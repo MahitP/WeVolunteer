@@ -131,7 +131,7 @@ describe('policy content verification', () => {
         for (const marker of SPEC_MARKERS) {
           expect(
             served,
-            `${doc.slug} is serving its internal Specification block ("${marker}")`
+            `${doc.slug} is serving its internal Specification await block("${marker}")`
           ).not.toContain(marker);
         }
       }

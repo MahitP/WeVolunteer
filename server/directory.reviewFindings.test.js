@@ -20,7 +20,7 @@ describe('review findings', () => {
     organizer = await srv.login('jordan.whitfield@example.org');
     admin = await srv.login('admin@example.gov');
     ({ db } = await import('./db.js'));
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org')).id;
 
     const make = async (name, username) => {
       const r = await srv.signupConfirmed({
@@ -81,18 +81,18 @@ describe('review findings', () => {
       }],
     }, organizer);
     expect(created.status).toBe(201);
-    const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id).id;
+    const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id)).id;
 
-    const before = db.prepare(
+    const before = (await db.prepare(
       `SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND title = 'A friend signed up'`
-    ).get(bobId).n;
+    ).get(bobId)).n;
 
     const applied = await srv.call('POST', `/api/events/${created.body.id}/apply`, { slotId }, alice);
     expect(applied.status).toBe(201);
 
-    expect(db.prepare(
+    expect((await db.prepare(
       `SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND title = 'A friend signed up'`
-    ).get(bobId).n).toBe(before);
+    ).get(bobId)).n).toBe(before);
   });
 
   /**
@@ -136,9 +136,9 @@ describe('review findings', () => {
     expect(leave.status).toBe(409);
     expect(leave.body.code).toBe('last_manager');
 
-    expect(db.prepare(
+    expect((await db.prepare(
       `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
-    ).get(created.body.organization.id).n).toBe(1);
+    ).get(created.body.organization.id)).n).toBe(1);
   });
 
   it('still allows demotion once a second manager exists', async () => {
@@ -174,7 +174,7 @@ describe('review findings', () => {
         }],
       }, organizer);
       eventId = created.body.id;
-      slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+      slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
       await srv.call('POST', `/api/events/${eventId}/apply`, { slotId }, alice);
     });
 

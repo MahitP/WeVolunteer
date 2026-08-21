@@ -36,6 +36,7 @@
  * three years from now.
  */
 
+import { runInTransaction } from '../db/connectionContext.js';
 import { RETAINABLE_MESSAGE_PREDICATE, userIsPartyToLiveReport } from '../evidenceHolds.js';
 import { recordError } from '../errorReporter.js';
 
@@ -132,11 +133,11 @@ function cutoff(now, days) {
  * bootstrap yet, so a missing table is treated as zero rather than throwing —
  * the assertion is about the sweep not deleting, not about the schema.
  */
-export function preservedCounts(db) {
+export async function preservedCounts(db) {
   const counts = {};
   for (const table of PRESERVED_TABLES) {
     try {
-      counts[table] = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+      counts[table] = (await db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get()).c;
     } catch {
       counts[table] = null;
     }
@@ -153,8 +154,8 @@ export function preservedCounts(db) {
  *
  * Returns what it removed, so the caller can log it and a test can assert it.
  */
-export function sweep(db, { now = new Date(), dryRun = false } = {}) {
-  const before = preservedCounts(db);
+export async function sweep(db, { now = new Date(), dryRun = false } = {}) {
+  const before = await preservedCounts(db);
 
   const messageCutoff = cutoff(now, RETENTION.messageDays);
   const auditCutoff = cutoff(now, RETENTION.auditDays);
@@ -177,25 +178,37 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
   `;
 
   const countable = {
-    messages: db.prepare(
+    messages: (await db.prepare(
       'SELECT COUNT(*) AS c FROM messages WHERE created_at < ?'
-    ).get(messageCutoff).c,
-    auditLogs: db.prepare(
+    ).get(messageCutoff)).c,
+    auditLogs: (await db.prepare(
       'SELECT COUNT(*) AS c FROM admin_audit_logs WHERE created_at < ?'
-    ).get(auditCutoff).c,
-    deletedAccounts: db.prepare(`
+    ).get(auditCutoff)).c,
+    deletedAccounts: (await db.prepare(`
       SELECT COUNT(*) AS c FROM users
       WHERE account_status = 'deleted' AND deleted_at IS NOT NULL AND deleted_at < ?
-    `).get(deletedCutoff).c,
-    applications: db.prepare(`
+    `).get(deletedCutoff)).c,
+    applications: (await db.prepare(`
       SELECT COUNT(*) AS c FROM applications a WHERE ${AGED_APPLICATION}
-    `).get(applicationCutoff).c,
+    `).get(applicationCutoff)).c,
   };
 
   if (dryRun) return { ...countable, dryRun: true };
 
-  db.exec('BEGIN TRANSACTION');
-  try {
+  /* `transactionOn` rather than `db.exec('BEGIN TRANSACTION')`.
+
+     This sweep deletes across a dozen tables and then calls
+     `assertPreservedTablesUntouched` INSIDE the transaction, specifically so a
+     violation reaches the ROLLBACK while the rollback still means something.
+     That design depends entirely on the deletes and the assertion being on one
+     connection — which a pool does not guarantee. Against a pool, `BEGIN` would
+     land on one borrowed client, the deletes on others, and the safety assertion
+     would inspect a connection that had not done the deleting. The rollback it
+     triggers would then discard nothing.
+
+     `db` is a parameter here, so the handle is passed through rather than
+     resolved from the context. */
+  return runInTransaction(db, async (tx) => {
     /**
      * Messages that are part of a live report are exempt.
      *
@@ -211,13 +224,13 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * lives in evidenceHolds.js and covers the whole live thread. One
      * definition, because a second copy of it is a second way to lose evidence.
      */
-    db.prepare(`
+    await tx.prepare(`
       DELETE FROM messages
       WHERE created_at < ?
         AND ${RETAINABLE_MESSAGE_PREDICATE}
     `).run(messageCutoff);
 
-    db.prepare('DELETE FROM admin_audit_logs WHERE created_at < ?').run(auditCutoff);
+    await tx.prepare('DELETE FROM admin_audit_logs WHERE created_at < ?').run(auditCutoff);
 
     /**
      * Applications, aged out with their event.
@@ -234,7 +247,7 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * `RETAINABLE_MESSAGE_PREDICATE` gives messages — and the assertion below is
      * what would catch its absence.
      */
-    db.prepare(`
+    await tx.prepare(`
       DELETE FROM applications
        WHERE id IN (SELECT a.id FROM applications a WHERE ${AGED_APPLICATION})
     `).run(applicationCutoff);
@@ -273,7 +286,12 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * three years after the first deletion) which is precisely why it had to be
      * found by reading the schema rather than by waiting.
      */
-    const purgeable = db.prepare(`
+    /* The `await` belongs on the EXECUTION, not on `prepare()`. Written the
+       other way round, `prepare` is awaited (harmlessly — it is synchronous on
+       both engines) and `.all()` returns the promise, so `.map` is called on it
+       and throws `(intermediate value).all(...).map is not a function`. On
+       SQLite `.all()` returned an array and the mistake was invisible. */
+    const purgeable = (await tx.prepare(`
       SELECT id FROM users
       WHERE account_status = 'deleted'
         AND deleted_at IS NOT NULL
@@ -285,7 +303,7 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
           WHERE EXISTS (SELECT 1 FROM attendance a WHERE a.event_id = e.id)
              OR EXISTS (SELECT 1 FROM certificates c WHERE c.event_id = e.id)
         )
-    `).all(deletedCutoff).map(r => r.id);
+    `).all(deletedCutoff)).map(r => r.id);
 
     /**
      * A shell that is party to a live report waits for the report, not the clock.
@@ -310,9 +328,9 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      */
     const heldByReport = [];
     for (const id of purgeable) {
-      if (userIsPartyToLiveReport(db, id)) { heldByReport.push(id); continue; }
-      db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(id);
-      db.prepare('DELETE FROM users WHERE id = ?').run(id);
+      if (await userIsPartyToLiveReport(tx, id)) { heldByReport.push(id); continue; }
+      await tx.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(id);
+      await tx.prepare('DELETE FROM users WHERE id = ?').run(id);
     }
 
     /**
@@ -331,19 +349,14 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
      * Inside the transaction, the throw reaches the ROLLBACK while the rollback
      * still means something.
      */
-    assertPreservedTablesUntouched(db, before);
-
-    db.exec('COMMIT');
+    await assertPreservedTablesUntouched(tx, before);
 
     return {
       ...countable,
       purgedAccounts: purgeable.length - heldByReport.length,
       heldByReport: heldByReport.length,
     };
-  } catch (err) {
-    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
-    throw err;
-  }
+  });
 }
 
 /**
@@ -354,8 +367,8 @@ export function sweep(db, { now = new Date(), dryRun = false } = {}) {
  * later, that the record they needed is gone — which is not recoverable and not
  * detectable by any test that only checks what the sweep intended to delete.
  */
-export function assertPreservedTablesUntouched(db, before) {
-  const after = preservedCounts(db);
+export async function assertPreservedTablesUntouched(db, before) {
+  const after = await preservedCounts(db);
   for (const table of PRESERVED_TABLES) {
     if (before[table] === null || after[table] === null) continue;
     if (after[table] !== before[table]) {
@@ -397,8 +410,8 @@ const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
  * so a database too broken to sweep is also too broken to file the report, which
  * is honest rather than a new failure mode.
  */
-function reportRetentionError(db, err, boundary) {
-  recordError(db, {
+async function reportRetentionError(db, err, boundary) {
+  await recordError(db, {
     source: 'worker',
     kind: err?.constructor?.name || 'Error',
     message: err?.message,
@@ -431,9 +444,9 @@ function reportRetentionError(db, err, boundary) {
 export function startRetentionWorker(db) {
   if (timer) return;
 
-  const run = () => {
+  const run = async () => {
     try {
-      const result = sweep(db);
+      const result = await sweep(db);
       const removed = result.messages + result.auditLogs + (result.applications || 0)
         + (result.purgedAccounts || 0);
       if (removed > 0) {
@@ -462,15 +475,29 @@ export function startRetentionWorker(db) {
       // the process down for a housekeeping task. The startup call below runs on
       // the caller's stack, where an escape would take the BOOT down instead.
       console.error('[Retention] sweep failed:', err.message);
-      reportRetentionError(db, err, 'retentionSweep');
+      await reportRetentionError(db, err, 'retentionSweep');
     }
   };
 
-  // Startup recovery, before the interval is armed — see this function's header.
-  run();
+  /**
+   * Startup recovery, before the interval is armed — see this function's header.
+   *
+   * The promise is RETURNED rather than dropped. `sweep` became async when its
+   * transaction did, so the startup sweep no longer finishes before this
+   * function does, and "enforces retention immediately" stopped being
+   * observable by anyone who could only see the return value. A caller that
+   * needs the first sweep to have happened — boot, or a test asserting exactly
+   * that property — can now await it.
+   *
+   * `server.js` deliberately does not: retention is housekeeping and must not
+   * hold up the listener. The rejection cannot escape either way, because `run`
+   * catches everything.
+   */
+  const started = run();
 
   timer = setInterval(run, SWEEP_INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
+  return started;
 }
 
 export function stopRetentionWorker() {

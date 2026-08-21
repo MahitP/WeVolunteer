@@ -57,10 +57,11 @@ describe('Student Organizer', () => {
   };
 
   /** Membership written directly — joining is not what these tests measure. */
-  const seat = (organizationId, userId, role = 'member') => {
-    db.prepare(`
-      INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+  const seat = async (organizationId, userId, role = 'member') => {
+    await db.prepare(`
+      INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
     `).run(organizationId, userId, role, new Date().toISOString());
   };
 
@@ -95,9 +96,9 @@ describe('Student Organizer', () => {
     ...body,
   }, session);
 
-  const capabilitiesOf = (userId) => db.prepare(
+  const capabilitiesOf = async (userId) => (await db.prepare(
     'SELECT capability FROM user_capabilities WHERE user_id = ?'
-  ).all(userId).map(r => r.capability).sort();
+  ).all(userId)).map(r => r.capability).sort();
 
   beforeAll(async () => {
     srv = await startTestServer();
@@ -119,11 +120,11 @@ describe('Student Organizer', () => {
   beforeEach(async () => {
     /* A second manager on each club, so the last-manager guard never fires as a
        side effect of a test that is about something else. */
-    seat(orgId, ownerId, 'manager');
-    seat(otherId, ownerId, 'manager');
-    seat(orgId, bystanderId, 'member');
-    seat(orgId, helperId, 'member');
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+    await seat(orgId, ownerId, 'manager');
+    await seat(otherId, ownerId, 'manager');
+    await seat(orgId, bystanderId, 'member');
+    await seat(orgId, helperId, 'member');
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(otherId, helperId);
     await setRole(orgKey, helperId, 'student_organizer');
     await acceptAgreement(helper);
@@ -131,8 +132,8 @@ describe('Student Organizer', () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   describe('the rank itself', () => {
-    it('is a value the membership table accepts', () => {
-      const row = db.prepare(
+    it('is a value the membership table accepts', async () => {
+      const row = await db.prepare(
         'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
       ).get(orgId, helperId);
       expect(row.member_role).toBe('student_organizer');
@@ -144,12 +145,12 @@ describe('Student Organizer', () => {
       expect(res.body.field).toBe('memberRole');
     });
 
-    it('refuses a rank the database itself would not store', () => {
+    it('refuses a rank the database itself would not store', async () => {
       /* The CHECK constraint from migration 046 is the backstop under the route
          validation — a path that skips the route must still not write junk. */
-      expect(() => db.prepare(
+      await expect(async () => await db.prepare(
         'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
-      ).run('president', orgId, helperId)).toThrow();
+      ).run('president', orgId, helperId)).rejects.toThrow();
     });
 
     it('leaves the account a student', async () => {
@@ -163,14 +164,14 @@ describe('Student Organizer', () => {
     it('creates an event for the club they help run', async () => {
       const res = await createEvent({ organizationId: orgId }, helper);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(db.prepare('SELECT organization_id, organizer_id FROM events WHERE id = ?').get(res.body.id))
+      expect(await db.prepare('SELECT organization_id, organizer_id FROM events WHERE id = ?').get(res.body.id))
         .toMatchObject({ organization_id: orgId, organizer_id: helperId });
     });
 
     it('creates a members-only event for that club', async () => {
       const res = await createEvent({ organizationId: orgId, audience: 'organization' }, helper);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id).audience)
+      expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(res.body.id)).audience)
         .toBe('organization');
     });
 
@@ -196,21 +197,21 @@ describe('Student Organizer', () => {
 
     it('manages applicants on an event they created', async () => {
       const created = await createEvent({ organizationId: orgId }, helper);
-      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id).id;
+      const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id)).id;
 
       const applied = await srv.call('POST', `/api/events/${created.body.id}/apply`,
         { slotId, message: 'I can help.' }, bystander);
       expect(applied.status, JSON.stringify(applied.body)).toBe(201);
 
-      const appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
-        .get(bystanderId, slotId).id;
+      const appId = (await db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+        .get(bystanderId, slotId)).id;
       const decided = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, helper);
       expect(decided.status, JSON.stringify(decided.body)).toBe(200);
     });
 
     it('edits an event they created', async () => {
       const created = await createEvent({ organizationId: orgId }, helper);
-      const slot = db.prepare('SELECT * FROM slots WHERE event_id = ?').get(created.body.id);
+      const slot = await db.prepare('SELECT * FROM slots WHERE event_id = ?').get(created.body.id);
       const res = await srv.call('PUT', `/api/events/${created.body.id}`, {
         title: 'Renamed by the helper',
         description: 'An event used by the student-organizer tests.',
@@ -238,8 +239,8 @@ describe('Student Organizer', () => {
       const res = await createEvent({}, helper);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('organization_required');
-      expect(db.prepare('SELECT COUNT(*) AS n FROM events WHERE organizer_id = ? AND organization_id IS NULL')
-        .get(helperId).n).toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) AS n FROM events WHERE organizer_id = ? AND organization_id IS NULL')
+        .get(helperId)).n).toBe(0);
     });
 
     it('cannot create an event for a club they have nothing to do with', async () => {
@@ -257,28 +258,28 @@ describe('Student Organizer', () => {
     it('cannot archive the organization', async () => {
       const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, { status: 'archived' }, helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT status FROM organizations WHERE id = ?').get(orgId).status).toBe('active');
+      expect((await db.prepare('SELECT status FROM organizations WHERE id = ?').get(orgId)).status).toBe('active');
     });
 
     it('cannot rename the organization', async () => {
-      const before = db.prepare('SELECT name FROM organizations WHERE id = ?').get(orgId).name;
+      const before = (await db.prepare('SELECT name FROM organizations WHERE id = ?').get(orgId)).name;
       const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, { name: 'Mine Now' }, helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT name FROM organizations WHERE id = ?').get(orgId).name).toBe(before);
+      expect((await db.prepare('SELECT name FROM organizations WHERE id = ?').get(orgId)).name).toBe(before);
     });
 
     it('cannot promote themselves to manager', async () => {
       const res = await setRole(orgKey, helperId, 'manager', helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
-        .get(orgId, helperId).member_role).toBe('student_organizer');
+      expect((await db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .get(orgId, helperId)).member_role).toBe('student_organizer');
     });
 
     it('cannot promote somebody else', async () => {
       const res = await setRole(orgKey, bystanderId, 'student_organizer', helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
-        .get(orgId, bystanderId).member_role).toBe('member');
+      expect((await db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .get(orgId, bystanderId)).member_role).toBe('member');
     });
 
     it('cannot demote a manager', async () => {
@@ -290,8 +291,8 @@ describe('Student Organizer', () => {
       const res = await srv.call('DELETE', `/api/organizations/${orgKey}/members/${bystanderId}`,
         undefined, helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?')
-        .get(orgId, bystanderId)?.ok).toBe(1);
+      expect((await db.prepare('SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .get(orgId, bystanderId))?.ok).toBe(1);
     });
 
     it('cannot read or decide the organization’s appeals', async () => {
@@ -304,7 +305,7 @@ describe('Student Organizer', () => {
       const res = await srv.call('PATCH', `/api/events/${theirs.body.id}/status`,
         { status: 'cancelled' }, helper);
       expect(res.status).toBe(403);
-      expect(db.prepare('SELECT status FROM events WHERE id = ?').get(theirs.body.id).status)
+      expect((await db.prepare('SELECT status FROM events WHERE id = ?').get(theirs.body.id)).status)
         .not.toBe('cancelled');
     });
 
@@ -313,7 +314,7 @@ describe('Student Organizer', () => {
          applicant regardless of how they came to be the organizer. The person
          picking and the person picked must not be the same. */
       const created = await createEvent({ organizationId: orgId }, helper);
-      const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id).id;
+      const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(created.body.id)).id;
       const res = await srv.call('POST', `/api/events/${created.body.id}/apply`,
         { slotId, message: 'Let me in.' }, helper);
       expect(res.status).toBe(403);
@@ -324,13 +325,13 @@ describe('Student Organizer', () => {
       const res = await srv.call('POST', `/api/admin/users/${helperId}/capabilities`,
         { capability: 'event.create' }, helper);
       expect([401, 403, 404]).toContain(res.status);
-      expect(capabilitiesOf(helperId)).not.toContain('event.create');
+      expect(await capabilitiesOf(helperId)).not.toContain('event.create');
     });
 
     it('holds ONLY the four helper capabilities, and no more', async () => {
       /* An explicit inventory. If a future promotion path grants something
          wider, this is the line that says so out loud. */
-      expect(capabilitiesOf(helperId)).toEqual([
+      expect(await capabilitiesOf(helperId)).toEqual([
         'organization.event.create',
         'organization.event.manage.own',
         'organization.post.create',
@@ -341,8 +342,8 @@ describe('Student Organizer', () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   describe('an ordinary member is not a helper', () => {
-    it('holds none of the four capabilities', () => {
-      expect(capabilitiesOf(bystanderId)).toEqual([]);
+    it('holds none of the four capabilities', async () => {
+      expect(await capabilitiesOf(bystanderId)).toEqual([]);
     });
 
     it('is refused at the gate, before any handler runs', async () => {
@@ -365,7 +366,7 @@ describe('Student Organizer', () => {
   describe('the capability follows the rank', () => {
     it('is taken back on demotion', async () => {
       await setRole(orgKey, helperId, 'member');
-      expect(capabilitiesOf(helperId)).toEqual([]);
+      expect(await capabilitiesOf(helperId)).toEqual([]);
       const res = await createEvent({ organizationId: orgId }, helper);
       expect(res.status).toBe(403);
     });
@@ -374,13 +375,13 @@ describe('Student Organizer', () => {
       const removed = await srv.call('DELETE', `/api/organizations/${orgKey}/members/${helperId}`,
         undefined, owner);
       expect(removed.status, JSON.stringify(removed.body)).toBe(200);
-      expect(capabilitiesOf(helperId)).toEqual([]);
+      expect(await capabilitiesOf(helperId)).toEqual([]);
     });
 
     it('is taken back when they leave of their own accord', async () => {
       const left = await srv.call('DELETE', `/api/organizations/${orgKey}/membership`, undefined, helper);
       expect([200, 204]).toContain(left.status);
-      expect(capabilitiesOf(helperId)).toEqual([]);
+      expect(await capabilitiesOf(helperId)).toEqual([]);
     });
 
     it('SURVIVES demotion in one club while they still help run another', async () => {
@@ -389,11 +390,11 @@ describe('Student Organizer', () => {
        * reading the new `memberRole` off the request. Stripping the capability
        * on demotion here would silently break the OTHER club they still run.
        */
-      seat(otherId, helperId, 'member');
+      await seat(otherId, helperId, 'member');
       await setRole(otherKey, helperId, 'student_organizer');
       await setRole(orgKey, helperId, 'member');
 
-      expect(capabilitiesOf(helperId)).toContain('organization.event.create');
+      expect(await capabilitiesOf(helperId)).toContain('organization.event.create');
 
       /* Still refused for the club they were demoted in — the second layer. */
       const here = await createEvent({ organizationId: orgId }, helper);
@@ -414,14 +415,14 @@ describe('Student Organizer', () => {
        * elsewhere would have walked straight through it and left the club with
        * nobody who can ban, archive or promote.
        */
-      db.prepare(`DELETE FROM organization_members
+      await db.prepare(`DELETE FROM organization_members
                    WHERE organization_id = ? AND member_role = 'manager' AND user_id <> ?`)
         .run(orgId, ownerId);
       const res = await setRole(orgKey, ownerId, 'student_organizer');
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('last_manager');
-      expect(db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
-        .get(orgId, ownerId).member_role).toBe('manager');
+      expect((await db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
+        .get(orgId, ownerId)).member_role).toBe('manager');
     });
 
     it('still lets a manager do everything a helper can', async () => {
@@ -453,12 +454,12 @@ describe('Student Organizer', () => {
       const copy = await srv.call('POST', `/api/events/${created.body.id}/duplicate`, {}, helper);
       expect(copy.status, JSON.stringify(copy.body)).toBe(201);
 
-      const row = db.prepare('SELECT organization_id, audience FROM events WHERE id = ?')
+      const row = await db.prepare('SELECT organization_id, audience FROM events WHERE id = ?')
         .get(copy.body.id ?? copy.body.event?.id);
       expect(row.organization_id, 'the copy was detached from the organization').toBe(orgId);
 
-      expect(db.prepare(`SELECT COUNT(*) AS n FROM events
-                          WHERE organizer_id = ? AND organization_id IS NULL`).get(helperId).n)
+      expect((await db.prepare(`SELECT COUNT(*) AS n FROM events
+                          WHERE organizer_id = ? AND organization_id IS NULL`).get(helperId)).n)
         .toBe(0);
     });
 
@@ -470,7 +471,7 @@ describe('Student Organizer', () => {
       const copy = await srv.call('POST', `/api/events/${created.body.id}/duplicate`, {}, owner);
       expect(copy.status, JSON.stringify(copy.body)).toBe(201);
 
-      expect(db.prepare('SELECT audience, organization_id FROM events WHERE id = ?')
+      expect(await db.prepare('SELECT audience, organization_id FROM events WHERE id = ?')
         .get(copy.body.id ?? copy.body.event?.id))
         .toMatchObject({ audience: 'organization', organization_id: orgId });
     });

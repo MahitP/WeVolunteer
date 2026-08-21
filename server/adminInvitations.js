@@ -87,7 +87,7 @@ export function describeFailure(reason) {
  *           accepting would be a silent demotion of the platform owner, and it
  *           would be performed BY the owner's own mailbox.
  */
-export function invitationRefusal(db, { email, role, reason }) {
+export async function invitationRefusal(db, { email, role, reason }) {
   const address = normaliseEmail(email);
 
   if (!address || !address.includes('@')) {
@@ -111,8 +111,8 @@ export function invitationRefusal(db, { email, role, reason }) {
     };
   }
 
-  const existing = db.prepare(
-    'SELECT id, role FROM users WHERE email = ? COLLATE NOCASE'
+  const existing = await db.prepare(
+    'SELECT id, role FROM users WHERE email = ? COLLATE nocase'
   ).get(address);
 
   if (existing?.role === ROLE.SUPER_ADMIN) {
@@ -152,18 +152,18 @@ export function invitationRefusal(db, { email, role, reason }) {
  * whose failure mode is two live tokens for one address, and revoking one then
  * leaves the other working.
  */
-export function createInvitation(db, { email, role, reason, invitedBy, now = new Date() }) {
+export async function createInvitation(db, { email, role, reason, invitedBy, now = new Date() }) {
   const address = normaliseEmail(email);
   const token = crypto.randomBytes(32).toString('base64url');
 
-  const superseded = db.prepare(`
+  const superseded = (await db.prepare(`
     UPDATE admin_invitations
        SET status = 'replaced', resolved_at = ?
      WHERE email = ? AND status = 'pending'
-  `).run(now.toISOString(), address).changes;
+  `).run(now.toISOString(), address)).changes;
 
   const id = `inv_${crypto.randomUUID()}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO admin_invitations
       (id, email, role, token_hash, invited_by, reason, status, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
@@ -192,12 +192,12 @@ export function createInvitation(db, { email, role, reason, invitedBy, now = new
  * holder would have to control the mailbox AND have proved it. This is the check
  * that makes the whole feature safe to deliver by email.
  */
-export function resolveInvitation(db, { token, user, now = new Date() }) {
+export async function resolveInvitation(db, { token, user, now = new Date() }) {
   if (!token || typeof token !== 'string') {
     return { ...INVITE_REJECTED, logReason: 'no token supplied' };
   }
 
-  const invitation = db.prepare(
+  const invitation = await db.prepare(
     'SELECT * FROM admin_invitations WHERE token_hash = ?'
   ).get(sha256(token));
 
@@ -230,7 +230,7 @@ export function resolveInvitation(db, { token, user, now = new Date() }) {
    * but checked so the property survives a future change rather than becoming a
    * comment nobody re-reads.
    */
-  const inviter = db.prepare('SELECT role FROM users WHERE id = ?').get(invitation.invited_by);
+  const inviter = await db.prepare('SELECT role FROM users WHERE id = ?').get(invitation.invited_by);
   if (inviter?.role !== ROLE.SUPER_ADMIN) {
     return { ...INVITE_REJECTED, logReason: 'inviting owner no longer holds ownership' };
   }
@@ -239,10 +239,10 @@ export function resolveInvitation(db, { token, user, now = new Date() }) {
 }
 
 /** The owner-facing list (IV-14): address, role, inviter, age, expiry. */
-export function listPendingInvitations(db, { now = new Date() } = {}) {
-  const rows = db.prepare(`
+export async function listPendingInvitations(db, { now = new Date() } = {}) {
+  const rows = await db.prepare(`
     SELECT i.id, i.email, i.role, i.reason, i.created_at, i.expires_at,
-           COALESCE(u.name, 'Account since deleted') AS invitedByName
+           COALESCE(u.name, 'Account since deleted') AS "invitedByName"
       FROM admin_invitations i
       LEFT JOIN users u ON u.id = i.invited_by
      WHERE i.status = 'pending'
@@ -264,12 +264,12 @@ export function listPendingInvitations(db, { now = new Date() } = {}) {
 }
 
 /** IV-9: revocable while pending, and recorded. Returns whether anything changed. */
-export function revokeInvitation(db, { id, now = new Date() }) {
-  return db.prepare(`
+export async function revokeInvitation(db, { id, now = new Date() }) {
+  return (await db.prepare(`
     UPDATE admin_invitations
        SET status = 'revoked', resolved_at = ?
      WHERE id = ? AND status = 'pending'
-  `).run(now.toISOString(), id).changes > 0;
+  `).run(now.toISOString(), id)).changes > 0;
 }
 
 /** Exposed for tests and for the delivery step; never for storage. */

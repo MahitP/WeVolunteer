@@ -34,6 +34,25 @@ import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import CertificateImport from '../components/account/CertificateImport';
+
+/**
+ * The marker beside a field a certificate filled in.
+ *
+ * Qualitative, never a percentage. A confidence figure here would be invented —
+ * nothing in the pipeline produces a calibrated one — and a made-up number
+ * beside a value a student is being asked to check is worse than no number,
+ * because it invites them to trust the high ones.
+ */
+function ExtractedMark({ source }) {
+  if (!source) return null;
+  return (
+    <span className="field-hint dim small">
+      <Check size={12} aria-hidden="true" />
+      {source === 'ai' ? ' Read by the assistant — please check' : ' Read from the certificate — please check'}
+    </span>
+  );
+}
 
 const BLANK = {
   organizationName: '', activityName: '', occurredOn: '', hours: '', description: '',
@@ -63,16 +82,63 @@ export default function LogExternalHours({ addToast }) {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(null);
 
+  /**
+   * Which fields were filled in from a certificate rather than typed.
+   *
+   * Kept so the form can say so beside each one. Editing a field clears its
+   * mark: once a person has changed a value it is theirs, and continuing to
+   * label it as extracted would be wrong about who is responsible for it.
+   */
+  const [extracted, setExtracted] = useState({});
+
   const set = (name, value) => {
     setForm(f => ({ ...f, [name]: value }));
     setErrors(e => (e[name] ? { ...e, [name]: undefined } : e));
+    setExtracted(x => (x[name] ? { ...x, [name]: undefined } : x));
+  };
+
+  /**
+   * Take what a certificate produced.
+   *
+   * Only fills fields that are still empty, so a re-read cannot quietly
+   * overwrite something the student has already corrected. Nothing is
+   * submitted — this fills a form they then read and send.
+   */
+  const applyExtraction = ({ fields, sources }) => {
+    setForm(f => {
+      const next = { ...f };
+      for (const [key, value] of Object.entries(fields || {})) {
+        if (next[key] === '' || next[key] === undefined || next[key] === null) {
+          next[key] = String(value);
+        }
+      }
+      return next;
+    });
+    setExtracted(x => ({ ...x, ...(sources || {}) }));
   };
 
   const load = () => {
     setLoading(true);
     api.fetchExternalHours()
       .then(res => setEntries(res.entries))
-      .catch(() => setEntries([]))
+      /**
+       * A failed load must not become "Nothing logged yet".
+       *
+       * This used to be `setEntries([])`, and the empty state below renders an
+       * EmptyState titled exactly that. So a student whose request failed was
+       * told their own hours record was empty — about the one screen where the
+       * obvious response is to type everything in again, which is how a network
+       * blip turns into duplicate submissions.
+       *
+       * `entries` stays null, and both branches below are guarded with `?.`, so
+       * neither the list nor the empty state renders. The toast is what says
+       * something went wrong. On a later reload the last good list is kept
+       * rather than blanked.
+       */
+      .catch(() => {
+        setEntries(prev => prev);
+        addToast?.('Could not load your external entries. Reload to try again.', 'error');
+      })
       .finally(() => setLoading(false));
   };
 
@@ -229,11 +295,17 @@ export default function LogExternalHours({ addToast }) {
         </p>
       </div>
 
+      <CertificateImport onExtracted={applyExtraction} />
+
       <form onSubmit={handleSubmit} className="card">
         <div className="card-head">
           <h2>{editingId ? 'Edit this entry' : 'Add an entry'}</h2>
         </div>
-        <div className="card-body stack-md">
+        {/* Blocked outright rather than masked: these fields hold a
+            certificate's contents, and the 2FA enrolment screen already
+            established that a mask level does not cover everything
+            rendered inside a subtree. */}
+        <div className="card-body stack-md" data-replay-block>
           <div className="field">
             <label htmlFor="ext-org">Organization</label>
             <input
@@ -248,6 +320,7 @@ export default function LogExternalHours({ addToast }) {
                 <AlertCircle size={12} aria-hidden="true" />{errors.organizationName}
               </span>
             )}
+<ExtractedMark source={extracted.organizationName} />
           </div>
 
           <div className="field">
@@ -264,6 +337,7 @@ export default function LogExternalHours({ addToast }) {
                 <AlertCircle size={12} aria-hidden="true" />{errors.activityName}
               </span>
             )}
+<ExtractedMark source={extracted.activityName} />
           </div>
 
           <div className="field-row">
@@ -281,6 +355,7 @@ export default function LogExternalHours({ addToast }) {
                   <AlertCircle size={12} aria-hidden="true" />{errors.occurredOn}
                 </span>
               )}
+<ExtractedMark source={extracted.occurredOn} />
             </div>
             <div className="field field-grow-1">
               <label htmlFor="ext-hours">Hours</label>
@@ -296,6 +371,7 @@ export default function LogExternalHours({ addToast }) {
                   <AlertCircle size={12} aria-hidden="true" />{errors.hours}
                 </span>
               )}
+<ExtractedMark source={extracted.hours} />
             </div>
           </div>
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 /**
@@ -40,27 +40,28 @@ describe('a volunteer profile for whoever has volunteered', () => {
     srv.call('GET', `/api/users/${id}/profile`, undefined, session);
 
   /** Credited attendance for `userId`, cloned off a real event and slot. */
-  const giveAttendance = (userId, tag) => {
-    const ev = db.prepare('SELECT * FROM events LIMIT 1').get();
-    const sl = db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(ev.id);
-    const clone = (table, tmpl, over) => {
+  const giveAttendance = async (userId, tag) => {
+    const ev = await db.prepare('SELECT * FROM events LIMIT 1').get();
+    const sl = await db.prepare('SELECT * FROM slots WHERE event_id = ? LIMIT 1').get(ev.id);
+    const clone = async (table, tmpl, over) => {
       const row = { ...tmpl, ...over };
       const cols = Object.keys(row);
-      db.prepare(`INSERT OR REPLACE INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      await db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
         .run(...cols.map(c => row[c]));
     };
     const past = new Date(Date.now() - 20 * 86400000).toISOString();
-    clone('events', ev, { id: `ovp-ev-${tag}`, title: 'Owner profile fixture', status: 'open' });
-    clone('slots', sl, {
+    await clone('events', ev, { id: `ovp-ev-${tag}`, title: 'Owner profile fixture', status: 'open' });
+    await clone('slots', sl, {
       id: `ovp-sl-${tag}`, event_id: `ovp-ev-${tag}`,
       start_datetime: past, end_datetime: new Date(Date.now() - 20 * 86400000 + 7200000).toISOString(),
     });
-    db.prepare(`INSERT OR REPLACE INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
-                VALUES (?, ?, ?, 1, 2)`).run(`ovp-ev-${tag}`, `ovp-sl-${tag}`, userId);
+    await db.prepare(`INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+                VALUES (?, ?, ?, 1, 2)
+      ON CONFLICT (slot_id, user_id) DO UPDATE SET event_id = excluded.event_id, present = excluded.present, hours_awarded = excluded.hours_awarded`).run(`ovp-ev-${tag}`, `ovp-sl-${tag}`, userId);
   };
 
-  const clearAttendance = (userId) =>
-    db.prepare('DELETE FROM attendance WHERE user_id = ?').run(userId);
+  const clearAttendance = async (userId) =>
+    await db.prepare('DELETE FROM attendance WHERE user_id = ?').run(userId);
 
   /** A throwaway account promoted after signup, the way the matrix builds its fixtures. */
   const makeAccount = async (role) => {
@@ -73,7 +74,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
       grade: 'Adult',
       role: 'student',
     });
-    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
+    await db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, signed.user.id);
     return signed.user.id;
   };
 
@@ -101,7 +102,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
      * themselves.
      */
     const ownerId = await makeAccount('super_admin');
-    giveAttendance(ownerId, 'owner');
+    await giveAttendance(ownerId, 'owner');
 
     const res = await profileOf(ownerId);
     expect(res.status, 'the owner’s own service record answered 404').toBe(200);
@@ -113,7 +114,7 @@ describe('a volunteer profile for whoever has volunteered', () => {
     /* "Looks like a normal student's volunteer profile" is the requirement, so
        the payload is compared against a student's rather than merely inspected. */
     const ownerId = await makeAccount('super_admin');
-    giveAttendance(ownerId, 'shape');
+    await giveAttendance(ownerId, 'shape');
 
     const owner = await profileOf(ownerId);
     const student = await profileOf(studentId);
@@ -137,10 +138,10 @@ describe('a volunteer profile for whoever has volunteered', () => {
     /* Derived from the ledger, not remembered: revoking the attendance revokes
        the profile, because the profile IS the attendance. */
     const ownerId = await makeAccount('super_admin');
-    giveAttendance(ownerId, 'revoke');
+    await giveAttendance(ownerId, 'revoke');
     expect((await profileOf(ownerId)).status).toBe(200);
 
-    clearAttendance(ownerId);
+    await clearAttendance(ownerId);
     expect((await profileOf(ownerId)).status).toBe(404);
   });
 
@@ -148,8 +149,8 @@ describe('a volunteer profile for whoever has volunteered', () => {
     /* A tombstone is anonymised in place rather than removed, so without the
        status check it would answer 200 as a live profile. */
     const ownerId = await makeAccount('super_admin');
-    giveAttendance(ownerId, 'tombstone');
-    db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(ownerId);
+    await giveAttendance(ownerId, 'tombstone');
+    await db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(ownerId);
     expect((await profileOf(ownerId)).status).toBe(404);
   });
 

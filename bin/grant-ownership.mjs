@@ -36,10 +36,10 @@ async function main() {
   }
 
   try {
-    const { db } = openPrivilegedDb('bin/grant-ownership.mjs');
-    assertSystemActor(db);
+    const { db } = await openPrivilegedDb('bin/grant-ownership.mjs');
+    await assertSystemActor(db);
 
-    const user = db.prepare('SELECT id, role, verified, account_status FROM users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT id, role, verified, account_status FROM users WHERE email = ?').get(email);
 
     if (!user) {
       console.error(`Error: User with email ${email} not found.`);
@@ -85,16 +85,16 @@ async function main() {
     }
 
     // Atomic promotion
-    db.exec('BEGIN');
+    await db.exec('BEGIN');
     try {
-      db.prepare(`
+      await db.prepare(`
         UPDATE users 
         SET role = 'super_admin', 
             token_version = token_version + 1 
         WHERE id = ?
       `).run(user.id);
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: user.id,
         command: 'bin/grant-ownership.mjs',
@@ -102,9 +102,9 @@ async function main() {
         metadata: { subject: email, previousRole: user.role },
       });
 
-      db.exec('COMMIT');
+      await db.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
+      await db.exec('ROLLBACK');
       throw err;
     }
 

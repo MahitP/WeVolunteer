@@ -30,7 +30,7 @@
  * The last of those is the defect this file was written to catch. See the block
  * comment on that test.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 
 // db.js opens its connection at module scope, so nothing that reaches it may be
 // imported statically here — see the long explanation in testServer.js.
@@ -56,12 +56,12 @@ const submitCode = (code, preauth) =>
   srv.call('POST', '/api/auth/login-2fa', { method: 'email', code }, undefined,
     preauth ? { Cookie: `wev_preauth=${preauth}` } : {});
 
-const userId = (email = EMAIL) =>
-  db.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+const userId = async (email = EMAIL) =>
+  (await db.prepare('SELECT id FROM users WHERE email = ?').get(email)).id;
 
-const liveCodes = (email = EMAIL) =>
-  db.prepare('SELECT * FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC')
-    .all(userId(email));
+const liveCodes = async (email = EMAIL) =>
+  await db.prepare('SELECT * FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC')
+    .all(await userId(email));
 
 /**
  * Enrols an account in email 2FA and nothing else.
@@ -71,8 +71,8 @@ const liveCodes = (email = EMAIL) =>
  * about what happens once an account IS enrolled, and routing every case through
  * a re-authentication would test that instead.
  */
-function enrolEmailOnly(email = EMAIL) {
-  db.prepare(`
+async function enrolEmailOnly(email = EMAIL) {
+  await db.prepare(`
     UPDATE users
        SET tfa_email_enabled = 1, email_verified = 1,
            tfa_enabled = 0, tfa_secret = NULL
@@ -81,23 +81,23 @@ function enrolEmailOnly(email = EMAIL) {
 }
 
 /** Clears the cooldown and every stored code, so a case starts from nothing. */
-function clearCodes(email = EMAIL) {
-  db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId(email));
-  db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId(email));
+async function clearCodes(email = EMAIL) {
+  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId(email));
+  await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(await userId(email));
 }
 
 beforeAll(async () => {
   const { startTestServer } = await import('./testServer.js');
   srv = await startTestServer();
   ({ db } = await import('./db.js'));
-  enrolEmailOnly();
+  await enrolEmailOnly();
 }, 60000);
 
 afterAll(async () => { await srv?.close?.(); });
 
-beforeEach(() => {
-  enrolEmailOnly();
-  clearCodes();
+beforeEach(async () => {
+  await enrolEmailOnly();
+  await clearCodes();
 });
 
 /* ── Requesting a code ───────────────────────────────────────────────────── */
@@ -106,7 +106,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('refuses a request carrying no pre-auth grant', async () => {
     const res = await sendCode(null);
     expect(res.status).toBe(401);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -119,7 +119,7 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('refuses a token that is not a pre-auth grant', async () => {
     const res = await sendCode('not-a-real-token');
     expect(res.status).toBe(401);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   it('sends a code and reports the address masked', async () => {
@@ -131,13 +131,13 @@ describe('POST /api/auth/login-2fa/email/send', () => {
        and the full address is a fact about the account. */
     expect(res.body.maskedEmail).toMatch(/^\w{2}\*\*\*@/);
     expect(res.body.maskedEmail).not.toBe(EMAIL);
-    expect(liveCodes()).toHaveLength(1);
+    expect(await liveCodes()).toHaveLength(1);
   });
 
   /** The code is stored hashed. A readable column is a readable second factor. */
   it('stores the code as a hash, never in the clear', async () => {
     await sendCode(await beginLogin());
-    const [row] = liveCodes();
+    const [row] = await liveCodes();
 
     expect(row.code_hash).toMatch(/^\$2[aby]\$/);
     expect(row.code_hash).not.toMatch(/^\d{6}$/);
@@ -159,22 +159,22 @@ describe('POST /api/auth/login-2fa/email/send', () => {
    */
   it('offers email to an authenticator account with a confirmed address', async () => {
     const preauth = await beginLogin();
-    db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 1, email_verified = 1 WHERE email = ?')
+    await db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 1, email_verified = 1 WHERE email = ?')
       .run(EMAIL);
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(200);
-    expect(liveCodes()).toHaveLength(1);
+    expect(await liveCodes()).toHaveLength(1);
   });
 
   it('refuses an account with no second factor at all', async () => {
     const preauth = await beginLogin();
-    db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 0 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 0, tfa_enabled = 0 WHERE email = ?').run(EMAIL);
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('method_unavailable');
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -185,11 +185,11 @@ describe('POST /api/auth/login-2fa/email/send', () => {
    */
   it('refuses an account whose address is not verified', async () => {
     const preauth = await beginLogin();
-    db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET email_verified = 0 WHERE email = ?').run(EMAIL);
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(400);
-    expect(liveCodes()).toHaveLength(0);
+    expect(await liveCodes()).toHaveLength(0);
   });
 
   /**
@@ -201,18 +201,52 @@ describe('POST /api/auth/login-2fa/email/send', () => {
   it('retires the previous code when a new one is requested', async () => {
     const preauth = await beginLogin();
     await sendCode(preauth);
-    const [first] = liveCodes();
+    const [first] = await liveCodes();
 
     /* Past the 60-second cooldown, which is a separate control tested below. */
-    db.prepare("UPDATE tfa_email_codes SET created_at = datetime('now', '-2 minutes') WHERE id = ?")
+    await db.prepare(`UPDATE tfa_email_codes SET created_at = '${new Date(Date.now() - 120000).toISOString()}' WHERE id = ?`)
       .run(first.id);
 
     const res = await sendCode(preauth);
     expect(res.status).toBe(200);
 
-    const after = db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(first.id);
+    const after = await db.prepare('SELECT used_at FROM tfa_email_codes WHERE id = ?').get(first.id);
     expect(after.used_at, 'the superseded code was left live').not.toBeNull();
-    expect(liveCodes().filter(c => c.used_at === null)).toHaveLength(1);
+    expect((await liveCodes()).filter(c => c.used_at === null)).toHaveLength(1);
+  });
+
+  /**
+   * The cooldown must read BOTH shapes this column is written in.
+   *
+   * `created_at` is the one column whose default differs by engine: SQLite's
+   * `datetime('now')` writes `2026-08-10 12:00:00`, and the generated PostgreSQL
+   * schema writes ISO-8601. The route used to append `'Z'` unconditionally,
+   * which turned the ISO form into `…123ZZ` and `getTime()` into NaN. The
+   * cooldown fails shut, so the endpoint then answered 429 to every request
+   * forever and nobody using email as their second factor could sign in.
+   *
+   * Both shapes are written here directly, because the bug is invisible on
+   * whichever engine happens to be running the test.
+   */
+  it('honours the cooldown for both the ISO and the SQLite timestamp shape', async () => {
+    const old = new Date(Date.now() - 120000);
+    const shapes = [
+      old.toISOString(),                                       // PostgreSQL default
+      old.toISOString().replace('T', ' ').replace(/\..*$/, ''), // SQLite datetime('now')
+    ];
+
+    for (const shape of shapes) {
+      const preauth = await beginLogin();
+      await sendCode(preauth);
+      /* Every row for this user, not just the newest: the cooldown reads
+         `ORDER BY created_at DESC LIMIT 1`, and by the second shape there are
+         codes left over from the first. */
+      await db.prepare('UPDATE tfa_email_codes SET created_at = ? WHERE user_id = ?')
+        .run(shape, await userId());
+
+      const res = await sendCode(preauth);
+      expect(res.status, `a code stored as "${shape}" must be read as two minutes old, not as unparseable`).toBe(200);
+    }
   });
 
   it('refuses a second request inside the cooldown', async () => {
@@ -285,11 +319,11 @@ describe('POST /api/auth/login-2fa/email/send', () => {
  */
 async function issueKnownCode(digits, { email = EMAIL, expiresInMs = 10 * 60 * 1000 } = {}) {
   const bcrypt = (await import('bcryptjs')).default;
-  const id = `tfa-email-test-${digits}-${userId(email)}`;
-  db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId(email));
-  db.prepare(
+  const id = `tfa-email-test-${digits}-${await userId(email)}`;
+  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId(email));
+  await db.prepare(
     'INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)'
-  ).run(id, userId(email), await bcrypt.hash(digits, 10),
+  ).run(id, await userId(email), await bcrypt.hash(digits, 10),
     new Date(Date.now() + expiresInMs).toISOString());
   return id;
 }
@@ -322,7 +356,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
 
     expect(res.status).toBe(401);
     expect(res.cookie).toBeFalsy();
-    expect(db.prepare('SELECT attempts FROM tfa_email_codes WHERE id = ?').get(id).attempts).toBe(1);
+    expect((await db.prepare('SELECT attempts FROM tfa_email_codes WHERE id = ?').get(id)).attempts).toBe(1);
   });
 
   /**
@@ -336,11 +370,11 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('charges one attempt per submission, not one per stored code', async () => {
     const preauth = await beginLogin();
     const bcrypt = (await import('bcryptjs')).default;
-    db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId());
+    await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId());
 
     for (const digits of ['411111', '422222', '433333']) {
-      db.prepare('INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)')
-        .run(`multi-${digits}`, userId(), await bcrypt.hash(digits, 10),
+      await db.prepare('INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)')
+        .run(`multi-${digits}`, await userId(), await bcrypt.hash(digits, 10),
           new Date(Date.now() + 600000).toISOString());
     }
 
@@ -348,7 +382,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
 
     for (const digits of ['411111', '422222', '433333']) {
       expect(
-        db.prepare('SELECT attempts FROM tfa_email_codes WHERE id = ?').get(`multi-${digits}`).attempts,
+        (await db.prepare('SELECT attempts FROM tfa_email_codes WHERE id = ?').get(`multi-${digits}`)).attempts,
         `code ${digits} was charged for a guess against another code`
       ).toBe(1);
     }
@@ -405,7 +439,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('refuses a code that a resend retired', async () => {
     const preauth = await beginLogin();
     await issueKnownCode('823456');
-    db.prepare("UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ?").run(userId());
+    await db.prepare(`UPDATE tfa_email_codes SET used_at = '${new Date().toISOString()}' WHERE user_id = ?`).run(await userId());
 
     expect((await submitCode('823456', preauth)).status).toBe(401);
   });
@@ -446,7 +480,7 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
    */
   it("refuses another account's code", async () => {
     const other = 'ethan.miller@example.com';
-    enrolEmailOnly(other);
+    await enrolEmailOnly(other);
     await issueKnownCode('111213', { email: other });
 
     const res = await submitCode('111213', await beginLogin(EMAIL));
@@ -471,14 +505,14 @@ describe('POST /api/auth/login-2fa with an emailed code', () => {
   it('refuses an account deleted between the two legs', async () => {
     const preauth = await beginLogin();
     await issueKnownCode('171819');
-    db.prepare("UPDATE users SET account_status = 'deleted' WHERE email = ?").run(EMAIL);
+    await db.prepare("UPDATE users SET account_status = 'deleted' WHERE email = ?").run(EMAIL);
 
     try {
       const res = await submitCode('171819', preauth);
       expect(res.status).toBe(401);
       expect(res.cookie).toBeFalsy();
     } finally {
-      db.prepare("UPDATE users SET account_status = 'active' WHERE email = ?").run(EMAIL);
+      await db.prepare("UPDATE users SET account_status = 'active' WHERE email = ?").run(EMAIL);
     }
   });
 });

@@ -90,10 +90,10 @@ describe('the organization appeal inbox', () => {
      * of these tests failed on exactly that — which is worth knowing, because it
      * means an organization cannot delegate management to a student today.
      */
-    db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(secondId);
+    await db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(secondId);
 
     for (const id of [managerId, outsiderId, secondId]) {
-      try { acceptOrganizerAgreement(db, { userId: id }); } catch { /* already signed */ }
+      try { await acceptOrganizerAgreement(db, { userId: id }); } catch { /* already signed */ }
     }
     /* The role change invalidates the cached session principal. */
     second = await srv.login(SECOND);
@@ -112,13 +112,14 @@ describe('the organization appeal inbox', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  const join = (orgIdent, userId, role = 'member') =>
-    db.prepare(`INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
-                VALUES (?, ?, ?, ?)`).run(orgIdent, userId, role, new Date().toISOString());
+  const join = async (orgIdent, userId, role = 'member') =>
+    await db.prepare(`INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+                VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at`).run(orgIdent, userId, role, new Date().toISOString());
 
   /** Ban the student, then file their appeal through the ordinary route. */
   const banAndAppeal = async () => {
-    join(orgId, studentId);
+    await join(orgId, studentId);
     const banned = await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
       { mode: 'ban', reason: 'Missed three shifts without telling anyone.' }, manager);
     expect(banned.status, JSON.stringify(banned.body)).toBe(200);
@@ -132,11 +133,11 @@ describe('the organization appeal inbox', () => {
     return filed.body.appealId;
   };
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_bans WHERE organization_id IN (?, ?)').run(orgId, otherId);
-    db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')").run(studentId);
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_bans WHERE organization_id IN (?, ?)').run(orgId, otherId);
+    await db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')").run(studentId);
 
-    join(orgId, managerId, 'manager');
+    await join(orgId, managerId, 'manager');
   });
 
   const inbox = (key, session) => srv.call('GET', `/api/organizations/${key}/appeals`, undefined, session);
@@ -151,7 +152,7 @@ describe('the organization appeal inbox', () => {
   it('shows the SAME appeal to a second manager who had nothing to do with it', async () => {
     /* The whole point of moving this to the organization. */
     const id = await banAndAppeal();
-    join(orgId, secondId, 'manager');
+    await join(orgId, secondId, 'manager');
     const res = await inbox(orgKey, second);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.appeals.map(a => a.id)).toContain(id);
@@ -160,7 +161,7 @@ describe('the organization appeal inbox', () => {
   it('marks the issuer so another manager can choose to take it', async () => {
     /* Surfaced, not enforced: a one-manager club has nobody to hand it to. */
     await banAndAppeal();
-    join(orgId, secondId, 'manager');
+    await join(orgId, secondId, 'manager');
     const mine = (await inbox(orgKey, manager)).body.appeals[0];
     const theirs = (await inbox(orgKey, second)).body.appeals[0];
     expect(mine.youIssuedThisBan).toBe(true);
@@ -174,7 +175,7 @@ describe('the organization appeal inbox', () => {
      * `canManage` can be refusing: membership is not management.
      */
     await banAndAppeal();
-    join(orgId, secondId, 'member');
+    await join(orgId, secondId, 'member');
     const res = await inbox(orgKey, second);
     expect(res.status).toBe(403);
     expect(JSON.stringify(res.body)).not.toMatch(/Missed three shifts/);
@@ -218,7 +219,7 @@ describe('the organization appeal inbox', () => {
     const res = await decide(orgKey, id, { decision: 'reversed', reasoning: 'Two shifts were cancelled by us.' }, manager);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const ban = db.prepare('SELECT lifted_at, lifted_by FROM organization_bans WHERE organization_id = ? AND user_id = ?')
+    const ban = await db.prepare('SELECT lifted_at, lifted_by FROM organization_bans WHERE organization_id = ? AND user_id = ?')
       .get(orgId, studentId);
     expect(ban.lifted_at).toBeTruthy();
     expect(ban.lifted_by).toBe(managerId);
@@ -231,7 +232,7 @@ describe('the organization appeal inbox', () => {
     const id = await banAndAppeal();
     await decide(orgKey, id, { decision: 'stands', reasoning: 'The shifts were not cancelled by us.' }, manager);
 
-    const ban = db.prepare('SELECT lifted_at FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL')
+    const ban = await db.prepare('SELECT lifted_at FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL')
       .get(orgId, studentId);
     expect(ban, 'the ban was lifted by a refusal').toBeTruthy();
 
@@ -244,15 +245,15 @@ describe('the organization appeal inbox', () => {
        lose the outcome and the reason together. */
     const id = await banAndAppeal();
     await decide(orgKey, id, { decision: 'reversed', reasoning: 'Two shifts were cancelled by us.' }, manager);
-    const rows = db.prepare('SELECT COUNT(*) n FROM organization_bans WHERE organization_id = ? AND user_id = ?')
-      .get(orgId, studentId).n;
+    const rows = (await db.prepare('SELECT COUNT(*) n FROM organization_bans WHERE organization_id = ? AND user_id = ?')
+      .get(orgId, studentId)).n;
     expect(rows).toBe(1);
   });
 
   it('records who decided it and why, on the appeal itself', async () => {
     const id = await banAndAppeal();
     await decide(orgKey, id, { decision: 'stands', reasoning: 'The shifts were not cancelled by us.' }, manager);
-    const row = db.prepare('SELECT status, decision, reasoning, reviewer_id, decided_at FROM appeals WHERE id = ?').get(id);
+    const row = await db.prepare('SELECT status, decision, reasoning, reviewer_id, decided_at FROM appeals WHERE id = ?').get(id);
     expect(row).toMatchObject({ status: 'resolved', decision: 'stands', reviewer_id: managerId });
     expect(row.reasoning).toMatch(/not cancelled/);
     expect(row.decided_at).toBeTruthy();
@@ -261,7 +262,7 @@ describe('the organization appeal inbox', () => {
   it('writes an append-only history entry for the decision', async () => {
     const id = await banAndAppeal();
     await decide(orgKey, id, { decision: 'stands', reasoning: 'The shifts were not cancelled by us.' }, manager);
-    const events = db.prepare('SELECT action, actor_id, to_status, note FROM appeal_events WHERE appeal_id = ? ORDER BY created_at').all(id);
+    const events = await db.prepare('SELECT action, actor_id, to_status, note FROM appeal_events WHERE appeal_id = ? ORDER BY created_at').all(id);
     expect(events.map(e => e.action)).toContain('decided');
     const decided = events.find(e => e.action === 'decided');
     expect(decided.actor_id).toBe(managerId);
@@ -275,7 +276,7 @@ describe('the organization appeal inbox', () => {
     const id = await banAndAppeal();
     const res = await decide(orgKey, id, { decision: 'stands', reasoning: 'too short' }, manager);
     expect(res.status).toBe(400);
-    expect(db.prepare('SELECT status FROM appeals WHERE id = ?').get(id).status).not.toBe('resolved');
+    expect((await db.prepare('SELECT status FROM appeals WHERE id = ?').get(id)).status).not.toBe('resolved');
   });
 
   it('refuses an unknown decision', async () => {
@@ -288,7 +289,7 @@ describe('the organization appeal inbox', () => {
     const id = await banAndAppeal();
     const res = await decide(orgKey, id, { decision: 'reversed', reasoning: 'Not my club to decide.' }, outsider);
     expect(res.status).toBe(403);
-    expect(db.prepare('SELECT status FROM appeals WHERE id = ?').get(id).status).not.toBe('resolved');
+    expect((await db.prepare('SELECT status FROM appeals WHERE id = ?').get(id)).status).not.toBe('resolved');
   });
 
   it('cannot be decided through another organization it does not belong to', async () => {
@@ -299,25 +300,25 @@ describe('the organization appeal inbox', () => {
     const id = await banAndAppeal();
     const res = await decide(otherKey, id, { decision: 'reversed', reasoning: 'Reaching into another club.' }, outsider);
     expect(res.status).toBe(404);
-    expect(db.prepare('SELECT status FROM appeals WHERE id = ?').get(id).status).not.toBe('resolved');
+    expect((await db.prepare('SELECT status FROM appeals WHERE id = ?').get(id)).status).not.toBe('resolved');
   });
 
   it('refuses a second decision rather than overwriting the first', async () => {
     /* Two managers pressing at once must not overwrite each other's reasoning. */
     const id = await banAndAppeal();
-    join(orgId, secondId, 'manager');
+    await join(orgId, secondId, 'manager');
     const first = await decide(orgKey, id, { decision: 'stands', reasoning: 'The first decision, recorded.' }, manager);
     expect(first.status).toBe(200);
 
     const again = await decide(orgKey, id, { decision: 'reversed', reasoning: 'A second, contradictory decision.' }, second);
     expect(again.status).toBe(409);
-    expect(db.prepare('SELECT decision FROM appeals WHERE id = ?').get(id).decision).toBe('stands');
+    expect((await db.prepare('SELECT decision FROM appeals WHERE id = ?').get(id)).decision).toBe('stands');
   });
 
   it('tells the appellant, in words written for a ban', async () => {
     const id = await banAndAppeal();
     await decide(orgKey, id, { decision: 'reversed', reasoning: 'Two shifts were cancelled by us.' }, manager);
-    const note = db.prepare('SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
+    const note = await db.prepare('SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1')
       .get(studentId);
     expect(note?.title).toMatch(/appeal/i);
     /* Not the suspension vocabulary: they were never suspended. */
@@ -340,10 +341,11 @@ describe('the organization appeal inbox', () => {
      */
 
     /** A second, older, already-lifted ban for the same pair. */
-    const addLiftedBan = (bannedBy, reason = 'An older ban, since lifted.') => {
-      db.prepare(`INSERT OR REPLACE INTO organization_bans
+    const addLiftedBan = async (bannedBy, reason = 'An older ban, since lifted.') => {
+      await db.prepare(`INSERT INTO organization_bans
                     (id, organization_id, user_id, banned_by, reason, created_at, lifted_at, lifted_by)
-                  VALUES ('old-ban', ?, ?, ?, ?, '2020-01-01T00:00:00.000Z', '2020-02-01T00:00:00.000Z', ?)`)
+                  VALUES ('old-ban', ?, ?, ?, ?, '2020-01-01T00:00:00.000Z', '2020-02-01T00:00:00.000Z', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at, lifted_at = excluded.lifted_at, lifted_by = excluded.lifted_by`)
         .run(orgId, studentId, bannedBy, reason, bannedBy);
     };
 
@@ -355,7 +357,7 @@ describe('the organization appeal inbox', () => {
        * ban.
        */
       const id = await banAndAppeal();
-      addLiftedBan(managerId);
+      await addLiftedBan(managerId);
 
       const rows = (await inbox(orgKey, manager)).body.appeals.filter(a => a.id === id);
       expect(rows, 'the appeal was duplicated by a historical ban').toHaveLength(1);
@@ -363,7 +365,7 @@ describe('the organization appeal inbox', () => {
 
     it('shows the reason of the ban actually in force, not an old one', async () => {
       const id = await banAndAppeal();
-      addLiftedBan(managerId, 'A totally different, older accusation.');
+      await addLiftedBan(managerId, 'A totally different, older accusation.');
 
       const a = (await inbox(orgKey, manager)).body.appeals.find(x => x.id === id);
       expect(a.ban.reason).toMatch(/Missed three shifts/);
@@ -387,8 +389,8 @@ describe('the organization appeal inbox', () => {
        * insert order was reversed — the bug needs the stale row to come first,
        * which is exactly what happens in reality, where the old ban is older.
        */
-      join(orgId, secondId, 'manager');
-      addLiftedBan(secondId);                    // older, lifted, issued by `second`
+      await join(orgId, secondId, 'manager');
+      await addLiftedBan(secondId);                    // older, lifted, issued by `second`
       const id = await banAndAppeal();           // current ban issued by `manager`
 
       const forIssuer = (await inbox(orgKey, manager)).body.appeals.find(x => x.id === id);
@@ -405,10 +407,11 @@ describe('the organization appeal inbox', () => {
        * is themselves banned can file an appeal and, holding the capability,
        * grant it.
        */
-      db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('self-ban', ?, ?, ?, 'Banned by a co-manager.', ?)`)
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('self-ban', ?, ?, ?, 'Banned by a co-manager.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at, lifted_at = excluded.lifted_at, lifted_by = excluded.lifted_by`)
         .run(orgId, secondId, managerId, new Date().toISOString());
-      join(orgId, secondId, 'manager');
+      await join(orgId, secondId, 'manager');
 
       const filed = await srv.call('POST', '/api/appeals', {
         subject: 'organization_ban', organizationId: orgId,
@@ -421,10 +424,10 @@ describe('the organization appeal inbox', () => {
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('self_review');
-      const ban = db.prepare('SELECT lifted_at FROM organization_bans WHERE id = ?').get('self-ban');
+      const ban = await db.prepare('SELECT lifted_at FROM organization_bans WHERE id = ?').get('self-ban');
       expect(ban.lifted_at, 'they lifted their own ban').toBeNull();
 
-      db.prepare("DELETE FROM organization_bans WHERE id = 'self-ban'").run();
+      await db.prepare("DELETE FROM organization_bans WHERE id = 'self-ban'").run();
     });
 
     it('does not let a stale appeal lift a ban issued after it', async () => {
@@ -436,20 +439,21 @@ describe('the organization appeal inbox', () => {
        */
       const id = await banAndAppeal();
 
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL')
         .run('2020-03-01T00:00:00.000Z', orgId, studentId);
       /* A NEWER ban, created after the appeal was filed. */
-      db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
-                  VALUES ('newer-ban', ?, ?, ?, 'A different matter entirely.', ?)`)
+      await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+                  VALUES ('newer-ban', ?, ?, ?, 'A different matter entirely.', ?)
+      ON CONFLICT (id) DO UPDATE SET organization_id = excluded.organization_id, user_id = excluded.user_id, banned_by = excluded.banned_by, reason = excluded.reason, created_at = excluded.created_at, lifted_at = excluded.lifted_at, lifted_by = excluded.lifted_by`)
         .run(orgId, studentId, managerId, new Date(Date.now() + 60000).toISOString());
 
       const res = await decide(orgKey, id, { decision: 'reversed', reasoning: 'Upholding the original appeal.' }, manager);
       expect(res.status).toBe(200);
 
-      const newer = db.prepare("SELECT lifted_at FROM organization_bans WHERE id = 'newer-ban'").get();
+      const newer = await db.prepare("SELECT lifted_at FROM organization_bans WHERE id = 'newer-ban'").get();
       expect(newer.lifted_at, 'an unreviewed later ban was lifted by an older appeal').toBeNull();
 
-      db.prepare("DELETE FROM organization_bans WHERE id = 'newer-ban'").run();
+      await db.prepare("DELETE FROM organization_bans WHERE id = 'newer-ban'").run();
     });
   });
 });

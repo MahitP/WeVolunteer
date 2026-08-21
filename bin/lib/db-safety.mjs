@@ -239,6 +239,58 @@ export function refuseProduction({ tool, effect }) {
   process.exit(1);
 }
 
+/**
+ * Refuses to run when the environment points at anything but a local SQLite file.
+ *
+ * ── The hole this closes ──
+ *
+ * Every other gate in this file reasons about a FILE: `resolveDbPath` returns a
+ * path, `describeProductionLikePath` inspects that path, and
+ * `describeNonDisposableContent` opens it as a SQLite database and counts rows.
+ * All three are correct and all three are blind on PostgreSQL, where the target
+ * is a URL and the path is a file that does not exist. A missing file reads as
+ * "nothing to protect", so the content check returned `null` and the gate
+ * opened.
+ *
+ * What that meant in practice, measured on 2026-08-19 rather than reasoned
+ * about: with `DATABASE_ENGINE=postgres` and a `DATABASE_URL` exported —
+ * the exact shell state the PostgreSQL runbook tells an operator to create —
+ * `bin/reset-dev-db.mjs --yes` passed all three gates, created 65 tables and
+ * seeded 15 demo accounts, including an administrator, all sharing the password
+ * published in `docs/operations/pilot-credentials.md`. `NODE_ENV` was unset,
+ * which is the normal state of an operator's shell, so the production gate
+ * never fired either.
+ *
+ * These tools delete and reseed. There is no version of them that should reach
+ * a PostgreSQL deployment, so the refusal is unconditional on engine rather than
+ * another heuristic about which database it is — heuristics are what the other
+ * three gates already are, and this is the case they cannot see.
+ */
+export function refuseNonSqliteEngine({ tool, effect }) {
+  const engine = (process.env.DATABASE_ENGINE ?? 'sqlite').trim().toLowerCase();
+  const hasUrl = typeof process.env.DATABASE_URL === 'string'
+    && process.env.DATABASE_URL.trim() !== '';
+
+  if (engine === 'sqlite' && !hasUrl) return;
+
+  console.error('REFUSING: this environment points at a PostgreSQL database.');
+  console.error('');
+  if (engine !== 'sqlite') console.error(`  DATABASE_ENGINE=${engine}`);
+  /* The URL is NOT printed. It carries the password. */
+  if (hasUrl) console.error('  DATABASE_URL is set.');
+  console.error('');
+  console.error(`  ${tool} only ever runs against a disposable local SQLite file.`);
+  console.error(`  What it would have done: ${effect}`);
+  console.error('');
+  console.error('  It seeds accounts that share a single published password, including');
+  console.error('  an administrator, so against a deployment it installs known logins.');
+  console.error('');
+  console.error('  To reset a local development database, clear the PostgreSQL settings');
+  console.error('  for this command:');
+  console.error(`    env -u DATABASE_ENGINE -u DATABASE_URL node ${tool.startsWith('bin/') ? tool : 'bin/<tool>'}`);
+  process.exit(1);
+}
+
 /** Refuses a path that looks like a deployment database, whatever NODE_ENV says. */
 export function refuseProductionLikePath({ tool, dbPath }) {
   const reason = describeProductionLikePath(dbPath);
@@ -322,6 +374,9 @@ export function hasYesFlag(argv = process.argv.slice(2)) {
  */
 export async function guardDestructive({ tool, dbPath, effect, assumeYes = hasYesFlag() }) {
   refuseProduction({ tool, effect });
+  /* Before every path-shaped check, because those all reason about a file and
+     this is the case where the target is not a file at all. */
+  refuseNonSqliteEngine({ tool, effect });
   refuseProductionLikePath({ tool, dbPath });
   // Content check runs before the prompt, not after: the prompt asks the operator
   // to confirm a belief, and this is the check that tests whether the belief is

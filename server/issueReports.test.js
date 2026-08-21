@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 /**
@@ -59,7 +59,7 @@ describe('filing a report', () => {
     expect(res.status).toBe(201);
     expect(res.body.reference).toMatch(/^WV-[A-Z2-9]{8}$/);
 
-    const row = db.prepare('SELECT * FROM issue_reports WHERE reference = ?').get(res.body.reference);
+    const row = await db.prepare('SELECT * FROM issue_reports WHERE reference = ?').get(res.body.reference);
     expect(row.category).toBe('bug');
     expect(row.description).toBe(DESCRIPTION);
     expect(row.reporter_id).toBe(studentId);
@@ -124,7 +124,7 @@ describe('filing a report', () => {
     });
     expect(res.status).toBe(201);
 
-    const row = db.prepare('SELECT context FROM issue_reports WHERE reference = ?').get(res.body.reference);
+    const row = await db.prepare('SELECT context FROM issue_reports WHERE reference = ?').get(res.body.reference);
     const stored = JSON.parse(row.context);
     expect(stored.route).toBe('/discover');
     expect(stored.viewport).toBe('390x844');
@@ -210,7 +210,7 @@ describe('a security report is handled more carefully', () => {
     expect(mail.text, 'the vulnerability travelled in an email').not.toContain(secret);
 
     /* But it IS stored, so somebody authorized can read it. */
-    const row = db.prepare('SELECT description FROM issue_reports WHERE reference = ?').get(res.body.reference);
+    const row = await db.prepare('SELECT description FROM issue_reports WHERE reference = ?').get(res.body.reference);
     expect(row.description).toBe(secret);
   });
 

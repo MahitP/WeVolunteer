@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarClock, MapPin, Mail, Globe, Lock, ShieldCheck, Phone, ShieldAlert, ArrowLeft, Award, Pencil } from 'lucide-react';
+import { CalendarClock, Mail, Lock, ShieldCheck, ShieldAlert, ArrowLeft, Award, Pencil } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';

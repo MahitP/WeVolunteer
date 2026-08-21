@@ -265,7 +265,7 @@ describe('the row and the file stay in step', () => {
     // Both halves: the pointer and the bytes. A file left behind stays readable,
     // unauthenticated, at a URL that has already been handed out.
     expect((await fetch(`${srv.base}${url}`)).status).toBe(404);
-    const row = db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
+    const row = await db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
       .get('pic-unserved@example.org');
     expect(row.profile_picture_url).toBeNull();
   });

@@ -66,12 +66,12 @@ describe('createHoursLedgerTable', () => {
     }).not.toThrow();
   });
 
-  it('has no foreign keys, so an entry survives deletion of what it describes', () => {
+  it('has no foreign keys, so an entry survives deletion of what it describes', async () => {
     const db = makeDb();
     seed(db);
     db.exec('PRAGMA foreign_keys = ON');
 
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       userName: 'Priya Patel', eventTitle: 'Food Pantry', slotName: 'Box Packer',
       action: 'credited', presentAfter: 1, hoursAfter: 3,
@@ -81,7 +81,7 @@ describe('createHoursLedgerTable', () => {
     db.exec("DELETE FROM users WHERE id = 'u1'");
     db.exec("DELETE FROM events WHERE id = 'e1'");
 
-    const rows = getLedgerForUser(db, 'u1');
+    const rows = await getLedgerForUser(db, 'u1');
     expect(rows).toHaveLength(1);
     // The snapshot is what keeps an orphaned row meaningful.
     expect(rows[0].user_name).toBe('Priya Patel');
@@ -94,8 +94,8 @@ describe('recordHoursChange', () => {
   let db;
   beforeEach(() => { db = makeDb(); seed(db); });
 
-  it('computes delta from before/after rather than trusting the caller', () => {
-    const { delta } = recordHoursChange(db, {
+  it('computes delta from before/after rather than trusting the caller', async () => {
+    const { delta } = await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'credited', presentBefore: null, hoursBefore: null,
       presentAfter: 1, hoursAfter: 2.5,
@@ -104,8 +104,8 @@ describe('recordHoursChange', () => {
     expect(delta).toBe(2.5);
   });
 
-  it('treats absence as a zero-delta event, not a missing one', () => {
-    const { delta } = recordHoursChange(db, {
+  it('treats absence as a zero-delta event, not a missing one', async () => {
+    const { delta } = await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'credited', presentAfter: 0, hoursAfter: 3,
       source: 'attendance_screen', actorRole: 'organizer', actorId: 'org1'
@@ -115,8 +115,8 @@ describe('recordHoursChange', () => {
     expect(db.prepare('SELECT hours_after FROM hours_ledger').get().hours_after).toBe(3);
   });
 
-  it('produces a negative delta when a credit is revoked', () => {
-    const { delta } = recordHoursChange(db, {
+  it('produces a negative delta when a credit is revoked', async () => {
+    const { delta } = await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'revoked', presentBefore: 1, hoursBefore: 3,
       presentAfter: 0, hoursAfter: 3,
@@ -126,8 +126,8 @@ describe('recordHoursChange', () => {
     expect(delta).toBe(-3);
   });
 
-  it('produces the difference when hours are adjusted', () => {
-    const { delta } = recordHoursChange(db, {
+  it('produces the difference when hours are adjusted', async () => {
+    const { delta } = await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'adjusted', presentBefore: 1, hoursBefore: 3,
       presentAfter: 1, hoursAfter: 4.5,
@@ -137,26 +137,27 @@ describe('recordHoursChange', () => {
     expect(delta).toBe(1.5);
   });
 
-  it('rejects unknown actions and sources', () => {
+  it('rejects unknown actions and sources', async () => {
     const base = {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       presentAfter: 1, hoursAfter: 1, source: 'attendance_screen'
     };
-    expect(() => recordHoursChange(db, { ...base, action: 'deleted' })).toThrow(/Unknown ledger action/);
-    expect(() => recordHoursChange(db, { ...base, action: 'credited', source: 'somewhere' }))
-      .toThrow(/Unknown ledger source/);
+    await expect(recordHoursChange(db, { ...base, action: 'deleted' }))
+      .rejects.toThrow(/Unknown ledger action/);
+    await expect(recordHoursChange(db, { ...base, action: 'credited', source: 'somewhere' }))
+      .rejects.toThrow(/Unknown ledger source/);
   });
 
-  it('requires the identifying triple', () => {
-    expect(() => recordHoursChange(db, {
+  it('requires the identifying triple', async () => {
+    await expect(recordHoursChange(db, {
       userId: 'u1', eventId: 'e1',
       action: 'credited', presentAfter: 1, hoursAfter: 1, source: 'attendance_screen'
-    })).toThrow(/requires userId, eventId and slotId/);
+    })).rejects.toThrow(/requires userId, eventId and slotId/);
   });
 
-  it('rounds to avoid floating point drift accumulating across entries', () => {
+  it('rounds to avoid floating point drift accumulating across entries', async () => {
     for (let i = 0; i < 10; i++) {
-      recordHoursChange(db, {
+      await recordHoursChange(db, {
         userId: 'u1', eventId: 'e1', slotId: `s-${i}`,
         action: 'credited', presentAfter: 1, hoursAfter: 0.1,
         source: 'attendance_screen', actorRole: 'organizer', actorId: 'org1'
@@ -170,39 +171,39 @@ describe('backfillHoursLedger', () => {
   let db;
   beforeEach(() => { db = makeDb(); seed(db); });
 
-  it('writes one migrated entry per attendance row and never touches attendance', () => {
+  it('writes one migrated entry per attendance row and never touches attendance', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
     addAttendance(db, 's2', 'u2', 1, 2, 'e2');
     addAttendance(db, 's3', 'u3', 0, 2, 'e2');
 
     const before = db.prepare('SELECT * FROM attendance ORDER BY slot_id').all();
-    const result = backfillHoursLedger(db);
+    const result = await backfillHoursLedger(db);
     const after = db.prepare('SELECT * FROM attendance ORDER BY slot_id').all();
 
     expect(result).toEqual({ inserted: 3, skipped: 0, total: 3 });
     expect(after).toEqual(before); // attendance is untouched, byte for byte
   });
 
-  it('is idempotent — re-running inserts nothing', () => {
+  it('is idempotent — re-running inserts nothing', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
     addAttendance(db, 's2', 'u2', 1, 2, 'e2');
 
-    expect(backfillHoursLedger(db).inserted).toBe(2);
-    expect(backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 2, total: 2 });
-    expect(backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 2, total: 2 });
+    expect((await backfillHoursLedger(db)).inserted).toBe(2);
+    expect(await backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 2, total: 2 });
+    expect(await backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 2, total: 2 });
 
     expect(db.prepare('SELECT COUNT(*) c FROM hours_ledger').get().c).toBe(2);
   });
 
-  it('uses an id derived from the attendance primary key', () => {
+  it('uses an id derived from the attendance primary key', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
-    backfillHoursLedger(db);
+    await backfillHoursLedger(db);
     expect(db.prepare('SELECT id FROM hours_ledger').get().id).toBe('migrate:s1:u1');
   });
 
-  it('does not invent history it cannot know', () => {
+  it('does not invent history it cannot know', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
-    backfillHoursLedger(db, { now: '2026-07-21T12:00:00.000Z' });
+    await backfillHoursLedger(db, { now: '2026-07-21T12:00:00.000Z' });
 
     const row = db.prepare('SELECT * FROM hours_ledger').get();
     expect(row.present_before).toBeNull();
@@ -214,10 +215,10 @@ describe('backfillHoursLedger', () => {
     expect(row.reason).toMatch(/not reconstructable/);
   });
 
-  it('keeps migrated entries permanently distinguishable from observed ones', () => {
+  it('keeps migrated entries permanently distinguishable from observed ones', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
-    backfillHoursLedger(db);
-    recordHoursChange(db, {
+    await backfillHoursLedger(db);
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e2', slotId: 's2',
       action: 'credited', presentAfter: 1, hoursAfter: 2,
       source: 'attendance_screen', actorRole: 'organizer', actorId: 'org1'
@@ -228,9 +229,9 @@ describe('backfillHoursLedger', () => {
     expect({ migrated, observed }).toEqual({ migrated: 1, observed: 1 });
   });
 
-  it('carries absent rows across with a zero delta', () => {
+  it('carries absent rows across with a zero delta', async () => {
     addAttendance(db, 's1', 'u1', 0, 3);
-    backfillHoursLedger(db);
+    await backfillHoursLedger(db);
 
     const row = db.prepare('SELECT * FROM hours_ledger').get();
     expect(row.delta).toBe(0);
@@ -238,9 +239,9 @@ describe('backfillHoursLedger', () => {
     expect(row.hours_after).toBe(3);
   });
 
-  it('handles an empty attendance table', () => {
-    expect(backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 0, total: 0 });
-    expect(verifyLedgerParity(db).ok).toBe(true);
+  it('handles an empty attendance table', async () => {
+    expect(await backfillHoursLedger(db)).toEqual({ inserted: 0, skipped: 0, total: 0 });
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 });
 
@@ -248,40 +249,40 @@ describe('verifyLedgerParity', () => {
   let db;
   beforeEach(() => { db = makeDb(); seed(db); });
 
-  it('passes after a clean backfill', () => {
+  it('passes after a clean backfill', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
     addAttendance(db, 's2', 'u2', 1, 2, 'e2');
     addAttendance(db, 's3', 'u3', 0, 2, 'e2');
-    backfillHoursLedger(db);
+    await backfillHoursLedger(db);
 
-    const parity = verifyLedgerParity(db);
+    const parity = await verifyLedgerParity(db);
     expect(parity.ok).toBe(true);
     expect(parity.mismatches).toEqual([]);
   });
 
-  it('detects a ledger entry with no matching attendance', () => {
+  it('detects a ledger entry with no matching attendance', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
-    backfillHoursLedger(db);
-    recordHoursChange(db, {
+    await backfillHoursLedger(db);
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e2', slotId: 's2',
       action: 'credited', presentAfter: 1, hoursAfter: 5,
       source: 'attendance_screen', actorRole: 'organizer', actorId: 'org1'
     });
 
-    const parity = verifyLedgerParity(db);
+    const parity = await verifyLedgerParity(db);
     expect(parity.ok).toBe(false);
     expect(parity.mismatches).toEqual([{ userId: 'u1', ledgerTotal: 8, attendanceTotal: 3 }]);
   });
 
-  it('detects attendance with no matching ledger entry', () => {
+  it('detects attendance with no matching ledger entry', async () => {
     addAttendance(db, 's1', 'u1', 1, 3);
     // deliberately not backfilled
-    const parity = verifyLedgerParity(db);
+    const parity = await verifyLedgerParity(db);
     expect(parity.ok).toBe(false);
     expect(parity.mismatches).toEqual([{ userId: 'u1', ledgerTotal: 0, attendanceTotal: 3 }]);
   });
 
-  it('holds as an invariant across an arbitrary sequence of changes', () => {
+  it('holds as an invariant across an arbitrary sequence of changes', async () => {
     // Property check: however hours are mutated, as long as each mutation is
     // mirrored into the ledger, the two views must agree per user.
     const users = ['u1', 'u2', 'u3'];
@@ -303,8 +304,8 @@ describe('verifyLedgerParity', () => {
       const prior = db.prepare('SELECT present, hours_awarded FROM attendance WHERE slot_id=? AND user_id=?')
         .get(slotId, userId);
 
-      upsert.run('e1', slotId, userId, present, hours);
-      recordHoursChange(db, {
+      await upsert.run('e1', slotId, userId, present, hours);
+      await recordHoursChange(db, {
         userId, eventId: 'e1', slotId,
         action: prior ? 'adjusted' : 'credited',
         presentBefore: prior ? prior.present : null,
@@ -318,22 +319,22 @@ describe('verifyLedgerParity', () => {
       expect(Number(ledgerSum(db, userId).toFixed(4)))
         .toBe(Number(creditedHours(db, userId).toFixed(4)));
     }
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 });
 
 describe('ledger is append-only in practice', () => {
-  it('records a full history rather than overwriting', () => {
+  it('records a full history rather than overwriting', async () => {
     const db = makeDb();
     seed(db);
 
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'credited', presentAfter: 1, hoursAfter: 3,
       source: 'attendance_screen', actorRole: 'organizer', actorId: 'org1',
       createdAt: '2026-07-01T10:00:00.000Z'
     });
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'revoked', presentBefore: 1, hoursBefore: 3, presentAfter: 0, hoursAfter: 3,
       source: 'admin_correction', actorRole: 'admin', actorId: 'admin1',
@@ -341,7 +342,7 @@ describe('ledger is append-only in practice', () => {
       createdAt: '2026-07-02T10:00:00.000Z'
     });
 
-    const history = getLedgerForUser(db, 'u1');
+    const history = await getLedgerForUser(db, 'u1');
     expect(history).toHaveLength(2);
     expect(history[0].action).toBe('revoked');   // newest first
     expect(history[1].action).toBe('credited');

@@ -75,8 +75,8 @@ function ask(query) {
  *
  * @returns {{ok: true, user: object} | {ok: false, code: string, message: string}}
  */
-export function assessAccount(db, email) {
-  const user = db.prepare(`
+export async function assessAccount(db, email) {
+  const user = await db.prepare(`
     SELECT id, email, role, account_status, tfa_enabled, tfa_email_enabled, tfa_secret
       FROM users
      WHERE email = ?
@@ -116,8 +116,8 @@ export function assessAccount(db, email) {
 }
 
 /** The write. One column, one row, inside a transaction with its audit entry. */
-export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-tfa-secret.mjs' }) {
-  db.exec('BEGIN');
+export async function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-tfa-secret.mjs' }) {
+  await db.exec('BEGIN');
   try {
     /**
      * `tfa_enabled = 0` in the WHERE clause as well as checked above.
@@ -132,7 +132,7 @@ export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-
      * existing sessions stay valid and the factor the account actually uses keeps
      * working.
      */
-    const result = db.prepare(`
+    const result = await db.prepare(`
       UPDATE users
          SET tfa_secret = NULL
        WHERE id = ? AND tfa_enabled = 0 AND tfa_secret IS NOT NULL
@@ -145,7 +145,7 @@ export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-
       );
     }
 
-    recordCliAudit(db, {
+    await recordCliAudit(db, {
       action: CLI_EVENTS.TFA_STALE_SECRET_CLEARED,
       targetUserId: user.id,
       command,
@@ -153,9 +153,9 @@ export function clearStaleSecret(db, { user, reason, command = 'bin/clear-stale-
       metadata: { subject: user.email, role: user.role },
     });
 
-    db.exec('COMMIT');
+    await db.exec('COMMIT');
   } catch (err) {
-    db.exec('ROLLBACK');
+    await db.exec('ROLLBACK');
     throw err;
   }
 }
@@ -178,10 +178,10 @@ async function main() {
   }
 
   try {
-    const { db } = openPrivilegedDb('bin/clear-stale-tfa-secret.mjs');
-    assertSystemActor(db);
+    const { db } = await openPrivilegedDb('bin/clear-stale-tfa-secret.mjs');
+    await assertSystemActor(db);
 
-    const assessment = assessAccount(db, email);
+    const assessment = await assessAccount(db, email);
     if (!assessment.ok) {
       /* `nothing_to_clear` is a successful no-op: the desired end state already
          holds, and a non-zero exit would make this unusable from a script that
@@ -215,14 +215,14 @@ async function main() {
       }
     }
 
-    clearStaleSecret(db, { user, reason });
+    await clearStaleSecret(db, { user, reason });
 
-    const after = db.prepare(
+    const after = await db.prepare(
       'SELECT tfa_enabled, tfa_email_enabled, tfa_secret FROM users WHERE id = ?'
     ).get(user.id);
-    const codes = db.prepare(
+    const codes = (await db.prepare(
       'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-    ).get(user.id).n;
+    ).get(user.id)).n;
 
     console.log('');
     console.log('Cleared. Current state:');

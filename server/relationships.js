@@ -68,8 +68,8 @@ export const RELATIONSHIP_KINDS = Object.freeze(['friend', 'mute', 'restrict']);
 const id = (prefix) => `${prefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
 /** The row for one directed relationship, or undefined. */
-export function relationship(db, actorId, subjectId, kind) {
-  return db.prepare(`
+export async function relationship(db, actorId, subjectId, kind) {
+  return await db.prepare(`
     SELECT * FROM user_relationships
     WHERE actor_id = ? AND subject_id = ? AND kind = ?
   `).get(actorId, subjectId, kind);
@@ -105,11 +105,11 @@ export function relationship(db, actorId, subjectId, kind) {
  * The extra read costs one indexed lookup on a table that is empty for almost
  * every pair, on a path that already runs `volunteerStats`.
  */
-export function areFriends(db, a, b) {
+export async function areFriends(db, a, b) {
   if (!a || !b || a === b) return false;
-  if (isBlockedBetween(db, a, b)) return false;
-  if (!arePeers(db, a, b)) return false;
-  return Boolean(db.prepare(`
+  if (await isBlockedBetween(db, a, b)) return false;
+  if (!await arePeers(db, a, b)) return false;
+  return Boolean(await db.prepare(`
     SELECT 1 FROM user_relationships
     WHERE kind = 'friend' AND status = 'accepted'
       AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))
@@ -157,8 +157,8 @@ export function areFriends(db, a, b) {
  * it, and `can(null, …)` is false, so a relationship pointing at a row that is
  * gone grants nothing.
  */
-export function arePeers(db, a, b) {
-  const rows = db.prepare(
+export async function arePeers(db, a, b) {
+  const rows = await db.prepare(
     'SELECT id, role FROM users WHERE id IN (?, ?)'
   ).all(a, b);
   if (rows.length !== 2) return false;
@@ -166,8 +166,8 @@ export function arePeers(db, a, b) {
 }
 
 /** True when either party has restricted the other. */
-export function isRestrictedBetween(db, a, b) {
-  return Boolean(db.prepare(`
+export async function isRestrictedBetween(db, a, b) {
+  return Boolean(await db.prepare(`
     SELECT 1 FROM user_relationships
     WHERE kind = 'restrict'
       AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))
@@ -185,19 +185,19 @@ export function isRestrictedBetween(db, a, b) {
  *
  * @returns {{status:'pending'|'accepted', created:boolean}}
  */
-export function requestFriend(db, actorId, subjectId, { now = new Date().toISOString() } = {}) {
-  const inbound = relationship(db, subjectId, actorId, 'friend');
+export async function requestFriend(db, actorId, subjectId, { now = new Date().toISOString() } = {}) {
+  const inbound = await relationship(db, subjectId, actorId, 'friend');
   if (inbound && inbound.status === 'pending') {
-    db.prepare(`UPDATE user_relationships SET status = 'accepted', responded_at = ? WHERE id = ?`)
+    await db.prepare(`UPDATE user_relationships SET status = 'accepted', responded_at = ? WHERE id = ?`)
       .run(now, inbound.id);
     return { status: 'accepted', created: false };
   }
   if (inbound && inbound.status === 'accepted') return { status: 'accepted', created: false };
 
-  const existing = relationship(db, actorId, subjectId, 'friend');
+  const existing = await relationship(db, actorId, subjectId, 'friend');
   if (existing) return { status: existing.status, created: false };
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at)
     VALUES (?, ?, ?, 'friend', 'pending', ?)
   `).run(id('rel'), actorId, subjectId, now);
@@ -205,8 +205,8 @@ export function requestFriend(db, actorId, subjectId, { now = new Date().toISOSt
 }
 
 /** Accepts a pending inbound request. Returns false when there was none. */
-export function acceptFriend(db, actorId, requesterId, { now = new Date().toISOString() } = {}) {
-  const { changes } = db.prepare(`
+export async function acceptFriend(db, actorId, requesterId, { now = new Date().toISOString() } = {}) {
+  const { changes } = await db.prepare(`
     UPDATE user_relationships SET status = 'accepted', responded_at = ?
     WHERE actor_id = ? AND subject_id = ? AND kind = 'friend' AND status = 'pending'
   `).run(now, requesterId, actorId);
@@ -220,8 +220,8 @@ export function acceptFriend(db, actorId, requesterId, { now = new Date().toISOS
  * unfriending are the same database operation, and giving them three endpoints
  * would give three chances to get the direction wrong.
  */
-export function removeFriend(db, actorId, subjectId) {
-  const { changes } = db.prepare(`
+export async function removeFriend(db, actorId, subjectId) {
+  const { changes } = await db.prepare(`
     DELETE FROM user_relationships
     WHERE kind = 'friend'
       AND ((actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?))
@@ -230,10 +230,10 @@ export function removeFriend(db, actorId, subjectId) {
 }
 
 /** Records a mute or a restriction. Idempotent. */
-export function setUnilateral(db, actorId, subjectId, kind, { now = new Date().toISOString() } = {}) {
+export async function setUnilateral(db, actorId, subjectId, kind, { now = new Date().toISOString() } = {}) {
   if (kind !== 'mute' && kind !== 'restrict') throw new Error(`Not a unilateral kind: ${kind}`);
-  if (relationship(db, actorId, subjectId, kind)) return false;
-  db.prepare(`
+  if (await relationship(db, actorId, subjectId, kind)) return false;
+  await db.prepare(`
     INSERT INTO user_relationships (id, actor_id, subject_id, kind, status, created_at, responded_at)
     VALUES (?, ?, ?, ?, 'accepted', ?, ?)
   `).run(id('rel'), actorId, subjectId, kind, now, now);
@@ -246,13 +246,13 @@ export function setUnilateral(db, actorId, subjectId, kind, { now = new Date().t
    * is being used to stop. A control that visibly does less than it says is
    * worse than not offering it.
    */
-  if (kind === 'restrict') removeFriend(db, actorId, subjectId);
+  if (kind === 'restrict') await removeFriend(db, actorId, subjectId);
   return true;
 }
 
 /** Lifts a mute or a restriction. */
-export function clearUnilateral(db, actorId, subjectId, kind) {
-  const { changes } = db.prepare(`
+export async function clearUnilateral(db, actorId, subjectId, kind) {
+  const { changes } = await db.prepare(`
     DELETE FROM user_relationships WHERE actor_id = ? AND subject_id = ? AND kind = ?
   `).run(actorId, subjectId, kind);
   return changes > 0;
@@ -262,14 +262,14 @@ export function clearUnilateral(db, actorId, subjectId, kind) {
  * Everything one viewer needs to know about their standing with one subject,
  * in a single query rather than five.
  */
-export function relationshipState(db, viewerId, subjectId) {
+export async function relationshipState(db, viewerId, subjectId) {
   if (!viewerId || !subjectId || viewerId === subjectId) {
     return {
       friendship: 'none', muted: false, restricted: false,
       blocked: false, blockedByViewer: false, restrictedBy: false
     };
   }
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT actor_id, subject_id, kind, status FROM user_relationships
     WHERE (actor_id = ? AND subject_id = ?) OR (actor_id = ? AND subject_id = ?)
   `).all(viewerId, subjectId, subjectId, viewerId);
@@ -299,7 +299,7 @@ export function relationshipState(db, viewerId, subjectId) {
    * Two columns rather than one, because `viewerRelationshipState` cannot
    * derive the safe answer from the symmetric one — see its header.
    */
-  const blockRows = db.prepare(`
+  const blockRows = await db.prepare(`
     SELECT blocker_id FROM user_blocks
     WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)
   `).all(viewerId, subjectId, subjectId, viewerId);
@@ -335,8 +335,8 @@ export function relationshipState(db, viewerId, subjectId) {
  * that legitimately need the flag — the friend-request refusal reads it to decide
  * whether to allow the request at all, and that decision must see the truth.
  */
-export function viewerRelationshipState(db, viewerId, subjectId) {
-  const { restrictedBy, blockedByViewer, ...visible } = relationshipState(db, viewerId, subjectId);
+export async function viewerRelationshipState(db, viewerId, subjectId) {
+  const { restrictedBy, blockedByViewer, ...visible } = await relationshipState(db, viewerId, subjectId);
 
   /**
    * ── `blocked` is narrowed to the viewer's OWN block ──
@@ -379,11 +379,11 @@ export function viewerRelationshipState(db, viewerId, subjectId) {
  * Returns [] rather than throwing on any of them, because the caller is a
  * signup and a signup must never fail because of a notification.
  */
-export function friendsToNotify(db, userId) {
-  const owner = db.prepare('SELECT friend_activity_visible FROM users WHERE id = ?').get(userId);
+export async function friendsToNotify(db, userId) {
+  const owner = await db.prepare('SELECT friend_activity_visible FROM users WHERE id = ?').get(userId);
   if (!owner || owner.friend_activity_visible === 0) return [];
 
-  return db.prepare(`
+  return (await db.prepare(`
     SELECT DISTINCT friend_id FROM (
       SELECT subject_id AS friend_id FROM user_relationships
         WHERE actor_id = ? AND kind = 'friend' AND status = 'accepted'
@@ -404,5 +404,5 @@ export function friendsToNotify(db, userId) {
         WHERE (b.blocker_id = f.friend_id AND b.blocked_id = ?)
            OR (b.blocker_id = ? AND b.blocked_id = f.friend_id)
       )
-  `).all(userId, userId, userId, userId, userId, userId).map(r => r.friend_id);
+  `).all(userId, userId, userId, userId, userId, userId)).map(r => r.friend_id);
 }

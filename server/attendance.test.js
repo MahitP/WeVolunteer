@@ -100,11 +100,11 @@ describe('slotDuration & slotHasEnded', () => {
 });
 
 describe('L5 — hours cannot be credited before a shift has ended', () => {
-  it('refuses finalisation for a shift still to come', () => {
+  it('refuses finalisation for a shift still to come', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: FUTURE_START, slotEnd: FUTURE_END });
 
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW
     });
 
@@ -116,7 +116,7 @@ describe('L5 — hours cannot be credited before a shift has ended', () => {
 });
 
 describe('L2 — no accidental over-crediting', () => {
-  it('credits only volunteers explicitly named in the request', () => {
+  it('credits only volunteers explicitly named in the request', async () => {
     const db = makeDb();
     const event = scenario(db);
     db.exec(`INSERT INTO users (id,name,role) VALUES ('u2','Leo Chen','student')`);
@@ -124,7 +124,7 @@ describe('L2 — no accidental over-crediting', () => {
       .run('a2', 'u2', 'e1', 's1', 'accepted');
 
     // Only u1 is named. u2 is accepted but unmentioned.
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
     expect(hoursOf(db, 'u1')).toBe(3);
     expect(hoursOf(db, 'u2')).toBe(0);
@@ -132,10 +132,10 @@ describe('L2 — no accidental over-crediting', () => {
     expect(db.prepare("SELECT COUNT(*) c FROM attendance WHERE user_id='u2'").get().c).toBe(0);
   });
 
-  it('an empty request credits nobody', () => {
+  it('an empty request credits nobody', async () => {
     const db = makeDb();
     const event = scenario(db);
-    const result = finalizeAttendance(db, { event, attendanceMap: {}, actor: ACTOR, now: NOW });
+    const result = await finalizeAttendance(db, { event, attendanceMap: {}, actor: ACTOR, now: NOW });
     expect(result.ok).toBe(true);
     expect(result.credited).toEqual([]);
     expect(hoursOf(db, 'u1')).toBe(0);
@@ -143,19 +143,19 @@ describe('L2 — no accidental over-crediting', () => {
 });
 
 describe('L6 — a partial or stale request never marks anyone absent', () => {
-  it('leaves unnamed existing credits untouched', () => {
+  it('leaves unnamed existing credits untouched', async () => {
     const db = makeDb();
     const event = scenario(db);
     db.exec(`INSERT INTO users (id,name,role) VALUES ('u2','Leo Chen','student')`);
     db.prepare('INSERT INTO applications (id,user_id,event_id,slot_id,status) VALUES (?,?,?,?,?)')
       .run('a2', 'u2', 'e1', 's1', 'accepted');
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true, a2: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true, a2: true }, actor: ACTOR, now: NOW });
     expect(hoursOf(db, 'u1')).toBe(3);
     expect(hoursOf(db, 'u2')).toBe(3);
 
     // A second save that mentions only u1 — the old code would have zeroed u2.
-    finalizeAttendance(db, {
+    await finalizeAttendance(db, {
       event, attendanceMap: { a1: true }, reason: 'recheck', actor: ACTOR, now: NOW
     });
 
@@ -164,17 +164,17 @@ describe('L6 — a partial or stale request never marks anyone absent', () => {
 });
 
 describe('L1 / constraint 3 — attendance is historical, not application state', () => {
-  it('keeps hours when the application is later withdrawn or rejected', () => {
+  it('keeps hours when the application is later withdrawn or rejected', async () => {
     const db = makeDb();
     const event = scenario(db);
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(hoursOf(db, 'u1')).toBe(3);
 
     db.exec("UPDATE applications SET status = 'rejected' WHERE id = 'a1'");
 
     // Re-saving the event must not disturb the historical record.
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: true }, reason: 'recheck', actor: ACTOR, now: NOW
     });
 
@@ -182,13 +182,13 @@ describe('L1 / constraint 3 — attendance is historical, not application state'
     expect(hoursOf(db, 'u1')).toBe(3);
   });
 
-  it('still allows correcting the record of a volunteer since un-accepted', () => {
+  it('still allows correcting the record of a volunteer since un-accepted', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     db.exec("UPDATE applications SET status = 'waitlisted' WHERE id = 'a1'");
 
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: false }, reason: 'Did not actually attend', actor: ACTOR, now: NOW
     });
 
@@ -197,11 +197,11 @@ describe('L1 / constraint 3 — attendance is historical, not application state'
     expect(ledgerRows(db).at(-1).action).toBe('revoked');
   });
 
-  it('refuses to invent a record for someone never accepted', () => {
+  it('refuses to invent a record for someone never accepted', async () => {
     const db = makeDb();
     const event = scenario(db, { status: 'pending' });
 
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW
     });
 
@@ -212,11 +212,11 @@ describe('L1 / constraint 3 — attendance is historical, not application state'
 });
 
 describe('L4 / decision 3 — hours are snapshots and are never re-priced', () => {
-  it('keeps the original credit after the slot duration is corrected', () => {
+  it('keeps the original credit after the slot duration is corrected', async () => {
     const db = makeDb();
     const event = scenario(db);
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(hoursOf(db, 'u1')).toBe(3);
 
     // Organizer shortens the slot from 3h to 1h after the fact.
@@ -224,20 +224,20 @@ describe('L4 / decision 3 — hours are snapshots and are never re-priced', () =
       .run('2026-07-01T10:00:00.000Z', 's1');
 
     // Toggle absent then present again — the stored value must survive.
-    finalizeAttendance(db, { event, attendanceMap: { a1: false }, reason: 'x', actor: ACTOR, now: NOW });
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, reason: 'y', actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: false }, reason: 'x', actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, reason: 'y', actor: ACTOR, now: NOW });
 
     expect(hoursOf(db, 'u1')).toBe(3); // not 1
   });
 });
 
 describe('decision 2 — corrections require a reason and an actor', () => {
-  it('refuses to change an existing record without a reason', () => {
+  it('refuses to change an existing record without a reason', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: false }, actor: ACTOR, now: NOW
     });
 
@@ -247,20 +247,20 @@ describe('decision 2 — corrections require a reason and an actor', () => {
     expect(hoursOf(db, 'u1')).toBe(3); // nothing written
   });
 
-  it('does not require a reason for a first-time credit', () => {
+  it('does not require a reason for a first-time credit', async () => {
     const db = makeDb();
     const event = scenario(db);
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW
     });
     expect(result.ok).toBe(true);
   });
 
-  it('attributes every entry to an actor and stores the reason on corrections', () => {
+  it('attributes every entry to an actor and stores the reason on corrections', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
-    finalizeAttendance(db, {
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, {
       event, attendanceMap: { a1: false }, reason: 'Signed in but left early', actor: ACTOR, now: NOW
     });
 
@@ -270,11 +270,11 @@ describe('decision 2 — corrections require a reason and an actor', () => {
     expect(rows[1]).toMatchObject({ action: 'revoked', actor_id: 'org1', reason: 'Signed in but left early' });
   });
 
-  it('rejects a whitespace-only reason', () => {
+  it('rejects a whitespace-only reason', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
-    const result = finalizeAttendance(db, {
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { a1: false }, reason: '   ', actor: ACTOR, now: NOW
     });
     expect(result.error).toBe('reason_required');
@@ -282,36 +282,36 @@ describe('decision 2 — corrections require a reason and an actor', () => {
 });
 
 describe('constraint 5 — every hours change writes a ledger entry', () => {
-  it('writes exactly one entry per changed record and none for no-ops', () => {
+  it('writes exactly one entry per changed record and none for no-ops', async () => {
     const db = makeDb();
     const event = scenario(db);
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(ledgerRows(db)).toHaveLength(1);
 
     // Saving the same value again changes nothing and should add no noise.
-    const again = finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    const again = await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(again.unchanged).toBe(1);
     expect(ledgerRows(db)).toHaveLength(1);
   });
 
-  it('keeps ledger deltas in step with credited hours', () => {
+  it('keeps ledger deltas in step with credited hours', async () => {
     const db = makeDb();
     const event = scenario(db);
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
-    finalizeAttendance(db, { event, attendanceMap: { a1: false }, reason: 'a', actor: ACTOR, now: NOW });
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, reason: 'b', actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: false }, reason: 'a', actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, reason: 'b', actor: ACTOR, now: NOW });
 
     const sum = db.prepare('SELECT SUM(delta) d FROM hours_ledger WHERE user_id=?').get('u1').d;
     expect(Number(sum.toFixed(4))).toBe(hoursOf(db, 'u1'));
     expect(hoursOf(db, 'u1')).toBe(3);
   });
 
-  it('records an absent-from-the-start mark with a zero delta', () => {
+  it('records an absent-from-the-start mark with a zero delta', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: false }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: false }, actor: ACTOR, now: NOW });
 
     const row = ledgerRows(db)[0];
     expect(row.action).toBe('credited');
@@ -322,38 +322,38 @@ describe('constraint 5 — every hours change writes a ledger entry', () => {
 });
 
 describe('decision 5 — check-in is separate from awarding hours', () => {
-  it('records marks during a shift without crediting anything', () => {
+  it('records marks during a shift without crediting anything', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: FUTURE_START, slotEnd: FUTURE_END });
 
-    const result = recordCheckins(db, {
+    const result = await recordCheckins(db, {
       event, checkinMap: { a1: true }, actor: ACTOR, now: NOW
     });
 
     expect(result.marked).toBe(1);
-    expect(getCheckins(db, 'e1')).toHaveLength(1);
+    expect(await getCheckins(db, 'e1')).toHaveLength(1);
     // The whole point: no hours, no ledger entry.
     expect(hoursOf(db, 'u1')).toBe(0);
     expect(ledgerRows(db)).toHaveLength(0);
     expect(db.prepare('SELECT COUNT(*) c FROM attendance').get().c).toBe(0);
   });
 
-  it('is freely re-editable', () => {
+  it('is freely re-editable', async () => {
     const db = makeDb();
     const event = scenario(db);
-    recordCheckins(db, { event, checkinMap: { a1: true }, actor: ACTOR, now: NOW });
-    recordCheckins(db, { event, checkinMap: { a1: false }, actor: ACTOR, now: NOW });
+    await recordCheckins(db, { event, checkinMap: { a1: true }, actor: ACTOR, now: NOW });
+    await recordCheckins(db, { event, checkinMap: { a1: false }, actor: ACTOR, now: NOW });
 
-    const marks = getCheckins(db, 'e1');
+    const marks = await getCheckins(db, 'e1');
     expect(marks).toHaveLength(1);
     expect(marks[0].present).toBe(0);
     expect(ledgerRows(db)).toHaveLength(0);
   });
 
-  it('ignores applications that are not accepted', () => {
+  it('ignores applications that are not accepted', async () => {
     const db = makeDb();
     const event = scenario(db, { status: 'pending' });
-    const result = recordCheckins(db, { event, checkinMap: { a1: true }, actor: ACTOR, now: NOW });
+    const result = await recordCheckins(db, { event, checkinMap: { a1: true }, actor: ACTOR, now: NOW });
     expect(result.marked).toBe(0);
     expect(result.skipped).toEqual(['a1']);
   });
@@ -374,80 +374,80 @@ describe('decision 1 — multi-day events do not complete after the first shift'
     return db.prepare('SELECT * FROM events WHERE id = ?').get('e1');
   }
 
-  it('is not complete while later shifts remain', () => {
+  it('is not complete while later shifts remain', async () => {
     const db = makeDb();
     const event = multiDay(db);
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
-    const completion = computeEventCompletion(db, 'e1', NOW);
+    const completion = await computeEventCompletion(db, 'e1', NOW);
     expect(completion.complete).toBe(false);
     expect(completion.reason).toBe('shifts_remaining');
   });
 
-  it('is not complete while an accepted volunteer has no record', () => {
+  it('is not complete while an accepted volunteer has no record', async () => {
     const db = makeDb();
     const event = multiDay(db);
     db.prepare('UPDATE slots SET start_datetime=?, end_datetime=? WHERE id=?')
       .run(PAST_START, PAST_END, 'day2'); // both shifts now over
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
-    const completion = computeEventCompletion(db, 'e1', NOW);
+    const completion = await computeEventCompletion(db, 'e1', NOW);
     expect(completion.complete).toBe(false);
     expect(completion.reason).toBe('attendance_outstanding');
     expect(completion.outstanding).toBe(1);
   });
 
-  it('completes once every shift has ended and everyone is accounted for', () => {
+  it('completes once every shift has ended and everyone is accounted for', async () => {
     const db = makeDb();
     const event = multiDay(db);
     db.prepare('UPDATE slots SET start_datetime=?, end_datetime=? WHERE id=?')
       .run(PAST_START, PAST_END, 'day2');
 
-    finalizeAttendance(db, { event, attendanceMap: { a1: true, a2: false }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true, a2: false }, actor: ACTOR, now: NOW });
 
-    expect(computeEventCompletion(db, 'e1', NOW).complete).toBe(true);
+    expect((await computeEventCompletion(db, 'e1', NOW)).complete).toBe(true);
   });
 
-  it('never auto-completes an event with no slots or no volunteers', () => {
+  it('never auto-completes an event with no slots or no volunteers', async () => {
     const db = makeDb();
     db.exec(`INSERT INTO events (id,title,status) VALUES ('empty','Empty','open')`);
-    expect(computeEventCompletion(db, 'empty', NOW)).toMatchObject({ complete: false, reason: 'no_slots' });
+    expect(await computeEventCompletion(db, 'empty', NOW)).toMatchObject({ complete: false, reason: 'no_slots' });
 
     db.prepare('INSERT INTO slots (id,event_id,name,start_datetime,end_datetime,max_spots) VALUES (?,?,?,?,?,?)')
       .run('s9', 'empty', 'Shift', PAST_START, PAST_END, 2);
-    expect(computeEventCompletion(db, 'empty', NOW)).toMatchObject({ complete: false, reason: 'no_volunteers' });
+    expect(await computeEventCompletion(db, 'empty', NOW)).toMatchObject({ complete: false, reason: 'no_volunteers' });
   });
 });
 
 describe('L3 / L7 — destructive paths are detectable before they run', () => {
-  it('reports the volunteers a slot removal would harm', () => {
+  it('reports the volunteers a slot removal would harm', async () => {
     const db = makeDb();
     const event = scenario(db);
-    finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
+    await finalizeAttendance(db, { event, attendanceMap: { a1: true }, actor: ACTOR, now: NOW });
 
-    const rows = attendanceOnSlots(db, ['s1']);
+    const rows = await attendanceOnSlots(db, ['s1']);
     expect(rows).toHaveLength(1);
     expect(rows[0].user_name).toBe('Priya Patel');
     expect(rows[0].slot_name).toBe('Box Packer');
   });
 
-  it('reports nothing for slots with no attendance', () => {
+  it('reports nothing for slots with no attendance', async () => {
     const db = makeDb();
     scenario(db);
-    expect(attendanceOnSlots(db, ['s1'])).toEqual([]);
-    expect(attendanceOnSlots(db, [])).toEqual([]);
+    expect(await attendanceOnSlots(db, ['s1'])).toEqual([]);
+    expect(await attendanceOnSlots(db, [])).toEqual([]);
   });
 
-  it('counts attendance so event deletion can be refused', () => {
+  it('counts attendance so event deletion can be refused', async () => {
     const db = makeDb();
     const event = scenario(db);
-    expect(eventAttendanceCount(db, 'e1')).toBe(0);
+    expect(await eventAttendanceCount(db, 'e1')).toBe(0);
 
     // Even an absent record blocks deletion — it is still part of the record.
-    finalizeAttendance(db, { event, attendanceMap: { a1: false }, actor: ACTOR, now: NOW });
-    expect(eventAttendanceCount(db, 'e1')).toBe(1);
+    await finalizeAttendance(db, { event, attendanceMap: { a1: false }, actor: ACTOR, now: NOW });
+    expect(await eventAttendanceCount(db, 'e1')).toBe(1);
   });
 });
 
@@ -455,20 +455,20 @@ describe('request hygiene', () => {
   let db, event;
   beforeEach(() => { db = makeDb(); event = scenario(db); });
 
-  it('ignores applications belonging to another event', () => {
+  it('ignores applications belonging to another event', async () => {
     db.exec(`INSERT INTO events (id,title,status) VALUES ('e2','Other','open')`);
     db.prepare('INSERT INTO applications (id,user_id,event_id,slot_id,status) VALUES (?,?,?,?,?)')
       .run('other', 'u1', 'e2', 's1', 'accepted');
 
-    const result = finalizeAttendance(db, {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { other: true }, actor: ACTOR, now: NOW
     });
     expect(result.skipped).toContainEqual({ applicationId: 'other', why: 'unknown_application' });
     expect(hoursOf(db, 'u1')).toBe(0);
   });
 
-  it('ignores unknown application ids', () => {
-    const result = finalizeAttendance(db, {
+  it('ignores unknown application ids', async () => {
+    const result = await finalizeAttendance(db, {
       event, attendanceMap: { nope: true }, actor: ACTOR, now: NOW
     });
     expect(result.ok).toBe(true);
@@ -486,24 +486,24 @@ describe('request hygiene', () => {
  * number.
  */
 describe('hour integrity', () => {
-  const finalize = (db, event, opts = {}) => finalizeAttendance(db, {
+  const finalize = async (db, event, opts = {}) => await finalizeAttendance(db, {
     event, attendanceMap: { a1: true }, actor: { id: 'org', role: 'organizer' }, now: NOW, ...opts,
   });
 
   /* An organizer whose volunteers stayed late must still be able to say so —
      the grace margin is what separates "ran over" from "wrong number". */
-  it('accepts an override within the shift plus the grace margin', () => {
+  it('accepts an override within the shift plus the grace margin', async () => {
     const db = makeDb();
     const event = scenario(db);           // a three-hour slot
-    const res = finalize(db, event, { hoursMap: { a1: 5 } });
+    const res = await finalize(db, event, { hoursMap: { a1: 5 } });
     expect(res.ok).toBe(true);
     expect(hoursOf(db, 'u1')).toBe(5);
   });
 
-  it('refuses an override far beyond what the shift can account for', () => {
+  it('refuses an override far beyond what the shift can account for', async () => {
     const db = makeDb();
     const event = scenario(db);           // three hours, so the ceiling is five
-    const res = finalize(db, event, { hoursMap: { a1: 24 } });
+    const res = await finalize(db, event, { hoursMap: { a1: 24 } });
     expect(res.ok).toBe(false);
     expect(res.error).toBe('invalid_hours');
     expect(res.invalidHours[0].scheduledHours).toBe(3);
@@ -527,18 +527,18 @@ describe('hour integrity', () => {
    * bounded by the absolute cap because a broken slot cannot offer a tighter
    * one.
    */
-  it('lets an explicit override price a slot that cannot price itself', () => {
+  it('lets an explicit override price a slot that cannot price itself', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
-    const res = finalize(db, event, { hoursMap: { a1: 4 } });
+    const res = await finalize(db, event, { hoursMap: { a1: 4 } });
     expect(res.ok).toBe(true);
     expect(hoursOf(db, 'u1')).toBe(4);
   });
 
-  it('still bounds that override by the absolute cap', () => {
+  it('still bounds that override by the absolute cap', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
-    const res = finalize(db, event, { hoursMap: { a1: 25 } });
+    const res = await finalize(db, event, { hoursMap: { a1: 25 } });
     expect(res.ok).toBe(false);
     expect(res.error).toBe('invalid_hours');
     expect(hoursOf(db, 'u1')).toBe(0);
@@ -547,10 +547,10 @@ describe('hour integrity', () => {
   /* Marking somebody ABSENT credits nothing and needs no duration, so a broken
      slot must not block recording an absence — and because the refusal is
      whole-request, blocking it would block every other volunteer too. */
-  it('records an absence on an unpriceable slot', () => {
+  it('records an absence on an unpriceable slot', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
-    const res = finalize(db, event, { attendanceMap: { a1: false } });
+    const res = await finalize(db, event, { attendanceMap: { a1: false } });
     expect(res.ok).toBe(true);
     expect(hoursOf(db, 'u1')).toBe(0);
   });
@@ -560,11 +560,11 @@ describe('hour integrity', () => {
    * `NaN <= now` is false, so the organizer was told to come back later about a
    * shift that has no end — a permanent refusal that says nothing true.
    */
-  it('names a shift whose end time cannot be read, instead of asking for patience', () => {
+  it('names a shift whose end time cannot be read, instead of asking for patience', async () => {
     const db = makeDb();
     const event = scenario(db);
     db.prepare('UPDATE slots SET end_datetime = ? WHERE id = ?').run('not a date', 's1');
-    const res = finalize(db, event);
+    const res = await finalize(db, event);
     expect(res.ok).toBe(false);
     expect(res.error).toBe('slot_unpriceable');
   });
@@ -573,10 +573,10 @@ describe('hour integrity', () => {
    * And the other half: with no override, such a slot used to fabricate 0.1
    * hours or write a NaN that failed NOT NULL and surfaced as a 500.
    */
-  it('refuses to price a credit from a slot whose times are unusable', () => {
+  it('refuses to price a credit from a slot whose times are unusable', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
-    const res = finalize(db, event);
+    const res = await finalize(db, event);
     expect(res.ok).toBe(false);
     expect(res.error).toBe('slot_unpriceable');
     expect(res.unpriceable[0].slotName).toBe('Box Packer');
@@ -592,10 +592,10 @@ describe('hour integrity', () => {
    * that is the snapshot invariant, and it is what stops this work reaching back
    * and rewriting records that were valid when they were made.
    */
-  it('leaves an existing credit alone when the slot has since become unusable', () => {
+  it('leaves an existing credit alone when the slot has since become unusable', async () => {
     const db = makeDb();
     const event = scenario(db);
-    expect(finalize(db, event).ok).toBe(true);
+    expect((await finalize(db, event)).ok).toBe(true);
     expect(hoursOf(db, 'u1')).toBe(3);
 
     /* The slot's times are broken afterwards. */
@@ -603,20 +603,20 @@ describe('hour integrity', () => {
 
     /* Re-finalising the same record is a no-op, not a refusal: `prior` exists,
        so nothing is re-priced and the unpriceable guard never applies. */
-    const again = finalize(db, event);
+    const again = await finalize(db, event);
     expect(again.ok).toBe(true);
     expect(hoursOf(db, 'u1'), 'the original credit survives').toBe(3);
   });
 
   /* A participation event credits no hours, so a broken slot cannot misprice
      anything and must not block recording who turned up. */
-  it('still records attendance on a no-hours event with an unusable slot', () => {
+  it('still records attendance on a no-hours event with an unusable slot', async () => {
     const db = makeDb();
     const event = scenario(db, { slotStart: PAST_END, slotEnd: PAST_END });
     /* `credits_hours` is read off the event object the caller passes, and this
        file's minimal schema has no such column — the flag is the input, not a
        lookup. */
-    const res = finalize(db, { ...event, credits_hours: 0 });
+    const res = await finalize(db, { ...event, credits_hours: 0 });
     expect(res.ok).toBe(true);
     expect(hoursOf(db, 'u1')).toBe(0);
   });

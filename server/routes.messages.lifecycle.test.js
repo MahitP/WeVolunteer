@@ -45,9 +45,9 @@ describe('messaging lifecycle enforcement', () => {
     const endDatetime = new Date(now + slotEndDaysOffset * 864e5).toISOString();
     const appliedAt = new Date(now + appAppliedDaysOffset * 864e5).toISOString();
 
-    db.prepare('UPDATE events SET status = ? WHERE id = ?').run(eventStatus, evId);
-    db.prepare('UPDATE slots SET end_datetime = ? WHERE event_id = ?').run(endDatetime, evId);
-    db.prepare('UPDATE applications SET status = ?, applied_at = ? WHERE event_id = ?').run(appStatus, appliedAt, evId);
+    await db.prepare('UPDATE events SET status = ? WHERE id = ?').run(eventStatus, evId);
+    await db.prepare('UPDATE slots SET end_datetime = ? WHERE event_id = ?').run(endDatetime, evId);
+    await db.prepare('UPDATE applications SET status = ?, applied_at = ? WHERE event_id = ?').run(appStatus, appliedAt, evId);
 
     return convId;
   };

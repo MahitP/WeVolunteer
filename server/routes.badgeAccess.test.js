@@ -44,14 +44,14 @@ afterAll(async () => { await srv.close(); });
 const STUDENT = 'user-student-1';
 
 describe('badge reads require a session', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // A real award, so a leak would actually have something to leak. The
     // migration seeds the badge catalogue, so any active badge will do.
-    const badge = db.prepare('SELECT id FROM badges WHERE active = 1 LIMIT 1').get();
-    const already = db.prepare('SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?')
+    const badge = await db.prepare('SELECT id FROM badges WHERE active = 1 LIMIT 1').get();
+    const already = await db.prepare('SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?')
       .get(STUDENT, badge.id);
     if (!already) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO user_badges (id, user_id, badge_id, earned_at)
         VALUES (?, ?, ?, ?)
       `).run('ub-access-test', STUDENT, badge.id, new Date().toISOString());

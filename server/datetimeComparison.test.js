@@ -74,7 +74,7 @@ describe('the raw comparison semantics', () => {
     
     const endedEarlierToday = isoFromNow(-4 * HOUR);
     const right = db.prepare("SELECT julianday(?) > julianday('now') AS isFuture").get(endedEarlierToday).isFuture;
-    const bound = db.prepare('SELECT ? > ? AS isFuture').get(endedEarlierToday, new Date().toISOString()).isFuture;
+    const bound = db.prepare('SELECT ? > ? AS "isFuture"').get(endedEarlierToday, new Date().toISOString()).isFuture;
 
     expect(wrong).toBe(1);  // the bug: a finished shift looks like a future one
     expect(right).toBe(0);
@@ -107,19 +107,19 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
     const slotId = `slot-dt-${now.getTime()}`;
     const appId = `app-dt-${now.getTime()}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at)
       VALUES (?, 'Earlier Today', 'd', 'School', 'L', ?, 'user-org-1', 'open', ?)
     `).run(eventId, isoFromNow(-6 * HOUR), now.toISOString());
 
     // Started 4h ago, ended 2h ago — unambiguously over, and unambiguously today.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Morning', 'd', ?, ?, 5)
     `).run(slotId, eventId, isoFromNow(-4 * HOUR), isoFromNow(-2 * HOUR));
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(appId, userId, eventId, slotId, isoFromNow(-8 * HOUR));
@@ -172,16 +172,16 @@ describe('a shift that ended earlier today is not reported as upcoming', () => {
     const eventId = `event-later-${now.getTime()}`;
     const slotId = `slot-later-${now.getTime()}`;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at)
       VALUES (?, 'Later Today', 'd', 'School', 'L', ?, 'user-org-1', 'open', ?)
     `).run(eventId, isoFromNow(HOUR), now.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Evening', 'd', ?, ?, 5)
     `).run(slotId, eventId, isoFromNow(3 * HOUR), isoFromNow(5 * HOUR));
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(`app-later-${now.getTime()}`, me.id, eventId, slotId, now.toISOString());
@@ -210,22 +210,28 @@ describe('an export that expired earlier today is cleaned up', () => {
     vi.resetModules();
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     const db = dbMod.db;
     const worker = await import('./workers/exportWorker.js');
 
     const now = new Date().toISOString();
-    db.prepare(`
+    /* `DO NOTHING` on both: these ids are fixed, and the file's schema namespace
+       outlives a single test, so a re-run would otherwise collide on the
+       primary key rather than on anything this test is about. */
+    await db.prepare(`
       INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
       VALUES ('u-dt','u-dt','u-dt@example.org','x','DT','11','student',?)
+      ON CONFLICT (id) DO NOTHING
     `).run(now);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO data_export_jobs (id, user_id, status, file_location, created_at, completed_at, expires_at)
       VALUES ('exp-dt','u-dt','completed', NULL, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET status = 'completed', expires_at = excluded.expires_at
     `).run(isoFromNow(-8 * HOUR), isoFromNow(-8 * HOUR), isoFromNow(-3 * HOUR));
 
-    worker.cleanupExpiredExports();
+    await worker.cleanupExpiredExports();
 
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-dt');
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-dt');
     expect(
       row.status,
       'an export that expired three hours ago is still marked completed, so a '
@@ -264,7 +270,7 @@ describe('no query compares an ISO column against SQLite\'s datetime(\'now\')', 
     expect(
       offenders,
       'these compare an ISO-8601 column against SQLite\'s space-separated '
-      + "datetime('now'), which misclassifies every timestamp on today's date. "
+      + `'${new Date().toISOString()}', which misclassifies every timestamp on today's date. `
       + 'Bind new Date().toISOString() instead.'
     ).toEqual([]);
   });

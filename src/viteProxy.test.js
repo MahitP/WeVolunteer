@@ -16,7 +16,25 @@ import viteConfig from '../vite.config.js';
  * both from one origin and needs no proxy) and invisible to a production build.
  */
 describe('vite dev proxy', () => {
-  const proxy = viteConfig.server?.proxy || {};
+  /**
+   * The config is a FUNCTION of `{ mode }`, not a plain object.
+   *
+   * It became one when the on-device AI flag gained a committed default: that
+   * default has to consult `loadEnv(mode, …)` so a deployment's own `.env` still
+   * wins, and `mode` is only available inside the function form. Reading
+   * `viteConfig.server` off the function silently yielded `undefined`, so every
+   * assertion here passed against an empty object — the proxy guard would have
+   * stopped guarding without failing.
+   */
+  const resolved = typeof viteConfig === 'function'
+    ? viteConfig({ mode: 'development', command: 'serve' })
+    : viteConfig;
+  const proxy = resolved.server?.proxy || {};
+
+  it('exposes a proxy table at all', () => {
+    /* The assertion the four below quietly depended on. */
+    expect(Object.keys(proxy).length).toBeGreaterThan(0);
+  });
 
   it('proxies /api to the API server', () => {
     expect(proxy['/api']).toBeDefined();

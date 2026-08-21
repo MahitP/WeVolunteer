@@ -99,16 +99,16 @@ describe('RecipientPicker dialog semantics', () => {
     vi.spyOn(api, 'searchMessagesUsers').mockResolvedValue({ users: USERS });
     const onSelect = vi.fn(), onClose = vi.fn();
     const utils = render(<RecipientPicker onSelect={onSelect} onClose={onClose} />);
-    const input = utils.container.querySelector('input');
+    const input = utils.baseElement.querySelector('input');
     fireEvent.change(input, { target: { value: 'ro' } });
-    await waitFor(() => expect(utils.container.querySelectorAll('[data-recipient]').length).toBe(2), { timeout: 3000 });
+    await waitFor(() => expect(utils.baseElement.querySelectorAll('[data-recipient]').length).toBe(2), { timeout: 3000 });
     return { ...utils, onSelect, onClose };
   };
 
   it('is a dialog', () => {
     vi.spyOn(api, 'searchMessagesUsers').mockResolvedValue({ users: [] });
-    const { container } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
-    const dialog = container.querySelector('[role="dialog"]');
+    const { baseElement } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
+    const dialog = baseElement.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.getAttribute('aria-label')).toBeTruthy();
@@ -124,8 +124,8 @@ describe('RecipientPicker dialog semantics', () => {
 
   // The core accessibility defect: the results were unreachable by keyboard.
   it('renders each result as a real button, not a clickable div', async () => {
-    const { container } = await mountWithResults();
-    const rows = [...container.querySelectorAll('[data-recipient]')];
+    const { baseElement } = await mountWithResults();
+    const rows = [...baseElement.querySelectorAll('[data-recipient]')];
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row.tagName, 'a recipient row must be focusable and activatable').toBe('BUTTON');
@@ -134,8 +134,8 @@ describe('RecipientPicker dialog semantics', () => {
   });
 
   it('selects a recipient with the keyboard', async () => {
-    const { container, onSelect } = await mountWithResults();
-    const row = container.querySelector('[data-recipient]');
+    const { baseElement, onSelect } = await mountWithResults();
+    const row = baseElement.querySelector('[data-recipient]');
     row.focus();
     // A <button> activates on Enter and Space natively; click is what fires.
     fireEvent.click(row);
@@ -144,26 +144,26 @@ describe('RecipientPicker dialog semantics', () => {
   });
 
   it('gives each result an accessible name including the person and the event', async () => {
-    const { container } = await mountWithResults();
-    const label = container.querySelector('[data-recipient]').getAttribute('aria-label');
+    const { baseElement } = await mountWithResults();
+    const label = baseElement.querySelector('[data-recipient]').getAttribute('aria-label');
     expect(label).toMatch(/Elena Rodriguez/);
     expect(label).toMatch(/Food Drive/);
   });
 
   it('labels the close control', () => {
     vi.spyOn(api, 'searchMessagesUsers').mockResolvedValue({ users: [] });
-    const { container } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
-    const close = container.querySelector('.modal-close');
+    const { baseElement } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
+    const close = baseElement.querySelector('.modal-close');
     expect(close).toBeTruthy();
     expect(close.getAttribute('aria-label')).toBeTruthy();
   });
 
   it('announces the searching and empty states', async () => {
     vi.spyOn(api, 'searchMessagesUsers').mockResolvedValue({ users: [] });
-    const { container } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
-    fireEvent.change(container.querySelector('input'), { target: { value: 'zz' } });
-    await waitFor(() => expect(container.textContent).toMatch(/No .*found|Searching/i), { timeout: 3000 });
-    expect(container.querySelector('[role="status"]'), 'state changes need a live region').toBeTruthy();
+    const { baseElement } = render(<RecipientPicker onSelect={() => {}} onClose={() => {}} />);
+    fireEvent.change(baseElement.querySelector('input'), { target: { value: 'zz' } });
+    await waitFor(() => expect(baseElement.textContent).toMatch(/No .*found|Searching/i), { timeout: 3000 });
+    expect(baseElement.querySelector('[role="status"]'), 'state changes need a live region').toBeTruthy();
   });
 });
 

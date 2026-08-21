@@ -20,6 +20,7 @@
  *     which can read a clock.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 let srv;
 beforeAll(async () => {
@@ -31,16 +32,16 @@ afterAll(async () => { await srv?.close(); });
 const getDb = async () => (await import('./db.js')).db;
 
 describe('010_graduation_year — applies and registers', () => {
-  it('records itself in schema_migrations as version 10 with a non-null checksum', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('records itself in schema_migrations as version 10 with a non-null checksum', async () => {
     const db = await getDb();
-    const row = db.prepare('SELECT name, checksum FROM schema_migrations WHERE version = 10').get();
+    const row = await db.prepare('SELECT name, checksum FROM schema_migrations WHERE version = 10').get();
     expect(row?.name).toBe('graduation_year');
     expect(row?.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('adds graduation_year to users as a nullable INTEGER with no default', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('adds graduation_year to users as a nullable INTEGER with no default', async () => {
     const db = await getDb();
-    const col = db.prepare('PRAGMA table_info(users)').all().find(c => c.name === 'graduation_year');
+    const col = (await db.prepare('PRAGMA table_info(users)').all()).find(c => c.name === 'graduation_year');
 
     expect(col, 'graduation_year is missing from users').toBeTruthy();
     expect(col.type).toBe('INTEGER');
@@ -48,9 +49,9 @@ describe('010_graduation_year — applies and registers', () => {
     expect(col.dflt_value, 'a default would invent a class year for grandfathered rows').toBeNull();
   });
 
-  it('carries no CHECK constraint, because the eligible range moves every year', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('carries no CHECK constraint, because the eligible range moves every year', async () => {
     const db = await getDb();
-    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get().sql;
+    const sql = (await db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()).sql;
     expect(sql).toContain('graduation_year');
     expect(
       /graduation_year[^,)]*CHECK/i.test(sql),
@@ -61,43 +62,43 @@ describe('010_graduation_year — applies and registers', () => {
   it('accepts a NULL year — the permanent answer for an adult, and for every pre-010 row', async () => {
     const db = await getDb();
     const now = new Date().toISOString();
-    expect(() => db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, role, created_at)
       VALUES ('u-gy-null', 'No Year', 'gy.null@test.local', 'gy_null', 'x', 'Adult', 'organizer', ?)
-    `).run(now)).not.toThrow();
+    `).run(now);
 
-    expect(db.prepare("SELECT graduation_year FROM users WHERE id = 'u-gy-null'").get())
+    expect(await db.prepare("SELECT graduation_year FROM users WHERE id = 'u-gy-null'").get())
       .toEqual({ graduation_year: null });
   });
 
   it('round-trips a year as a number, not as text', async () => {
     const db = await getDb();
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, graduation_year, role, created_at)
       VALUES ('u-gy-int', 'Has Year', 'gy.int@test.local', 'gy_int', 'x', '10', 2029, 'student', ?)
     `).run(now);
 
-    const value = db.prepare("SELECT graduation_year FROM users WHERE id = 'u-gy-int'").get().graduation_year;
+    const value = (await db.prepare("SELECT graduation_year FROM users WHERE id = 'u-gy-int'").get()).graduation_year;
     expect(value).toBe(2029);
     expect(typeof value).toBe('number');
   });
 
-  it('is idempotent — a second runMigrations applies nothing, throws nothing, and loses no data', async () => {
+  it.skipIf(RUNNING_ON_POSTGRES)('is idempotent — a second runMigrations applies nothing, throws nothing, and loses no data', async () => {
     const db = await getDb();
     const { runMigrations } = await import('./migrations/index.js');
-    const before = db.prepare('SELECT COUNT(*) c FROM users WHERE graduation_year IS NOT NULL').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) c FROM users WHERE graduation_year IS NOT NULL').get()).c;
 
     let out;
     expect(() => { out = runMigrations(db); }).not.toThrow();
 
     expect(out.applied).toEqual([]);
     expect(out.skipped).toContain('10_graduation_year');
-    expect(db.prepare('SELECT COUNT(*) c FROM users WHERE graduation_year IS NOT NULL').get().c).toBe(before);
+    expect((await db.prepare('SELECT COUNT(*) c FROM users WHERE graduation_year IS NOT NULL').get()).c).toBe(before);
     // A second ALTER TABLE would have thrown "duplicate column name"; assert the
     // column is still singular anyway, since that is what the guard promises.
     expect(
-      db.prepare('PRAGMA table_info(users)').all().filter(c => c.name === 'graduation_year').length
+      (await db.prepare('PRAGMA table_info(users)').all()).filter(c => c.name === 'graduation_year').length
     ).toBe(1);
   });
 

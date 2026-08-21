@@ -35,13 +35,13 @@ let conversationId, messageIds;
  * conversation row produces a uniform 404 that looks exactly like a real
  * refusal.
  */
-function seedConversation({ id, student, organizer, eventId, count }) {
+async function seedConversation({ id, student, organizer, eventId, count }) {
   const base = Date.now() - 3600_000;
-  db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+  await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
     .run(id, eventId, student, organizer, organizer, new Date(base).toISOString());
   for (const [uid, role] of [[student, 'student'], [organizer, 'organizer']]) {
-    db.prepare(`INSERT INTO conversation_participants
+    await db.prepare(`INSERT INTO conversation_participants
                   (conversation_id, user_id, role_at_creation, joined_at)
                 VALUES (?, ?, ?, ?)`)
       .run(id, uid, role, new Date(base).toISOString());
@@ -52,7 +52,7 @@ function seedConversation({ id, student, organizer, eventId, count }) {
     ids.push(mid);
     // Even index = sent by the organizer, so the student can report it without
     // tripping the self-report refusal.
-    db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+    await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                 VALUES (?, ?, ?, ?, ?)`)
       .run(mid, id, i % 2 ? student : organizer, `body ${i}`, new Date(base + i * 1000).toISOString());
   }
@@ -68,7 +68,7 @@ function seedConversation({ id, student, organizer, eventId, count }) {
  */
 async function seedFreshConversation(id, count) {
   const { cookie, user } = await freshReporter();
-  const ids = seedConversation({
+  const ids = await seedConversation({
     id, student: user.id, organizer: organizerId, eventId: eventIds[0], count,
   });
   return { cookie, user, messageIds: ids };
@@ -93,7 +93,7 @@ async function freshReporter() {
 }
 
 const adminToken = () => srv.login('admin@example.gov');
-const rowFor = (id) => db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
+const rowFor = async (id) => await db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
 
 /**
  * The ceiling this file asserts against.
@@ -111,15 +111,31 @@ beforeAll(async () => {
   srv = await startTestServer();
   db = (await import('./db.js')).db;
 
-  eventIds = db.prepare('SELECT id FROM events ORDER BY id').all().map(r => r.id);
-  commentId = db.prepare('SELECT id FROM event_comments LIMIT 1').get().id;
-  announcementId = db.prepare('SELECT id FROM event_announcements LIMIT 1').get().id;
-  organizerId = db.prepare("SELECT id FROM users WHERE role = 'organizer' LIMIT 1").get().id;
-  const student = db.prepare("SELECT id, email FROM users WHERE role = 'student' LIMIT 1").get();
+  eventIds = (await db.prepare('SELECT id FROM events ORDER BY id').all()).map(r => r.id);
+  commentId = (await db.prepare('SELECT id FROM event_comments LIMIT 1').get()).id;
+  announcementId = (await db.prepare('SELECT id FROM event_announcements LIMIT 1').get()).id;
+  organizerId = (await db.prepare("SELECT id FROM users WHERE role = 'organizer' LIMIT 1").get()).id;
+  /**
+   * A LIVE student, and ordered.
+   *
+   * `WHERE role = 'student' LIMIT 1` used to work by luck. Migration 022 seeds
+   * `system-cli` — a reserved actor with `role = 'student'` and
+   * `account_status = 'deleted'` — and it only stayed out of the way because the
+   * demo accounts happened to be inserted first. When the seed moved after the
+   * migrations, this started selecting the tombstone, and the three tests using
+   * it failed at `login()` with "No account found".
+   *
+   * The application never had this exposure: every query of its own that counts
+   * or lists students excludes tombstones, and `adminRoutes.js` says why. This
+   * asks the same question the application asks.
+   */
+  const student = await db.prepare(
+    "SELECT id, email FROM users WHERE role = 'student' AND account_status <> 'deleted' ORDER BY id LIMIT 1"
+  ).get();
   studentId = student.id;
 
   conversationId = 'conv_reports_test';
-  messageIds = seedConversation({
+  messageIds = await seedConversation({
     id: conversationId, student: studentId, organizer: organizerId,
     eventId: eventIds[0], count: 25,
   });
@@ -144,7 +160,7 @@ describe('every target type files end to end', () => {
     }, cookie);
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.target_type).toBe(targetType);
     expect(row.category).toBe('bullying_or_harassment');
     expect(row.status).toBe('open');
@@ -165,7 +181,7 @@ describe('every target type files end to end', () => {
       targetType: 'organizer', targetId: organizerId, reason: 'pretending_to_be_someone',
     }, cookie);
     expect(res.status).toBe(200);
-    expect(rowFor(res.body.reportId).target_type).toBe('user');
+    expect((await rowFor(res.body.reportId)).target_type).toBe('user');
   });
 
   /**
@@ -179,24 +195,24 @@ describe('every target type files end to end', () => {
       targetType: 'certificate', targetId: 'WEV-A2B3-C4D5', reason: 'fake_hours_or_certificate',
     }, cookie);
     expect(res.status).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.target_type).toBe('certificate');
     expect(row.target_author_id, 'a certificate is not a person').toBeNull();
   });
 
   it('files a conversation report and freezes the whole thread as evidence', async () => {
-    const t = await srv.login(db.prepare('SELECT email FROM users WHERE id = ?').get(studentId).email);
+    const t = await srv.login((await db.prepare('SELECT email FROM users WHERE id = ?').get(studentId)).email);
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'conversation', targetId: conversationId,
       reason: 'asked_to_meet_alone', details: 'this is the one that matters',
     }, t);
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.conversation_id_snapshot).toBe(conversationId);
     expect(row.target_author_id, 'the reported party is the other participant').toBe(organizerId);
     expect(
-      db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(res.body.reportId).c,
+      (await db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(res.body.reportId)).c,
       'a conversation report with no evidence is a report nobody can decide',
     ).toBe(messageIds.length);
   });
@@ -208,16 +224,16 @@ describe('every target type files end to end', () => {
    * was still open.
    */
   it('files a message report with the messages either side of it', async () => {
-    const t = await srv.login(db.prepare('SELECT email FROM users WHERE id = ?').get(studentId).email);
+    const t = await srv.login((await db.prepare('SELECT email FROM users WHERE id = ?').get(studentId)).email);
     const anchor = 12;   // even => organizer-sent, and far enough in for full context
     const res = await srv.call('POST', `/api/messages/${messageIds[anchor]}/report`, {
       reason: 'inappropriate', details: 'this message',
     }, t);
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const captured = db.prepare(
+    const captured = (await db.prepare(
       'SELECT message_id FROM report_evidence WHERE report_id = ? ORDER BY created_at'
-    ).all(res.body.reportId).map(r => r.message_id);
+    ).all(res.body.reportId)).map(r => r.message_id);
 
     expect(captured, 'the reported message itself is missing').toContain(messageIds[anchor]);
     expect(captured, 'no context before').toContain(messageIds[anchor - 10]);
@@ -228,16 +244,16 @@ describe('every target type files end to end', () => {
   it('files a conversation report through the legacy path and writes no legacy row', async () => {
     const legacyConv = 'conv_reports_legacy';
     const { cookie } = await seedFreshConversation(legacyConv, 4);
-    const before = db.prepare('SELECT COUNT(*) c FROM conversation_reports').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) c FROM conversation_reports').get()).c;
 
     const res = await srv.call('POST', `/api/messages/conversations/${legacyConv}/report`, {
       reason: 'safety', details: 'the shipped modal payload',
     }, cookie);
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(rowFor(res.body.reportId).target_type).toBe('conversation');
+    expect((await rowFor(res.body.reportId)).target_type).toBe('conversation');
     expect(
-      db.prepare('SELECT COUNT(*) c FROM conversation_reports').get().c,
+      (await db.prepare('SELECT COUNT(*) c FROM conversation_reports').get()).c,
       'the fold is undone if this route still writes the legacy table',
     ).toBe(before);
   });
@@ -258,7 +274,7 @@ describe('every target type files end to end', () => {
 
     const res = await srv.call('POST', `/api/messages/conversations/${convId}/report`, { reason }, cookie);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(rowFor(res.body.reportId).category).toBe(category);
+    expect((await rowFor(res.body.reportId)).category).toBe(category);
   });
 });
 
@@ -311,13 +327,13 @@ describe('refusals are uniform, so nothing can be enumerated', () => {
       targetType: 'user', targetId: 'user_that_never_existed', reason: 'pretending_to_be_someone',
     }, cookie);
     expect(res.status).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.target_author_id).toBeNull();
     expect(row.target_name_snapshot).toBeNull();
   });
 
   it('refuses reporting yourself, whichever surface it is reached through', async () => {
-    const t = await srv.login(db.prepare('SELECT email FROM users WHERE id = ?').get(studentId).email);
+    const t = await srv.login((await db.prepare('SELECT email FROM users WHERE id = ?').get(studentId)).email);
     // Odd index => sent by the student, so this is their own message.
     const own = await srv.call('POST', '/api/reports', {
       targetType: 'message', targetId: messageIds[7], reason: 'other',
@@ -393,7 +409,7 @@ describe('what the client may and may not decide', () => {
     }, cookie);
 
     expect(res.status).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.status).toBe('open');
     expect(row.reporter_id).toBe(user.id);
     expect(row.reporter_name_snapshot).toBe(user.name);
@@ -406,7 +422,7 @@ describe('what the client may and may not decide', () => {
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: peer.id, reason: 'threatened_me',
     }, cookie);
-    expect(rowFor(res.body.reportId).priority).toBe('urgent');
+    expect((await rowFor(res.body.reportId)).priority).toBe('urgent');
   });
 
   it('floors a student reporting an adult at urgent even for a mild category', async () => {
@@ -414,7 +430,7 @@ describe('what the client may and may not decide', () => {
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: organizerId, reason: 'spam_or_advertising',
     }, cookie);
-    expect(rowFor(res.body.reportId).priority).toBe('urgent');
+    expect((await rowFor(res.body.reportId)).priority).toBe('urgent');
   });
 
   /**
@@ -430,7 +446,7 @@ describe('what the client may and may not decide', () => {
       reason: 'This is not a real volunteering opportunity and the address is wrong.',
     }, cookie);
     expect(res.status).toBe(200);
-    const row = rowFor(res.body.reportId);
+    const row = await rowFor(res.body.reportId);
     expect(row.category).toBe('other');
     expect(row.description).toContain('not a real volunteering opportunity');
   });
@@ -455,7 +471,7 @@ describe('duplicate suppression', () => {
     expect(second.status).toBe(200);
     expect(second.body.reportId).toBe(first.body.reportId);
     expect(second.body.duplicate).toBe(true);
-    expect(rowFor(first.body.reportId).description, 'the first report was overwritten').toBe('first');
+    expect((await rowFor(first.body.reportId)).description, 'the first report was overwritten').toBe('first');
   });
 
   it('lets the same person report the same target again once the first is closed', async () => {
@@ -464,7 +480,7 @@ describe('duplicate suppression', () => {
     const first = await srv.call('POST', '/api/reports', {
       targetType: 'event', targetId: target, reason: 'other', details: 'first',
     }, cookie);
-    db.prepare("UPDATE reports SET status = 'dismissed' WHERE id = ?").run(first.body.reportId);
+    await db.prepare("UPDATE reports SET status = 'dismissed' WHERE id = ?").run(first.body.reportId);
 
     const second = await srv.call('POST', '/api/reports', {
       targetType: 'event', targetId: target, reason: 'other', details: 'it happened again',
@@ -493,7 +509,7 @@ describe('what filing does and does not set in motion', () => {
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event', targetId: eventIds[0], reason: 'other',
     }, cookie);
-    const filed = db.prepare(
+    const filed = await db.prepare(
       "SELECT actor_id FROM moderation_actions WHERE report_id = ? AND action = 'filed'"
     ).all(res.body.reportId);
     expect(filed.length).toBe(1);
@@ -508,14 +524,14 @@ describe('what filing does and does not set in motion', () => {
   it('never notifies the reported party', async () => {
     const { cookie } = await freshReporter();
     const victim = (await freshReporter()).user;
-    const before = db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ?').get(victim.id).c;
+    const before = (await db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ?').get(victim.id)).c;
 
     await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: victim.id, reason: 'threatened_me', details: 'urgent',
     }, cookie);
 
     expect(
-      db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ?').get(victim.id).c,
+      (await db.prepare('SELECT COUNT(*) c FROM notifications WHERE user_id = ?').get(victim.id)).c,
       'the person reported was told they were reported',
     ).toBe(before);
   });
@@ -535,12 +551,12 @@ describe('what filing does and does not set in motion', () => {
    */
   it('leaves no orphaned evidence when a report is refused', async () => {
     const { cookie } = await freshReporter();
-    const before = db.prepare('SELECT COUNT(*) c FROM report_evidence').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) c FROM report_evidence').get()).c;
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'conversation', targetId: conversationId, reason: 'other',
     }, cookie);
     expect(res.status).toBe(404);
-    expect(db.prepare('SELECT COUNT(*) c FROM report_evidence').get().c).toBe(before);
+    expect((await db.prepare('SELECT COUNT(*) c FROM report_evidence').get()).c).toBe(before);
   });
 });
 

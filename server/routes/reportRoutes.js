@@ -6,7 +6,7 @@ import { isValidCategory } from '../moderation.js';
 
 const router = express.Router();
 
-router.post('/api/reports', authenticateToken, reportLimiter, (req, res) => {
+router.post('/api/reports', authenticateToken, reportLimiter, async (req, res) => {
   const { targetType, targetId, reason, details } = req.body;
 
   /**
@@ -51,7 +51,7 @@ router.post('/api/reports', authenticateToken, reportLimiter, (req, res) => {
     ? details
     : [reason, details].filter(t => typeof t === 'string' && t.trim()).join('\n\n') || null;
 
-  const result = createReport({
+  const result = await createReport({
     reporter: req.user,
     targetType,
     targetId,

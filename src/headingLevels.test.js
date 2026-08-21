@@ -48,6 +48,19 @@ const ROOT = process.cwd();
  * does not, the page gets two `h1`s again and this guard will not catch it —
  * so the claim is the thing to check when reviewing a change here.
  */
+/*
+ * NOTE ON A MISTAKE THIS LIST ALREADY MADE.
+ *
+ * `views/PublicProfile.jsx` was on here originally, on the strength of a browser
+ * probe that showed `/users/@someone` with a single `h1`. The probe was wrong:
+ * that username did not exist in the database being measured, so the route was
+ * rendering its not-found state, which has no heading of its own. The real page
+ * renders inside the shell and had two.
+ *
+ * Which is the point of the note at the top: an entry here is a CLAIM that a
+ * file renders without the shell, and the guard cannot check the claim. Measure
+ * a route that actually has data before adding one.
+ */
 const STANDALONE = new Set([
   /* Authentication and account gates — rendered before or instead of the shell. */
   'views/Login.jsx',
@@ -69,7 +82,6 @@ const STANDALONE = new Set([
 
   /* Public, signed-out pages. */
   'views/CertificateVerification.jsx',
-  'views/PublicProfile.jsx',
 
   /* The crash experience replaces the whole tree, including the shell. */
   'views/ErrorExperience/ErrorExperience.jsx',

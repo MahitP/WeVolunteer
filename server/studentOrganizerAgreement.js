@@ -1,4 +1,6 @@
 import { CAPABILITIES, ROLE } from './authz.js';
+import { runInTransaction } from './db/connectionContext.js';
+import './db/connectionContext.js';
 import { STUDENT_ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
@@ -60,19 +62,23 @@ const ROLES_BOUND_ELSEWHERE = new Set([ROLE.ORGANIZER, ROLE.ADMIN, ROLE.SUPER_AD
  * shipped. A reader shown 1.1 and measured against 1.0 accepts something that
  * does not clear their block.
  */
-export function hasAcceptedStudentOrganizerAgreement(db, userId) {
+export async function hasAcceptedStudentOrganizerAgreement(db, userId) {
   if (STUDENT_ORGANIZER_DOCUMENTS.length === 0) return true;
 
   const accepted = new Set(
-    db.prepare('SELECT document_slug, version FROM legal_acceptances WHERE user_id = ?')
-      .all(userId)
+    (await db.prepare('SELECT document_slug, version FROM legal_acceptances WHERE user_id = ?')
+      .all(userId))
       .map(r => `${r.document_slug}@${r.version}`)
   );
 
-  return STUDENT_ORGANIZER_DOCUMENTS.every((registered) => {
-    const doc = resolveDocument(db, registered) ?? registered;
-    return accepted.has(`${doc.slug}@${doc.version}`);
-  });
+  /* A loop, not `.every`: the resolver is async, and `.every` does not await —
+     it would see a truthy promise for every document and report the agreement
+     as accepted by somebody who never accepted it. */
+  for (const registered of STUDENT_ORGANIZER_DOCUMENTS) {
+    const doc = await resolveDocument(db, registered) ?? registered;
+    if (!accepted.has(`${doc.slug}@${doc.version}`)) return false;
+  }
+  return true;
 }
 
 /**
@@ -93,7 +99,7 @@ export function hasAcceptedStudentOrganizerAgreement(db, userId) {
  *
  * So this withholds only what the rank actually added.
  */
-export function studentOrganizerWithholdingsFor(db, userRow) {
+export async function studentOrganizerWithholdingsFor(db, userRow) {
   if (!userRow) return [];
 
   /**
@@ -124,8 +130,8 @@ export function studentOrganizerWithholdingsFor(db, userRow) {
    */
   if (ROLES_BOUND_ELSEWHERE.has(userRow.role)) return [];
 
-  if (!helpsRunAnywhere(db, userRow.id)) return [];
-  if (hasAcceptedStudentOrganizerAgreement(db, userRow.id)) return [];
+  if (!await helpsRunAnywhere(db, userRow.id)) return [];
+  if (await hasAcceptedStudentOrganizerAgreement(db, userRow.id)) return [];
 
   /* Whatever the role does NOT already give them — belt and braces under the
      role test above, so a future role list that gains one of the four cannot
@@ -145,14 +151,19 @@ export function studentOrganizerWithholdingsFor(db, userRow) {
  * Idempotent by returning `already` rather than writing a second set of rows.
  * "When did this person accept v1.0" must have one answer.
  */
-export function acceptStudentOrganizerAgreement(db, { userId, req = null, now = null }) {
-  if (hasAcceptedStudentOrganizerAgreement(db, userId)) {
+export async function acceptStudentOrganizerAgreement(db, { userId, req = null, now = null }) {
+  if (await hasAcceptedStudentOrganizerAgreement(db, userId)) {
     return { recorded: 0, already: true };
   }
 
-  db.exec('BEGIN');
-  try {
-    const recorded = recordAcceptances(db, {
+  /* `transactionOn` rather than `db.exec('BEGIN')`, for the reason set out in
+     organizerAgreement.js: BEGIN on a pooled handle starts a transaction on one
+     client while the writes inside land on others, so the acceptance rows stop
+     being atomic and the rollback discards nothing — silently. The handle is
+     still a parameter, so this module remains drivable against a throwaway
+     database in a test. */
+  return runInTransaction(db, async (tx) => {
+    const recorded = await recordAcceptances(tx, {
       userId,
       method: 'student_organizer_agreement',
       context: 'student-organizer-onboarding',
@@ -160,12 +171,8 @@ export function acceptStudentOrganizerAgreement(db, { userId, req = null, now = 
       req,
       now,
     });
-    db.exec('COMMIT');
     return { recorded, already: false };
-  } catch (err) {
-    try { db.exec('ROLLBACK'); } catch { /* already rolled back */ }
-    throw err;
-  }
+  });
 }
 
 /**
@@ -179,18 +186,18 @@ export function acceptStudentOrganizerAgreement(db, { userId, req = null, now = 
  * `withheld` comes from the same function `can()` is fed, so this endpoint and
  * the gate cannot disagree about what is currently being withheld.
  */
-export function studentOrganizerAgreementStatus(db, userRow) {
+export async function studentOrganizerAgreementStatus(db, userRow) {
   return {
     /* "Are you asked to accept this", which is not the same as "do you help run
        a club": an organizer or an administrator who does is bound by their own
        instrument instead, and telling them otherwise is what produced a screen
        inviting the platform owner to sign a student's agreement. */
-    required: !ROLES_BOUND_ELSEWHERE.has(userRow.role) && helpsRunAnywhere(db, userRow.id),
-    accepted: hasAcceptedStudentOrganizerAgreement(db, userRow.id),
-    documents: STUDENT_ORGANIZER_DOCUMENTS.map((registered) => {
-      const d = resolveDocument(db, registered) ?? registered;
+    required: !ROLES_BOUND_ELSEWHERE.has(userRow.role) && await helpsRunAnywhere(db, userRow.id),
+    accepted: await hasAcceptedStudentOrganizerAgreement(db, userRow.id),
+    documents: await Promise.all(STUDENT_ORGANIZER_DOCUMENTS.map(async (registered) => {
+      const d = await resolveDocument(db, registered) ?? registered;
       return { slug: d.slug, title: d.title, version: d.version, effectiveAt: d.effectiveAt };
-    }),
-    withheld: studentOrganizerWithholdingsFor(db, userRow),
+    })),
+    withheld: await studentOrganizerWithholdingsFor(db, userRow),
   };
 }

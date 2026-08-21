@@ -166,8 +166,8 @@ const fail = (error, extra) => ({ ok: false, error, ...extra });
  * that says it is present is worse than either alone, because the next reader
  * checks the comment.
  */
-function load(db, challengeId, userId) {
-  return db.prepare('SELECT * FROM reauth_challenges WHERE id = ? AND user_id = ?')
+async function load(db, challengeId, userId) {
+  return await db.prepare('SELECT * FROM reauth_challenges WHERE id = ? AND user_id = ?')
     .get(challengeId, userId);
 }
 
@@ -215,8 +215,8 @@ function notGrantable(row, nowIso) {
  * statement names the account it is charging, in the file where every other
  * write already does.
  */
-function recordFailedAttempt(db, { row, userId, error, nowIso }) {
-  const updated = db.prepare(`
+async function recordFailedAttempt(db, { row, userId, error, nowIso }) {
+  const updated = await db.prepare(`
     UPDATE reauth_challenges
        SET attempts = attempts + 1
      WHERE id = ? AND user_id = ? AND consumed_at IS NULL
@@ -242,7 +242,7 @@ function recordFailedAttempt(db, { row, userId, error, nowIso }) {
    *
    * Read AFTER the increment above, so the figure already includes this guess.
    */
-  const remaining = accountAttemptsRemaining(db, userId, nowIso ?? new Date().toISOString());
+  const remaining = await accountAttemptsRemaining(db, userId, nowIso ?? new Date().toISOString());
 
   /**
    * ACCOUNT_LOCKED, not LOCKED, when the budget that is actually spent is the
@@ -269,9 +269,9 @@ function recordFailedAttempt(db, { row, userId, error, nowIso }) {
  * retention window is longer than this one, so every row that should be counted
  * is still present to count.
  */
-function accountAttemptsSpent(db, userId, nowIso) {
+async function accountAttemptsSpent(db, userId, nowIso) {
   const since = new Date(new Date(nowIso).getTime() - ACCOUNT_ATTEMPT_WINDOW_MS).toISOString();
-  const { spent } = db.prepare(`
+  const { spent } = await db.prepare(`
     SELECT COALESCE(SUM(attempts), 0) AS spent
       FROM reauth_challenges
      WHERE user_id = ? AND created_at > ?
@@ -280,12 +280,12 @@ function accountAttemptsSpent(db, userId, nowIso) {
 }
 
 /** What the caller may still spend. Never negative, so the client can render it. */
-function accountAttemptsRemaining(db, userId, nowIso) {
-  return Math.max(0, MAX_ACCOUNT_ATTEMPTS - accountAttemptsSpent(db, userId, nowIso));
+async function accountAttemptsRemaining(db, userId, nowIso) {
+  return Math.max(0, MAX_ACCOUNT_ATTEMPTS - await accountAttemptsSpent(db, userId, nowIso));
 }
 
-function accountAttemptsExhausted(db, userId, nowIso) {
-  return accountAttemptsSpent(db, userId, nowIso) >= MAX_ACCOUNT_ATTEMPTS;
+async function accountAttemptsExhausted(db, userId, nowIso) {
+  return await accountAttemptsSpent(db, userId, nowIso) >= MAX_ACCOUNT_ATTEMPTS;
 }
 
 /**
@@ -302,8 +302,8 @@ function accountAttemptsExhausted(db, userId, nowIso) {
  * row from BEFORE the ~100 ms bcrypt comparison, which is exactly the window a
  * parallel guesser would use to push the count over the limit.
  */
-function commitGrant(db, { challengeId, userId, method, nowIso }) {
-  const granted = db.prepare(`
+async function commitGrant(db, { challengeId, userId, method, nowIso }) {
+  const granted = (await db.prepare(`
     UPDATE reauth_challenges
        SET granted_at = ?, method = ?
      WHERE id = ? AND user_id = ?
@@ -311,7 +311,7 @@ function commitGrant(db, { challengeId, userId, method, nowIso }) {
        AND granted_at IS NULL
        AND expires_at > ?
        AND attempts < ?
-  `).run(nowIso, method, challengeId, userId, nowIso, MAX_ATTEMPTS).changes === 1;
+  `).run(nowIso, method, challengeId, userId, nowIso, MAX_ATTEMPTS)).changes === 1;
 
   if (granted) return { ok: true };
 
@@ -325,7 +325,7 @@ function commitGrant(db, { challengeId, userId, method, nowIso }) {
    * lie — the user asked for a grant and there is one. Anything else is a
    * genuine refusal.
    */
-  const after = load(db, challengeId, userId);
+  const after = await load(db, challengeId, userId);
   if (after && after.granted_at && !after.consumed_at && after.expires_at > nowIso) {
     return { ok: true };
   }
@@ -348,15 +348,15 @@ function commitGrant(db, { challengeId, userId, method, nowIso }) {
  * grant bound to no session is not a step-up — anyone holding the id could
  * spend it — so failing loudly is the only safe answer.
  */
-export function openChallenge({ db, userId, action, params = {}, sessionJti, ipHash = null }) {
+export async function openChallenge({ db, userId, action, params = {}, sessionJti, ipHash = null }) {
   if (!userId) throw new Error('openChallenge: a userId is required');
   if (!isSensitiveAction(action)) throw new Error(`openChallenge: unknown sensitive action: ${action}`);
   if (!sessionJti) throw new Error('openChallenge: a session jti is required to bind the challenge');
 
-  const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
+  const user = await db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
   if (!user) throw new Error(`openChallenge: no such user: ${userId}`);
 
-  const linked = db.prepare('SELECT COUNT(*) AS c FROM oauth_accounts WHERE user_id = ?').get(userId).c;
+  const linked = (await db.prepare('SELECT COUNT(*) AS c FROM oauth_accounts WHERE user_id = ?').get(userId)).c;
   const available = {
     password: user.password_hash !== OAUTH_ONLY && !!user.password_hash,
     oauth: linked > 0
@@ -368,7 +368,7 @@ export function openChallenge({ db, userId, action, params = {}, sessionJti, ipH
   const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS).toISOString();
   const id = `reauth-${crypto.randomUUID()}`;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO reauth_challenges
       (id, user_id, action, params_hash, method, session_jti, created_at, expires_at, granted_at, consumed_at, attempts, ip_hash)
     VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, 0, ?)
@@ -392,7 +392,7 @@ export function openChallenge({ db, userId, action, params = {}, sessionJti, ipH
     id,
     methods,
     expiresAt,
-    attemptsRemaining: accountAttemptsRemaining(db, userId, nowIso)
+    attemptsRemaining: await accountAttemptsRemaining(db, userId, nowIso)
   };
 }
 
@@ -413,7 +413,7 @@ function methodAllowed(row, method) {
  */
 export async function grantByPassword({ db, challengeId, userId, password }) {
   const nowIso = new Date().toISOString();
-  const row = load(db, challengeId, userId);
+  const row = await load(db, challengeId, userId);
   if (!row) return fail(E.NOT_FOUND);
 
   /**
@@ -432,7 +432,7 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
    * about the account, and answering it with a lockout would be a worse
    * diagnosis, not a better one.
    */
-  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
+  if (await accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
 
   const blocked = notGrantable(row, nowIso);
   if (blocked) return fail(blocked);
@@ -441,7 +441,7 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
   /* The ceiling was already checked above — before bcrypt, so an exhausted
      account costs no CPU, and before the sentinel check could tell an attacker
      anything about the account's shape. */
-  const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
+  const user = await db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId);
   if (!user) return fail(E.NOT_FOUND);
 
   /**
@@ -461,13 +461,13 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
   // bcryptjs throws on a non-string, and an empty password is a guess like any
   // other — both are wrong answers, not crashes.
   if (typeof password !== 'string' || password.length === 0) {
-    return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
+    return await recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
   }
 
   const matches = await bcrypt.compare(password, user.password_hash);
-  if (!matches) return recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
+  if (!matches) return await recordFailedAttempt(db, { row, userId, error: E.INVALID_PASSWORD, nowIso });
 
-  return commitGrant(db, { challengeId, userId, method: 'password', nowIso });
+  return await commitGrant(db, { challengeId, userId, method: 'password', nowIso });
 }
 
 /**
@@ -487,7 +487,7 @@ export async function grantByPassword({ db, challengeId, userId, password }) {
  */
 export async function grantByOAuth({ db, challengeId, userId, provider, subject }) {
   const nowIso = new Date().toISOString();
-  const row = load(db, challengeId, userId);
+  const row = await load(db, challengeId, userId);
   if (!row) return fail(E.NOT_FOUND);
 
   /**
@@ -506,13 +506,13 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
    * about the account, and answering it with a lockout would be a worse
    * diagnosis, not a better one.
    */
-  if (accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
+  if (await accountAttemptsExhausted(db, userId, nowIso)) return fail(E.ACCOUNT_LOCKED);
 
   const blocked = notGrantable(row, nowIso);
   if (blocked) return fail(blocked);
   if (!methodAllowed(row, 'oauth')) return fail(E.METHOD_NOT_ALLOWED);
 
-  const link = db.prepare(
+  const link = await db.prepare(
     'SELECT provider_user_id FROM oauth_accounts WHERE user_id = ? AND provider = ?'
   ).get(userId, provider);
 
@@ -523,10 +523,10 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
   // A mismatch IS a wrong answer — it is the guessable half of this path, so it
   // costs an attempt exactly like a wrong password does.
   if (!subject || String(subject) !== String(link.provider_user_id)) {
-    return recordFailedAttempt(db, { row, userId, error: E.PROVIDER_MISMATCH, nowIso });
+    return await recordFailedAttempt(db, { row, userId, error: E.PROVIDER_MISMATCH, nowIso });
   }
 
-  return commitGrant(db, { challengeId, userId, method: 'oauth', nowIso });
+  return await commitGrant(db, { challengeId, userId, method: 'oauth', nowIso });
 }
 
 /**
@@ -564,7 +564,7 @@ export async function grantByOAuth({ db, challengeId, userId, provider, subject 
  * `await consumeChallenge(...)` still reads fine either way, because awaiting a
  * plain value is a no-op. Every existing caller was left untouched.
  */
-export function consumeChallenge({ db, challengeId, userId, action, params = {}, sessionJti }) {
+export async function consumeChallenge({ db, challengeId, userId, action, params = {}, sessionJti }) {
   const nowIso = new Date().toISOString();
 
   // A stored challenge can only ever hold a registered action, so an
@@ -589,7 +589,7 @@ export function consumeChallenge({ db, challengeId, userId, action, params = {},
    * keeps hashing `${action}|...`, and nothing in that module promises the
    * binding it is providing here.
    */
-  const spent = db.prepare(`
+  const spent = (await db.prepare(`
     UPDATE reauth_challenges
        SET consumed_at = ?
      WHERE id = ?
@@ -601,13 +601,13 @@ export function consumeChallenge({ db, challengeId, userId, action, params = {},
        AND consumed_at IS NULL
        AND expires_at > ?
        AND attempts < ?
-  `).run(nowIso, challengeId, userId, action, expectedHash, sessionJti ?? null, nowIso, MAX_ATTEMPTS)
+  `).run(nowIso, challengeId, userId, action, expectedHash, sessionJti ?? null, nowIso, MAX_ATTEMPTS))
     .changes === 1;
 
   if (spent) return { ok: true };
 
   // ── Diagnosis only. Nothing below can authorise anything. ──
-  const row = load(db, challengeId, userId);
+  const row = await load(db, challengeId, userId);
   if (!row) return fail(E.NOT_FOUND);
   if (row.consumed_at) return fail(E.CONSUMED);
   if (row.expires_at <= nowIso) return fail(E.EXPIRED);
@@ -659,14 +659,14 @@ export function consumeChallenge({ db, challengeId, userId, action, params = {},
  * Scoped by user like every other lookup in this module, so another user's
  * challenge id is indistinguishable from one that does not exist.
  */
-export function peekChallenge({ db, challengeId, userId }) {
+export async function peekChallenge({ db, challengeId, userId }) {
   // Not an error worth throwing over: an absent or malformed challenge id is
   // what an ordinary request looks like, and this is called from a middleware
   // that must not blow up on one.
   if (!challengeId || !userId) return fail(E.NOT_FOUND);
 
   const nowIso = new Date().toISOString();
-  const row = load(db, challengeId, userId);
+  const row = await load(db, challengeId, userId);
 
   // Same order and same predicates as consumeChallenge's diagnosis, minus the
   // per-request bindings (action, params, session) that only the caller knows.
@@ -696,7 +696,7 @@ export function peekChallenge({ db, challengeId, userId }) {
  * nothing here is a record: an expired challenge cannot be granted or consumed,
  * so this deletes only rows that can no longer do anything.
  */
-export function sweepExpiredChallenges(db, now = new Date()) {
+export async function sweepExpiredChallenges(db, now = new Date()) {
   const cutoff = new Date(now.getTime() - CHALLENGE_RETENTION_MS).toISOString();
-  return db.prepare('DELETE FROM reauth_challenges WHERE expires_at < ?').run(cutoff).changes;
+  return (await db.prepare('DELETE FROM reauth_challenges WHERE expires_at < ?').run(cutoff)).changes;
 }

@@ -96,6 +96,92 @@ describe('APP_URL is validated, not merely present', () => {
     const r = bootEmail({ NODE_ENV: 'development', APP_URL: 'http://localhost:5173' });
     expect(r.booted, r.out.slice(0, 300)).toBe(true);
   });
+
+  it('refuses a loopback host even over https', () => {
+    /* `https://localhost:5173` passes every other check — absolute, parseable,
+       https — and is exactly what a development value looks like after someone
+       adds a certificate to it. Every verification, reset, invitation and
+       email-change link would then point at the recipient's own machine, and
+       the mail would still send successfully, so nothing would report a fault. */
+    for (const value of ['https://localhost:5173', 'https://127.0.0.1', 'https://[::1]:5173']) {
+      const r = bootEmail({ APP_URL: value });
+      expect(r.booted, `${value} was accepted`).toBe(false);
+      expect(r.out).toMatch(/points at localhost in production/);
+    }
+  });
+});
+
+/**
+ * The CORS development default must not survive into production.
+ *
+ * `CORS_ORIGINS` fell back to `http://localhost:5173,http://localhost:4173`
+ * unconditionally, so a production process started without it granted those
+ * origins credentialed cross-origin access to the live API — anything the
+ * user happened to be running on those ports could act as them and read the
+ * replies, on a deployment whose operator never configured CORS at all.
+ */
+describe('REQUIRE_EMAIL_VERIFICATION in production', () => {
+  /**
+   * A deployment may switch the gate off — it is a documented opt-out — but it
+   * must not do so silently. With the gate off nothing in the sign-in path ever
+   * consults `email_verified`, so an account registered against an address its
+   * holder does not own works completely, and the only record is a line in an
+   * env file. A warning, not a refusal, because refusing would overrule an
+   * operator who meant it.
+   */
+  it('warns, and still boots', () => {
+    const r = bootConfig({ REQUIRE_EMAIL_VERIFICATION: 'false' });
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).toMatch(/REQUIRE_EMAIL_VERIFICATION=false in production/);
+  });
+
+  it('says nothing when the gate is left on', () => {
+    const r = bootConfig({});
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).not.toMatch(/REQUIRE_EMAIL_VERIFICATION=false/);
+  });
+
+  it('leaves development alone', () => {
+    const r = bootConfig({ NODE_ENV: 'development', REQUIRE_EMAIL_VERIFICATION: 'false' });
+    expect(r.booted, r.out.slice(0, 300)).toBe(true);
+    expect(r.out).not.toMatch(/WARNING: REQUIRE_EMAIL_VERIFICATION/);
+  });
+});
+
+describe('CORS_ORIGINS in production', () => {
+  const origins = async (env) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
+        const m = await import('${root}/server/config.js');
+        console.log('ORIGINS:' + JSON.stringify(m.ALLOWED_ORIGINS));
+      `], { env: { ...PRODUCTION, ...env }, encoding: 'utf8' });
+    const line = ((r.stdout || '') + (r.stderr || '')).split('\n').find((l) => l.startsWith('ORIGINS:'));
+    return { list: line ? JSON.parse(line.slice('ORIGINS:'.length)) : null, out: (r.stdout || '') + (r.stderr || '') };
+  };
+
+  it('does not grant localhost when CORS_ORIGINS is unset', async () => {
+    const { list, out } = await origins({ CORS_ORIGINS: undefined });
+    expect(list, out.slice(0, 400)).toEqual([]);
+  });
+
+  it('still applies the development default outside production', async () => {
+    /* Removing the default in dev would break every Vite session. */
+    const { list, out } = await origins({ NODE_ENV: 'development', CORS_ORIGINS: undefined });
+    expect(list, out.slice(0, 400)).toContain('http://localhost:5173');
+  });
+
+  it('honours an explicit public origin', async () => {
+    const { list } = await origins({ CORS_ORIGINS: 'https://volunteers.example.org' });
+    expect(list).toEqual(['https://volunteers.example.org']);
+  });
+
+  it('refuses a loopback origin rather than ignoring it', async () => {
+    /* Dropping it silently would leave the operator believing a configured
+       origin is in force. */
+    const r = bootConfig({ CORS_ORIGINS: 'https://volunteers.example.org,http://localhost:5173' });
+    expect(r.booted).toBe(false);
+    expect(r.out).toMatch(/loopback origin in production/);
+  });
 });
 
 describe('TRUST_PROXY is required in production', () => {
@@ -162,5 +248,62 @@ describe('TFA_ENCRYPTION_KEY base64 validation actually runs', () => {
        quietly moved the all-zero key back into the accepted set. */
     const r = bootConfig({ TFA_ENCRYPTION_KEY: Buffer.alloc(32).toString('base64') });
     expect(r.booted).toBe(false);
+  });
+});
+
+/**
+ * DEMO_MODE must not survive a production boot.
+ *
+ * The refusal lives in `server.js`, and it was the only one of the four
+ * production refusals with no test behind it — APP_URL, TRUST_PROXY, the
+ * encryption key, the email provider and OAUTH_ALLOW_MOCK all had one.
+ *
+ * What it prevents is not subtle. `completeDatabaseInit()` seeds the demo
+ * accounts, and `db.js` prints a banner about them saying they "share a
+ * PUBLISHED password". A production process that reached that call would stand
+ * up a set of known-credential logins on a platform used by minors.
+ *
+ * ── Ordering, which the test also pins ──
+ *
+ * `import { app } from './app.js'` is hoisted above the check, so the database
+ * handle is already open by the time the guard runs. That is tolerable because
+ * the seeding is not at import time — it happens in `completeDatabaseInit()`,
+ * further down `server.js`, and the process has exited before then. The
+ * assertion on the seeding banner is what holds that ordering in place: if
+ * seeding were ever moved into a module's import, this test fails rather than
+ * the guard quietly becoming decorative.
+ *
+ * Runs `server.js` itself rather than a module, because the guard is there.
+ * WEV_DB_PATH points at a throwaway file — a privileged boot must never be
+ * pointed at a real database by a test.
+ */
+describe('DEMO_MODE cannot be enabled in production', () => {
+  const bootServer = (env) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [`${root}/server/server.js`], {
+      env: {
+        ...PRODUCTION,
+        WEV_DB_PATH: `/tmp/wev-demo-guard-${process.pid}.db`,
+        ...env,
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+  };
+
+  it('refuses to boot, and exits non-zero', () => {
+    const r = bootServer({ DEMO_MODE: 'true' });
+
+    expect(r.out).toMatch(/FATAL: DEMO_MODE cannot be enabled in production/);
+    expect(r.status, 'a refusal that exits 0 is not a refusal').toBe(1);
+  });
+
+  it('exits before the demo accounts are seeded', () => {
+    /* The banner `db.js` prints when it creates them. Its absence is the
+       evidence that no published-password login was stood up. */
+    const r = bootServer({ DEMO_MODE: 'true' });
+
+    expect(r.out).not.toMatch(/PUBLISHED password/i);
   });
 });

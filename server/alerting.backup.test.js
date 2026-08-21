@@ -101,6 +101,50 @@ describe('when the backups have stopped', () => {
     expect(res).toMatchObject({ sent: 1, status: 'none' });
   });
 
+  /**
+   * A production host with no backup directory has no backups.
+   *
+   * `unconfigured` was deliberately silent because it meant "a laptop". That was
+   * true while SQLite was production: the backup timer shipped with the
+   * deployment, so the directory existed on every real host. On Supabase nothing
+   * creates it — `bin/backup.sh` is a `sqlite3 .backup` and does not run against
+   * PostgreSQL at all — so the state a production host lands in by default is
+   * precisely the one that said nothing.
+   */
+  it('emails when a PRODUCTION host has no backup directory at all', async () => {
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const res = await sendBackupAlert({
+        send,
+        status: { status: 'unconfigured', lastBackupAt: null, ageHours: null, count: 0 },
+      });
+      expect(res).toMatchObject({ sent: 1, status: 'unconfigured' });
+      /* The message has to say why it is not simply "turn the timer on", because
+         on this deployment the timer is the wrong tool. */
+      expect(send.mock.calls[0][0].text).toMatch(/sqlite3 \.backup|pg_dump/);
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
+  });
+
+  it('stays quiet about no backup directory outside production', async () => {
+    /* Alerting on every developer's laptop is how an alert gets ignored on the
+       day it is real. */
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    try {
+      const res = await sendBackupAlert({
+        send,
+        status: { status: 'unconfigured', lastBackupAt: null, ageHours: null, count: 0 },
+      });
+      expect(res).toMatchObject({ sent: 0, reason: 'healthy' });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
+  });
+
   it('admits it cannot tell a disabled timer from a failed run', async () => {
     /**
      * The honesty requirement. `backupStatus` reads a directory; both causes

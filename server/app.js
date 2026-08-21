@@ -1,4 +1,5 @@
 import express from 'express';
+import { probeWritable as probeDatabaseWritable } from './db/dialectSql.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -140,7 +141,30 @@ app.use(helmet({
        * only because the SDK cannot function without it, and it stays inert
        * while no API key is configured.
        */
-      scriptSrc: ["'self'", 'https://cdn.amplitude.com'],
+      /**
+       * `'wasm-unsafe-eval'` is what lets the on-device AI runtime compile its
+       * WebAssembly module. Without it the browser refuses every
+       * `WebAssembly.compile`/`instantiate` in the page and local inference
+       * cannot start at all — there is no way to ship that feature without this
+       * token.
+       *
+       * It is narrower than it reads. `'wasm-unsafe-eval'` permits compiling
+       * WebAssembly and nothing else; it does NOT restore `eval()`, `new
+       * Function()`, or inline script. Those remain refused, which is the
+       * property this directive block exists to hold. An injected script still
+       * cannot execute — and a script that cannot execute cannot reach
+       * WebAssembly either.
+       *
+       * Unconditional rather than gated on a server flag, following the same
+       * reasoning as the Amplitude host below: this widens what the page MAY do
+       * and switches nothing on. Local AI is a build-time client flag
+       * (VITE_LOCAL_AI), and the server cannot see it. Gating this on a second,
+       * server-side flag would mean two settings that must agree, and the
+       * failure when they disagree is the worst kind — the feature ships, the
+       * page renders, and every model load is refused by the browser with an
+       * error that names WebAssembly rather than the misconfiguration.
+       */
+      scriptSrc: ["'self'", "'wasm-unsafe-eval'", 'https://cdn.amplitude.com'],
 
       /**
        * Session Replay compresses in a worker created from a blob.
@@ -191,6 +215,44 @@ app.use(helmet({
         'https://sr-client-cfg.amplitude.com',
         'https://gs.amplitude.com',
         'https://cdn.amplitude.com',
+
+        /**
+         * Where the on-device AI models are downloaded from.
+         *
+         * `huggingface.co` serves two things: the metadata API, which is where
+         * the expected byte length and SHA-256 of every model file come from,
+         * and the `/resolve/` URL that 302s to the CDN.
+         *
+         * ── The wildcard, and why it is not the pattern above ──
+         *
+         * The Amplitude hosts are named individually precisely so a new
+         * subdomain cannot be reached without somebody adding it on purpose,
+         * and the same instinct applies here. It does not survive contact with
+         * how Hugging Face actually serves files. Measured on 2026-08-15, a
+         * `/resolve/` request redirects to `us.aws.cdn.hf.co` — a
+         * region-and-provider-specific host, and Hugging Face's own
+         * documentation warns these hostnames may change without notice.
+         *
+         * Pinning the one observed host would mean a student routed to a
+         * different region gets a refused request instead of a model, with no
+         * error anybody would connect to this file. So the wildcard is scoped
+         * to the `cdn.` label rather than to `hf.co`: it covers the regional
+         * variants of the content-delivery subtree and nothing else. A future
+         * Hugging Face *product* on some other `hf.co` subdomain is still
+         * refused, which is the property the Amplitude comment is protecting.
+         *
+         * ── If this ever needs to go away ──
+         *
+         * Self-hosting the weights removes both lines and returns connect-src
+         * to same-origin. Client-side that is one constant, `MODEL_BASE_URL` in
+         * `src/ai/models.js`; nothing else knows where the files come from.
+         *
+         * As with Amplitude, this widens what the page MAY reach and switches
+         * nothing on. Nothing is fetched unless VITE_LOCAL_AI is set at build
+         * time AND somebody chooses a model.
+         */
+        'https://huggingface.co',
+        'https://*.cdn.hf.co',
       ],
 
       frameAncestors: ["'none'"],
@@ -943,21 +1005,19 @@ let writeProbeCache = { at: 0, ok: null };
  * else in the codebase). A scratch INSERT/ROLLBACK would also work but leaves
  * rowid sequences and WAL frames behind for no extra signal.
  */
-function probeWritable() {
+async function probeWritable() {
   const now = Date.now();
   if (writeProbeCache.ok !== null && now - writeProbeCache.at < WRITE_PROBE_INTERVAL_MS) {
     return writeProbeCache.ok;
   }
 
+  /* The probe itself lives in `db/dialectSql.js`: PostgreSQL has no pragmas, and
+     its equivalent trick — allocating a transaction id — is different enough to
+     want the reasoning written down beside the SQLite one rather than branched
+     inline here. The caching and the /health wiring stay. */
   let ok = false;
   try {
-    const current = db.prepare('PRAGMA user_version').get();
-    const value = Number(current?.user_version ?? 0);
-    // Interpolated rather than bound: PRAGMA does not accept bind parameters. The
-    // value comes from SQLite itself and is coerced through Number(), so it cannot
-    // carry anything but a number.
-    db.exec(`PRAGMA user_version = ${value}`);
-    ok = true;
+    ok = await probeDatabaseWritable(db);
   } catch {
     ok = false;
   }
@@ -968,10 +1028,10 @@ function probeWritable() {
 
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   let readable = false;
   try {
-    db.prepare('SELECT 1').get();
+    await db.prepare('SELECT 1').get();
     readable = true;
   } catch {
     readable = false;
@@ -990,7 +1050,7 @@ app.get('/health', (req, res) => {
     });
   }
 
-  const writable = probeWritable();
+  const writable = await probeWritable();
   if (!writable) {
     return res.status(503).json({
       status: 'error',
@@ -1086,9 +1146,93 @@ if (IS_PRODUCTION) {
   });
 }
 
+/**
+ * Route a rejected async handler into the error middleware below, instead of
+ * letting it kill the process.
+ *
+ * ── The outage this prevents ──
+ *
+ * Express 4 does not understand promises. An `async (req, res)` handler that
+ * throws returns a rejected promise which Express drops on the floor; Node
+ * raises `unhandledRejection`; `shutdown.js` treats that as fatal and drains.
+ * So ONE failing request took the entire server down for every user.
+ *
+ * Found by the production boot rehearsal on 2026-08-18, not by the suite. A
+ * single `GET /api/organizations` — one unquoted alias in an ORDER BY, wrong
+ * only on PostgreSQL — logged `column "membercount" does not exist` and the
+ * process exited three requests into the session.
+ *
+ * 51 of the 206 async route handlers have no try/catch of their own, so this was
+ * not one unlucky route. On SQLite most of them never throw, which is why it was
+ * invisible: PostgreSQL turns every dialect difference, constraint violation and
+ * transient pool error into exactly this.
+ *
+ * ── Why here, and not 51 try/catch blocks ──
+ *
+ * A wrapper at each site is 51 chances to forget the 52nd. This walks the router
+ * stack once, after everything is mounted and before the error handler is
+ * registered, and wraps each handler so a rejection becomes `next(err)`. The
+ * error middleware below then answers the request the way it already answers
+ * every other failure.
+ *
+ * Handlers of arity 4 are error middleware and are left alone — wrapping one
+ * would change how Express classifies it. Layers are marked so a second pass
+ * cannot double-wrap. `unhandledRejection` stays fatal in shutdown.js: it is
+ * still the right response to a rejection from somewhere that is NOT a request,
+ * and this narrows what reaches it rather than muting it.
+ */
+export function routeAsyncErrorsToExpress(stack) {
+  for (const layer of stack ?? []) {
+    if (layer.route?.stack) routeAsyncErrorsToExpress(layer.route.stack);
+
+    const fn = layer.handle;
+    if (typeof fn !== 'function' || fn.length >= 4 || fn.__asyncErrorsRouted) continue;
+
+    /**
+     * A mounted sub-router is descended into, never wrapped.
+     *
+     * `app.use(someRouter)` makes a layer whose `handle` IS the router function,
+     * and that function carries the `.stack` of everything inside it. Replacing
+     * it with a wrapper drops the `.stack`, and anything walking the tree stops
+     * dead at the mount point — which is not hypothetical: it broke
+     * `routes.resetRemoved` (which descends via `layer.handle.stack` to prove no
+     * reset route is reachable) and `authz.completeness` (which enumerates every
+     * mounted route to prove each one is gated). Two authorization-adjacent
+     * guards went blind, and both said so.
+     *
+     * There is nothing to gain by wrapping one either: a router does not reject,
+     * the handlers inside it do, and those are reached by the recursion.
+     */
+    if (Array.isArray(fn.stack)) {
+      routeAsyncErrorsToExpress(fn.stack);
+      continue;
+    }
+
+    const wrapped = function asyncErrorBoundary(req, res, next) {
+      let result;
+      try {
+        result = fn.call(this, req, res, next);
+      } catch (err) {
+        next(err);
+        return undefined;
+      }
+      /* Returns the HANDLED chain, not the original promise. Express ignores the
+         return value, but anything that does await it — a test, a future
+         wrapper — would otherwise see the same rejection a second time and
+         resurrect the unhandled rejection this exists to prevent. */
+      if (result && typeof result.then === 'function') return result.then(undefined, next);
+      return result;
+    };
+    wrapped.__asyncErrorsRouted = true;
+    layer.handle = wrapped;
+  }
+}
+
+routeAsyncErrorsToExpress(app._router?.stack);
+
 // Error handler registered LAST, so it catches errors from every layer above,
 // including the static/SPA block.
-app.use((err, req, res, _next) => {
+app.use(async (err, req, res, _next) => {
   if (String(err.message).startsWith('Origin not allowed by CORS')) {
     console.warn(err.message);
     return res.status(403).json({ error: 'Origin not allowed.' });
@@ -1154,7 +1298,7 @@ app.use((err, req, res, _next) => {
    * failure happened before routing resolved, which is honest: there was no
    * route.
    */
-  recordError(db, {
+  await recordError(db, {
     source: 'server',
     kind: err?.constructor?.name || 'Error',
     message: err?.message,

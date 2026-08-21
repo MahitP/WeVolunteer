@@ -13,14 +13,30 @@
  * With N instances the login brute-force limit, the mail limit and the
  * certificate-verify limit are all N× looser than configured, and nothing says so.
  *
- * The narrower consequence is an ordering hazard: capacity checks read outside their
- * transaction (`PATCH /api/applications/bulk` counts accepted rows per slot, then
- * opens a transaction to write). One process is safe because `node:sqlite` is
- * synchronous and the handler never awaits, so the read and the write cannot
- * interleave. Two processes can interleave them and accept past a slot's capacity.
- * Stated honestly: 25 concurrent trials across two live instances did not reproduce
- * an oversell, because SQLite's write serialization narrows the window to
- * microseconds. It is a real hazard, not a demonstrated defect.
+ * The narrower consequence WAS an ordering hazard: capacity checks read outside
+ * their transaction (`PATCH /api/applications/bulk` counted accepted rows per slot,
+ * then opened a transaction to write). One process was safe because `node:sqlite`
+ * is synchronous and the handler never awaits, so the read and the write could not
+ * interleave. Two processes could interleave them and accept past a slot's capacity.
+ * Stated honestly at the time: 25 concurrent trials across two live instances did
+ * not reproduce an oversell, because SQLite's write serialization narrows the window
+ * to microseconds. It was a real hazard, not a demonstrated defect.
+ *
+ * ── What the PostgreSQL migration changed about that paragraph ──
+ *
+ * The premise above — "the handler never awaits" — is a property of `node:sqlite`,
+ * not of the handler. On PostgreSQL every statement is a promise, so the read and
+ * the write interleave WITHIN one process and the second instance stops being
+ * necessary. It then stopped being hypothetical: three concurrent bulk accepts put
+ * six volunteers into a two-spot slot and returned 200 to all three
+ * (`application.postgresConcurrency.test.js`).
+ *
+ * Both capacity routes now count inside their transaction behind `SELECT … FOR
+ * UPDATE` on the slot, so the invariant no longer rests on either the engine's
+ * concurrency model or on this lock. The lock remains correct and still worth
+ * holding — the rate limiters below are genuinely per-process — but it is not what
+ * keeps a roster from being oversold, and nothing new should be written as though
+ * it were.
  *
  * ── Why a lock rather than shared state ──
  *
@@ -102,13 +118,13 @@ function pidAlive(pid) {
  * Returns `{ acquired, conflict }` rather than exiting, so the boot path decides what
  * to do with the answer and the decision stays testable without spawning a process.
  */
-export function acquireInstanceLock(db) {
+export async function acquireInstanceLock(db) {
   createInstanceLockTable(db);
 
   const me = { hostname: os.hostname(), pid: process.pid };
   const now = new Date();
 
-  const existing = db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
+  const existing = await db.prepare('SELECT * FROM instance_lock WHERE id = 1').get();
 
   if (existing) {
     const sameProcess = existing.hostname === me.hostname && existing.pid === me.pid;
@@ -138,18 +154,21 @@ export function acquireInstanceLock(db) {
 
   // Take it. `INSERT OR REPLACE` on a fixed primary key is an upsert here, and the
   // whole statement is a single write so two racing acquisitions serialize.
-  db.prepare(`
-    INSERT OR REPLACE INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
+  await db.prepare(`
+    INSERT INTO instance_lock (id, hostname, pid, acquired_at, heartbeat_at)
     VALUES (1, ?, ?, ?, ?)
+    ON CONFLICT (id) DO UPDATE SET
+      hostname = excluded.hostname, pid = excluded.pid,
+      acquired_at = excluded.acquired_at, heartbeat_at = excluded.heartbeat_at
   `).run(me.hostname, me.pid, now.toISOString(), now.toISOString());
 
   return { acquired: true, conflict: null };
 }
 
 /** Refreshes this process's claim. Never throws — it is bookkeeping, not a check. */
-export function heartbeatInstanceLock(db) {
+export async function heartbeatInstanceLock(db) {
   try {
-    db.prepare(`
+    await db.prepare(`
       UPDATE instance_lock SET heartbeat_at = ?
       WHERE id = 1 AND hostname = ? AND pid = ?
     `).run(new Date().toISOString(), os.hostname(), process.pid);
@@ -161,7 +180,7 @@ export function heartbeatInstanceLock(db) {
 }
 
 /** Starts the heartbeat. Returns the timer so shutdown can clear it. */
-export function startInstanceLockHeartbeat(db) {
+export async function startInstanceLockHeartbeat(db) {
   if (heartbeatTimer) return heartbeatTimer;
   heartbeatTimer = setInterval(() => heartbeatInstanceLock(db), HEARTBEAT_MS);
   // Never the reason the process stays alive.
@@ -183,9 +202,9 @@ export function stopInstanceLockHeartbeat() {
  * takeover would delete the CURRENT holder's row on its way out, handing a third
  * instance a free pass.
  */
-export function releaseInstanceLock(db) {
+export async function releaseInstanceLock(db) {
   try {
-    db.prepare('DELETE FROM instance_lock WHERE id = 1 AND hostname = ? AND pid = ?')
+    await db.prepare('DELETE FROM instance_lock WHERE id = 1 AND hostname = ? AND pid = ?')
       .run(os.hostname(), process.pid);
   } catch (err) {
     console.error('[InstanceLock] Release failed:', err.message);

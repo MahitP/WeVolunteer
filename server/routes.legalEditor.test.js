@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer, enrolTwoFactor } from './testServer.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 /**
  * The owner-only Legal Center editor.
@@ -89,7 +90,7 @@ describe('the Legal Center editor', () => {
       name: 'Owner', username: 'legal_owner', email: 'legal.owner@test.local',
       password: OWNER_PASSWORD, grade: 'Adult', role: 'student',
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
       .run('super_admin', 'legal.owner@test.local');
     /* An administrator with no second factor is refused by `requireCap` before
        any capability is consulted, so an unenrolled fixture would read 403 for
@@ -285,7 +286,7 @@ describe('the Legal Center editor', () => {
      * rather than in a parallel log nobody reads.
      */
     it('writes an audit row naming the document and version', async () => {
-      const row = db.prepare(`
+      const row = await db.prepare(`
         SELECT action, details FROM admin_audit_logs
         WHERE action = 'LEGAL_DOCUMENT_PUBLISHED'
         ORDER BY created_at DESC LIMIT 1
@@ -409,14 +410,14 @@ describe('the Legal Center editor', () => {
      */
     it('re-syncs without complaint after revisions have been published', async () => {
       const { syncLegalDocuments } = await import('./consent.js');
-      expect(() => syncLegalDocuments(db)).not.toThrow();
-      expect(() => syncLegalDocuments(db)).not.toThrow();
+      await expect(syncLegalDocuments(db)).resolves.not.toThrow();
+      await expect(syncLegalDocuments(db)).resolves.not.toThrow();
     });
 
     it('records each published revision as its own immutable catalogue row', async () => {
-      const rows = db.prepare(
+      const rows = (await db.prepare(
         'SELECT version FROM legal_documents WHERE slug = ? ORDER BY version'
-      ).all(EDITABLE).map(r => r.version);
+      ).all(EDITABLE)).map(r => r.version);
       /* The registry's original and both revisions, none overwritten. */
       expect(rows).toContain('1.0');
       expect(rows).toContain('1.1.0');
@@ -427,25 +428,61 @@ describe('the Legal Center editor', () => {
   /* ── The migration ─────────────────────────────────────────────────────── */
 
   describe('migration 034', () => {
-    it('is idempotent', async () => {
+    /**
+     * The two tests that RUN the migration are SQLite-only, and were silently
+     * vacuous on PostgreSQL until 2026-08-18.
+     *
+     * Migrations build the SQLite schema. PostgreSQL gets `db/postgresSchema.js`,
+     * which is GENERATED from these same migrations with the dialect rewritten
+     * (`bin/generate-postgres-schema.mjs` turns `INTEGER PRIMARY KEY AUTOINCREMENT`
+     * into an identity column). So migration 034's raw DDL is not something
+     * PostgreSQL is ever asked to execute in production.
+     *
+     * Running it here anyway did not fail the way a wrong test should. `up()` calls
+     * `db.exec(...)` WITHOUT awaiting — correct against `node:sqlite`, which is
+     * synchronous, but on PostgreSQL `exec` returns a promise. The SQLite DDL was
+     * rejected by the server with `syntax error at or near "AUTOINCREMENT"` AFTER
+     * `up()` had already returned, so:
+     *
+     *   - `expect(() => …).not.toThrow()` saw a clean return and passed while the
+     *     migration had done nothing at all, proving no idempotency;
+     *   - the row-count test passed for the same reason — the count was unchanged
+     *     because the table was never touched;
+     *   - and the rejection surfaced as one of three "Unhandled Errors" that
+     *     vitest reports separately, which is why the suite could show 0 failures
+     *     and still exit non-zero.
+     *
+     * Confining them is not weakening them: on SQLite they assert exactly what
+     * they did before. This is the same treatment the email-dedupe migration tests
+     * in `routes.emailUniqueness.test.js` already get, for the same reason.
+     *
+     * The duplicate-(slug, version) test below is NOT skipped — it exercises the
+     * live constraint rather than the migration mechanism, and it is already
+     * written in the portable refusal form.
+     */
+    it.skipIf(RUNNING_ON_POSTGRES)('is idempotent', async () => {
       const migration = (await import('./migrations/034_legal_document_revisions.js')).default;
       expect(() => { migration.up(db); migration.up(db); }).not.toThrow();
     });
 
-    it('does not disturb the revisions already stored', async () => {
-      const before = db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get().n;
+    it.skipIf(RUNNING_ON_POSTGRES)('does not disturb the revisions already stored', async () => {
+      const before = (await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n;
       const migration = (await import('./migrations/034_legal_document_revisions.js')).default;
       migration.up(db);
-      expect(db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get().n).toBe(before);
+      expect((await db.prepare('SELECT COUNT(*) AS n FROM legal_document_revisions').get()).n).toBe(before);
     });
 
-    it('refuses a duplicate (slug, version) at the schema level', () => {
-      const insert = () => db.prepare(`
+    it('refuses a duplicate (slug, version) at the schema level', async () => {
+      /* `await expect(async () => …).rejects` — the portable refusal form.
+         SQLite's `.run()` throws synchronously and PostgreSQL returns a rejected
+         promise, so `expect(fn).toThrow()` observes only one of them: here it
+         saw the function return normally and reported "expected to throw" while
+         the write WAS being refused. */
+      await expect(async () => db.prepare(`
         INSERT INTO legal_document_revisions
           (slug, version, body, content_hash, effective_at, created_at, created_by)
         VALUES (?, '1.1.0', 'x', 'h', '2026-09-01', '2026-09-01T00:00:00Z', NULL)
-      `).run(EDITABLE);
-      expect(insert).toThrow();
+      `).run(EDITABLE)).rejects.toThrow();
     });
   });
   /**
@@ -486,7 +523,7 @@ describe('the Legal Center editor', () => {
        somebody already agreed to — that is the one thing this subsystem exists
        to keep true. */
     it('leaves existing acceptance rows byte-identical', async () => {
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
       ).all();
 
@@ -497,7 +534,7 @@ describe('the Legal Center editor', () => {
       });
       expect(res.status).toBe(200);
 
-      const after = db.prepare(
+      const after = await db.prepare(
         'SELECT document_slug, version, content_hash, accepted_at FROM legal_acceptances ORDER BY id'
       ).all();
       expect(after).toEqual(before);

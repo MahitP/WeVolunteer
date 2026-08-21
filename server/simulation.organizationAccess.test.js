@@ -46,9 +46,10 @@ describe('one club, five people', () => {
   const setRoleAsA = (userId, memberRole) =>
     srv.call('PATCH', `/api/organizations/${orgKey}/members/${userId}`, { memberRole }, s.A);
 
-  const seat = (userId, role) => db.prepare(`
-    INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+  const seat = async (userId, role) => await db.prepare(`
+    INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
   `).run(orgId, userId, role, new Date().toISOString());
 
   const createEvent = (body, session) => srv.call('POST', '/api/events', {
@@ -96,10 +97,10 @@ describe('one club, five people', () => {
 
   // ───────────────────────────────────────────────────────────────────────────
   it('1. A runs the club; B, C and E join it; D stays outside', async () => {
-    seat(id.A, 'manager');
-    seat(id.B, 'member');
-    seat(id.C, 'member');
-    seat(id.E, 'member');
+    await seat(id.A, 'manager');
+    await seat(id.B, 'member');
+    await seat(id.C, 'member');
+    await seat(id.E, 'member');
 
     const page = await srv.call('GET', `/api/organizations/${orgKey}`, undefined, s.A);
     expect(page.status).toBe(200);
@@ -123,8 +124,8 @@ describe('one club, five people', () => {
     /* Granted by the promotion, and WITHHELD until B accepts the Student
        Organizer Agreement — so the row exists now and does nothing yet. Step 2b
        is where it starts working. */
-    const caps = db.prepare('SELECT capability FROM user_capabilities WHERE user_id = ?')
-      .all(id.B).map(r => r.capability).sort();
+    const caps = (await db.prepare('SELECT capability FROM user_capabilities WHERE user_id = ?')
+      .all(id.B)).map(r => r.capability).sort();
     expect(caps).toEqual([
       'organization.event.create', 'organization.event.manage.own',
       'organization.post.create', 'organization.post.manage',
@@ -162,7 +163,7 @@ describe('one club, five people', () => {
     const open = await createEvent({ organizationId: orgId, title: 'Open day' }, s.B);
     expect(open.status, JSON.stringify(open.body)).toBe(201);
     openEventId = open.body.id;
-    openSlotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(openEventId).id;
+    openSlotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(openEventId)).id;
 
     const members = await createEvent({
       organizationId: orgId, audience: 'organization', title: 'Members practice',
@@ -177,9 +178,9 @@ describe('one club, five people', () => {
     }, s.B);
     expect(members.status, JSON.stringify(members.body)).toBe(201);
     membersEventId = members.body.id;
-    membersSlotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(membersEventId).id;
+    membersSlotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(membersEventId)).id;
 
-    expect(db.prepare('SELECT audience FROM events WHERE id = ?').get(membersEventId).audience)
+    expect((await db.prepare('SELECT audience FROM events WHERE id = ?').get(membersEventId)).audience)
       .toBe('organization');
   });
 
@@ -227,8 +228,8 @@ describe('one club, five people', () => {
     const applied = await apply(openEventId, openSlotId, s.E);
     expect(applied.status, JSON.stringify(applied.body)).toBe(201);
 
-    const appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
-      .get(id.E, openSlotId).id;
+    const appId = (await db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+      .get(id.E, openSlotId)).id;
     const accepted = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, s.B);
     expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
   });
@@ -257,7 +258,7 @@ describe('one club, five people', () => {
      * organizer already has a per-shift removal control for when that is what
      * they meant.
      */
-    const row = db.prepare('SELECT status FROM applications WHERE user_id = ? AND slot_id = ?')
+    const row = await db.prepare('SELECT status FROM applications WHERE user_id = ? AND slot_id = ?')
       .get(id.E, openSlotId);
     expect(row.status).toBe('accepted');
   });
@@ -292,12 +293,12 @@ describe('one club, five people', () => {
   });
 
   it('16. B cannot touch the club itself', async () => {
-    const before = db.prepare('SELECT name, status FROM organizations WHERE id = ?').get(orgId);
+    const before = await db.prepare('SELECT name, status FROM organizations WHERE id = ?').get(orgId);
     for (const body of [{ status: 'archived' }, { name: 'B’s Club' }, { description: 'Mine.' }]) {
       const res = await srv.call('PATCH', `/api/organizations/${orgKey}`, body, s.B);
       expect(res.status, `B changed ${Object.keys(body)[0]}`).toBe(403);
     }
-    expect(db.prepare('SELECT name, status FROM organizations WHERE id = ?').get(orgId))
+    expect(await db.prepare('SELECT name, status FROM organizations WHERE id = ?').get(orgId))
       .toEqual(before);
   });
 
@@ -307,8 +308,8 @@ describe('one club, five people', () => {
         { memberRole: 'manager' }, s.B);
       expect(res.status).toBe(403);
     }
-    expect(db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
-      .get(orgId, id.B).member_role).toBe('student_organizer');
+    expect((await db.prepare('SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      .get(orgId, id.B)).member_role).toBe('student_organizer');
   });
 
   it('18. B cannot act for a club B does not help run', async () => {
@@ -331,7 +332,7 @@ describe('one club, five people', () => {
       { memberRole: 'member' }, s.A);
     expect(demoted.status, JSON.stringify(demoted.body)).toBe(200);
 
-    expect(db.prepare('SELECT COUNT(*) AS n FROM user_capabilities WHERE user_id = ?').get(id.B).n)
+    expect((await db.prepare('SELECT COUNT(*) AS n FROM user_capabilities WHERE user_id = ?').get(id.B)).n)
       .toBe(0);
     expect((await createEvent({ organizationId: orgId }, s.B)).status).toBe(403);
     expect((await srv.call('POST', `/api/organizations/${orgKey}/announcements`,
@@ -350,13 +351,13 @@ describe('one club, five people', () => {
      * cancel it, accept its applicants or record who turned up. A review found
      * it behind the very test that was supposed to cover it.
      */
-    const row = db.prepare('SELECT status, organization_id FROM events WHERE id = ?').get(openEventId);
+    const row = await db.prepare('SELECT status, organization_id FROM events WHERE id = ?').get(openEventId);
     expect(row).toMatchObject({ status: 'open', organization_id: orgId });
 
     const cancelled = await srv.call('PATCH', `/api/events/${openEventId}/status`,
       { status: 'cancelled' }, s.A);
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
-    expect(db.prepare('SELECT status FROM events WHERE id = ?').get(openEventId).status)
+    expect((await db.prepare('SELECT status FROM events WHERE id = ?').get(openEventId)).status)
       .toBe('cancelled');
   });
 
@@ -403,13 +404,13 @@ describe('one club, five people', () => {
       }],
     }, s.B);
     expect(made.status, JSON.stringify(made.body)).toBe(201);
-    const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id).id;
+    const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id)).id;
 
     const applied = await srv.call('POST', `/api/events/${made.body.id}/apply`,
       { slotId, message: 'I can help.' }, s.D);
     expect(applied.status, JSON.stringify(applied.body)).toBe(201);
-    const appId = db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
-      .get(id.D, slotId).id;
+    const appId = (await db.prepare('SELECT id FROM applications WHERE user_id = ? AND slot_id = ?')
+      .get(id.D, slotId)).id;
 
     /* One at a time... */
     const decided = await srv.call('PATCH', `/api/applications/${appId}`, { status: 'accepted' }, s.A);
@@ -437,7 +438,7 @@ describe('one club, five people', () => {
      *
      * C is seated as a manager first so the club is not left without one.
      */
-    seat(id.C, 'manager');
+    await seat(id.C, 'manager');
     const made = await createEvent({
       organizationId: orgId, title: 'A’s shift',
       slots: [{
@@ -448,7 +449,7 @@ describe('one club, five people', () => {
       }],
     }, s.A);
     expect(made.status, JSON.stringify(made.body)).toBe(201);
-    const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id).id;
+    const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(made.body.id)).id;
     expect((await srv.call('POST', `/api/events/${made.body.id}/apply`,
       { slotId, message: 'I can help.' }, s.D)).status).toBe(201);
 
@@ -461,7 +462,7 @@ describe('one club, five people', () => {
       .toBeGreaterThan(0);
 
     /* A leaves the club they still host that event for. */
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(orgId, id.A);
     try {
       expect((await srv.call('GET', `/api/events/${made.body.id}`, undefined, s.A)).status)
@@ -469,7 +470,7 @@ describe('one club, five people', () => {
       expect(await listedBefore(s.A), 'a removed member still listed the club’s applicants')
         .toBe(0);
     } finally {
-      seat(id.A, 'manager');
+      await seat(id.A, 'manager');
     }
   });
 
@@ -484,7 +485,7 @@ describe('one club, five people', () => {
     const attempt = await srv.call('PATCH', `/api/events/${theirs.body.id}/status`,
       { status: 'cancelled' }, s.B);
     expect(attempt.status).toBe(403);
-    expect(db.prepare('SELECT status FROM events WHERE id = ?').get(theirs.body.id).status)
+    expect((await db.prepare('SELECT status FROM events WHERE id = ?').get(theirs.body.id)).status)
       .not.toBe('cancelled');
   });
 });

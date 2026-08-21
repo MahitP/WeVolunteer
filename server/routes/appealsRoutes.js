@@ -19,11 +19,14 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
+import { forUpdate } from '../db/dialectSql.js';
 import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 
+import { nullSafeEquals } from '../db/dialectSql.js';
 import {
   APPEAL_SUBJECTS, APPEAL_DECISIONS, MIN_REASONING_LENGTH,
   validateStatement, validateReasoning, disqualifiers, allOverridable,
@@ -50,9 +53,9 @@ const router = express.Router();
 const TOKEN_REFUSAL = { error: 'This appeal link does not work any more.', code: 'appeal_link_invalid' };
 
 /** Reads a live token row, or null. Expiry is compared as ISO-8601 UTC throughout. */
-function liveToken(token) {
+async function liveToken(token) {
   if (!token || typeof token !== 'string') return null;
-  const row = db.prepare(
+  const row = await db.prepare(
     'SELECT token, user_id, expires_at, used_at FROM appeal_tokens WHERE token = ?'
   ).get(token);
   if (!row) return null;
@@ -67,11 +70,11 @@ function liveToken(token) {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** GET /api/appeals/token/:token — what the form needs, and nothing about the person. */
-router.get('/api/appeals/token/:token', (req, res) => {
-  const row = liveToken(req.params.token);
+router.get('/api/appeals/token/:token', async (req, res) => {
+  const row = await liveToken(req.params.token);
   if (!row) return res.status(404).json(TOKEN_REFUSAL);
 
-  const user = db.prepare(
+  const user = await db.prepare(
     'SELECT account_status, suspension_reason, suspended_at FROM users WHERE id = ?'
   ).get(row.user_id);
   if (!user) return res.status(404).json(TOKEN_REFUSAL);
@@ -116,7 +119,7 @@ router.get('/api/appeals/token/:token', (req, res) => {
    * no date. Migration 015 froze these columns for exactly this reader; nothing
    * was reading them.
    */
-  const appeal = db.prepare(`
+  const appeal = await db.prepare(`
     SELECT a.id, a.status, a.decision, a.reasoning, a.created_at, a.decided_at,
            a.suspension_reason_snapshot, a.suspended_at_snapshot,
            COALESCE(u.name, a.reviewer_name_snapshot) AS reviewer_name_snapshot
@@ -162,31 +165,31 @@ router.get('/api/appeals/token/:token', (req, res) => {
 });
 
 /** POST /api/appeals/token/:token — file the appeal. Single use. */
-router.post('/api/appeals/token/:token', (req, res) => {
+router.post('/api/appeals/token/:token', async (req, res) => {
   const check = validateStatement(req.body?.statement);
   if (!check.ok) return res.status(400).json({ error: check.error, code: 'statement_invalid' });
 
-  const row = liveToken(req.params.token);
+  const row = await liveToken(req.params.token);
   if (!row || row.used_at) return res.status(404).json(TOKEN_REFUSAL);
 
-  const user = db.prepare(`
+  const user = await db.prepare(`
     SELECT id, account_status, suspension_reason, suspended_at, suspended_by
       FROM users WHERE id = ?
   `).get(row.user_id);
   if (!user || user.account_status !== 'suspended') return res.status(404).json(TOKEN_REFUSAL);
 
   const suspender = user.suspended_by
-    ? db.prepare('SELECT name FROM users WHERE id = ?').get(user.suspended_by)
+    ? await db.prepare('SELECT name FROM users WHERE id = ?').get(user.suspended_by)
     : null;
 
   const appealId = newAppealId();
   const now = new Date().toISOString();
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // Spend the token first: a statement recorded against a token that was
       // not spent is a statement that can be filed twice.
-      const spent = db.prepare(
+      const spent = await tx.prepare(
         'UPDATE appeal_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL'
       ).run(now, row.token);
       if (spent.changes !== 1) throw Object.assign(new Error('token already spent'), { spent: true });
@@ -201,7 +204,7 @@ router.post('/api/appeals/token/:token', (req, res) => {
        * rendered "Suspended By: System" over a 1970 date. Migration 015 freezes
        * these four columns; nothing can take them away again.
        */
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO appeals (
           id, user_id, report_id, subject, subject_ref, statement, status,
           suspension_reason_snapshot, suspended_at_snapshot,
@@ -215,7 +218,7 @@ router.post('/api/appeals/token/:token', (req, res) => {
         now, now
       );
 
-      recordAppealEvent(db, {
+      await recordAppealEvent(tx, {
         appealId, actorId: user.id, actorRole: 'appellant',
         action: 'submitted', toStatus: 'open',
         note: 'Filed through the emailed appeal link.',
@@ -248,7 +251,7 @@ router.post('/api/appeals/token/:token', (req, res) => {
  * `inTransaction` with no catch and answered 500. It also accepted any
  * `reportId` at all, with no check that the caller had anything to do with it.
  */
-router.post('/api/appeals', authenticateToken, (req, res) => {
+router.post('/api/appeals', authenticateToken, async (req, res) => {
   const check = validateStatement(req.body?.statement);
   if (!check.ok) return res.status(400).json({ error: check.error, code: 'statement_invalid' });
 
@@ -285,7 +288,7 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
 
   if (subject === 'organization_ban') {
     subjectRef = typeof req.body?.organizationId === 'string' ? req.body.organizationId : null;
-    const ban = subjectRef && db.prepare(`
+    const ban = subjectRef && await db.prepare(`
       SELECT id FROM organization_bans
        WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
     `).get(subjectRef, req.user.id);
@@ -303,7 +306,7 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
     subjectRef = typeof req.body?.reportId === 'string' ? req.body.reportId : null;
 
     if (subjectRef) {
-      const report = db.prepare(
+      const report = await db.prepare(
         'SELECT id, target_author_id, target_type, target_id FROM reports WHERE id = ?'
       ).get(subjectRef);
 
@@ -324,10 +327,10 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
   }
 
   /** One live appeal per person per subject. A duplicate is not new information. */
-  const existing = db.prepare(`
+  const existing = await db.prepare(`
     SELECT id FROM appeals
      WHERE user_id = ? AND status IN ('open', 'reviewing')
-       AND subject = ? AND (subject_ref IS ? OR subject_ref = ?)
+       AND subject = ? AND (${nullSafeEquals(db, 'subject_ref', '?')} OR subject_ref = ?)
      LIMIT 1
   `).get(req.user.id, subject, subjectRef, subjectRef);
   if (existing) {
@@ -379,11 +382,11 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
    * `subject_ref`, so for that case this is per-person anyway.
    */
   const windowStart = new Date(Date.now() - APPEAL_WINDOW_MS).toISOString();
-  const recent = db.prepare(`
+  const recent = await db.prepare(`
     SELECT COUNT(*) AS n, MIN(created_at) AS oldest
       FROM appeals
      WHERE user_id = ? AND created_at > ?
-       AND subject = ? AND (subject_ref IS ? OR subject_ref = ?)
+       AND subject = ? AND (${nullSafeEquals(db, 'subject_ref', '?')} OR subject_ref = ?)
   `).get(req.user.id, windowStart, subject, subjectRef, subjectRef);
 
   if (recent.n >= APPEAL_WINDOW_MAX) {
@@ -428,7 +431,7 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
    * be worse than leaving it null.
    */
   const suspensionSnapshot = subject === 'suspension'
-    ? db.prepare(`
+    ? await db.prepare(`
         SELECT u.suspension_reason, u.suspended_at, u.suspended_by,
                (SELECT name FROM users WHERE id = u.suspended_by) AS suspended_by_name
           FROM users u WHERE u.id = ?
@@ -436,8 +439,8 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
     : null;
 
   try {
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         INSERT INTO appeals (id, user_id, report_id, subject, subject_ref, statement,
                              status,
                              suspension_reason_snapshot, suspended_at_snapshot,
@@ -453,7 +456,7 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
         now, now,
       );
 
-      recordAppealEvent(db, {
+      await recordAppealEvent(tx, {
         appealId, actorId: req.user.id, actorRole: 'appellant',
         action: 'submitted', toStatus: 'open',
       });
@@ -462,7 +465,7 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
       // appeal is actually attached to a report. The column list is the one
       // migration 012 creates — see this route's header.
       if (reportId) {
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO moderation_actions (id, report_id, actor_id, action, created_at)
           VALUES (?, ?, ?, 'appealed', ?)
         `).run(`act_${crypto.randomBytes(8).toString('hex')}`, reportId, req.user.id, now);
@@ -477,12 +480,12 @@ router.post('/api/appeals', authenticateToken, (req, res) => {
 });
 
 /** GET /api/appeals/mine — including the reasons and the reviewer, which are promised. */
-router.get('/api/appeals/mine', authenticateToken, (req, res) => {
+router.get('/api/appeals/mine', authenticateToken, async (req, res) => {
   // Live reviewer name first, snapshot as the fallback — same reasoning as the
   // token route above: a reopened appeal is usually decided by somebody else.
-  const appeals = db.prepare(`
+  const appeals = await db.prepare(`
     SELECT a.id, a.subject, a.subject_ref, a.statement, a.status, a.decision, a.reasoning,
-           COALESCE(u.name, a.reviewer_name_snapshot) AS reviewerName,
+           COALESCE(u.name, a.reviewer_name_snapshot) AS "reviewerName",
            a.created_at, a.decided_at
       FROM appeals a
       LEFT JOIN users u ON u.id = a.reviewer_id
@@ -496,7 +499,7 @@ router.get('/api/appeals/mine', authenticateToken, (req, res) => {
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /** GET /api/admin/appeals — oldest first; the SLA is a promise about the oldest item. */
-router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'), (req, res) => {
+router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'), async (req, res) => {
   /**
    * LEFT JOIN, not JOIN.
    *
@@ -534,7 +537,7 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
    * spending the effort. Read from `appeal_events` rather than a column on
    * `appeals`, so there is no second piece of state to keep in step.
    */
-  const appeals = db.prepare(`
+  const appeals = await db.prepare(`
     SELECT a.id, a.user_id, a.subject, a.status, a.decision, a.created_at, a.decided_at,
            COALESCE(u.name, 'Account since deleted') AS user_name,
            (SELECT COALESCE(cu.name, 'Account since deleted')
@@ -569,7 +572,7 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
    * Ordered oldest-first for the same reason the queue is: the longest-waiting
    * one is the person who has been wrongly locked out the longest.
    */
-  const pendingRemedies = db.prepare(`
+  const pendingRemedies = await db.prepare(`
     SELECT a.id, a.user_id, a.decided_at,
            COALESCE(u.name, 'Account since deleted') AS user_name,
            u.suspension_reason
@@ -584,11 +587,13 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
   // Which of these the caller may not decide, computed once so the queue can mark
   // them rather than letting the moderator find out with a 403 after they have
   // read the case and written their reasoning.
-  const withConflicts = appeals.map(a => {
-    const full = db.prepare('SELECT * FROM appeals WHERE id = ?').get(a.id);
-    const conflicts = disqualifiers(db, req.user.id, full);
+  /* `Promise.all`, because the per-appeal lookup is async now. A bare `.map`
+     would hand the queue an array of promises, which serialises to `[{}, …]`. */
+  const withConflicts = await Promise.all(appeals.map(async (a) => {
+    const full = await db.prepare('SELECT * FROM appeals WHERE id = ?').get(a.id);
+    const conflicts = await disqualifiers(db, req.user.id, full);
     return { ...a, conflicts, canDecide: conflicts.length === 0 };
-  });
+  }));
 
   res.json({
     appeals: withConflicts,
@@ -612,8 +617,8 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
  * conflict of interest exists — would have marked an appeal as in progress for a
  * reviewer who is then refused. Claiming is now an explicit POST.
  */
-router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.review'), (req, res) => {
-  const appeal = db.prepare(`
+router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.review'), async (req, res) => {
+  const appeal = await db.prepare(`
     SELECT a.*, u.name AS user_name, u.account_status
       FROM appeals a
       LEFT JOIN users u ON a.user_id = u.id
@@ -625,14 +630,14 @@ router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.revie
   if (appeal.report_id) {
     // `reason` has not existed on `reports` since migration 012 renamed it to
     // `description`; the reviewer's context panel had been rendering blank.
-    report = db.prepare(`
+    report = await db.prepare(`
       SELECT id, category, description, status, target_type, target_body_snapshot,
              reporter_name_snapshot, created_at
         FROM reports WHERE id = ?
     `).get(appeal.report_id);
   }
 
-  const history = db.prepare(`
+  const history = await db.prepare(`
     SELECT e.action, e.from_status, e.to_status, e.note, e.created_at, e.actor_role,
            COALESCE(u.name, 'Account since deleted') AS actor_name
       FROM appeal_events e
@@ -642,7 +647,7 @@ router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.revie
 
   // Reading is deliberately allowed while conflicted — a moderator has to be
   // able to see what was said about them. Only the decision is refused.
-  const conflicts = disqualifiers(db, req.user.id, appeal);
+  const conflicts = await disqualifiers(db, req.user.id, appeal);
 
   /**
    * Reading somebody's appeal is logged, on the model the evidence route already
@@ -669,7 +674,7 @@ router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.revie
    * It is idempotent in effect — the row records an access, and an access
    * genuinely happened each time.
    */
-  recordAudit(db, {
+  await recordAudit(db, {
     adminId: req.user.id,
     action: 'APPEAL_VIEWED',
     targetUserId: appeal.user_id,
@@ -696,14 +701,14 @@ router.get('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.revie
 });
 
 /** POST /api/admin/appeals/:id/claim — take an appeal, deliberately. */
-router.post('/api/admin/appeals/:id/claim', authenticateToken, requireCap('appeal.review'), (req, res) => {
-  const appeal = db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
+router.post('/api/admin/appeals/:id/claim', authenticateToken, requireCap('appeal.review'), async (req, res) => {
+  const appeal = await db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
   if (!appeal) return res.status(404).json({ error: 'Appeal not found' });
   if (appeal.status !== 'open') {
     return res.status(409).json({ error: 'That appeal is not open.', code: 'not_open' });
   }
 
-  const conflicts = disqualifiers(db, req.user.id, appeal);
+  const conflicts = await disqualifiers(db, req.user.id, appeal);
   if (conflicts.length > 0 && !(allOverridable(conflicts) && can(req.principal, 'admin.create'))) {
     return res.status(403).json({
       error: `You cannot review this appeal because ${explainConflicts(conflicts)}.`,
@@ -712,9 +717,9 @@ router.post('/api/admin/appeals/:id/claim', authenticateToken, requireCap('appea
   }
 
   const now = new Date().toISOString();
-  inTransaction(() => {
-    db.prepare("UPDATE appeals SET status = 'reviewing', updated_at = ? WHERE id = ?").run(now, appeal.id);
-    recordAppealEvent(db, {
+  await runInTransaction(db, async (tx) => {
+    await tx.prepare("UPDATE appeals SET status = 'reviewing', updated_at = ? WHERE id = ?").run(now, appeal.id);
+    await recordAppealEvent(tx, {
       appealId: appeal.id, actorId: req.user.id, actorRole: 'reviewer',
       action: 'claimed', fromStatus: appeal.status, toStatus: 'reviewing',
     });
@@ -730,7 +735,7 @@ router.post('/api/admin/appeals/:id/claim', authenticateToken, requireCap('appea
  * super_admin asks about, so a bare `else` here would let the most privileged
  * account through the branch meant to stop it.
  */
-router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.review'), (req, res) => {
+router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.review'), async (req, res) => {
   const { decision, reasoning, overrideReason } = req.body ?? {};
 
   if (!APPEAL_DECISIONS.includes(decision)) {
@@ -742,7 +747,7 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
   const reasons = validateReasoning(reasoning);
   if (!reasons.ok) return res.status(400).json({ error: reasons.error, code: 'reasoning_required' });
 
-  const appeal = db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
+  const appeal = await db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
   if (!appeal) return res.status(404).json({ error: 'Appeal not found' });
 
   /**
@@ -759,7 +764,7 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
     });
   }
 
-  const conflicts = disqualifiers(db, req.user.id, appeal);
+  const conflicts = await disqualifiers(db, req.user.id, appeal);
   let override = null;
 
   if (conflicts.length === 0) {
@@ -788,7 +793,7 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
     });
   }
 
-  const reviewer = db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
+  const reviewer = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.user.id);
   const now = new Date().toISOString();
 
   /**
@@ -799,14 +804,34 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
    * decision — which is why that route now serves the outcome for a spent token
    * instead of 404ing the moment the appeal is over.
    */
-  const outcomeToken = db.prepare(`
+  const outcomeToken = (await db.prepare(`
     SELECT token FROM appeal_tokens
      WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1
-  `).get(appeal.user_id, now)?.token ?? null;
+  `).get(appeal.user_id, now))?.token ?? null;
 
+  let alreadyDecided = false;
   try {
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      /**
+       * Re-read the appeal under a row lock before deciding it.
+       *
+       * The `isFinal(appeal.status)` check above runs on the ambient handle,
+       * many statements before this write. Three reviewers deciding at once all
+       * passed it and all wrote: the suite saw [200, 200, 200] where the
+       * contract is one 200 and two 409s, so one appeal carried three decisions
+       * and the last writer silently won.
+       *
+       * SQLite's process-wide write queue closed that window; a connection pool
+       * opens it. Locking the row here makes the second and third transactions
+       * wait, re-read the committed status, and take the refusal the first one
+       * earned.
+       */
+      const current = await tx.prepare(
+        `SELECT status FROM appeals WHERE id = ?${forUpdate(db)}`
+      ).get(req.params.id);
+      if (!current || isFinal(current.status)) { alreadyDecided = true; return; }
+
+      await tx.prepare(`
         UPDATE appeals
            SET status = 'resolved', decision = ?, reasoning = ?, reviewer_id = ?,
                reviewer_name_snapshot = COALESCE(reviewer_name_snapshot, ?),
@@ -814,7 +839,7 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
          WHERE id = ?
       `).run(decision, reasons.value, req.user.id, reviewer?.name ?? null, now, now, appeal.id);
 
-      recordAppealEvent(db, {
+      await recordAppealEvent(tx, {
         appealId: appeal.id, actorId: req.user.id, actorRole: 'reviewer',
         action: 'decided', fromStatus: appeal.status, toStatus: 'resolved',
         note: override
@@ -822,7 +847,7 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
           : `${decision}: ${reasons.value}`,
       });
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'APPEAL_REVIEWED',
         targetUserId: appeal.user_id,
@@ -847,11 +872,11 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
        * `content_removal` appeal has no suspension behind it at all, and a
        * suspension may already have been lifted while the appeal was open.
        */
-      const stillSuspended = db.prepare(
+      const stillSuspended = await tx.prepare(
         "SELECT 1 AS s FROM users WHERE id = ? AND account_status = 'suspended'"
       ).get(appeal.user_id) != null;
 
-      notificationService.dispatch(
+      await notificationService.dispatch(
         decision === 'reversed' ? 'APPEAL_DECISION_REVERSED' : 'APPEAL_DECISION_STANDS',
         {
           reasoning: reasons.value,
@@ -865,6 +890,16 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
   } catch (err) {
     console.error('Failed to decide appeal:', err);
     return res.status(500).json({ error: 'We could not record that decision. Please try again.' });
+  }
+
+  /* Refused inside the transaction, answered outside it — the same shape the
+     accept path uses, because returning from the callback would commit a no-op
+     rather than send a response. */
+  if (alreadyDecided) {
+    return res.status(409).json({
+      error: 'This appeal has already been decided. Reopen it if the decision needs to change.',
+      code: 'already_decided',
+    });
   }
 
   /**
@@ -896,11 +931,11 @@ router.patch('/api/admin/appeals/:id', authenticateToken, requireCap('appeal.rev
  * costs you the decision, which is the right incentive, because reopen is
  * otherwise the lever for relitigating an outcome you disliked.
  */
-router.post('/api/admin/appeals/:id/reopen', authenticateToken, requireCap('appeal.review'), (req, res) => {
+router.post('/api/admin/appeals/:id/reopen', authenticateToken, requireCap('appeal.review'), async (req, res) => {
   const why = validateReasoning(req.body?.reason);
   if (!why.ok) return res.status(400).json({ error: why.error, code: 'reason_required' });
 
-  const appeal = db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
+  const appeal = await db.prepare('SELECT * FROM appeals WHERE id = ?').get(req.params.id);
   if (!appeal) return res.status(404).json({ error: 'Appeal not found' });
   if (!isFinal(appeal.status)) {
     return res.status(409).json({ error: 'That appeal is not decided.', code: 'not_decided' });
@@ -908,27 +943,27 @@ router.post('/api/admin/appeals/:id/reopen', authenticateToken, requireCap('appe
 
   const now = new Date().toISOString();
   try {
-    inTransaction(() => {
-      db.prepare("UPDATE appeals SET status = 'reviewing', updated_at = ? WHERE id = ?")
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare("UPDATE appeals SET status = 'reviewing', updated_at = ? WHERE id = ?")
         .run(now, appeal.id);
 
-      recordAppealEvent(db, {
+      await recordAppealEvent(tx, {
         appealId: appeal.id, actorId: req.user.id, actorRole: 'reviewer',
         action: 'reopened', fromStatus: appeal.status, toStatus: 'reviewing', note: why.value,
       });
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id, action: 'APPEAL_REOPENED', targetUserId: appeal.user_id,
         details: `Appeal ${appeal.id} reopened: ${why.value}`,
       });
 
       // An appeal that silently returns to 'reviewing' after the appellant was
       // told the outcome is worse than never telling them.
-      const token = db.prepare(`
+      const token = (await tx.prepare(`
         SELECT token FROM appeal_tokens
          WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1
-      `).get(appeal.user_id, now)?.token ?? null;
-      notificationService.dispatch('APPEAL_REOPENED', { reason: why.value, token }, appeal.user_id);
+      `).get(appeal.user_id, now))?.token ?? null;
+      await notificationService.dispatch('APPEAL_REOPENED', { reason: why.value, token }, appeal.user_id);
     });
   } catch (err) {
     console.error('Failed to reopen appeal:', err);

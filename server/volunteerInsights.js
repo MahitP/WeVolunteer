@@ -121,14 +121,14 @@ export function buildStreak(months, now) {
  * Driven by `idx_attendance_user(user_id, present)` with primary-key lookups
  * into `slots` and `events` — no new index, no scan.
  */
-export function attendanceMonths(db, userId) {
-  return db.prepare(`
-    SELECT DISTINCT strftime('%Y-%m', s.end_datetime) AS month
+export async function attendanceMonths(db, userId) {
+  return (await db.prepare(`
+    SELECT DISTINCT substr(s.end_datetime, 1, 7) AS month
     FROM attendance at
     JOIN slots  s ON s.id = at.slot_id
     JOIN events e ON e.id = at.event_id
     WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
-  `).all(userId).map(r => r.month).filter(Boolean);
+  `).all(userId)).map(r => r.month).filter(Boolean);
 }
 
 /* ── The figures ──────────────────────────────────────────────────────────── */
@@ -148,8 +148,8 @@ export function attendanceMonths(db, userId) {
  * So both callers now derive it here. `routes.volunteerInsights.test.js` asserts
  * the two agree, because that is the failure this exists to prevent.
  */
-export function milestoneInputs(db, userId) {
-  const row = db.prepare(`
+export async function milestoneInputs(db, userId) {
+  const row = await db.prepare(`
     SELECT COALESCE(SUM(hours_awarded), 0) AS hours,
            COUNT(DISTINCT event_id) AS events,
            COUNT(*) AS shifts
@@ -174,16 +174,16 @@ export function milestoneInputs(db, userId) {
  * It also makes `highlightLast` mean what it says. It highlighted "the most
  * recent month with any activity"; now the last column is always this month.
  */
-export function monthlyHours(db, userId, { now = new Date(), months = 6 } = {}) {
+export async function monthlyHours(db, userId, { now = new Date(), months = 6 } = {}) {
   const keys = monthKeys(now, months);
 
-  const rows = db.prepare(`
-    SELECT strftime('%Y-%m', s.end_datetime) AS month,
+  const rows = await db.prepare(`
+    SELECT substr(s.end_datetime, 1, 7) AS month,
            SUM(a.hours_awarded) AS hours
     FROM attendance a
     JOIN slots s ON a.slot_id = s.id
     WHERE a.user_id = ? AND a.present = 1
-      AND strftime('%Y-%m', s.end_datetime) >= ?
+      AND substr(s.end_datetime, 1, 7) >= ?
     GROUP BY month
   `).all(userId, keys[0]);
 
@@ -192,23 +192,23 @@ export function monthlyHours(db, userId, { now = new Date(), months = 6 } = {}) 
 }
 
 /** The first credited shift's end, the mirror of `lastVolunteeredAt`. */
-export function firstVolunteeredAt(db, userId) {
-  return db.prepare(`
+export async function firstVolunteeredAt(db, userId) {
+  return (await db.prepare(`
     SELECT MIN(s.end_datetime) AS t
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
     WHERE at.user_id = ? AND at.present = 1
-  `).get(userId)?.t ?? null;
+  `).get(userId))?.t ?? null;
 }
 
 /** How many of the category enum's values this volunteer has served in. */
-export function kindsOfService(db, userId) {
-  return db.prepare(`
+export async function kindsOfService(db, userId) {
+  return (await db.prepare(`
     SELECT COUNT(DISTINCT e.category) AS n
     FROM attendance a
     JOIN events e ON e.id = a.event_id
     WHERE a.user_id = ? AND a.present = 1
-  `).get(userId)?.n ?? 0;
+  `).get(userId))?.n ?? 0;
 }
 
 /**
@@ -220,15 +220,15 @@ export function kindsOfService(db, userId) {
  * applications on cancelled events as upcoming, which is a commitment to
  * something that is not happening.
  */
-export function upcomingCount(db, userId, { now = new Date().toISOString() } = {}) {
-  return db.prepare(`
+export async function upcomingCount(db, userId, { now = new Date().toISOString() } = {}) {
+  return (await db.prepare(`
     SELECT COUNT(*) AS c
     FROM applications a
     JOIN slots  s ON s.id = a.slot_id
     JOIN events e ON e.id = a.event_id
     WHERE a.user_id = ? AND a.status = 'accepted'
       AND s.end_datetime > ? AND e.status <> 'cancelled'
-  `).get(userId, now)?.c ?? 0;
+  `).get(userId, now))?.c ?? 0;
 }
 
 /**
@@ -236,13 +236,13 @@ export function upcomingCount(db, userId, { now = new Date().toISOString() } = {
  *
  * Eight indexed single-user queries, no scans, no new indexes.
  */
-export function volunteerInsights(db, userId, { now = new Date(), months = 6 } = {}) {
+export async function volunteerInsights(db, userId, { now = new Date(), months = 6 } = {}) {
   const nowIso = new Date(now).toISOString();
-  const stats = volunteerStats(db, userId, { now: nowIso });
-  const inputs = milestoneInputs(db, userId);
+  const stats = await volunteerStats(db, userId, { now: nowIso });
+  const inputs = await milestoneInputs(db, userId);
 
   return {
-    monthlyHours: monthlyHours(db, userId, { now, months }),
+    monthlyHours: await monthlyHours(db, userId, { now, months }),
     record: {
       hoursCredited: stats.hoursCredited,
       eventsSignedUp: stats.eventsSignedUp,
@@ -250,13 +250,13 @@ export function volunteerInsights(db, userId, { now = new Date(), months = 6 } =
       eventsAbsent: stats.eventsAbsent,
       eventsAwaitingRecord: stats.eventsAwaitingRecord,
       lastVolunteeredAt: stats.lastVolunteeredAt,
-      firstVolunteeredAt: firstVolunteeredAt(db, userId),
-      kindsOfService: kindsOfService(db, userId),
+      firstVolunteeredAt: await firstVolunteeredAt(db, userId),
+      kindsOfService: await kindsOfService(db, userId),
       shiftsWorked: inputs.shifts,
     },
     milestones: buildMilestones(inputs.hours, inputs.events),
-    streak: buildStreak(attendanceMonths(db, userId), now),
-    upcomingCount: upcomingCount(db, userId, { now: nowIso }),
+    streak: buildStreak(await attendanceMonths(db, userId), now),
+    upcomingCount: await upcomingCount(db, userId, { now: nowIso }),
     serviceHourGoal: SERVICE_HOUR_GOAL,
   };
 }

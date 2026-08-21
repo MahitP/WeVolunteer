@@ -101,17 +101,17 @@ describe('liftIfExpired', () => {
     };
   };
 
-  it('writes nothing when the suspension still applies', () => {
+  it('writes nothing when the suspension still applies', async () => {
     for (const until of [null, iso(60_000), 'unreadable']) {
       const db = fakeDb();
-      expect(liftIfExpired(db, row({ suspended_until: until }), NOW)).toBe(false);
+      expect(await liftIfExpired(db, row({ suspended_until: until }), NOW)).toBe(false);
       expect(db.calls.length, String(until)).toBe(0);
     }
   });
 
-  it('lifts an expired suspension exactly once', () => {
+  it('lifts an expired suspension exactly once', async () => {
     const db = fakeDb();
-    expect(liftIfExpired(db, row({ suspended_until: iso(-1) }), NOW)).toBe(true);
+    expect(await liftIfExpired(db, row({ suspended_until: iso(-1) }), NOW)).toBe(true);
     expect(db.calls).toEqual([[NOW.toISOString(), 'u_1']]);
   });
 });

@@ -74,11 +74,11 @@ function unknowablePasswordHash() {
 }
 
 /** A username that cannot collide with a person's, derived from the address. */
-function usernameFor(db, email) {
+async function usernameFor(db, email) {
   const base = `owner_${email.split('@')[0]}`.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
   let candidate = base;
   let n = 1;
-  while (db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(candidate)) {
+  while (await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(candidate)) {
     candidate = `${base}${n++}`;
   }
   return candidate;
@@ -99,8 +99,8 @@ async function main() {
 
   /* `openPrivilegedDb` prints the resolved path itself — this script used to do it
      separately, which is where the duplicate came from. */
-  const { db } = openPrivilegedDb('bin/bootstrap-owners.mjs');
-  assertSystemActor(db);
+  const { db } = await openPrivilegedDb('bin/bootstrap-owners.mjs');
+  await assertSystemActor(db);
 
   console.log('');
   console.log('About to grant PLATFORM OWNERSHIP — full, unrestricted control over');
@@ -117,16 +117,16 @@ async function main() {
   const now = new Date().toISOString();
 
   for (const email of emails) {
-    const existing = db.prepare('SELECT id, role, account_status FROM users WHERE email = ? COLLATE NOCASE').get(email);
+    const existing = await db.prepare('SELECT id, role, account_status FROM users WHERE email = ? COLLATE NOCASE').get(email);
 
-    db.exec('BEGIN');
+    await db.exec('BEGIN');
     try {
       let userId;
       let what;
 
       if (existing) {
         if (existing.role === 'super_admin') {
-          db.exec('ROLLBACK');
+          await db.exec('ROLLBACK');
           console.log(`• ${email} — already an owner, unchanged.`);
           continue;
         }
@@ -135,7 +135,7 @@ async function main() {
         /* An existing account keeps its password. Somebody already signs in with
            it, and replacing their credential during a promotion would lock them
            out of the account being promoted. */
-        db.prepare(`
+        await db.prepare(`
           UPDATE users
              SET role = 'super_admin',
                  verified = 1,
@@ -149,21 +149,21 @@ async function main() {
       } else {
         userId = `user-${crypto.randomUUID()}`;
         what = 'created';
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO users (
             id, name, email, username, password_hash, grade, role, verified,
             avatar, bio, school, skills, email_verified, account_status,
             leaderboard_opt_in, email_opt_out, profile_visibility, created_at, token_version
           ) VALUES (?, ?, ?, ?, ?, ?, 'super_admin', 1, ?, ?, ?, ?, 1, 'active', 0, 0, 'private', ?, 0)
         `).run(
-          userId, 'Platform Owner', email, usernameFor(db, email),
+          userId, 'Platform Owner', email, await usernameFor(db, email),
           unknowablePasswordHash(), 'N/A',
           '👑', 'Platform owner.', 'WeVolunteer', JSON.stringify([]),
           now
         );
       }
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.OWNER_GRANTED,
         targetUserId: userId,
         command: 'bin/bootstrap-owners.mjs',
@@ -171,10 +171,10 @@ async function main() {
         metadata: { subject: email },
       });
 
-      db.exec('COMMIT');
+      await db.exec('COMMIT');
       console.log(`• ${email} — ${what}.`);
     } catch (err) {
-      db.exec('ROLLBACK');
+      await db.exec('ROLLBACK');
       console.error(`• ${email} — FAILED, nothing changed for this account:`, err.message);
       process.exitCode = 1;
     }
@@ -193,4 +193,8 @@ async function main() {
   console.log('');
   console.log('Rotate owner passwords on a schedule. An owner account is the only');
   console.log('one on this platform that cannot be locked out by anybody else.');
+  /* Awaited: on PostgreSQL `close()` returns a promise, and exiting before it
+     settles abandons the pool mid-shutdown. The process ends on its own once
+     the pool is closed and no handles remain. */
+  await db.close?.();
 }

@@ -57,10 +57,33 @@ function sourceFiles(dir) {
 /**
  * Action literals passed to an audit writer.
  *
- * Matches `action: 'X'` rather than the whole `recordAudit(` call, because the
- * argument is built as an object literal at every call site and the object is
- * sometimes assembled a line or two above the call. Matching the property is
- * both simpler and harder to evade by accident.
+ * Matches the `action:` property rather than the whole `recordAudit(` call,
+ * because the argument is built as an object literal at every call site and the
+ * object is sometimes assembled a line or two above the call. Matching the
+ * property is both simpler and harder to evade by accident.
+ *
+ * ── Why the value is scanned rather than matched ──
+ *
+ * This used to require a quote sitting *directly* after `action:`, which meant a
+ * call site that picks between two names could not be seen at all:
+ *
+ *     action: mode === 'ban' ? 'ORGANIZATION_BANNED' : 'ORGANIZATION_MEMBERSHIP_REMOVED',
+ *
+ * Six actions were shipping unlabelled behind that shape when it was found —
+ * four from the organization moderation work, and `BADGE_DEFINED` /
+ * `BADGE_DEFINITION_UPDATED`, which had been invisible to this guard since
+ * `badgeRoutes.js` was written. The Audit Explorer rendered all six in raw
+ * SCREAMING_SNAKE while this test reported full coverage, which is the specific
+ * failure the file's header says the guard exists to prevent — so the guard was
+ * not merely incomplete, it was asserting something false.
+ *
+ * The fix is to take everything up to the end of the line and pull every
+ * SCREAMING_SNAKE string literal out of it. Deliberately over-inclusive: a
+ * conditional contributes both branches, and a non-action constant that happens
+ * to sit on an `action:` line is swept in too. The cost of a false positive is
+ * that somebody writes one label that was not strictly needed. The cost of a
+ * false negative is the bug above, silently. Line-bounded so a multi-line object
+ * cannot bleed unrelated literals in from below.
  */
 function declaredActions() {
   const found = new Map();   // action -> first file that writes it
@@ -68,8 +91,10 @@ function declaredActions() {
 
   for (const file of files) {
     const src = fs.readFileSync(file, 'utf8');
-    for (const m of src.matchAll(/action:\s*['"`]([A-Z][A-Z0-9_]{2,})['"`]/g)) {
-      if (!found.has(m[1])) found.set(m[1], path.relative(path.resolve(__dirname, '..'), file));
+    for (const m of src.matchAll(/action:([^\n]*)/g)) {
+      for (const lit of m[1].matchAll(/['"`]([A-Z][A-Z0-9_]{2,})['"`]/g)) {
+        if (!found.has(lit[1])) found.set(lit[1], path.relative(path.resolve(__dirname, '..'), file));
+      }
     }
     /* The CLI scripts route their actions through a frozen constant rather than a
        literal, precisely so the four commands cannot disagree about spelling.

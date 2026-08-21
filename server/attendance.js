@@ -195,10 +195,10 @@ export const slotHasStarted = (slot, now) => {
 };
 
 /** Volunteers whose hours would be destroyed by removing these slots. */
-export function attendanceOnSlots(db, slotIds) {
+export async function attendanceOnSlots(db, slotIds) {
   if (!slotIds.length) return [];
   const placeholders = slotIds.map(() => '?').join(',');
-  return db.prepare(`
+  return await db.prepare(`
     SELECT a.slot_id, a.user_id, a.present, a.hours_awarded,
            u.name AS user_name, s.name AS slot_name
     FROM attendance a
@@ -208,8 +208,8 @@ export function attendanceOnSlots(db, slotIds) {
   `).all(...slotIds);
 }
 
-export function eventAttendanceCount(db, eventId) {
-  return db.prepare('SELECT COUNT(*) AS c FROM attendance WHERE event_id = ?').get(eventId).c;
+export async function eventAttendanceCount(db, eventId) {
+  return (await db.prepare('SELECT COUNT(*) AS c FROM attendance WHERE event_id = ?').get(eventId)).c;
 }
 
 /**
@@ -224,8 +224,8 @@ export function eventAttendanceCount(db, eventId) {
  * application has an attendance record. An event with no slots, or no accepted
  * volunteers, is never auto-completed — there is nothing to have finished.
  */
-export function computeEventCompletion(db, eventId, now) {
-  const slots = db.prepare('SELECT id, end_datetime FROM slots WHERE event_id = ?').all(eventId);
+export async function computeEventCompletion(db, eventId, now) {
+  const slots = await db.prepare('SELECT id, end_datetime FROM slots WHERE event_id = ?').all(eventId);
   if (slots.length === 0) return { complete: false, reason: 'no_slots' };
 
   /* `!== true` rather than `!`: a slot whose end time cannot be read is not
@@ -236,7 +236,7 @@ export function computeEventCompletion(db, eventId, now) {
     return { complete: false, reason: 'shifts_remaining', remaining: unfinished.length };
   }
 
-  const outstanding = db.prepare(`
+  const outstanding = (await db.prepare(`
     SELECT COUNT(*) AS c
     FROM applications ap
     WHERE ap.event_id = ? AND ap.status = 'accepted'
@@ -244,15 +244,15 @@ export function computeEventCompletion(db, eventId, now) {
         SELECT 1 FROM attendance at
         WHERE at.slot_id = ap.slot_id AND at.user_id = ap.user_id
       )
-  `).get(eventId).c;
+  `).get(eventId)).c;
 
   if (outstanding > 0) {
     return { complete: false, reason: 'attendance_outstanding', outstanding };
   }
 
-  const total = db.prepare(
+  const total = (await db.prepare(
     "SELECT COUNT(*) AS c FROM applications WHERE event_id = ? AND status = 'accepted'"
-  ).get(eventId).c;
+  ).get(eventId)).c;
   if (total === 0) return { complete: false, reason: 'no_volunteers' };
 
   return { complete: true };
@@ -290,10 +290,10 @@ export const CHECKIN_OPENS_BEFORE_MS = 2 * 60 * 60 * 1000;
  * An event with no slots at all reports open: there is no time to be early
  * relative to, and `recordCheckins` refuses every application anyway.
  */
-export function checkinWindowState(db, event, now) {
-  const earliest = db.prepare(
+export async function checkinWindowState(db, event, now) {
+  const earliest = (await db.prepare(
     'SELECT MIN(start_datetime) AS start FROM slots WHERE event_id = ?'
-  ).get(event.id)?.start;
+  ).get(event.id))?.start;
 
   if (!earliest) return { open: true, opensAt: null };
 
@@ -310,7 +310,7 @@ export function checkinWindowState(db, event, now) {
  * Records check-in marks. Never touches `attendance`, never credits anything,
  * never writes to the ledger — nothing here changes anyone's hours.
  */
-export function recordCheckins(db, { event, checkinMap, actor, now, method = 'manual' }) {
+export async function recordCheckins(db, { event, checkinMap, actor, now, method = 'manual' }) {
   /**
    * `method` records HOW the mark was taken, and defaults to 'manual' so the
    * existing route needs no change at all.
@@ -324,7 +324,7 @@ export function recordCheckins(db, { event, checkinMap, actor, now, method = 'ma
     throw new Error(`recordCheckins: unknown method '${method}'`);
   }
 
-  const upsert = db.prepare(`
+  const upsert = await db.prepare(`
     INSERT INTO attendance_checkin (event_id, slot_id, user_id, present, marked_by, marked_at, method)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(slot_id, user_id) DO UPDATE SET
@@ -336,7 +336,7 @@ export function recordCheckins(db, { event, checkinMap, actor, now, method = 'ma
   const skipped = [];
 
   for (const [applicationId, present] of Object.entries(checkinMap || {})) {
-    const app = db.prepare(
+    const app = await db.prepare(
       'SELECT id, event_id, slot_id, user_id, status FROM applications WHERE id = ?'
     ).get(applicationId);
 
@@ -345,15 +345,15 @@ export function recordCheckins(db, { event, checkinMap, actor, now, method = 'ma
       continue;
     }
 
-    upsert.run(event.id, app.slot_id, app.user_id, present ? 1 : 0, actor.id, now, method);
+    await upsert.run(event.id, app.slot_id, app.user_id, present ? 1 : 0, actor.id, now, method);
     marked++;
   }
 
   return { marked, skipped };
 }
 
-export function getCheckins(db, eventId) {
-  return db.prepare('SELECT * FROM attendance_checkin WHERE event_id = ?').all(eventId);
+export async function getCheckins(db, eventId) {
+  return await db.prepare('SELECT * FROM attendance_checkin WHERE event_id = ?').all(eventId);
 }
 
 /**
@@ -365,7 +365,7 @@ export function getCheckins(db, eventId) {
  *
  * Caller is responsible for wrapping this in a transaction.
  */
-export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason, actor, now }) {
+export async function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason, actor, now }) {
   const entries = Object.entries(attendanceMap || {});
   const planned = [];
   const skipped = [];
@@ -390,7 +390,7 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
   for (const [applicationId, rawPresent] of entries) {
     const present = rawPresent ? 1 : 0;
 
-    const app = db.prepare(`
+    const app = await db.prepare(`
       SELECT ap.id, ap.event_id, ap.slot_id, ap.user_id, ap.status,
              u.name AS user_name, s.name AS slot_name,
              s.start_datetime, s.end_datetime
@@ -405,7 +405,7 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
       continue;
     }
 
-    const prior = db.prepare(
+    const prior = await db.prepare(
       'SELECT present, hours_awarded FROM attendance WHERE slot_id = ? AND user_id = ?'
     ).get(app.slot_id, app.user_id);
 
@@ -651,7 +651,7 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
     };
   }
 
-  const upsert = db.prepare(`
+  const upsert = await db.prepare(`
     INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(slot_id, user_id) DO UPDATE SET
@@ -662,7 +662,7 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
   const revoked = [];
 
   for (const p of planned) {
-    upsert.run(event.id, p.app.slot_id, p.app.user_id, p.present, p.hours);
+    await upsert.run(event.id, p.app.slot_id, p.app.user_id, p.present, p.hours);
 
     const wasCredited = p.prior ? p.prior.present === 1 : false;
     const isCredited = p.present === 1;
@@ -677,7 +677,7 @@ export function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason,
       : (wasCredited && isCredited && p.hoursOverridden) ? 'adjusted'
         : 'credited';
 
-    recordHoursChange(db, {
+    await recordHoursChange(db, {
       userId: p.app.user_id,
       eventId: event.id,
       slotId: p.app.slot_id,

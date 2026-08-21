@@ -81,10 +81,10 @@ export function suspensionHasExpired(row, now = new Date()) {
  * to invalidate — and bumping again would be one more forced sign-out for
  * somebody who has just been let back in.
  */
-export function liftIfExpired(db, row, now = new Date()) {
+export async function liftIfExpired(db, row, now = new Date()) {
   if (!suspensionHasExpired(row, now)) return false;
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE users
        SET account_status = 'active',
            suspension_lifted_at = ?
@@ -107,10 +107,10 @@ export function liftIfExpired(db, row, now = new Date()) {
  * behind that rule is in `adminRoutes.js`, where `datetime('now','+30 days')`
  * wrote a zone-less string that `new Date()` then read as local time.
  */
-export function sweepExpiredSuspensions(db, { now = new Date() } = {}) {
+export async function sweepExpiredSuspensions(db, { now = new Date() } = {}) {
   const stamp = now.toISOString();
 
-  const due = db.prepare(`
+  const due = await db.prepare(`
     SELECT id, account_status, suspended_until FROM users
      WHERE account_status = 'suspended'
        AND suspended_until IS NOT NULL
@@ -122,7 +122,7 @@ export function sweepExpiredSuspensions(db, { now = new Date() } = {}) {
     // Through `liftIfExpired` rather than one bulk UPDATE, so the "has it really
     // expired" decision is made by the same predicate that guards access. A bulk
     // statement would be a second, subtly different definition of expired.
-    if (liftIfExpired(db, row, now)) lifted.push(row.id);
+    if (await liftIfExpired(db, row, now)) lifted.push(row.id);
   }
   return lifted;
 }

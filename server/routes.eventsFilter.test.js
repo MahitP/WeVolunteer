@@ -61,8 +61,7 @@ describe('text search', () => {
   });
 
   it('is case-insensitive', async () => {
-    expect(await totalOf('scope=listable&limit=5&q=tutoring'))
-      .toBe(await totalOf('scope=listable&limit=5&q=TUTORING'));
+    expect(await totalOf('scope=listable&limit=5&q=tutoring')).toBe(await totalOf('scope=listable&limit=5&q=TUTORING'));
   });
 
   it('matches the description as well as the title', async () => {
@@ -195,8 +194,8 @@ describe('distance', () => {
     const { db } = await import('./db.js');
     const list = (await q('scope=listable&limit=2')).body.events;
     // Two points roughly 8.7 miles apart.
-    db.prepare('UPDATE events SET latitude = ?, longitude = ? WHERE id = ?').run(40.39, -74.52, list[0].id);
-    db.prepare('UPDATE events SET latitude = ?, longitude = ? WHERE id = ?').run(40.49, -74.42, list[1].id);
+    await db.prepare('UPDATE events SET latitude = ?, longitude = ? WHERE id = ?').run(40.39, -74.52, list[0].id);
+    await db.prepare('UPDATE events SET latitude = ?, longitude = ? WHERE id = ?').run(40.49, -74.42, list[1].id);
   });
 
   it('reports distance in miles', async () => {
@@ -255,14 +254,14 @@ describe('validation', () => {
     if (field) expect(res.body.field).toBe(field);
   };
 
-  it('rejects an unknown sort', () => bad('limit=5&sort=nope', 'sort'));
-  it('rejects an unknown scope', () => bad('limit=5&scope=nope', 'scope'));
-  it('rejects lat without lng', () => bad('limit=5&lat=40', 'lng'));
-  it('rejects maxDistance without coordinates', () => bad('limit=5&maxDistance=5', 'maxDistance'));
-  it('rejects distance sort without coordinates', () => bad('limit=5&sort=distance', 'sort'));
-  it('rejects an out-of-range latitude', () => bad('limit=5&lat=200&lng=0', 'lat'));
-  it('rejects a malformed date', () => bad('limit=5&from=2026/01/01', 'from'));
-  it('rejects a negative minHours', () => bad('limit=5&minHours=-1', 'minHours'));
+  it('rejects an unknown sort', async () => await bad('limit=5&sort=nope', 'sort'));
+  it('rejects an unknown scope', async () => await bad('limit=5&scope=nope', 'scope'));
+  it('rejects lat without lng', async () => await bad('limit=5&lat=40', 'lng'));
+  it('rejects maxDistance without coordinates', async () => await bad('limit=5&maxDistance=5', 'maxDistance'));
+  it('rejects distance sort without coordinates', async () => await bad('limit=5&sort=distance', 'sort'));
+  it('rejects an out-of-range latitude', async () => await bad('limit=5&lat=200&lng=0', 'lat'));
+  it('rejects a malformed date', async () => await bad('limit=5&from=2026/01/01', 'from'));
+  it('rejects a negative minHours', async () => await bad('limit=5&minHours=-1', 'minHours'));
 
   it('still requires authentication', async () => {
     const res = await fetch(`${srv.base}/api/events?limit=5&q=anything`);

@@ -21,7 +21,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
   const ORGANIZER = 'user-org-1';          // hosts event-softball
   const DEDUPE = 'awaiting-decision:event-sweep-test';
 
-  const notificationsFor = (userId, dedupeKey) => db.prepare(
+  const notificationsFor = async (userId, dedupeKey) => await db.prepare(
     'SELECT * FROM notifications WHERE user_id = ? AND dedupe_key = ?'
   ).all(userId, dedupeKey);
 
@@ -46,15 +46,15 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
   });
   afterAll(async () => { await srv.close(); });
 
-  it('notifies the organizer, once, naming how many are waiting', () => {
-    const pending = db.prepare(
+  it('notifies the organizer, once, naming how many are waiting', async () => {
+    const pending = (await db.prepare(
       "SELECT COUNT(*) c FROM applications WHERE event_id = 'event-sweep-test' AND status = 'pending'"
-    ).get().c;
+    ).get()).c;
     expect(pending).toBeGreaterThan(0);   // the situation under test really exists
 
-    runNotificationSweep();
+    await runNotificationSweep();
 
-    const sent = notificationsFor(ORGANIZER, DEDUPE);
+    const sent = await notificationsFor(ORGANIZER, DEDUPE);
     expect(sent).toHaveLength(1);
     expect(sent[0].kind).toBe('APPLICATION');
     expect(sent[0].title).toMatch(/decision needed/i);
@@ -62,26 +62,26 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     expect(sent[0].link).toBe('event:event-sweep-test');
   });
 
-  it('does not repeat on the next sweep', () => {
+  it('does not repeat on the next sweep', async () => {
     // The sweep runs every 15 minutes; without the dedupe key an organizer
     // would collect four of these an hour until they acted.
-    runNotificationSweep();
-    runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, DEDUPE)).toHaveLength(1);
+    await runNotificationSweep();
+    await runNotificationSweep();
+    expect(await notificationsFor(ORGANIZER, DEDUPE)).toHaveLength(1);
   });
 
-  it('tells the organizer, not the applicants', () => {
-    const applicants = db.prepare(
+  it('tells the organizer, not the applicants', async () => {
+    const applicants = (await db.prepare(
       "SELECT DISTINCT user_id FROM applications WHERE event_id = 'event-sweep-test' AND status = 'pending'"
-    ).all().map(r => r.user_id);
+    ).all()).map(r => r.user_id);
 
     expect(applicants.length).toBeGreaterThan(0);
     for (const userId of applicants) {
-      expect(notificationsFor(userId, DEDUPE)).toHaveLength(0);
+      expect(await notificationsFor(userId, DEDUPE)).toHaveLength(0);
     }
   });
 
-  it('ignores an event whose deadline has not passed yet', () => {
+  it('ignores an event whose deadline has not passed yet', async () => {
     const future = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
     const later = new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString();
 
@@ -96,11 +96,11 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
       VALUES ('app-future', 'user-student-1', 'event-future', 'slot-future', 'pending', '${new Date().toISOString()}');
     `);
 
-    runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(0);
+    await runNotificationSweep();
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(0);
   });
 
-  it('ignores cancelled and completed events', () => {
+  it('ignores cancelled and completed events', async () => {
     const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
     const now = new Date().toISOString();
 
@@ -116,20 +116,20 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
       `);
     }
 
-    runNotificationSweep();
+    await runNotificationSweep();
 
     // A cancelled event has nothing to staff; a completed one is already done.
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-cxl')).toHaveLength(0);
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-done')).toHaveLength(0);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-cxl')).toHaveLength(0);
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-done')).toHaveLength(0);
   });
 
-  it('fires for a closed event that still has undecided applicants', () => {
+  it('fires for a closed event that still has undecided applicants', async () => {
     // Closing sign-ups does not decide anyone. An organizer who closed the
     // event and then forgot is in exactly the situation this rule exists for.
     db.exec("UPDATE events SET status = 'closed' WHERE id = 'event-future'");
     db.exec(`UPDATE events SET application_deadline = '${new Date(Date.now() - 3600 * 1000).toISOString()}' WHERE id = 'event-future'`);
 
-    runNotificationSweep();
-    expect(notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(1);
+    await runNotificationSweep();
+    expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(1);
   });
 });

@@ -52,6 +52,7 @@ beforeAll(async () => {
   process.env.WEV_DB_PATH = dbPath;
   const mod = await import('./db.js');
   mod.initDatabase();
+  await mod.completeDatabaseInit();
   db = new DatabaseSync(dbPath);
 }, 60000);
 
@@ -95,6 +96,7 @@ describe('the reserved system-cli actor', () => {
   it('is idempotent across repeated migration runs', async () => {
     const mod = await import('./db.js');
     mod.initDatabase();
+    await mod.completeDatabaseInit();
     const count = db.prepare("SELECT COUNT(*) c FROM users WHERE id = 'system-cli'").get().c;
     expect(count).toBe(1);
   });

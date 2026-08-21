@@ -43,7 +43,7 @@ describe('GET /api/platform/owner', () => {
     srv = await startTestServer();
     ({ db } = await import('./db.js'));
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, name, username, grade, password_hash, role, account_status, created_at)
       VALUES (?, ?, ?, ?, 'Adult', 'x', 'super_admin', 'active', '2099-01-01T00:00:00.000Z')
     `).run(OWNER_ID, 'owner-under-test@example.org', 'Ada Owner', 'adaowner');
@@ -51,11 +51,11 @@ describe('GET /api/platform/owner', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  it('has an owner to talk about — the fixture the rest of this file needs', () => {
+  it('has an owner to talk about — the fixture the rest of this file needs', async () => {
     /* Guards the vacuity directly: if this account stops existing, the tests
        below stop testing and stay green, which is how they shipped the first
        time. */
-    expect(db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'super_admin' AND account_status = 'active'").get().n)
+    expect((await db.prepare("SELECT COUNT(*) n FROM users WHERE role = 'super_admin' AND account_status = 'active'").get()).n)
       .toBeGreaterThan(0);
   });
 
@@ -75,7 +75,7 @@ describe('GET /api/platform/owner', () => {
     const res = await fetchOwner();
     expect(res.body.owner, 'the fixture owner should be named').toBeTruthy();
 
-    const row = db.prepare('SELECT role, account_status FROM users WHERE username = ?')
+    const row = await db.prepare('SELECT role, account_status FROM users WHERE username = ?')
       .get(res.body.owner.username);
     expect(row?.role, 'a non-owner was presented as the owner').toBe('super_admin');
     expect(row?.account_status).toBe('active');
@@ -102,22 +102,22 @@ describe('GET /api/platform/owner', () => {
     /* An owner whose account has been closed is not who to complain to, and
        publishing their name on the front of the platform would be worse than
        publishing nobody's. */
-    const owner = db.prepare(
+    const owner = await db.prepare(
       "SELECT id, account_status FROM users WHERE role = 'super_admin' AND account_status = 'active' ORDER BY created_at ASC, id ASC LIMIT 1"
     ).get();
     if (!owner) return;
 
-    db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(owner.id);
+    await db.prepare("UPDATE users SET account_status = 'deleted' WHERE id = ?").run(owner.id);
     try {
       const res = await fetchOwner();
       const named = res.body.owner?.username;
       if (named) {
-        const row = db.prepare('SELECT id, account_status FROM users WHERE username = ?').get(named);
+        const row = await db.prepare('SELECT id, account_status FROM users WHERE username = ?').get(named);
         expect(row.account_status).toBe('active');
         expect(row.id).not.toBe(owner.id);
       }
     } finally {
-      db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(owner.id);
+      await db.prepare("UPDATE users SET account_status = 'active' WHERE id = ?").run(owner.id);
     }
   });
 

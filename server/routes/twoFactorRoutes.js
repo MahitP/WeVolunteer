@@ -4,10 +4,11 @@ import bcrypt from 'bcryptjs';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction, secondFactorRequiredFor, enabledSecondFactors } from '../utils.js';
+import { authenticateToken, secondFactorRequiredFor, enabledSecondFactors } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { requireAAL2 } from '../authz.js';
 import { spendChallenge, ChallengeNotSpent, refuseReauth } from '../reauthResponses.js';
-import { encryptSecret, decryptSecret, verifyTotp } from '../cryptoUtils.js';
+import { encryptSecret, verifyTotp } from '../cryptoUtils.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 
 const router = express.Router();
@@ -39,10 +40,10 @@ function generateRecoveryCode() {
  */
 router.post('/api/2fa/generate', authenticateToken, requireAAL2('2fa.generate'), async (req, res) => {
   try {
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.generate', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.generate', {});
 
-      const user = db.prepare('SELECT email, tfa_enabled FROM users WHERE id = ?').get(req.user.id);
+      const user = await tx.prepare('SELECT email, tfa_enabled FROM users WHERE id = ?').get(req.user.id);
 
       /**
        * Generating a new secret would overwrite a working one.
@@ -72,7 +73,7 @@ router.post('/api/2fa/generate', authenticateToken, requireAAL2('2fa.generate'),
       const otpauth = generateURI({ secret, label: user.email, issuer: 'WeVolunteer' });
       
       const encryptedSecret = encryptSecret(secret);
-      db.prepare('UPDATE users SET tfa_secret = ? WHERE id = ?').run(encryptedSecret, req.user.id);
+      await tx.prepare('UPDATE users SET tfa_secret = ? WHERE id = ?').run(encryptedSecret, req.user.id);
       
       // We resolve the QR code outside the transaction in a moment
       req.tempSecret = secret;
@@ -148,7 +149,7 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
      * the one that counts. Collapsing them into a value carried across the
      * `await` would make the authoritative check read stale state.
      */
-    const enrolling = db.prepare('SELECT tfa_secret FROM users WHERE id = ?').get(req.user.id);
+    const enrolling = await db.prepare('SELECT tfa_secret FROM users WHERE id = ?').get(req.user.id);
     if (!enrolling?.tfa_secret) {
       return res.status(400).json({ error: 'No 2FA secret found. Generate one first.' });
     }
@@ -187,9 +188,9 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
      * new codes" from "you already have codes and they still work". The email
      * route uses the same convention.
      */
-    const existingCodes = db.prepare(
+    const existingCodes = (await db.prepare(
       'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-    ).get(req.user.id).n;
+    ).get(req.user.id)).n;
 
     const recoveryCodes = existingCodes > 0
       ? null
@@ -198,23 +199,29 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
     /**
      * Hashed BEFORE the transaction opens, not inside it.
      *
-     * `inTransaction` is synchronous, so an `await` cannot go in it — which is
-     * how these became `bcrypt.hashSync` and tripped `bcryptAsync.test.js`. Ten
-     * synchronous bcrypt hashes at cost 10 is roughly a second of blocked event
-     * loop, during which every other request on the process waits; that guard's
-     * message records a measured p95 of 3.8s on unrelated endpoints under load.
+     * The transaction is async now (wave 7), so an `await` inside it is legal
+     * where it was not before — but the hashing stays out here regardless, and
+     * for a better reason than the original one.
      *
-     * Doing the expensive work first and writing the finished hashes inside the
-     * transaction keeps the write atomic and the loop free.
+     * Ten bcrypt hashes at cost 10 is roughly a second of work. Inside the
+     * transaction that second would be spent holding a write lock: on PostgreSQL
+     * a pooled client nobody else can use, on SQLite the database's write lock
+     * via `BEGIN IMMEDIATE`. Doing the expensive work first keeps the
+     * transaction as short as the writes themselves.
+     *
+     * The original note recorded why they must not be `bcrypt.hashSync` — ten
+     * synchronous hashes block the event loop for about a second, and
+     * `bcryptAsync.test.js` guards it after a measured p95 of 3.8s on unrelated
+     * endpoints under load. That reason still stands too.
      */
     const hashedCodes = recoveryCodes
       ? await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)))
       : [];
 
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.enable', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.enable', {});
 
-      const user = db.prepare('SELECT id, tfa_secret, tfa_last_counter FROM users WHERE id = ?').get(req.user.id);
+      const user = await tx.prepare('SELECT id, tfa_secret, tfa_last_counter FROM users WHERE id = ?').get(req.user.id);
       if (!user.tfa_secret) throw new Error('No 2FA secret found. Generate one first.');
 
       /* `verifyTotp` returns a real boolean. otplib's `verifySync` returns an
@@ -232,7 +239,7 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
        */
       if (!verifyTotp(token, user.tfa_secret)) throw new Error('Invalid token');
 
-      db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run(req.user.id);
+      await tx.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run(req.user.id);
 
       /**
        * Written only when this enrolment actually issued a set.
@@ -253,20 +260,21 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
        * when there is none and replaced only by `regenerate`, which asks first.
        */
       if (hashedCodes.length) {
-        db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+        await tx.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
 
         /* `datetime('now')`, single quotes. Double quotes make SQLite parse `now` as an
            IDENTIFIER, and `node:sqlite` does not enable the legacy fallback that treats
            an unresolvable identifier as a string — so this fails at runtime with
            "no such column: now". It is a latent 500 in every recovery-code path. */
-        const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
+        const insertRC = tx.prepare('INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)');
+        const rcCreatedAt = new Date().toISOString();
         for (const hash of hashedCodes) {
-          insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+          await insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash, rcCreatedAt);
         }
-        recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
+        await recordSecurityEvent(tx, req, req.user.id, '2FA_RECOVERY_GENERATED');
       }
 
-      recordSecurityEvent(db, req, req.user.id, '2FA_TOTP_ENABLED');
+      await recordSecurityEvent(tx, req, req.user.id, '2FA_TOTP_ENABLED');
     });
 
     res.json({ success: true, recoveryCodes });
@@ -286,7 +294,7 @@ router.post('/api/2fa/enable', authenticateToken, requireAAL2('2fa.enable'), asy
  * Verifies the provided token before disabling TOTP and email 2FA,
  * and purges all recovery codes.
  */
-router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (req, res) => {
+router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), async (req, res) => {
   const { token } = req.body;
   
   try {
@@ -294,10 +302,10 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
        outcomes happened — one factor removed, or two-factor switched off. */
     let twoFactorSurvives = false;
 
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.disable', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.disable', {});
 
-      const user = db.prepare(
+      const user = await tx.prepare(
         'SELECT id, tfa_secret, tfa_enabled, tfa_email_enabled, email_verified, role, tfa_last_counter FROM users WHERE id = ?'
       ).get(req.user.id);
       if (!user.tfa_enabled) throw new Error('2FA is not enabled');
@@ -361,7 +369,7 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
         /* Only the authenticator. Email 2FA stays on, so the account still has
            a second factor and the recovery set still has something to be the
            fallback FOR. */
-        db.prepare(
+        await tx.prepare(
           'UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_last_counter = NULL WHERE id = ?'
         ).run(req.user.id);
       } else {
@@ -369,13 +377,13 @@ router.post('/api/2fa/disable', authenticateToken, requireAAL2('2fa.disable'), (
            has nothing left to recover past and is destroyed with it — leaving
            ten live credentials on an account with no second factor would be a
            standing bypass of a protection the user believes they removed. */
-        db.prepare(
+        await tx.prepare(
           'UPDATE users SET tfa_enabled = 0, tfa_secret = NULL, tfa_last_counter = NULL, tfa_email_enabled = 0 WHERE id = ?'
         ).run(req.user.id);
-        db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+        await tx.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
       }
 
-      recordSecurityEvent(db, req, req.user.id, '2FA_TOTP_DISABLED');
+      await recordSecurityEvent(tx, req, req.user.id, '2FA_TOTP_DISABLED');
     });
 
     /* `twoFactorStillOn` so the screen can say what actually happened rather
@@ -419,9 +427,9 @@ router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'
      * Existing codes are left alone: silently replacing the set an authenticator
      * user already wrote down would invalidate the paper in their drawer.
      */
-    const existing = db.prepare(
+    const existing = (await db.prepare(
       'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-    ).get(req.user.id).n;
+    ).get(req.user.id)).n;
 
     const recoveryCodes = existing > 0
       ? null
@@ -432,25 +440,26 @@ router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'
       ? await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)))
       : [];
 
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.enable', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.enable', {});
 
-      const user = db.prepare('SELECT email_verified FROM users WHERE id = ?').get(req.user.id);
+      const user = await tx.prepare('SELECT email_verified FROM users WHERE id = ?').get(req.user.id);
       if (user.email_verified !== 1) {
         throw new Error('Email must be verified to enable email 2FA');
       }
 
-      db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE id = ?').run(req.user.id);
+      await tx.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE id = ?').run(req.user.id);
 
       if (hashedCodes.length) {
-        const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
+        const insertRC = tx.prepare('INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)');
+        const rcCreatedAt = new Date().toISOString();
         for (const hash of hashedCodes) {
-          insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+          await insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash, rcCreatedAt);
         }
-        recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
+        await recordSecurityEvent(tx, req, req.user.id, '2FA_RECOVERY_GENERATED');
       }
 
-      recordSecurityEvent(db, req, req.user.id, '2FA_EMAIL_ENABLED');
+      await recordSecurityEvent(tx, req, req.user.id, '2FA_EMAIL_ENABLED');
     });
 
     res.json({ success: true, recoveryCodes });
@@ -469,20 +478,20 @@ router.post('/api/2fa/email/enable', authenticateToken, requireAAL2('2fa.enable'
  * 
  * Uses the '2fa.disable' sensitive action.
  */
-router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disable'), (req, res) => {
+router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disable'), async (req, res) => {
   try {
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.disable', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.disable', {});
 
-      const user = db.prepare('SELECT tfa_enabled, role FROM users WHERE id = ?').get(req.user.id);
+      const user = await tx.prepare('SELECT tfa_enabled, role FROM users WHERE id = ?').get(req.user.id);
       
       const requires2FA = secondFactorRequiredFor(user.role);
       if (requires2FA && user.tfa_enabled !== 1) {
         throw new Error('role_requires_2fa');
       }
 
-      db.prepare('UPDATE users SET tfa_email_enabled = 0 WHERE id = ?').run(req.user.id);
-      recordSecurityEvent(db, req, req.user.id, '2FA_EMAIL_DISABLED');
+      await tx.prepare('UPDATE users SET tfa_email_enabled = 0 WHERE id = ?').run(req.user.id);
+      await recordSecurityEvent(tx, req, req.user.id, '2FA_EMAIL_DISABLED');
     });
 
     res.json({ success: true });
@@ -499,12 +508,12 @@ router.post('/api/2fa/email/disable', authenticateToken, requireAAL2('2fa.disabl
 /**
  * Check 2FA status for the current user.
  */
-router.get('/api/2fa/status', authenticateToken, (req, res) => {
+router.get('/api/2fa/status', authenticateToken, async (req, res) => {
   try {
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const countRow = db.prepare('SELECT COUNT(*) as count FROM recovery_codes WHERE user_id = ?').get(req.user.id);
+    const countRow = await db.prepare('SELECT COUNT(*) as count FROM recovery_codes WHERE user_id = ?').get(req.user.id);
 
     const totp = user.tfa_enabled === 1;
     const emailEnrolled = user.tfa_email_enabled === 1;
@@ -526,7 +535,7 @@ router.get('/api/2fa/status', authenticateToken, (req, res) => {
      * `enrolled` is the switch the account set. The client shows the first and
      * only offers the enable/disable control for the second.
      */
-    const offered = enabledSecondFactors(user);
+    const offered = await enabledSecondFactors(user);
 
     res.json({
       enabled: totp || emailEnrolled,
@@ -578,28 +587,35 @@ router.post('/api/2fa/recovery-codes/regenerate', authenticateToken, requireAAL2
     /**
      * Hashed BEFORE the transaction opens, not inside it.
      *
-     * `inTransaction` is synchronous, so an `await` cannot go in it — which is
-     * how these became `bcrypt.hashSync` and tripped `bcryptAsync.test.js`. Ten
-     * synchronous bcrypt hashes at cost 10 is roughly a second of blocked event
-     * loop, during which every other request on the process waits; that guard's
-     * message records a measured p95 of 3.8s on unrelated endpoints under load.
+     * The transaction is async now (wave 7), so an `await` inside it is legal
+     * where it was not before — but the hashing stays out here regardless, and
+     * for a better reason than the original one.
      *
-     * Doing the expensive work first and writing the finished hashes inside the
-     * transaction keeps the write atomic and the loop free.
+     * Ten bcrypt hashes at cost 10 is roughly a second of work. Inside the
+     * transaction that second would be spent holding a write lock: on PostgreSQL
+     * a pooled client nobody else can use, on SQLite the database's write lock
+     * via `BEGIN IMMEDIATE`. Doing the expensive work first keeps the
+     * transaction as short as the writes themselves.
+     *
+     * The original note recorded why they must not be `bcrypt.hashSync` — ten
+     * synchronous hashes block the event loop for about a second, and
+     * `bcryptAsync.test.js` guards it after a measured p95 of 3.8s on unrelated
+     * endpoints under load. That reason still stands too.
      */
     const hashedCodes = await Promise.all(recoveryCodes.map((code) => bcrypt.hash(code, 10)));
 
-    inTransaction(() => {
-      spendChallenge(db, req, '2fa.recovery.regenerate', {});
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, '2fa.recovery.regenerate', {});
 
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
+      await tx.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(req.user.id);
       
-      const insertRC = db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))");
+      const insertRC = tx.prepare('INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, ?)');
+        const rcCreatedAt = new Date().toISOString();
       for (const hash of hashedCodes) {
-        insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash);
+        await insertRC.run(`rc-${crypto.randomUUID()}`, req.user.id, hash, rcCreatedAt);
       }
 
-      recordSecurityEvent(db, req, req.user.id, '2FA_RECOVERY_GENERATED');
+      await recordSecurityEvent(tx, req, req.user.id, '2FA_RECOVERY_GENERATED');
     });
 
     res.json({ success: true, recoveryCodes });

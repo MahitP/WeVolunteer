@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 import { installMailbox } from './testMailbox.js';
 import { hashToken } from './tokenDigest.js';
@@ -148,6 +147,56 @@ describe('auth: password reset', () => {
     expect(relogin.status).toBe(200);
   });
 
+  /**
+   * An unclaimed OWNER can claim their account, which is Q-1 in
+   * `docs/questions-for-owner.md` and the one item there marked launch-blocking.
+   *
+   * Both bootstrap owners hold a bcrypt hash of a discarded random value, so the
+   * only way in is "Forgot password". Q-1's own wording names the risk: keeping a
+   * master account unclaimed means "its reset path is then untested when you need
+   * it". It was untested — the reset suite covers a student, and the demo seed
+   * contains no `super_admin` at all, so no test had ever driven this for the one
+   * role that cannot be recovered by anybody else.
+   *
+   * Two things have to hold, and the second is the one that could strand an owner:
+   *
+   *   1. the reset itself works for a `super_admin`;
+   *   2. signing in afterwards reaches the second-factor ENROLMENT wall rather
+   *      than a refusal. `REQUIRE_ADMIN_2FA` defaults on, and an owner who has
+   *      never enrolled has no authenticator to present — so a policy that
+   *      demanded one instead of offering enrolment would lock the platform's
+   *      last account out permanently, with no other owner able to help.
+   */
+  it('lets an unclaimed owner claim the account and reach 2FA enrolment', async () => {
+    const { db } = await import('./db.js');
+    const email = 'priya.patel@example.com';
+
+    /* Shaped like a bootstrap owner: super_admin, verified, and holding a
+       password nobody knows. */
+    await db.prepare(
+      "UPDATE users SET role = 'super_admin', password_hash = ?, tfa_enabled = 0 WHERE email = ?"
+    ).run('$2a$10$0000000000000000000000000000000000000000000000000000', email);
+
+    await forgot(email);
+    const token = await tokenFor(email);
+    expect(token, 'no reset mail reached an owner address').toBeTruthy();
+
+    const reset = await srv.call('POST', '/api/auth/reset-password', { token, password: 'OwnerClaim1!x' });
+    expect(reset.status, 'an owner could not complete a password reset').toBe(200);
+
+    const relogin = await srv.call('POST', '/api/auth/login', { email, password: 'OwnerClaim1!x' });
+    expect(
+      relogin.status,
+      'the owner reset their password and still could not sign in — this is the '
+      + 'state with no way out, because no other account can rescue a super_admin',
+    ).toBe(200);
+
+    /* Enrolment is REQUIRED and OFFERED, not demanded up front. Whichever shape
+       the response uses, it must not be a refusal. */
+    const body = JSON.stringify(relogin.body);
+    expect(body, 'sign-in succeeded but said nothing about the second factor').toMatch(/tfa|twoFactor|2fa/i);
+  });
+
   it('burns the token so it cannot be replayed', async () => {
     await forgot('priya.patel@example.com');
     const token = await tokenFor('priya.patel@example.com');
@@ -165,10 +214,9 @@ describe('auth: password reset', () => {
 
     // The row is addressed by the digest of the token, because that is all the
     // table holds now — the same lookup the route itself performs.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token_hash = ?')
+    const { db } = await import('./db.js');
+    await db.prepare('UPDATE password_reset_tokens SET expires_at = ? WHERE token_hash = ?')
       .run('2020-01-01T00:00:00.000Z', hashToken(token));
-    db.close();
 
     const res = await srv.call('POST', '/api/auth/reset-password', { token, password: 'TooLatePass1' });
     expect(res.status).toBe(400);

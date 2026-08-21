@@ -5,7 +5,8 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { db } from '../db.js';
 import { JWT_SECRET, COOKIE_NAME } from '../config.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { recordError, hashUserId } from '../errorReporter.js';
@@ -117,7 +118,7 @@ function optionalReporter(req) {
  * server-side before storage. `message`, `stack` and `kind` go through
  * redaction. `context` is filtered to an allowlist.
  */
-router.post('/api/errors/report', (req, res) => {
+router.post('/api/errors/report', async (req, res) => {
   // Answer first, unconditionally. Nothing below can change what the client
   // receives, which is what stops a reporting failure becoming a client-visible
   // failure on a path with no session to recover.
@@ -127,7 +128,7 @@ router.post('/api/errors/report', (req, res) => {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const { userHash, role } = optionalReporter(req);
 
-    recordError(db, {
+    await recordError(db, {
       // Assigned, never read from the body. A report claiming to be a server
       // error would otherwise escape the client ceiling entirely.
       source: 'client',
@@ -218,7 +219,7 @@ const oneOf = (raw, allowed) => (typeof raw === 'string' && allowed.includes(raw
 
 /* 1 ── GET /api/errors ─────────────────────────────────────────────────── */
 
-router.get('/api/errors', authenticateToken, requireCap('error.read'), (req, res) => {
+router.get('/api/errors', authenticateToken, requireCap('error.read'), async (req, res) => {
   try {
     const limit = boundedInt(req.query.limit, { fallback: DEFAULT_LIMIT, min: 1, max: MAX_LIMIT });
     const offset = boundedInt(req.query.offset, { fallback: 0, min: 0, max: MAX_OFFSET });
@@ -231,12 +232,12 @@ router.get('/api/errors', authenticateToken, requireCap('error.read'), (req, res
     if (source) { where.push('source = ?'); params.push(source); }
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-    const { total } = db.prepare(`SELECT COUNT(*) AS total FROM error_groups ${clause}`).get(...params);
+    const { total } = await db.prepare(`SELECT COUNT(*) AS total FROM error_groups ${clause}`).get(...params);
 
     // last_seen_at DESC is what the triage index is built for, and the order the
     // dashboard reads in: the thing that broke most recently is the thing most
     // likely to still be broken.
-    const groups = db.prepare(`
+    const groups = await db.prepare(`
       SELECT * FROM error_groups ${clause}
        ORDER BY last_seen_at DESC, fingerprint ASC
        LIMIT ? OFFSET ?
@@ -264,7 +265,7 @@ router.get('/api/errors', authenticateToken, requireCap('error.read'), (req, res
  * The rule for anything added later: every literal path goes above every
  * parameterised one that could swallow it.
  */
-router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (req, res) => {
+router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), async (req, res) => {
   try {
     /**
      * Occurrences by day come from EVENTS, not groups.
@@ -276,7 +277,7 @@ router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (
      * retained evidence — not an all-time total, and the dashboard must not
      * imply otherwise.
      */
-    const byDay = db.prepare(`
+    const byDay = await db.prepare(`
       SELECT substr(occurred_at, 1, 10) AS day, COUNT(*) AS count
         FROM error_events
        GROUP BY day
@@ -285,7 +286,7 @@ router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (
 
     // By source, from GROUPS: how many distinct problems, and how many times
     // they have happened in total — the counter survives its evidence.
-    const bySource = db.prepare(`
+    const bySource = await db.prepare(`
       SELECT source,
              COUNT(*) AS groups,
              COALESCE(SUM(occurrences), 0) AS occurrences
@@ -294,7 +295,7 @@ router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (
        ORDER BY source ASC
     `).all();
 
-    const byStatus = db.prepare(`
+    const byStatus = await db.prepare(`
       SELECT status, COUNT(*) AS groups FROM error_groups GROUP BY status ORDER BY status ASC
     `).all();
 
@@ -307,9 +308,9 @@ router.get('/api/errors/summary', authenticateToken, requireCap('error.read'), (
 
 /* 3 ── GET /api/errors/:fingerprint ────────────────────────────────────── */
 
-router.get('/api/errors/:fingerprint', authenticateToken, requireCap('error.read'), (req, res) => {
+router.get('/api/errors/:fingerprint', authenticateToken, requireCap('error.read'), async (req, res) => {
   try {
-    const group = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(req.params.fingerprint);
+    const group = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(req.params.fingerprint);
     if (!group) return res.status(404).json({ error: 'No such error group.' });
 
     /**
@@ -320,7 +321,7 @@ router.get('/api/errors/:fingerprint', authenticateToken, requireCap('error.read
      * independent bound would be a number that could drift from the real one and
      * a knob that suggests there is more to fetch when there is not.
      */
-    const events = db.prepare(`
+    const events = await db.prepare(`
       SELECT * FROM error_events WHERE fingerprint = ? ORDER BY occurred_at DESC, id DESC
     `).all(req.params.fingerprint);
 
@@ -350,7 +351,7 @@ router.get('/api/errors/:fingerprint', authenticateToken, requireCap('error.read
  * expires, and bury eight genuinely consequential actions under thousands of
  * "the owner looked at a list".
  */
-router.patch('/api/errors/:fingerprint', authenticateToken, requireCap('error.write'), (req, res) => {
+router.patch('/api/errors/:fingerprint', authenticateToken, requireCap('error.write'), async (req, res) => {
   const { fingerprint } = req.params;
   const status = req.body?.status;
 
@@ -362,20 +363,20 @@ router.patch('/api/errors/:fingerprint', authenticateToken, requireCap('error.wr
   }
 
   try {
-    const existing = db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fingerprint);
+    const existing = await db.prepare('SELECT status FROM error_groups WHERE fingerprint = ?').get(fingerprint);
     if (!existing) return res.status(404).json({ error: 'No such error group.' });
 
     const now = new Date().toISOString();
     const resolving = status === 'resolved';
 
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         UPDATE error_groups
            SET status = ?, resolved_at = ?, resolved_by = ?
          WHERE fingerprint = ?
       `).run(status, resolving ? now : null, resolving ? req.user.id : null, fingerprint);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'ERROR_GROUP_STATUS_CHANGED',
         // An error group is not a user, and the column is nullable — inventing

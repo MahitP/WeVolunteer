@@ -150,7 +150,7 @@ describe('an alert carries no personal data', () => {
   it('never even reads the sensitive columns out of the database', async () => {
     group('fp-a', { message: 'Cannot read hours of a named student', route: '/users/:id/profile' });
 
-    const [row] = pendingAlerts(db);
+    const [row] = await pendingAlerts(db);
 
     expect(Object.keys(row).sort()).toEqual(
       ['fingerprint', 'first_seen_at', 'kind', 'occurrences', 'source']
@@ -259,7 +259,7 @@ describe('refusals and robustness', () => {
     group('fp-resolved', { status: 'resolved' });
     group('fp-ignored', { status: 'ignored' });
 
-    expect(pendingAlerts(db)).toEqual([]);
+    expect(await pendingAlerts(db)).toEqual([]);
     expect((await sendErrorAlerts(db, { send: sender() })).reason).toBe('nothing_new');
   });
 
@@ -336,7 +336,7 @@ describe('migration 005', () => {
       fresh.prepare("SELECT alerted_at FROM error_groups WHERE fingerprint = 'old'").get().alerted_at,
       'a pre-existing group must not be treated as new'
     ).toBe('2026-07-02T00:00:00.000Z');
-    expect(pendingAlerts(fresh)).toEqual([]);
+    expect(await pendingAlerts(fresh)).toEqual([]);
   });
 
   it('is idempotent — running it twice changes nothing', async () => {

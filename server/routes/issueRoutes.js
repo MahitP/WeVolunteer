@@ -4,7 +4,7 @@ import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { sendMail } from '../email.js';
-import { APP_NAME } from '../config.js';
+import '../config.js';
 /* The address book stays on this side of the boundary — `issueReports.js` is
    bundled into the browser and `emailIdentity.js` reads `process.env` at module
    scope. See the header on `../issueReports.js`. */
@@ -83,7 +83,7 @@ router.post('/api/issues', authenticateToken, issueLimiter, async (req, res) => 
   const now = new Date().toISOString();
 
   try {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO issue_reports (id, reference, category, description, reporter_id, context, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)
     `).run(id, reference, category, description, req.principal.userId, context ? JSON.stringify(context) : null, now, now);
@@ -145,8 +145,8 @@ router.post('/api/issues', authenticateToken, issueLimiter, async (req, res) => 
  * have reported". Ordinary organizers and students hold none of it, so this is
  * not a feed anybody can browse.
  */
-router.get('/api/issues', authenticateToken, requireCap('report.resolve'), (req, res) => {
-  const rows = db.prepare(`
+router.get('/api/issues', authenticateToken, requireCap('report.resolve'), async (req, res) => {
+  const rows = await db.prepare(`
     SELECT i.id, i.reference, i.category, i.description, i.context, i.status, i.created_at,
            u.name AS reporter_name, u.username AS reporter_username
       FROM issue_reports i

@@ -30,8 +30,8 @@ describe('legal change notices', () => {
     srv.call('POST', '/api/legal/updates/acknowledge', { slug: s, version: v }, session);
 
   /** Moves the account's acceptance back a version, so it is behind. */
-  const setAcceptedVersion = (version) => {
-    db.prepare('UPDATE legal_acceptances SET version = ? WHERE user_id = ? AND document_slug = ?')
+  const setAcceptedVersion = async (version) => {
+    await db.prepare('UPDATE legal_acceptances SET version = ? WHERE user_id = ? AND document_slug = ?')
       .run(version, studentId, slug);
   };
 
@@ -47,24 +47,25 @@ describe('legal change notices', () => {
      * below is vacuous: a user who has accepted nothing can be behind on
      * nothing, and the suite would skip rather than fail.
      */
-    const doc = db.prepare(
+    const doc = await db.prepare(
       'SELECT slug, version, content_hash FROM legal_documents ORDER BY slug LIMIT 1'
     ).get();
     expect(doc, 'no legal documents are published').toBeTruthy();
     slug = doc.slug;
 
-    db.prepare(`INSERT OR IGNORE INTO legal_acceptances
+    await db.prepare(`INSERT INTO legal_acceptances
       (id, user_id, document_slug, version, content_hash, accepted_at, method, context)
-      VALUES (?, ?, ?, ?, ?, ?, 'signup', 'test-fixture')`)
+      VALUES (?, ?, ?, ?, ?, ?, 'signup', 'test-fixture')
+    ON CONFLICT DO NOTHING`)
       .run(`acc-fixture-${studentId}`, studentId, doc.slug, doc.version, doc.content_hash, new Date().toISOString());
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM legal_change_notices WHERE user_id = ?').run(studentId);
-    const live = db.prepare('SELECT version FROM legal_documents WHERE slug = ? ORDER BY published_at DESC LIMIT 1').get(slug);
-    db.prepare('UPDATE legal_acceptances SET version = ? WHERE user_id = ? AND document_slug = ?')
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM legal_change_notices WHERE user_id = ?').run(studentId);
+    const live = await db.prepare('SELECT version FROM legal_documents WHERE slug = ? ORDER BY published_at DESC LIMIT 1').get(slug);
+    await db.prepare('UPDATE legal_acceptances SET version = ? WHERE user_id = ? AND document_slug = ?')
       .run(live.version, studentId, slug);
   });
 
@@ -78,7 +79,7 @@ describe('legal change notices', () => {
 
   describe('when a document has moved on', () => {
     it('reports it', async () => {
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const res = await updates();
 
       const found = res.body.updates.find(u => u.slug === slug);
@@ -88,7 +89,7 @@ describe('legal change notices', () => {
     });
 
     it('carries a version the client can show', async () => {
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const found = (await updates()).body.updates.find(u => u.slug === slug);
       expect(found.version).toBeTruthy();
       expect(found.version).not.toBe('0.9');
@@ -100,7 +101,7 @@ describe('legal change notices', () => {
        * entire privacy policy would be a wall nobody reads and a needless
        * payload on every app open — the link is what discharges the obligation.
        */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const found = (await updates()).body.updates.find(u => u.slug === slug);
 
       expect(found).not.toHaveProperty('body');
@@ -110,7 +111,7 @@ describe('legal change notices', () => {
 
   describe('acknowledgement', () => {
     it('stops the notice coming back', async () => {
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const before = (await updates()).body.updates.find(u => u.slug === slug);
       expect(before).toBeTruthy();
 
@@ -123,33 +124,33 @@ describe('legal change notices', () => {
     it('is idempotent — acknowledging twice is one row', async () => {
       /* A double-click, a retry and a second tab must converge, not race to a
          constraint error the client has to interpret. */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
 
       expect((await ack(slug, v)).status).toBe(200);
       expect((await ack(slug, v)).status).toBe(200);
 
-      const rows = db.prepare(
+      const rows = (await db.prepare(
         'SELECT COUNT(*) AS c FROM legal_change_notices WHERE user_id = ? AND slug = ? AND version = ?'
-      ).get(studentId, slug, v).c;
+      ).get(studentId, slug, v)).c;
       expect(rows).toBe(1);
     });
 
     it('keeps the first acknowledgement timestamp', async () => {
       /* The record is "when did they first see this", not "when did they last
          click". Overwriting would quietly move the date the product would cite. */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
 
       await ack(slug, v);
-      const first = db.prepare(
+      const first = (await db.prepare(
         'SELECT acknowledged_at FROM legal_change_notices WHERE user_id = ? AND slug = ? AND version = ?'
-      ).get(studentId, slug, v).acknowledged_at;
+      ).get(studentId, slug, v)).acknowledged_at;
 
       await ack(slug, v);
-      const second = db.prepare(
+      const second = (await db.prepare(
         'SELECT acknowledged_at FROM legal_change_notices WHERE user_id = ? AND slug = ? AND version = ?'
-      ).get(studentId, slug, v).acknowledged_at;
+      ).get(studentId, slug, v)).acknowledged_at;
 
       expect(second).toBe(first);
     });
@@ -163,12 +164,12 @@ describe('legal change notices', () => {
        * one the product would produce if asked to prove somebody agreed — would
        * be reading dismissals as consent.
        */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
 
-      const before = db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE user_id = ?').get(studentId).c;
+      const before = (await db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE user_id = ?').get(studentId)).c;
       await ack(slug, v);
-      const after = db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE user_id = ?').get(studentId).c;
+      const after = (await db.prepare('SELECT COUNT(*) AS c FROM legal_acceptances WHERE user_id = ?').get(studentId)).c;
 
       expect(after).toBe(before);
     });
@@ -184,12 +185,12 @@ describe('legal change notices', () => {
        * `effectiveDocuments` resolves the registry against revisions and never
        * reads that column for the version.
        */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
       await ack(slug, v);
       expect((await updates()).body.updates.find(u => u.slug === slug)).toBeUndefined();
 
-      db.prepare(`INSERT INTO legal_document_revisions
+      await db.prepare(`INSERT INTO legal_document_revisions
         (slug, version, body, content_hash, effective_at, created_at, created_by)
         VALUES (?, ?, ?, ?, ?, ?, NULL)`)
         .run(slug, '99.0', '## Draft\nA newly added sentence that nobody has seen before today.',
@@ -201,18 +202,18 @@ describe('legal change notices', () => {
         expect(again.version).toBe('99.0');
         expect(again.previousVersion).toBe(v);
       } finally {
-        db.prepare('DELETE FROM legal_document_revisions WHERE slug = ? AND version = ?').run(slug, '99.0');
+        await db.prepare('DELETE FROM legal_document_revisions WHERE slug = ? AND version = ?').run(slug, '99.0');
       }
     });
 
     it('quotes a sentence that is genuinely new', async () => {
       /* End to end: the excerpt the modal shows comes from comparing the new
          body against the previous one, not from a canned string. */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
       await ack(slug, v);
 
-      db.prepare(`INSERT INTO legal_document_revisions
+      await db.prepare(`INSERT INTO legal_document_revisions
         (slug, version, body, content_hash, effective_at, created_at, created_by)
         VALUES (?, ?, ?, ?, ?, ?, NULL)`)
         .run(slug, '99.1',
@@ -223,7 +224,7 @@ describe('legal change notices', () => {
         const again = (await updates()).body.updates.find(u => u.slug === slug);
         expect(again.excerpt).toContain('three school years');
       } finally {
-        db.prepare('DELETE FROM legal_document_revisions WHERE slug = ? AND version = ?').run(slug, '99.1');
+        await db.prepare('DELETE FROM legal_document_revisions WHERE slug = ? AND version = ?').run(slug, '99.1');
       }
     });
   });
@@ -253,13 +254,13 @@ describe('legal change notices', () => {
          way to write another account's row is to be that account. Asserted
          because "there is no parameter for it" is a property that a future edge
          could quietly add. */
-      setAcceptedVersion('0.9');
+      await setAcceptedVersion('0.9');
       const v = (await updates()).body.updates.find(u => u.slug === slug).version;
       await ack(slug, v);
 
-      const others = db.prepare(
+      const others = (await db.prepare(
         'SELECT COUNT(*) AS c FROM legal_change_notices WHERE user_id != ?'
-      ).get(studentId).c;
+      ).get(studentId)).c;
       expect(others).toBe(0);
     });
   });

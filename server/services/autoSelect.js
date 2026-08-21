@@ -29,7 +29,9 @@ import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
 import { notificationService } from './notificationService.js';
-import { inTransaction } from '../utils.js';
+import '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
+import { verifyRunStillApplies, staleRunMessage } from './autoSelectStaleness.js';
 
 /**
  * Computes a draw without writing anything.
@@ -40,11 +42,11 @@ import { inTransaction } from '../utils.js';
  * computed result can be reviewed before it takes effect — which is the manual
  * two-step flow the organizer sees.
  */
-export function computeDraw(db, eventId, { runNumber }) {
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+export async function computeDraw(db, eventId, { runNumber }) {
+  const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
   if (!event) throw new Error(`Event not found: ${eventId}`);
 
-  const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
+  const slots = await db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
   const selectedIds = [];
   const waitlistIds = [];
 
@@ -67,7 +69,7 @@ export function computeDraw(db, eventId, { runNumber }) {
      * directly, over the real curve, so the two names cannot drift apart again
      * without the build going red.
      */
-    const allPending = db.prepare(`
+    const allPending = await db.prepare(`
       SELECT a.id, a.user_id,
              COALESCE(SUM(att.hours_awarded), 0) as totalHours
       FROM applications a
@@ -97,7 +99,14 @@ export function computeDraw(db, eventId, { runNumber }) {
      *
      * Not `rejected`, because the organizer did not reject them.
      */
-    const pendingApps = allPending.filter(a => eventApplicationEligibility(event, a.user_id).ok);
+    /* A loop rather than `.filter`, because the predicate is async now.
+       `Array.filter` does not await, so it would have compared a promise: the
+       truthiness of `.ok` on a pending promise is `undefined`, and every
+       applicant would have been waitlisted instead of selected. */
+    const pendingApps = [];
+    for (const a of allPending) {
+      if ((await eventApplicationEligibility(event, a.user_id)).ok) pendingApps.push(a);
+    }
     for (const refused of allPending) {
       if (!pendingApps.includes(refused)) waitlistIds.push(refused.id);
     }
@@ -113,15 +122,15 @@ export function computeDraw(db, eventId, { runNumber }) {
      * `reliabilityMultiplier` treats as neutral — deliberately not as zero
      * attendance.
      */
-    const records = attendanceRecordsFor(db, pendingApps.map(a => a.user_id));
+    const records = await attendanceRecordsFor(db, pendingApps.map(a => a.user_id));
     for (const app of pendingApps) app.attendance = records.get(app.user_id) ?? null;
 
     // Capacity already consumed by hand-accepted volunteers. This is what keeps a
     // draw from ever exceeding a slot's spots, and from reconsidering anyone who is
     // already accepted — the query above only looks at `pending`.
-    const acceptedSlotCount = db.prepare(`
+    const acceptedSlotCount = (await db.prepare(`
       SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND status = 'accepted'
-    `).get(slot.id).count;
+    `).get(slot.id)).count;
 
     const remainingSpots = Math.max(0, slot.max_spots - acceptedSlotCount);
 
@@ -145,11 +154,11 @@ export function computeDraw(db, eventId, { runNumber }) {
 }
 
 /** Stores a computed draw as an unconfirmed draft and returns the row id. */
-export function recordRun(db, eventId, { selectedIds, waitlistIds }, { runNumber, reason }) {
+export async function recordRun(db, eventId, { selectedIds, waitlistIds }, { runNumber, reason }) {
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const nowStr = new Date().toISOString();
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO auto_select_runs (id, event_id, run_number, created_at, selected_ids, waitlist_ids, is_confirmed, reason)
     VALUES (?, ?, ?, ?, ?, ?, 0, ?)
   `).run(runId, eventId, runNumber, nowStr, JSON.stringify(selectedIds), JSON.stringify(waitlistIds), reason ?? null);
@@ -170,23 +179,147 @@ export function recordRun(db, eventId, { selectedIds, waitlistIds }, { runNumber
  * selection from an organizer's. That is the only addition to the original
  * behaviour, and it is additive: the field is new, nothing existing changed shape.
  */
-export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
-  const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+/**
+ * The current status of every application the run selected.
+ *
+ * A missing row yields `status: null` rather than being dropped, because "this
+ * application no longer exists" is a distinct staleness reason from "it was
+ * withdrawn", and silently omitting it would let the run apply as though the id
+ * had never been selected.
+ */
+async function readSelectionState(db, selectedIds) {
+  if (selectedIds.length === 0) return [];
+  const placeholders = selectedIds.map(() => '?').join(',');
+  const rows = await db.prepare(
+    `SELECT id, slot_id, status FROM applications WHERE id IN (${placeholders})`
+  ).all(...selectedIds);
+
+  const byId = new Map(rows.map(r => [r.id, r]));
+  return selectedIds.map(id => {
+    const row = byId.get(id);
+    return { id, slotId: row?.slot_id ?? null, status: row?.status ?? null };
+  });
+}
+
+/**
+ * Capacity for every slot the selection touches, read under a row lock where the
+ * engine has one.
+ *
+ * ── The lock, and why it is conditional rather than universal ──
+ *
+ * On PostgreSQL, `FOR UPDATE` on the slot row is what makes "read the accepted
+ * count, then accept" atomic against a concurrent confirmation: the second
+ * transaction blocks until the first commits, then counts a total that already
+ * includes it. Proved in `capacity.postgresConcurrency.test.js`, including that
+ * the lock survives an `await` between the read and the write.
+ *
+ * SQLite has no `FOR UPDATE`, and needs none — one connection inside one
+ * transaction cannot interleave, which is the guarantee this migration is
+ * carefully replacing rather than discarding. Emitting the clause there would be
+ * a syntax error, so the dialect decides.
+ */
+async function readSlotCapacity(db, selectedIds) {
+  const slots = new Map();
+  if (selectedIds.length === 0) return slots;
+
+  const placeholders = selectedIds.map(() => '?').join(',');
+  const slotIds = (await db.prepare(
+    `SELECT DISTINCT slot_id FROM applications WHERE id IN (${placeholders})`
+  ).all(...selectedIds)).map(r => r.slot_id).filter(Boolean);
+
+  if (slotIds.length === 0) return slots;
+
+  const lock = db.dialect === 'postgres' ? ' FOR UPDATE' : '';
+  const slotPlaceholders = slotIds.map(() => '?').join(',');
+
+  /* The lock is taken on `slots` — the row whose capacity is the scarce thing.
+     Locking the applications would not serialise two confirmations looking at
+     different applications of the same slot. */
+  const rows = await db.prepare(
+    `SELECT id, max_spots FROM slots WHERE id IN (${slotPlaceholders})${lock}`
+  ).all(...slotIds);
+
+  for (const row of rows) {
+    const acceptedNow = (await db.prepare(
+      "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
+    ).get(row.id)).c;
+    slots.set(row.id, { maxSpots: row.max_spots, acceptedNow });
+  }
+  return slots;
+}
+
+export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
+  const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
   if (!event) throw new Error(`Event not found: ${eventId}`);
 
   const selectedIds = JSON.parse(run.selected_ids);
   const waitlistIds = JSON.parse(run.waitlist_ids);
 
-  inTransaction(() => {
+  /* `runInTransaction`, not `inTransaction`: this body awaits, and the
+     synchronous helper commits when its callback RETURNS — which for an async
+     callback is before any of the work has run. On PostgreSQL the transaction
+     owns a pinned pooled client; on SQLite it owns its own connection. Either
+     way every statement below lands inside it, including across the awaits.
+
+     Deliberately not `return runInTransaction(...)`: the callback returns
+     nothing, and this function's contract is `{ selectedIds, waitlistIds }`. A
+     refusal propagates by throwing and needs no return value. */
+  await runInTransaction(db, async (tx) => {
+    /**
+     * 0. Refuse the run if it can no longer be honoured exactly.
+     *
+     * ── Why this is here at all ──
+     *
+     * A draw reads capacity; confirmation happens later, after the organizer has
+     * looked at the list. In between, somebody can be accepted by hand or
+     * withdraw. Until this check existed, confirmation applied the recorded ids
+     * regardless — reachable without any concurrency at all (draw, approve,
+     * confirm) and demonstrated in `capacity.baseline.test.js`.
+     *
+     * ── Why refuse rather than truncate ──
+     *
+     * Owner decision, 2026-08-16. The organizer confirmed a specific reviewed
+     * list. Accepting a subset silently gives them something they did not choose;
+     * accepting all of it breaks capacity. Refusing preserves both, and a re-draw
+     * is cheap because a draw is a pure read.
+     *
+     * ── Why it is inside the transaction ──
+     *
+     * The check and the writes it authorises must be one atomic step, or the
+     * state it validated can change before the acceptance lands. On PostgreSQL
+     * the slot rows are additionally locked (see `readSlotCapacity`) so a
+     * concurrent confirmation waits rather than racing. On SQLite the single
+     * connection inside this transaction already serialises.
+     *
+     * Nothing is written before this point, so a refusal leaves the run
+     * `is_confirmed = 0` and every application untouched — which is precisely
+     * what "stale, not applied" means in the existing run lifecycle.
+     */
+    const verdict = verifyRunStillApplies({
+      selections: await readSelectionState(tx, selectedIds),
+      slots: await readSlotCapacity(tx, selectedIds),
+    });
+
+    if (!verdict.ok) {
+      const err = new Error(staleRunMessage(verdict));
+      err.code = verdict.code;
+      err.reason = verdict.reason;
+      err.detail = verdict.detail;
+      /* Thrown rather than returned: `inTransaction` rolls back on a throw, and
+         the UPDATE below must not have happened. Every caller already handles a
+         throw from here. */
+      throw err;
+    }
+
     // 1. Confirm this run
-    db.prepare('UPDATE auto_select_runs SET is_confirmed = 1 WHERE id = ?').run(run.id);
+    await tx.prepare('UPDATE auto_select_runs SET is_confirmed = 1 WHERE id = ?').run(run.id);
 
     // 2. Set statuses for selected applicants
-    const acceptStmt = db.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
+    const acceptStmt = await tx.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
     for (const id of selectedIds) {
-      acceptStmt.run(id);
+      await acceptStmt.run(id);
 
-      const appRow = db.prepare(`
+      const appRow = await tx.prepare(`
         SELECT a.user_id, s.name as slot_name
         FROM applications a
         JOIN slots s ON a.slot_id = s.id
@@ -194,19 +327,19 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
       `).get(id);
 
       if (appRow) {
-        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
+        await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
       }
     }
 
     // 3. Set statuses and ranks for waitlisted applicants
     const waitlistApps = waitlistIds.length > 0
-      ? db.prepare(`
+      ? await tx.prepare(`
           SELECT id, slot_id, user_id FROM applications
           WHERE id IN (${waitlistIds.map(() => '?').join(',')})
         `).all(...waitlistIds)
       : [];
 
-    const waitlistStmt = db.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
+    const waitlistStmt = await tx.prepare("UPDATE applications SET status = 'waitlisted', waitlist_order = ? WHERE id = ?");
 
     // Slot-specific waitlist counters
     const slotWaitlistIndex = {};
@@ -218,9 +351,9 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
       slotWaitlistIndex[app.slot_id] = (slotWaitlistIndex[app.slot_id] || 0) + 1;
       const rank = slotWaitlistIndex[app.slot_id];
 
-      waitlistStmt.run(rank, id);
+      await waitlistStmt.run(rank, id);
 
-      notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
+      await notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
     }
 
     // 4. Compute selection summary
@@ -229,7 +362,7 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
     let waitlistedHoursSum = 0;
 
     if (selectedIds.length > 0) {
-      const rows = db.prepare(`
+      const rows = await tx.prepare(`
         SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
         FROM applications a
         LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
@@ -240,7 +373,7 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
     }
 
     if (waitlistIds.length > 0) {
-      const rows = db.prepare(`
+      const rows = await tx.prepare(`
         SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
         FROM applications a
         LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
@@ -255,12 +388,12 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
 
     // Surface the draw history so the published summary reflects that
     // re-draws happened, and why — not just the final, cleaned-up outcome.
-    const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
-    const redrawReasons = db.prepare(`
+    const runCount = (await tx.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId)).count;
+    const redrawReasons = (await tx.prepare(`
       SELECT reason FROM auto_select_runs
       WHERE event_id = ? AND reason IS NOT NULL
       ORDER BY run_number ASC
-    `).all(eventId).map(r => r.reason);
+    `).all(eventId)).map(r => r.reason);
 
     const summary = {
       totalApplicants,
@@ -274,7 +407,7 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
       timestamp: new Date().toISOString()
     };
 
-    db.prepare(`
+    await tx.prepare(`
       UPDATE events
       SET selection_summary = ?, status = 'closed'
       WHERE id = ?
@@ -285,8 +418,8 @@ export function applyRun(db, eventId, run, { executedBy = 'organizer' } = {}) {
 }
 
 /** The latest run for an event, confirmed or not. */
-export function latestRun(db, eventId) {
-  return db.prepare(`
+export async function latestRun(db, eventId) {
+  return await db.prepare(`
     SELECT * FROM auto_select_runs
     WHERE event_id = ?
     ORDER BY run_number DESC LIMIT 1
@@ -294,10 +427,10 @@ export function latestRun(db, eventId) {
 }
 
 /** Whether a confirmed run exists — the terminal state for an event's selection. */
-export function hasConfirmedRun(db, eventId) {
-  return db.prepare(
+export async function hasConfirmedRun(db, eventId) {
+  return (await db.prepare(
     'SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ? AND is_confirmed = 1'
-  ).get(eventId).count > 0;
+  ).get(eventId)).count > 0;
 }
 
 /**
@@ -311,23 +444,23 @@ export function hasConfirmedRun(db, eventId) {
  * Refuses if a confirmed run already exists, which is the idempotency guard the
  * manual route already enforces and the reason this is safe to call repeatedly.
  */
-export function runAndConfirm(db, eventId, { source = 'scheduler' } = {}) {
-  if (hasConfirmedRun(db, eventId)) {
+export async function runAndConfirm(db, eventId, { source = 'scheduler' } = {}) {
+  if (await hasConfirmedRun(db, eventId)) {
     return { executed: false, reason: 'already_confirmed' };
   }
 
-  const existing = latestRun(db, eventId);
+  const existing = await latestRun(db, eventId);
 
   if (existing) {
-    applyRun(db, eventId, existing, { executedBy: source });
+    await applyRun(db, eventId, existing, { executedBy: source });
     return { executed: true, reusedDraft: true, runNumber: existing.run_number };
   }
 
   const runNumber = 1;
-  const draw = computeDraw(db, eventId, { runNumber });
-  const { runId } = recordRun(db, eventId, draw, { runNumber, reason: null });
-  const stored = db.prepare('SELECT * FROM auto_select_runs WHERE id = ?').get(runId);
-  applyRun(db, eventId, stored, { executedBy: source });
+  const draw = await computeDraw(db, eventId, { runNumber });
+  const { runId } = await recordRun(db, eventId, draw, { runNumber, reason: null });
+  const stored = await db.prepare('SELECT * FROM auto_select_runs WHERE id = ?').get(runId);
+  await applyRun(db, eventId, stored, { executedBy: source });
 
   return { executed: true, reusedDraft: false, runNumber, ...draw };
 }

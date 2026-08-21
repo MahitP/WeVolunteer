@@ -2,7 +2,7 @@ import { ALL_CAPABILITIES, SUPER_ONLY } from './authz.js';
 
 const SUPER_ONLY_SET = new Set(SUPER_ONLY);
 
-export function grantCapability({ db, userId, capability, scope = '', grantedBy, expiresAt = null }) {
+export async function grantCapability({ db, userId, capability, scope = '', grantedBy, expiresAt = null }) {
   if (!ALL_CAPABILITIES.includes(capability)) {
     throw new Error(`Unknown capability: ${capability}`);
   }
@@ -29,7 +29,7 @@ export function grantCapability({ db, userId, capability, scope = '', grantedBy,
   if (SUPER_ONLY_SET.has(capability)) {
     throw new Error(`Capability ${capability} cannot be granted — it is super_admin only`);
   }
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO user_capabilities (user_id, capability, scope, granted_by, granted_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, capability, scope) DO UPDATE SET
@@ -39,8 +39,8 @@ export function grantCapability({ db, userId, capability, scope = '', grantedBy,
   `).run(userId, capability, scope, grantedBy, new Date().toISOString(), expiresAt);
 }
 
-export function revokeCapability({ db, userId, capability, scope = '' }) {
-  db.prepare('DELETE FROM user_capabilities WHERE user_id = ? AND capability = ? AND scope = ?')
+export async function revokeCapability({ db, userId, capability, scope = '' }) {
+  await db.prepare('DELETE FROM user_capabilities WHERE user_id = ? AND capability = ? AND scope = ?')
     .run(userId, capability, scope);
 }
 
@@ -61,9 +61,9 @@ export function revokeCapability({ db, userId, capability, scope = '' }) {
  * hand or by a future scope-aware writer that lands before a scope-aware
  * `can()`.
  */
-export function grantsFor(db, userId) {
-  return db.prepare(`
+export async function grantsFor(db, userId) {
+  return (await db.prepare(`
     SELECT DISTINCT capability FROM user_capabilities
     WHERE user_id = ? AND scope = '' AND (expires_at IS NULL OR expires_at > ?)
-  `).all(userId, new Date().toISOString()).map(r => r.capability);
+  `).all(userId, new Date().toISOString())).map(r => r.capability);
 }

@@ -34,6 +34,7 @@ import { formatOrganization } from '../organizations.js';
    both halves of discovery. */
 import { normaliseTag } from '../eventTags.js';
 import { notificationService } from '../services/notificationService.js';
+import { jsonArrayContains, caseInsensitiveLike } from '../db/dialectSql.js';
 
 const router = express.Router();
 
@@ -116,24 +117,24 @@ function likePrefix(q) {
  * wrong person. The client's `/users/@name` URL resolves here; the id form
  * remains for internal links that already hold an id.
  */
-router.get('/api/users/by-username/:username', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const row = db.prepare(`SELECT * FROM users WHERE username = ? COLLATE NOCASE AND ${LIVE_USER}`)
+router.get('/api/users/by-username/:username', authenticateToken, requireCap('directory.read'), async (req, res) => {
+  const row = await db.prepare(`SELECT * FROM users WHERE username = ? COLLATE nocase AND ${LIVE_USER}`)
     .get(req.params.username);
   if (!row) return res.status(404).json({ error: 'No account with that username.', code: 'not_found' });
-  res.json(buildProfileResponse(req, row));
+  res.json(await buildProfileResponse(req, row));
 });
 
 /** The same profile, addressed by id. */
-router.get('/api/users/:id/public-profile', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const row = db.prepare(`SELECT * FROM users WHERE id = ? AND ${LIVE_USER}`).get(req.params.id);
+router.get('/api/users/:id/public-profile', authenticateToken, requireCap('directory.read'), async (req, res) => {
+  const row = await db.prepare(`SELECT * FROM users WHERE id = ? AND ${LIVE_USER}`).get(req.params.id);
   if (!row) return res.status(404).json({ error: 'No such account.', code: 'not_found' });
-  res.json(buildProfileResponse(req, row));
+  res.json(await buildProfileResponse(req, row));
 });
 
-function buildProfileResponse(req, row) {
+async function buildProfileResponse(req, row) {
   const viewerId = req.principal.userId;
-  const isFriend = areFriends(db, viewerId, row.id);
-  const profile = publicProfile(db, row, {
+  const isFriend = await areFriends(db, viewerId, row.id);
+  const profile = await publicProfile(db, row, {
     viewerId,
     canSeeContact: can(req.principal, 'user.contact.read'),
     isFriend,
@@ -157,7 +158,7 @@ function buildProfileResponse(req, row) {
      * trade-off — refusing silently would be a worse lie. Leaking the state on
      * every other relationship response was not a trade-off, just an oversight.
      */
-    viewer: viewerRelationshipState(db, viewerId, row.id),
+    viewer: await viewerRelationshipState(db, viewerId, row.id),
   };
 }
 
@@ -169,7 +170,7 @@ function buildProfileResponse(req, row) {
  * in the public profile at any privacy setting. Self, or staff holding
  * `user.contact.read`.
  */
-router.get('/api/users/:id/service-record', authenticateToken, requireCap('directory.read'), (req, res) => {
+router.get('/api/users/:id/service-record', authenticateToken, requireCap('directory.read'), async (req, res) => {
   const targetId = req.params.id;
   const isSelf = targetId === req.principal.userId;
 
@@ -186,7 +187,7 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
    * test that pins it); it requires an application this organizer cannot
    * manufacture.
    */
-  const hostsApplicant = can(req.principal, 'applicant.review') && Boolean(db.prepare(`
+  const hostsApplicant = can(req.principal, 'applicant.review') && Boolean(await db.prepare(`
     SELECT 1 FROM applications a
     JOIN events e ON e.id = a.event_id
     WHERE a.user_id = ? AND e.organizer_id = ?
@@ -196,13 +197,13 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
   if (!isSelf && !can(req.principal, 'user.contact.read') && !hostsApplicant) {
     return res.status(403).json({ error: 'That volunteer\'s detailed service record is not public.', code: 'forbidden' });
   }
-  const row = db.prepare(`SELECT id FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
+  const row = await db.prepare(`SELECT id FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
   if (!row) return res.status(404).json({ error: 'No such account.', code: 'not_found' });
 
-  const completed = db.prepare(`
-    SELECT e.id AS eventId, e.title, e.location, e.category, e.credits_hours AS creditsHours,
-           s.start_datetime AS startDatetime, s.end_datetime AS endDatetime,
-           at.present, at.hours_awarded AS hoursAwarded
+  const completed = await db.prepare(`
+    SELECT e.id AS "eventId", e.title, e.location, e.category, e.credits_hours AS "creditsHours",
+           s.start_datetime AS "startDatetime", s.end_datetime AS "endDatetime",
+           at.present, at.hours_awarded AS "hoursAwarded"
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
     JOIN events e ON e.id = at.event_id
@@ -224,17 +225,17 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
    * feature is not. Where an organizer needs a record, `completed` is the record:
    * it is the service this platform can actually vouch for.
    */
-  const external = isSelf ? db.prepare(`
-    SELECT id, organization_name AS organizationName, activity_name AS activityName,
-           description, occurred_on AS occurredOn, hours
+  const external = isSelf ? (await db.prepare(`
+    SELECT id, organization_name AS "organizationName", activity_name AS "activityName",
+           description, occurred_on AS "occurredOn", hours
     FROM external_hours WHERE user_id = ? ORDER BY occurred_on DESC LIMIT 200
-  `).all(targetId).map(r => ({ ...r, selfReported: true })) : [];
+  `).all(targetId)).map(r => ({ ...r, selfReported: true })) : [];
 
   res.json({
     completed: completed.map(r => ({ ...r, present: r.present === 1, creditsHours: r.creditsHours !== 0 })),
     external,
     externalWithheld: !isSelf,
-    stats: volunteerStats(db, targetId),
+    stats: await volunteerStats(db, targetId),
   });
 });
 
@@ -251,8 +252,25 @@ router.get('/api/users/:id/service-record', authenticateToken, requireCap('direc
  * public baseline — so there is no field search can show that the profile would
  * withhold. Suspended and deleted accounts are excluded outright.
  */
-router.get('/api/directory/search', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const raw = String(req.query.q ?? '').trim();
+router.get('/api/directory/search', authenticateToken, requireCap('directory.read'), async (req, res) => {
+  /**
+   * NUL bytes are stripped before the value can reach a query.
+   *
+   * PostgreSQL refuses `\0` inside a text value outright — `invalid byte
+   * sequence for encoding "UTF8": 0x00` — and the refusal happens at the driver,
+   * so it surfaces as a 500 rather than as an empty result. SQLite stores the
+   * byte happily, which is why `?q=@abc%00def` was a harmless no-match there and
+   * an unauthenticated 500 here.
+   *
+   * Stripped rather than rejected: a NUL in a search box is never a deliberate
+   * query, and answering 400 to it would tell a prober they had found an edge
+   * the server treats specially. Removing it makes the search mean what the
+   * visible characters say.
+   */
+  /* `replaceAll` with a plain string rather than a regex: matching a control
+     character in a pattern is a lint warning worth respecting in general, and
+     there is no need for a pattern here at all. */
+  const raw = String(req.query.q ?? '').replaceAll('\u0000', '').trim();
 
   /**
    * ── Two sigils, because a searcher already knows which kind they want ──
@@ -304,25 +322,34 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
      which the empty-result branch below treats as "no matches". */
   const tagKey = sigil === 'tag' ? (normaliseTag(q)?.tag ?? null) : null;
 
+  /* SQLite's LIKE ignores case; PostgreSQL's does not, so `@Ana` silently
+     stopped matching the handle `ana` — an empty result, not an error.
+
+     Hoisted out of the people branch because the ORGANIZATION branch below had
+     the same bug and no access to this: searching "Beach" would not have found
+     "beach cleanup" once the deployment moved to PostgreSQL. One definition, so
+     the next query added here cannot quietly get the raw operator. */
+  const LIKE = caseInsensitiveLike(db);
+
   let users = [];
   if (type !== 'organizations') {
     /**
      * `LIMIT n + 1` is how `hasMore` is answered without a second COUNT over
      * the whole table. The extra row is dropped before it reaches the client.
      */
-    const rows = db.prepare(`
+    const rows = await db.prepare(`
       SELECT id, username, name, avatar, profile_picture_url, role, location
       FROM users
       WHERE ${LIVE_USER}
-        AND (name LIKE ? ESCAPE '\\' OR username LIKE ? ESCAPE '\\')
+        AND (name ${LIKE} ? ESCAPE '\\' OR username ${LIKE} ? ESCAPE '\\')
       ORDER BY
         /* Exact username first, then prefix matches, then the rest. A student
            searching for a friend's exact handle should not have to scroll. */
-        CASE WHEN username = ? COLLATE NOCASE THEN 0
-             WHEN username LIKE ? ESCAPE '\\' THEN 1
-             WHEN name LIKE ? ESCAPE '\\' THEN 2
+        CASE WHEN username = ? COLLATE nocase THEN 0
+             WHEN username ${LIKE} ? ESCAPE '\\' THEN 1
+             WHEN name ${LIKE} ? ESCAPE '\\' THEN 2
              ELSE 3 END,
-        name COLLATE NOCASE
+        name COLLATE nocase
       LIMIT ? OFFSET ?
     `).all(term, term, q, prefix, prefix, limit + 1, offset);
     users = rows.slice(0, limit).map(profileSummary);
@@ -348,27 +375,24 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
      * stores, so one spelling of a tag finds the same things on both sides.
      */
     const rows = sigil === 'tag'
-      ? db.prepare(`
+      ? await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
         WHERE o.status = 'active'
           AND o.tags IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM json_each(o.tags)
-            WHERE lower(trim(json_each.value)) = ?
-          )
-        ORDER BY o.name COLLATE NOCASE
+          AND ${jsonArrayContains(db, 'o.tags', '?')}
+        ORDER BY o.name COLLATE nocase
         LIMIT ? OFFSET ?
       `).all(tagKey, limit + 1, offset)
-      : db.prepare(`
+      : await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
-        WHERE o.status = 'active' AND (o.name LIKE ? ESCAPE '\\' OR o.slug LIKE ? ESCAPE '\\')
-        ORDER BY o.name COLLATE NOCASE
+        WHERE o.status = 'active' AND (o.name ${LIKE} ? ESCAPE '\\' OR o.slug ${LIKE} ? ESCAPE '\\')
+        ORDER BY o.name COLLATE nocase
         LIMIT ? OFFSET ?
       `).all(term, term, limit + 1, offset);
     organizations = rows.slice(0, limit).map(formatOrganization);
@@ -389,13 +413,13 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
 /* ── Relationships ──────────────────────────────────────────────────────── */
 
 /** Resolves and validates the target of a relationship action. */
-function resolveTarget(req, res) {
+async function resolveTarget(req, res) {
   const targetId = req.params.id;
   if (targetId === req.principal.userId) {
     res.status(400).json({ error: 'That action does not apply to your own account.', code: 'self_target' });
     return null;
   }
-  const row = db.prepare(`SELECT id, name, role FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
+  const row = await db.prepare(`SELECT id, name, role FROM users WHERE id = ? AND ${LIVE_USER}`).get(targetId);
   if (!row) {
     res.status(404).json({ error: 'No such account.', code: 'not_found' });
     return null;
@@ -459,18 +483,18 @@ function refusePeerOnly(req, res, targetRow) {
  * restricted account discovering it has been restricted by watching a request
  * silently do nothing.
  */
-router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const target = resolveTarget(req, res);
+router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const target = await resolveTarget(req, res);
   if (!target) return;
 
   if (refusePeerOnly(req, res, target)) return;
 
-  const state = relationshipState(db, req.principal.userId, target.id);
+  const state = await relationshipState(db, req.principal.userId, target.id);
   if (state.blocked || state.restricted || state.restrictedBy) {
     return res.status(409).json({ error: 'You cannot add this person as a friend.', code: 'not_permitted' });
   }
 
-  const result = requestFriend(db, req.principal.userId, target.id);
+  const result = await requestFriend(db, req.principal.userId, target.id);
 
   /**
    * The request itself is a notification, and the accepted case is another.
@@ -478,41 +502,41 @@ router.post('/api/users/:id/friend', authenticateToken, requireCap('relationship
    * notification could not be written.
    */
   try {
-    const actor = db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.principal.userId);
+    const actor = await db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.principal.userId);
     const payload = { actorName: actor.name, actorUsername: actor.username };
     if (result.status === 'pending' && result.created) {
-      notificationService.dispatch('FRIEND_REQUEST', payload, target.id, `friend-request:${req.principal.userId}`);
+      await notificationService.dispatch('FRIEND_REQUEST', payload, target.id, `friend-request:${req.principal.userId}`);
     } else if (result.status === 'accepted') {
       /* The person who ASKED is the one told it was accepted, which is the
          other party here — this branch runs when the actor completed somebody
          else's inbound request by tapping Add back. */
-      notificationService.dispatch('FRIEND_ACCEPTED', payload, target.id, `friend-accepted:${req.principal.userId}`);
+      await notificationService.dispatch('FRIEND_ACCEPTED', payload, target.id, `friend-accepted:${req.principal.userId}`);
     }
   } catch { /* best effort — see above */ }
 
-  res.json({ status: result.status, ...viewerRelationshipState(db, req.principal.userId, target.id) });
+  res.json({ status: result.status, ...(await viewerRelationshipState(db, req.principal.userId, target.id)) });
 });
 
 /** Accept a pending inbound request explicitly. */
-router.post('/api/users/:id/friend/accept', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const target = resolveTarget(req, res);
+router.post('/api/users/:id/friend/accept', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const target = await resolveTarget(req, res);
   if (!target) return;
   /* The same peer rule as sending. A row written before this rule existed must
      not become a friendship by being accepted afterwards — the accept side is
      where such a row would otherwise complete. Removal is deliberately NOT
      gated: anybody may always get out of a relationship, whatever created it. */
   if (refusePeerOnly(req, res, target)) return;
-  const ok = acceptFriend(db, req.principal.userId, target.id);
+  const ok = await acceptFriend(db, req.principal.userId, target.id);
   if (!ok) return res.status(404).json({ error: 'There is no friend request from that person.', code: 'no_request' });
-  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
+  res.json(await viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /** Unfriend, decline, or withdraw — all the same removal. */
-router.delete('/api/users/:id/friend', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const target = resolveTarget(req, res);
+router.delete('/api/users/:id/friend', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const target = await resolveTarget(req, res);
   if (!target) return;
-  removeFriend(db, req.principal.userId, target.id);
-  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
+  await removeFriend(db, req.principal.userId, target.id);
+  res.json(await viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /**
@@ -523,31 +547,31 @@ router.delete('/api/users/:id/friend', authenticateToken, requireCap('relationsh
  * and that difference belongs in the module that documents it, not spread over
  * four handlers that could drift.
  */
-router.post('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const target = resolveTarget(req, res);
+router.post('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const target = await resolveTarget(req, res);
   if (!target) return;
-  setUnilateral(db, req.principal.userId, target.id, req.params.kind);
-  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
+  await setUnilateral(db, req.principal.userId, target.id, req.params.kind);
+  res.json(await viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
-router.delete('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const target = resolveTarget(req, res);
+router.delete('/api/users/:id/:kind(mute|restrict)', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const target = await resolveTarget(req, res);
   if (!target) return;
-  clearUnilateral(db, req.principal.userId, target.id, req.params.kind);
-  res.json(viewerRelationshipState(db, req.principal.userId, target.id));
+  await clearUnilateral(db, req.principal.userId, target.id, req.params.kind);
+  res.json(await viewerRelationshipState(db, req.principal.userId, target.id));
 });
 
 /** The caller's own friends and pending requests. */
-router.get('/api/me/friends', authenticateToken, requireCap('relationship.manage'), (req, res) => {
+router.get('/api/me/friends', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
   const me = req.principal.userId;
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT r.kind, r.status, r.actor_id, r.subject_id,
            u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location
     FROM user_relationships r
     JOIN users u ON u.id = CASE WHEN r.actor_id = ? THEN r.subject_id ELSE r.actor_id END
     WHERE r.kind = 'friend' AND (r.actor_id = ? OR r.subject_id = ?)
       AND u.account_status = 'active'
-    ORDER BY u.name COLLATE NOCASE
+    ORDER BY u.name COLLATE nocase
     LIMIT 500
   `).all(me, me, me);
 
@@ -562,13 +586,13 @@ router.get('/api/me/friends', authenticateToken, requireCap('relationship.manage
 });
 
 /** The caller's own mutes and restrictions, so Settings can list and lift them. */
-router.get('/api/me/relationships', authenticateToken, requireCap('relationship.manage'), (req, res) => {
-  const rows = db.prepare(`
+router.get('/api/me/relationships', authenticateToken, requireCap('relationship.manage'), async (req, res) => {
+  const rows = await db.prepare(`
     SELECT r.kind, u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location
     FROM user_relationships r
     JOIN users u ON u.id = r.subject_id
     WHERE r.actor_id = ? AND r.kind IN ('mute', 'restrict') AND u.account_status = 'active'
-    ORDER BY u.name COLLATE NOCASE
+    ORDER BY u.name COLLATE nocase
   `).all(req.principal.userId);
   res.json({
     muted: rows.filter(r => r.kind === 'mute').map(profileSummary),

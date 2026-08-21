@@ -18,6 +18,7 @@
  *     LAST by distance, matching `distance != null` and `?? Infinity`
  *   • per-slot hours carry a 0.1 floor, as formatSlot does
  */
+import { hoursBetween, greatest, least, substringPosition } from './db/dialectSql.js';
 
 import { normaliseTag, MAX_TAGS_PER_EVENT } from './eventTags.js';
 
@@ -29,10 +30,25 @@ const SORTS = {
   deadline: 'e.application_deadline ASC',
   spots: 'spots_remaining DESC',
   hours: 'agg.total_hours DESC',
-  // COLLATE NOCASE approximates localeCompare well enough for titles and, unlike
-  // it, can use an index.
-  alpha: 'e.title COLLATE NOCASE ASC',
-  distance: 'distance_miles IS NULL, distance_miles ASC'
+  // A case-insensitive collation approximates localeCompare well enough for
+  // titles and, unlike it, can use an index. Spelled lower-case: that is the one
+  // token both engines resolve to their own collation, and the dialect ratchet
+  // counts the two spellings separately.
+  alpha: 'e.title COLLATE nocase ASC',
+  /**
+   * `NULLS LAST` rather than a leading `distance_miles IS NULL`.
+   *
+   * Both spellings mean "events with no coordinates go to the bottom", and the
+   * `IS NULL` form is the one SQLite needs if you cannot assume `NULLS LAST` —
+   * its ASC default is NULLS FIRST. But `distance_miles` is a SELECT alias, and
+   * PostgreSQL resolves an output alias in ORDER BY only as a bare reference,
+   * never inside an expression, so `distance_miles IS NULL` failed there with
+   * "column distance_miles does not exist" and the nearest-first sort 500'd.
+   *
+   * `NULLS LAST` is understood by SQLite 3.30+ (this runs 3.51) and states the
+   * intent directly instead of encoding it as a boolean sort key.
+   */
+  distance: 'distance_miles ASC NULLS LAST'
 };
 
 export const EVENT_SORTS = Object.keys(SORTS);
@@ -206,14 +222,14 @@ export function parseEventFilters(query = {}) {
  * can push the cosine a hair above 1 for two nearly identical points, and acos
  * of that is NaN, which would silently drop an event a user is standing next to.
  */
-export function eventQueryFragments({ lat, lng }) {
+export function eventQueryFragments({ lat, lng, db = null }) {
   const EARTH_RADIUS_MILES = 3958.8;
 
   const distanceExpr = lat != null
-    ? `(${EARTH_RADIUS_MILES} * acos(min(1.0,
+    ? `(${EARTH_RADIUS_MILES} * acos(${least(db, '1.0', `
          cos(radians(@lat)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians(@lng))
          + sin(radians(@lat)) * sin(radians(e.latitude))
-       )))`
+       `)}))`
     : 'NULL';
 
   return {
@@ -243,7 +259,7 @@ export function eventQueryFragments({ lat, lng }) {
                MAX(s.end_datetime)   AS max_end,
                COALESCE(SUM(s.max_spots), 0) AS total_spots,
                COALESCE(SUM(
-                 max(0.1, ROUND((julianday(s.end_datetime) - julianday(s.start_datetime)) * 24, 2))
+                 ${greatest(db, '0.1', hoursBetween(db, 's.start_datetime', 's.end_datetime'))}
                ), 0) AS total_hours,
                (SELECT COUNT(*) FROM applications a2
                  WHERE a2.event_id = e.id AND a2.status = 'accepted') AS accepted
@@ -253,7 +269,10 @@ export function eventQueryFragments({ lat, lng }) {
       )
     `,
     distanceSelect: `${distanceExpr} AS distance_miles`,
-    spotsSelect: 'MAX(0, agg.total_spots - COALESCE(agg.accepted, 0)) AS spots_remaining'
+    /* `greatest`, not `MAX`: SQLite overloads `max` as both the aggregate and
+       the scalar, PostgreSQL keeps them apart and answers
+       `function max(integer, bigint) does not exist`. */
+    spotsSelect: `${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} AS spots_remaining`
   };
 }
 
@@ -265,7 +284,7 @@ export function eventQueryFragments({ lat, lng }) {
  * across every branch — the kind of bookkeeping that silently binds the wrong
  * value once a filter is added in the middle.
  */
-export function buildEventWhere(filters, userId) {
+export function buildEventWhere(filters, userId, db = null) {
   const clauses = [];
   const params = {};
 
@@ -274,13 +293,14 @@ export function buildEventWhere(filters, userId) {
   else if (filters.scope === 'open') clauses.push(`e.status = 'open'`);
 
   if (filters.q) {
-    // instr on lowered text rather than LIKE: no wildcard characters in user
-    // input can change the shape of the match.
+    // A position test on lowered text rather than LIKE: no wildcard characters
+    // in user input can change the shape of the match. The engines spell the
+    // function differently, so it comes from the dialect layer.
     clauses.push(`(
-      instr(lower(e.title), lower(@q)) > 0
-      OR instr(lower(e.description), lower(@q)) > 0
-      OR instr(lower(e.location), lower(@q)) > 0
-      OR instr(lower(u.name), lower(@q)) > 0
+      ${substringPosition(db, 'lower(e.title)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(e.description)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(e.location)', 'lower(@q)')}
+      OR ${substringPosition(db, 'lower(u.name)', 'lower(@q)')}
     )`);
     params.q = filters.q;
   }
@@ -333,7 +353,7 @@ export function buildEventWhere(filters, userId) {
    */
   if (filters.openOnly) {
     clauses.push(`e.status = 'open'`);
-    clauses.push('MAX(0, agg.total_spots - COALESCE(agg.accepted, 0)) > 0');
+    clauses.push(`${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} > 0`);
     clauses.push('e.application_deadline > @now');
     params.now = new Date().toISOString();
   }
@@ -391,10 +411,10 @@ export function buildEventWhere(filters, userId) {
     // An event with no coordinates has no distance, so it cannot satisfy a
     // distance filter — the same as the client's `distance != null` test.
     clauses.push('e.latitude IS NOT NULL AND e.longitude IS NOT NULL');
-    clauses.push(`(3958.8 * acos(min(1.0,
+    clauses.push(`(3958.8 * acos(${least(db, '1.0', `
       cos(radians(@lat)) * cos(radians(e.latitude)) * cos(radians(e.longitude) - radians(@lng))
       + sin(radians(@lat)) * sin(radians(e.latitude))
-    ))) <= @maxDistance`);
+    `)})) <= @maxDistance`);
     params.maxDistance = filters.maxDistance;
     // Used by the clause immediately above, so they belong in these params.
     params.lat = filters.lat;

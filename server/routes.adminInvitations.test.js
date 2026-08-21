@@ -35,8 +35,8 @@ describe('administrator invitations', () => {
   };
 
   /** The plaintext token never leaves the server, so tests read the row directly. */
-  const liveTokenFor = (email) => {
-    const row = db.prepare(
+  const liveTokenFor = async (email) => {
+    const row = await db.prepare(
       "SELECT id FROM admin_invitations WHERE email = ? AND status = 'pending'"
     ).get(email);
     return row?.id ?? null;
@@ -51,7 +51,7 @@ describe('administrator invitations', () => {
 
     /* The invited person: a real account with a VERIFIED address, which is what
        IV-6 requires before a token can be redeemed. */
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
                          email_verified, account_status, created_at, token_version)
       VALUES ('u-invitee', 'Invited Person', ?, 'invitedperson',
@@ -62,9 +62,9 @@ describe('administrator invitations', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM admin_invitations').run();
-    db.prepare("UPDATE users SET role = 'student' WHERE id = 'u-invitee'").run();
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM admin_invitations').run();
+    await db.prepare("UPDATE users SET role = 'student' WHERE id = 'u-invitee'").run();
   });
 
   /* ── AC-4.3.1: owner-only and step-up gated ─────────────────────────────── */
@@ -102,7 +102,7 @@ describe('administrator invitations', () => {
     const res = await invite();
     expect(res.status).toBe(201);
 
-    const stored = db.prepare(
+    const stored = await db.prepare(
       'SELECT token_hash FROM admin_invitations WHERE email = ?'
     ).get(INVITEE);
     expect(stored.token_hash).toHaveLength(64);
@@ -115,7 +115,7 @@ describe('administrator invitations', () => {
 
   it('stores a hash rather than the token itself', async () => {
     await invite();
-    const row = db.prepare('SELECT * FROM admin_invitations WHERE email = ?').get(INVITEE);
+    const row = await db.prepare('SELECT * FROM admin_invitations WHERE email = ?').get(INVITEE);
     /* A 32-byte base64url token is 43 chars; a SHA-256 hex digest is 64. */
     expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
   });
@@ -125,7 +125,7 @@ describe('administrator invitations', () => {
   it('grants nothing before it is accepted', async () => {
     await invite();
 
-    const row = db.prepare("SELECT role FROM users WHERE id = 'u-invitee'").get();
+    const row = await db.prepare("SELECT role FROM users WHERE id = 'u-invitee'").get();
     expect(row.role).toBe('student');
 
     /* And the account still cannot do administrative things. */
@@ -172,20 +172,20 @@ describe('administrator invitations', () => {
    */
   it('keeps at most one pending invitation per address, replacing the first', async () => {
     await invite();
-    const first = liveTokenFor(INVITEE);
+    const first = await liveTokenFor(INVITEE);
 
     const second = await invite({ reason: 'Re-sent after the first was not received' });
     expect(second.status).toBe(201);
     expect(second.body.replaced).toBe(true);
 
-    const pending = db.prepare(
+    const pending = await db.prepare(
       "SELECT id FROM admin_invitations WHERE email = ? AND status = 'pending'"
     ).all(INVITEE);
     expect(pending).toHaveLength(1);
     expect(pending[0].id).not.toBe(first);
 
     /* The superseded one is kept, not deleted, so the history survives. */
-    const replaced = db.prepare(
+    const replaced = await db.prepare(
       "SELECT status FROM admin_invitations WHERE id = ?"
     ).get(first);
     expect(replaced.status).toBe('replaced');
@@ -204,8 +204,8 @@ describe('administrator invitations', () => {
    */
   it('answers identically for every kind of bad token', async () => {
     await invite();
-    const id = liveTokenFor(INVITEE);
-    db.prepare("UPDATE admin_invitations SET status = 'revoked' WHERE id = ?").run(id);
+    const id = await liveTokenFor(INVITEE);
+    await db.prepare("UPDATE admin_invitations SET status = 'revoked' WHERE id = ?").run(id);
 
     const attempts = await Promise.all([
       srv.call('POST', '/api/auth/accept-invitation', { token: 'never-existed' }, student),
@@ -250,21 +250,21 @@ describe('administrator invitations', () => {
 
   it('revokes a pending invitation and records it', async () => {
     await invite();
-    const id = liveTokenFor(INVITEE);
+    const id = await liveTokenFor(INVITEE);
 
     const res = await srv.call('DELETE', `/api/admin/invitations/${id}`, undefined, owner);
     expect(res.status).toBe(200);
 
-    expect(db.prepare('SELECT status FROM admin_invitations WHERE id = ?').get(id).status)
+    expect((await db.prepare('SELECT status FROM admin_invitations WHERE id = ?').get(id)).status)
       .toBe('revoked');
-    expect(db.prepare(
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'ADMIN_INVITE_REVOKED'"
-    ).get().c).toBeGreaterThan(0);
+    ).get()).c).toBeGreaterThan(0);
   });
 
   it('will not revoke one twice', async () => {
     await invite();
-    const id = liveTokenFor(INVITEE);
+    const id = await liveTokenFor(INVITEE);
     await srv.call('DELETE', `/api/admin/invitations/${id}`, undefined, owner);
     const again = await srv.call('DELETE', `/api/admin/invitations/${id}`, undefined, owner);
     expect(again.status).toBe(409);
@@ -275,7 +275,7 @@ describe('administrator invitations', () => {
 
   it('records the invitation with the address and the reason', async () => {
     await invite();
-    const row = db.prepare(
+    const row = await db.prepare(
       "SELECT details FROM admin_audit_logs WHERE action = 'ADMIN_INVITED' ORDER BY created_at DESC"
     ).get();
     expect(row.details).toContain(INVITEE);

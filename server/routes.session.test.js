@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import jwt from 'jsonwebtoken';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 import { installMailbox } from './testMailbox.js';
@@ -45,10 +44,9 @@ describe('authenticateToken: reads identity from the database', () => {
     // anonymisation (an UPDATE), so it never hits this; the one real hard
     // delete, denying a pending organizer, clears these rows explicitly for
     // the same reason and with the same two lines.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-    db.close();
+    const { db } = await import('./db.js');
+    await db.prepare('DELETE FROM legal_acceptances WHERE user_id = ?').run(userId);
+    await db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 
     const after = await srv.call('GET', '/api/auth/me', undefined, token);
     expect(after.status).toBe(401);
@@ -66,8 +64,8 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(decoded.role).toBe('student');
 
     // Promote the account directly in the DB — the token is untouched.
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare("UPDATE users SET role = 'organizer', email_verified = 1 WHERE id = ?").run(userId);
+    const { db } = await import('./db.js');
+    await db.prepare("UPDATE users SET role = 'organizer', email_verified = 1 WHERE id = ?").run(userId);
 
     /**
      * And record the Organizer Agreement acceptance the promotion implies.
@@ -86,13 +84,12 @@ describe('authenticateToken: reads identity from the database', () => {
      */
     const { ORGANIZER_DOCUMENTS } = await import('./legalDocuments.js');
     for (const doc of ORGANIZER_DOCUMENTS) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO legal_acceptances
           (id, user_id, document_slug, version, content_hash, accepted_at, method, context, ip_prefix, ua_family)
         VALUES (?, ?, ?, ?, ?, ?, 'test_fixture', 'live-role-read', NULL, NULL)
       `).run(`acc-fixture-${userId}`, userId, doc.slug, doc.version, doc.contentHash, new Date().toISOString());
     }
-    db.close();
 
     // Hit an organizer-only endpoint with the SAME (still student-shaped) token.
     const res = await srv.call('POST', '/api/events', {

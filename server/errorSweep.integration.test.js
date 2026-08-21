@@ -30,60 +30,60 @@ beforeAll(async () => {
 afterAll(async () => { await srv?.close(); });
 
 describe('the maintenance sweep actually expires error data', () => {
-  it('removes an aged group when runNotificationSweep runs', () => {
+  it('removes an aged group when runNotificationSweep runs', async () => {
     const old = new Date(Date.now() - 400 * 86_400_000).toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO error_groups
         (fingerprint, source, kind, message, status, occurrences, users_seen, first_seen_at, last_seen_at)
       VALUES ('fp-integration-old', 'server', 'TypeError', 'ancient', 'open', 9, 0, ?, ?)
     `).run(old, old);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO error_groups
         (fingerprint, source, kind, message, status, occurrences, users_seen, first_seen_at, last_seen_at)
       VALUES ('fp-integration-fresh', 'server', 'TypeError', 'recent', 'open', 9, 0, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());
 
     // The real entry point the 15-minute interval calls — not sweepErrors.
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
-    const alive = db.prepare(
+    const alive = (await db.prepare(
       "SELECT fingerprint FROM error_groups WHERE fingerprint LIKE 'fp-integration-%'"
-    ).all().map(r => r.fingerprint);
+    ).all()).map(r => r.fingerprint);
 
     expect(alive, 'runNotificationSweep never reached sweepErrors').toEqual(['fp-integration-fresh']);
   });
 
-  it('removes aged evidence from a group that survives', () => {
+  it('removes aged evidence from a group that survives', async () => {
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO error_groups
         (fingerprint, source, kind, message, status, occurrences, users_seen, first_seen_at, last_seen_at)
       VALUES ('fp-integration-evt', 'server', 'TypeError', 'keeps', 'open', 3, 0, ?, ?)
     `).run(now, now);
-    db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
       .run('ev-int-old', 'fp-integration-evt', new Date(Date.now() - 90 * 86_400_000).toISOString());
-    db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO error_events (id, fingerprint, occurred_at) VALUES (?, ?, ?)')
       .run('ev-int-new', 'fp-integration-evt', now);
 
-    utils.runNotificationSweep();
+    await utils.runNotificationSweep();
 
-    const kept = db.prepare(
+    const kept = (await db.prepare(
       "SELECT id FROM error_events WHERE fingerprint = 'fp-integration-evt'"
-    ).all().map(r => r.id);
+    ).all()).map(r => r.id);
     expect(kept).toEqual(['ev-int-new']);
     // The group survived losing its old evidence — counter intact.
     expect(
-      db.prepare("SELECT occurrences FROM error_groups WHERE fingerprint = 'fp-integration-evt'").get().occurrences
+      (await db.prepare("SELECT occurrences FROM error_groups WHERE fingerprint = 'fp-integration-evt'").get()).occurrences
     ).toBe(3);
   });
 
-  it('a failing error sweep does not abort the rest of the maintenance sweep', () => {
+  it('a failing error sweep does not abort the rest of the maintenance sweep', async () => {
     // runNotificationSweep wraps its whole body in ONE try/catch, so a throw
     // from sweepErrors would silently abandon every task after it. sweepErrors
     // catches internally instead; this asserts the whole thing still completes
     // and returns its own count.
-    expect(() => utils.runNotificationSweep()).not.toThrow();
-    expect(typeof utils.runNotificationSweep()).toBe('number');
+    await expect(utils.runNotificationSweep()).resolves.toBeTypeOf('number');
+    expect(typeof await utils.runNotificationSweep()).toBe('number');
   });
 });
 
@@ -110,10 +110,10 @@ describe('no new scheduling machinery was introduced', () => {
 
   it('the sweep is invoked from utils.js beside the step-up sweep', () => {
     const src = read('utils.js');
-    expect(src).toContain('sweepErrors(db, now)');
+    expect(src).toContain('await sweepErrors(db, now)');
     expect(src).toContain("from './errorReporter.js'");
     // Both sweeps live in the same try block; neither gets its own timer.
     expect(src.indexOf('sweepExpiredChallenges(db, now)')).toBeGreaterThan(0);
-    expect(src.indexOf('sweepErrors(db, now)')).toBeGreaterThan(src.indexOf('sweepExpiredChallenges(db, now)'));
+    expect(src.indexOf('await sweepErrors(db, now)')).toBeGreaterThan(src.indexOf('sweepExpiredChallenges(db, now)'));
   });
 });

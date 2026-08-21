@@ -49,17 +49,17 @@ let PASSWORD_HASH;
 
 let seq = 0;
 
-function makeUser({ providers = [] } = {}) {
+async function makeUser({ providers = [] } = {}) {
   const id = `reauth-refresh-${++seq}`;
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, name, email, username, password_hash, grade, role,
                        verified, email_verified, created_at)
     VALUES (?, ?, ?, ?, ?, 'Adult', 'student', 1, 1, ?)
   `).run(id, 'Refresh Person', `${id}@example.org`, id, PASSWORD_HASH, now);
 
   for (const [provider, sub] of providers) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(`oauth-${id}-${provider}`, id, provider, sub, `${id}@example.org`, now, now);
@@ -74,8 +74,8 @@ function makeUser({ providers = [] } = {}) {
  * back in to check that a new SESSION does not reset the budget either, and that
  * only works if the sessions are genuinely different ones.
  */
-function sessionFor(userId) {
-  const u = db.prepare('SELECT id, role, email, name, token_version FROM users WHERE id = ?').get(userId);
+async function sessionFor(userId) {
+  const u = await db.prepare('SELECT id, role, email, name, token_version FROM users WHERE id = ?').get(userId);
   const payload = {
     id: u.id, email: u.email, name: u.name,
     tokenVersion: u.token_version ?? 0, jti: crypto.randomUUID()
@@ -99,11 +99,11 @@ async function api(method, path, { body, session } = {}) {
 }
 
 /** What the browser does on load, and again on every refresh. */
-const openChallenge = (session, action = 'account.delete', params = {}) =>
-  api('POST', '/api/auth/reauth/challenge', { session, body: { action, params } });
+const openChallenge = async (session, action = 'account.delete', params = {}) =>
+  await api('POST', '/api/auth/reauth/challenge', { session, body: { action, params } });
 
-const guess = (session, challengeId, password) =>
-  api('POST', '/api/auth/reauth/password', { session, body: { challengeId, password } });
+const guess = async (session, challengeId, password) =>
+  await api('POST', '/api/auth/reauth/password', { session, body: { challengeId, password } });
 
 /** Spends the whole budget against one challenge, as a user at a keyboard would. */
 async function exhaust(session) {
@@ -155,7 +155,7 @@ describe('the two budgets are one budget', () => {
 describe('a refresh does not restore spent attempts', () => {
   /** The reported bug, stated as an assertion. */
   it('does not grant a fresh budget to a challenge opened after the budget is gone', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     await exhaust(session);
 
     /* The refresh. A brand-new challenge row, `attempts` genuinely zero. */
@@ -175,7 +175,7 @@ describe('a refresh does not restore spent attempts', () => {
    * response, so a refreshed dialog looked exactly like a fresh one.
    */
   it('reports zero remaining on the challenge it opens', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     await exhaust(session);
 
     const second = await openChallenge(session);
@@ -184,7 +184,7 @@ describe('a refresh does not restore spent attempts', () => {
 
   /** Refreshing repeatedly is not a slow way to get there either. */
   it('does not accumulate a budget across many opened challenges', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     await exhaust(session);
 
     for (let i = 0; i < 4; i++) {
@@ -204,10 +204,10 @@ describe('a refresh does not restore spent attempts', () => {
    * this is what that buys.
    */
   it('does not reset for a new session on the same account', async () => {
-    const userId = makeUser();
-    await exhaust(sessionFor(userId));
+    const userId = await makeUser();
+    await exhaust(await sessionFor(userId));
 
-    const fresh = sessionFor(userId);
+    const fresh = await sessionFor(userId);
     const opened = await openChallenge(fresh);
     expect(opened.body.attemptsRemaining).toBe(0);
 
@@ -224,7 +224,7 @@ describe('a refresh does not restore spent attempts', () => {
    * A limit that only refuses wrong answers refuses nothing an attacker minds.
    */
   it('refuses the correct password once the budget is spent', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     await exhaust(session);
 
     const opened = await openChallenge(session);
@@ -234,7 +234,7 @@ describe('a refresh does not restore spent attempts', () => {
     expect(res.body.code).toBe('account_locked');
 
     /* And nothing was granted — the refusal is not cosmetic. */
-    const row = db.prepare('SELECT granted_at FROM reauth_challenges WHERE id = ?')
+    const row = await db.prepare('SELECT granted_at FROM reauth_challenges WHERE id = ?')
       .get(opened.body.challengeId);
     expect(row.granted_at).toBeNull();
   });
@@ -247,8 +247,8 @@ describe('a refresh does not restore spent attempts', () => {
    * this reason, and this is the assertion that keeps it there.
    */
   it('refuses the provider path once the budget is spent', async () => {
-    const userId = makeUser({ providers: [['google', 'sub-refresh-1']] });
-    const session = sessionFor(userId);
+    const userId = await makeUser({ providers: [['google', 'sub-refresh-1']] });
+    const session = await sessionFor(userId);
     await exhaust(session);
 
     const opened = await openChallenge(session);
@@ -273,7 +273,7 @@ describe('the number shown is the number enforced', () => {
    * same defect wearing a smaller number.
    */
   it('counts down by one per wrong answer', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const opened = await openChallenge(session);
     expect(opened.body.attemptsRemaining).toBe(reauth.MAX_ACCOUNT_ATTEMPTS);
 
@@ -285,7 +285,7 @@ describe('the number shown is the number enforced', () => {
 
   /** A challenge opened part-way through inherits the part that is left. */
   it('carries the partial spend onto the next challenge', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const first = await openChallenge(session);
     await guess(session, first.body.challengeId, WRONG);
     await guess(session, first.body.challengeId, WRONG);
@@ -310,7 +310,7 @@ describe('the number shown is the number enforced', () => {
    * the user around a loop that cannot succeed.
    */
   it('says wait, not start again, when the budget is what ran out', async () => {
-    const session = sessionFor(makeUser());
+    const session = await sessionFor(await makeUser());
     const { seen } = await exhaust(session);
     const last = seen[seen.length - 1];
 
@@ -331,8 +331,8 @@ describe('the ceiling is per account', () => {
    * denial of service.
    */
   it('does not spend another account\'s budget', async () => {
-    const victim = sessionFor(makeUser());
-    await exhaust(sessionFor(makeUser()));
+    const victim = await sessionFor(await makeUser());
+    await exhaust(await sessionFor(await makeUser()));
 
     const opened = await openChallenge(victim);
     expect(opened.body.attemptsRemaining).toBe(reauth.MAX_ACCOUNT_ATTEMPTS);

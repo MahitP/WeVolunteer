@@ -37,19 +37,20 @@ describe('removing an organization member', () => {
   let orgKey;
   let orgId;
 
-  const membersOf = () => db.prepare(
-    'SELECT user_id AS userId, member_role AS role FROM organization_members WHERE organization_id = ?'
+  const membersOf = async () => await db.prepare(
+    'SELECT user_id AS "userId", member_role AS role FROM organization_members WHERE organization_id = ?'
   ).all(orgId);
 
-  const isMember = (userId) => membersOf().some(m => m.userId === userId);
+  const isMember = async (userId) => (await membersOf()).some(m => m.userId === userId);
 
   const remove = (userId, session = manager) =>
     srv.call('DELETE', `/api/organizations/${orgKey}/members/${userId}`, undefined, session);
 
-  const join = (userId, role = 'member') => {
-    db.prepare(`
-      INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+  const join = async (userId, role = 'member') => {
+    await db.prepare(`
+      INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
     `).run(orgId, userId, role, new Date().toISOString());
   };
 
@@ -75,17 +76,17 @@ describe('removing an organization member', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
-    join(managerId, 'manager');
-    join(studentId, 'member');
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
+    await join(managerId, 'manager');
+    await join(studentId, 'member');
   });
 
   describe('a manager', () => {
     it('can remove a member', async () => {
       const res = await remove(studentId);
       expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(isMember(studentId)).toBe(false);
+      expect(await isMember(studentId)).toBe(false);
     });
 
     it('reports the new member count', async () => {
@@ -95,10 +96,10 @@ describe('removing an organization member', () => {
     });
 
     it('can remove a co-manager while another manager remains', async () => {
-      join(otherId, 'manager');
+      await join(otherId, 'manager');
       const res = await remove(otherId);
       expect(res.status).toBe(200);
-      expect(isMember(otherId)).toBe(false);
+      expect(await isMember(otherId)).toBe(false);
     });
 
     it('404s for somebody who is not a member', async () => {
@@ -113,7 +114,7 @@ describe('removing an organization member', () => {
       const res = await remove(managerId);
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('last_manager');
-      expect(isMember(managerId)).toBe(true);
+      expect(await isMember(managerId)).toBe(true);
     });
 
     it('cannot be reached by removing the co-manager first and then themselves', async () => {
@@ -123,24 +124,24 @@ describe('removing an organization member', () => {
        * of managers one request at a time and every individual step returns
        * 200.
        */
-      join(otherId, 'manager');
+      await join(otherId, 'manager');
 
       expect((await remove(otherId)).status).toBe(200);
       const second = await remove(managerId);
 
       expect(second.status).toBe(409);
-      expect(membersOf().filter(m => m.role === 'manager')).toHaveLength(1);
+      expect((await membersOf()).filter(m => m.role === 'manager')).toHaveLength(1);
     });
 
     it('can still be removed once somebody else is promoted', async () => {
-      join(otherId, 'member');
+      await join(otherId, 'member');
       const promote = await srv.call('PATCH', `/api/organizations/${orgKey}/members/${otherId}`,
         { memberRole: 'manager' }, manager);
       expect(promote.status).toBe(200);
 
       const res = await remove(managerId);
       expect(res.status).toBe(200);
-      expect(membersOf().filter(m => m.role === 'manager')).toHaveLength(1);
+      expect((await membersOf()).filter(m => m.role === 'manager')).toHaveLength(1);
     });
   });
 
@@ -148,7 +149,7 @@ describe('removing an organization member', () => {
     it('refuses a plain member removing somebody', async () => {
       const res = await remove(managerId, student);
       expect([403, 404]).toContain(res.status);
-      expect(isMember(managerId)).toBe(true);
+      expect(await isMember(managerId)).toBe(true);
     });
 
     it('refuses a member removing themselves through the manager route', async () => {
@@ -168,29 +169,29 @@ describe('removing an organization member', () => {
        * holds the capability and is refused by the per-organization check
        * alone.
        */
-      join(otherId, 'member');
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await join(otherId, 'member');
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
-      join(studentId, 'manager');
+      await join(studentId, 'manager');
 
       const res = await remove(otherId, manager);
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('not_manager');
-      expect(isMember(otherId), 'the member must still be there').toBe(true);
+      expect(await isMember(otherId), 'the member must still be there').toBe(true);
     });
 
     it('refuses a member of this organization who is not a manager', async () => {
       /* Belonging is not managing. Same route, same organization, wrong role. */
-      join(otherId, 'member');
-      db.prepare("UPDATE organization_members SET member_role = 'member' WHERE organization_id = ? AND user_id = ?")
+      await join(otherId, 'member');
+      await db.prepare("UPDATE organization_members SET member_role = 'member' WHERE organization_id = ? AND user_id = ?")
         .run(orgId, managerId);
 
       const res = await remove(otherId, manager);
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('not_manager');
-      expect(isMember(otherId)).toBe(true);
+      expect(await isMember(otherId)).toBe(true);
     });
 
     it('refuses an unauthenticated caller', async () => {
@@ -202,7 +203,7 @@ describe('removing an organization member', () => {
   describe('what removal must never touch', () => {
     it('leaves the account itself alone', async () => {
       await remove(studentId);
-      const user = db.prepare('SELECT id, account_status FROM users WHERE id = ?').get(studentId);
+      const user = await db.prepare('SELECT id, account_status FROM users WHERE id = ?').get(studentId);
       expect(user).toBeTruthy();
       expect(user.account_status).not.toBe('deleted');
     });
@@ -213,28 +214,28 @@ describe('removing an organization member', () => {
        * and a manager tidying a member list must not be able to edit somebody's
        * transcript as a side effect.
        */
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(studentId);
 
       await remove(studentId);
 
-      const after = db.prepare(
+      const after = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(studentId);
       expect(after).toEqual(before);
     });
 
     it('leaves their applications and event history alone', async () => {
-      const before = db.prepare('SELECT COUNT(*) AS c FROM applications WHERE user_id = ?').get(studentId).c;
+      const before = (await db.prepare('SELECT COUNT(*) AS c FROM applications WHERE user_id = ?').get(studentId)).c;
       await remove(studentId);
-      expect(db.prepare('SELECT COUNT(*) AS c FROM applications WHERE user_id = ?').get(studentId).c).toBe(before);
+      expect((await db.prepare('SELECT COUNT(*) AS c FROM applications WHERE user_id = ?').get(studentId)).c).toBe(before);
     });
 
     it('leaves their certificates alone', async () => {
-      const before = db.prepare('SELECT COUNT(*) AS c FROM certificates WHERE user_id = ?').get(studentId).c;
+      const before = (await db.prepare('SELECT COUNT(*) AS c FROM certificates WHERE user_id = ?').get(studentId)).c;
       await remove(studentId);
-      expect(db.prepare('SELECT COUNT(*) AS c FROM certificates WHERE user_id = ?').get(studentId).c).toBe(before);
+      expect((await db.prepare('SELECT COUNT(*) AS c FROM certificates WHERE user_id = ?').get(studentId)).c).toBe(before);
     });
 
     it('leaves memberships of OTHER organizations alone', async () => {
@@ -243,16 +244,17 @@ describe('removing an organization member', () => {
         description: 'Another organization the volunteer belongs to.',
       }, manager);
       const elsewhereId = elsewhere.body.organization.id;
-      db.prepare(`
-        INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+      await db.prepare(`
+        INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
         VALUES (?, ?, 'member', ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
       `).run(elsewhereId, studentId, new Date().toISOString());
 
       await remove(studentId);
 
-      const stillThere = db.prepare(
+      const stillThere = (await db.prepare(
         'SELECT COUNT(*) AS c FROM organization_members WHERE organization_id = ? AND user_id = ?'
-      ).get(elsewhereId, studentId).c;
+      ).get(elsewhereId, studentId)).c;
       expect(stillThere).toBe(1);
     });
   });
@@ -268,12 +270,12 @@ describe('removing an organization member', () => {
     const removeWith = (userId, body, session = manager) =>
       srv.call('DELETE', `/api/organizations/${orgKey}/members/${userId}`, body, session);
 
-    const activeBan = (userId) => db.prepare(
+    const activeBan = async (userId) => await db.prepare(
       'SELECT reason, banned_by FROM organization_bans WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL'
     ).get(orgId, userId);
 
-    beforeEach(() => {
-      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    beforeEach(async () => {
+      await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
     });
 
     it('kicks by default when no mode is given', async () => {
@@ -283,7 +285,7 @@ describe('removing an organization member', () => {
 
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body.banned).toBe(false);
-      expect(activeBan(studentId)).toBeUndefined();
+      expect(await activeBan(studentId)).toBeUndefined();
     });
 
     it('lets a kicked member join again', async () => {
@@ -291,7 +293,7 @@ describe('removing an organization member', () => {
 
       const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
       expect(rejoin.status, JSON.stringify(rejoin.body)).toBe(200);
-      expect(isMember(studentId)).toBe(true);
+      expect(await isMember(studentId)).toBe(true);
     });
 
     it('accepts a kick with no reason', async () => {
@@ -306,7 +308,7 @@ describe('removing an organization member', () => {
 
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body.banned).toBe(true);
-      expect(activeBan(studentId)).toMatchObject({
+      expect(await activeBan(studentId)).toMatchObject({
         reason: 'Repeatedly no-showed shifts.',
         banned_by: managerId,
       });
@@ -322,8 +324,8 @@ describe('removing an organization member', () => {
 
       expect(res.status).toBe(400);
       expect(res.body.code).toBe('reason_required');
-      expect(isMember(studentId), 'a refused ban must not remove them either').toBe(true);
-      expect(activeBan(studentId)).toBeUndefined();
+      expect(await isMember(studentId), 'a refused ban must not remove them either').toBe(true);
+      expect(await activeBan(studentId)).toBeUndefined();
     });
 
     it('stops a banned person rejoining through the ordinary join route', async () => {
@@ -338,7 +340,7 @@ describe('removing an organization member', () => {
 
       expect(rejoin.status).toBe(403);
       expect(rejoin.body.code).toBe('banned');
-      expect(isMember(studentId)).toBe(false);
+      expect(await isMember(studentId)).toBe(false);
     });
 
     it('tells the banned person why, in the refusal', async () => {
@@ -351,7 +353,7 @@ describe('removing an organization member', () => {
       /* Lifting sets `lifted_at` rather than deleting the row — the fact that
          somebody was banned and then unbanned is what an appeal produces. */
       await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
         .run(new Date().toISOString(), orgId, studentId);
 
       const rejoin = await srv.call('POST', `/api/organizations/${orgKey}/membership`, undefined, student);
@@ -360,32 +362,32 @@ describe('removing an organization member', () => {
 
     it('keeps the lifted ban on the record', async () => {
       await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
         .run(new Date().toISOString(), orgId, studentId);
 
-      const rows = db.prepare(
+      const rows = (await db.prepare(
         'SELECT COUNT(*) AS c FROM organization_bans WHERE organization_id = ? AND user_id = ?'
-      ).get(orgId, studentId).c;
+      ).get(orgId, studentId)).c;
       expect(rows, 'lifting must not erase the decision').toBe(1);
     });
 
     it('refuses a ban from somebody who does not manage this organization', async () => {
       /* The caller HOLDS the capability and has had its membership removed, so
          only `canManage` can be doing the refusing. */
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
 
       const res = await removeWith(studentId, { mode: 'ban', reason: 'Not mine to ban.' });
 
       expect(res.status).toBe(403);
-      expect(activeBan(studentId)).toBeUndefined();
-      join(managerId, 'manager');
+      expect(await activeBan(studentId)).toBeUndefined();
+      await join(managerId, 'manager');
     });
 
     it('refuses a ban from a plain member', async () => {
       const res = await removeWith(managerId, { mode: 'ban', reason: 'Trying it on.' }, student);
       expect([403, 404]).toContain(res.status);
-      expect(activeBan(managerId)).toBeUndefined();
+      expect(await activeBan(managerId)).toBeUndefined();
     });
 
     it('will not let a manager ban themselves', async () => {
@@ -395,7 +397,7 @@ describe('removing an organization member', () => {
          A co-manager first, so the last-manager rule — which fires earlier and
          would refuse this for an entirely different reason — is not what the
          assertion is measuring. */
-      join(otherId, 'manager');
+      await join(otherId, 'manager');
 
       const res = await removeWith(managerId, { mode: 'ban', reason: 'Oops.' });
       expect(res.status).toBe(409);
@@ -405,7 +407,7 @@ describe('removing an organization member', () => {
     it('notifies the person, saying which it was', async () => {
       await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
 
-      const note = db.prepare(
+      const note = await db.prepare(
         'SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
       ).get(studentId);
 
@@ -417,7 +419,7 @@ describe('removing an organization member', () => {
     it('tells a kicked person they can come back', async () => {
       await removeWith(studentId, { mode: 'kick' });
 
-      const note = db.prepare(
+      const note = await db.prepare(
         'SELECT title, body FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
       ).get(studentId);
 
@@ -443,18 +445,18 @@ describe('removing an organization member', () => {
       );
 
       expect(promote.status, 'a banned person must not be reinstated by a role change').toBe(404);
-      expect(isMember(studentId)).toBe(false);
+      expect(await isMember(studentId)).toBe(false);
     });
 
     it('never revokes an hour, whichever it was', async () => {
       /* The property every removal path in this product shares. */
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(studentId);
 
       await removeWith(studentId, { mode: 'ban', reason: 'Repeated no-shows.' });
 
-      expect(db.prepare(
+      expect(await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(studentId)).toEqual(before);
     });
@@ -473,19 +475,19 @@ describe('removing an organization member', () => {
 
     /* Live appeals only. Resolved rows from earlier tests stay on the record —
        nothing deletes an appeal — so a bare COUNT would keep counting them. */
-    const openAppeals = (userId) => db.prepare(
+    const openAppeals = async (userId) => (await db.prepare(
       "SELECT COUNT(*) AS c FROM appeals WHERE user_id = ? AND status IN ('open', 'reviewing')"
-    ).get(userId).c;
+    ).get(userId)).c;
 
-    beforeEach(() => {
-      db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    beforeEach(async () => {
+      await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
       /* Closed, not deleted. A trigger refuses the delete outright — "an appeal
          is never deleted: it is the record of a person contesting an enforcement
          action" — and that rule is right, so the fixture works with it. Only
          `open` and `reviewing` appeals block a new one, so resolving them leaves
          each test a clean slate without erasing anything. */
-      db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(studentId);
-      db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(otherId);
+      await db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(studentId);
+      await db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ?").run(otherId);
     });
 
     it('accepts an appeal from the person actually banned', async () => {
@@ -495,7 +497,7 @@ describe('removing an organization member', () => {
       const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
 
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      const row = db.prepare('SELECT subject, subject_ref, status FROM appeals WHERE id = ?').get(res.body.appealId);
+      const row = await db.prepare('SELECT subject, subject_ref, status FROM appeals WHERE id = ?').get(res.body.appealId);
       expect(row).toMatchObject({ subject: 'organization_ban', subject_ref: orgId, status: 'open' });
     });
 
@@ -510,7 +512,7 @@ describe('removing an organization member', () => {
 
       expect(res.status).toBe(404);
       expect(res.body.code).toBe('subject_not_found');
-      expect(openAppeals(studentId)).toBe(0);
+      expect(await openAppeals(studentId)).toBe(0);
     });
 
     it('refuses an appeal about somebody ELSE\'s ban', async () => {
@@ -528,7 +530,7 @@ describe('removing an organization member', () => {
          queueing a case a reviewer can only close. */
       await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
         { mode: 'ban', reason: 'Missed three shifts.' }, manager);
-      db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
         .run(new Date().toISOString(), orgId, studentId);
 
       const res = await appeal({ subject: 'organization_ban', organizationId: orgId, statement: STATEMENT });
@@ -555,7 +557,7 @@ describe('removing an organization member', () => {
       expect(second.status).toBe(200);
       expect(second.body.duplicate).toBe(true);
       expect(second.body.appealId).toBe(first.body.appealId);
-      expect(openAppeals(studentId)).toBe(1);
+      expect(await openAppeals(studentId)).toBe(1);
     });
   });
 });

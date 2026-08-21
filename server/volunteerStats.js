@@ -83,10 +83,10 @@ const DUE_COMMITMENTS = `
  *            eventsAwaitingRecord:number, hoursCredited:number,
  *            lastVolunteeredAt:string|null}}
  */
-export function volunteerStats(db, userId, { now = new Date().toISOString() } = {}) {
-  const signedUp = db.prepare(`
+export async function volunteerStats(db, userId, { now = new Date().toISOString() } = {}) {
+  const signedUp = (await db.prepare(`
     SELECT COUNT(DISTINCT a.event_id) AS n ${DUE_COMMITMENTS}
-  `).get(userId, now)?.n ?? 0;
+  `).get(userId, now))?.n ?? 0;
 
   /**
    * Attendance is keyed by (slot, user) but the statistic is about events, so
@@ -96,7 +96,7 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
    * both attended and absent. MAX(present) is what expresses that: any present
    * shift makes the event attended.
    */
-  const outcome = db.prepare(`
+  const outcome = await db.prepare(`
     SELECT
       SUM(CASE WHEN best = 1 THEN 1 ELSE 0 END) AS attended,
       SUM(CASE WHEN best = 0 THEN 1 ELSE 0 END) AS absent
@@ -124,10 +124,34 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
    */
   const eventsAwaitingRecord = Math.max(0, signedUp - eventsAttended - eventsAbsent);
 
-  const hours = db.prepare(`
-    SELECT COALESCE(SUM(hours_awarded), 0) AS h
-    FROM attendance WHERE user_id = ? AND present = 1
-  `).get(userId)?.h ?? 0;
+  /**
+   * Credited hours.
+   *
+   * ── Why the join is here now ──
+   *
+   * This was `FROM attendance WHERE user_id = ? AND present = 1` with no
+   * reference to the event at all, which meant a CANCELLED event's hours
+   * counted toward a student's total while `eventsAttended` two queries above
+   * excluded that same event from their count. One number said the work
+   * happened and the other said it did not.
+   *
+   * The transcript is the surface where that became untenable: it is a record
+   * of completed service, and printing a called-off event as a verified row
+   * under somebody's name is a claim the platform cannot support. So cancelled
+   * events are excluded here, in the itemised `completed` list, and in the
+   * organization figures — one rule, applied everywhere hours are presented as
+   * credited service.
+   *
+   * Measured before changing it: zero attendance rows on cancelled events exist
+   * in the pilot database, so no student's displayed total moves. This corrects
+   * an edge case rather than restating anybody's record.
+   */
+  const hours = (await db.prepare(`
+    SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
+  `).get(userId))?.h ?? 0;
 
   return {
     eventsSignedUp: signedUp,
@@ -135,7 +159,7 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
     eventsAbsent,
     eventsAwaitingRecord,
     hoursCredited: Number(hours.toFixed ? hours.toFixed(2) : hours),
-    lastVolunteeredAt: lastVolunteeredAt(db, userId),
+    lastVolunteeredAt: await lastVolunteeredAt(db, userId),
   };
 }
 
@@ -157,13 +181,13 @@ export function volunteerStats(db, userId, { now = new Date().toISOString() } = 
  * student's own log shows their external entries in full — that is where a
  * complete personal history belongs.
  */
-export function lastVolunteeredAt(db, userId) {
-  return db.prepare(`
+export async function lastVolunteeredAt(db, userId) {
+  return (await db.prepare(`
     SELECT MAX(s.end_datetime) AS t
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
     WHERE at.user_id = ? AND at.present = 1
-  `).get(userId)?.t ?? null;
+  `).get(userId))?.t ?? null;
 }
 
 /**
@@ -179,8 +203,8 @@ export function lastVolunteeredAt(db, userId) {
  * an organizer confirmed on a WeVolunteer event; these are what a student says
  * they did somewhere else.
  */
-export function externalHoursSummary(db, userId) {
-  const row = db.prepare(`
+export async function externalHoursSummary(db, userId) {
+  const row = await db.prepare(`
     SELECT COALESCE(SUM(hours), 0) AS total, COUNT(*) AS entries
     FROM external_hours WHERE user_id = ?
   `).get(userId) ?? {};
@@ -204,12 +228,12 @@ export function externalHoursSummary(db, userId) {
  * reliabilityMultiplier in weighting.js, where that distinction is the whole
  * point.
  */
-export function attendanceRecordsFor(db, userIds) {
+export async function attendanceRecordsFor(db, userIds) {
   const ids = [...new Set(userIds)].filter(Boolean);
   if (ids.length === 0) return new Map();
 
   const placeholders = ids.map(() => '?').join(',');
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT user_id,
            SUM(CASE WHEN best = 1 THEN 1 ELSE 0 END) AS attended,
            SUM(CASE WHEN best = 0 THEN 1 ELSE 0 END) AS absent
@@ -257,7 +281,7 @@ export function attendanceRecordsFor(db, userIds) {
  *
  * @returns {Map<string, {signedUp:number, attended:number, absent:number}>}
  */
-export function participationCountsFor(db, userIds, { now = new Date().toISOString() } = {}) {
+export async function participationCountsFor(db, userIds, { now = new Date().toISOString() } = {}) {
   const ids = [...new Set(userIds)].filter(Boolean);
   if (ids.length === 0) return new Map();
 
@@ -266,13 +290,13 @@ export function participationCountsFor(db, userIds, { now = new Date().toISOStri
   /* `DUE_COMMITMENTS` is written for one user; widened to a set here by
      replacing its equality with an IN, which is the only difference between the
      two — asserted by volunteerStats.test.js. */
-  const signedUpRows = db.prepare(`
+  const signedUpRows = await db.prepare(`
     SELECT a.user_id, COUNT(DISTINCT a.event_id) AS n
     ${DUE_COMMITMENTS.replace('a.user_id = ?', `a.user_id IN (${placeholders})`)}
     GROUP BY a.user_id
   `).all(...ids, now);
 
-  const attendance = attendanceRecordsFor(db, ids);
+  const attendance = await attendanceRecordsFor(db, ids);
 
   const out = new Map();
   for (const id of ids) {

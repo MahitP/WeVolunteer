@@ -82,10 +82,10 @@ beforeAll(async () => {
   expect(created.status, JSON.stringify(created.body)).toBe(201);
 
   const eventId = created.body.id;
-  const slotId = db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId).id;
+  const slotId = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').get(eventId)).id;
 
   /* No `id` column: `attendance` is keyed on (event_id, slot_id, user_id). */
-  db.prepare(
+  await db.prepare(
     'INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded) VALUES (?, ?, ?, 1, 2)'
   ).run(eventId, slotId, aliceId);
 });

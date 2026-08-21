@@ -27,6 +27,12 @@ import EmptyState from './common/EmptyState';
  */
 export default function OrganizationAnnouncements({ orgKey, canManage, isMember, repliesEnabled, addToast }) {
   const [announcements, setAnnouncements] = useState([]);
+  /* Distinct from "loaded and empty". The card states "Nothing announced
+     yet", which is a claim about what the organization has posted, and a
+     failed request is not evidence for it. The list starts as [] rather than
+     null here, so leaving it alone on failure would still render the claim —
+     this flag is what separates the two. */
+  const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,11 +42,15 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
     let cancelled = false;
     setLoading(true);
     api.fetchOrganizationAnnouncements(orgKey)
-      .then(res => { if (!cancelled) setAnnouncements(res?.announcements ?? []); })
-      .catch(() => { if (!cancelled) setAnnouncements([]); })
+      .then(res => { if (!cancelled) { setAnnouncements(res?.announcements ?? []); setLoadFailed(false); } })
+      .catch(() => {
+        if (cancelled) return;
+        setLoadFailed(true);
+        addToast?.('Could not load announcements. Reload to try again.', 'error');
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [orgKey]);
+  }, [orgKey, addToast]);
 
   const publish = async (e) => {
     e.preventDefault();
@@ -125,6 +135,8 @@ export default function OrganizationAnnouncements({ orgKey, canManage, isMember,
 
         {loading ? (
           <p className="muted">Loading announcements…</p>
+        ) : loadFailed ? (
+          <p className="muted">Announcements could not be loaded. Reload to try again.</p>
         ) : announcements.length === 0 ? (
           <EmptyState
             icon={Megaphone}

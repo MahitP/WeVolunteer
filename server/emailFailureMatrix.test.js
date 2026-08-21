@@ -279,15 +279,15 @@ describe('the recipient cannot tell which provider delivered', () => {
 describe('idempotency', () => {
   it('collapses a repeated enqueue of the same message to one row', async () => {
     const key = 'verification:user-42:attempt-1';
-    enqueueMessage({ ...MESSAGE, idempotencyKey: key }, { flow: 'verification', handle: db });
-    enqueueMessage({ ...MESSAGE, idempotencyKey: key }, { flow: 'verification', handle: db });
+    await enqueueMessage({ ...MESSAGE, idempotencyKey: key }, { flow: 'verification', handle: db });
+    await enqueueMessage({ ...MESSAGE, idempotencyKey: key }, { flow: 'verification', handle: db });
 
     expect(rows(), 'the same message was queued twice').toHaveLength(1);
   });
 
-  it('keeps two genuinely different messages apart', () => {
-    enqueueMessage({ ...MESSAGE, idempotencyKey: 'a' }, { flow: 'password-reset', handle: db });
-    enqueueMessage({ ...MESSAGE, idempotencyKey: 'b' }, { flow: 'password-reset', handle: db });
+  it('keeps two genuinely different messages apart', async () => {
+    await enqueueMessage({ ...MESSAGE, idempotencyKey: 'a' }, { flow: 'password-reset', handle: db });
+    await enqueueMessage({ ...MESSAGE, idempotencyKey: 'b' }, { flow: 'password-reset', handle: db });
     /* Two resets a minute apart are two messages. A key derived from the body
        would have silently collapsed them and sent only the first. */
     expect(rows()).toHaveLength(2);
@@ -303,14 +303,14 @@ describe('idempotency', () => {
 });
 
 describe('queue bookkeeping', () => {
-  const seed = () => {
-    enqueueMessage({ ...MESSAGE, idempotencyKey: 'k1' }, { flow: 'verification', handle: db });
+  const seed = async () => {
+    await enqueueMessage({ ...MESSAGE, idempotencyKey: 'k1' }, { flow: 'verification', handle: db });
     return rows()[0];
   };
 
-  it('records the provider and message id on success, and drops the body', () => {
-    const job = seed();
-    recordQueueOutcome(job.id, {
+  it('records the provider and message id on success, and drops the body', async () => {
+    const job = await seed();
+    await recordQueueOutcome(job.id, {
       ok: true, provider: 'resend', messageId: 're_final',
       attempts: [{ provider: 'resend', category: null, at: 'now' }],
     }, { handle: db });
@@ -327,9 +327,9 @@ describe('queue bookkeeping', () => {
     expect(payload.text).toBeUndefined();
   });
 
-  it('schedules a retry with a category and a later attempt time', () => {
-    const job = seed();
-    recordQueueOutcome(job.id, {
+  it('schedules a retry with a category and a later attempt time', async () => {
+    const job = await seed();
+    await recordQueueOutcome(job.id, {
       ok: false, category: FAILURE.TRANSIENT, attemptCount: 1,
       error: new Error('relay hiccup'), attempts: [],
     }, { handle: db });
@@ -343,9 +343,9 @@ describe('queue bookkeeping', () => {
     expect(JSON.parse(row.payload).html).toBe(MESSAGE.html);
   });
 
-  it('gives up at the attempt ceiling and clears the body', () => {
-    const job = seed();
-    recordQueueOutcome(job.id, {
+  it('gives up at the attempt ceiling and clears the body', async () => {
+    const job = await seed();
+    await recordQueueOutcome(job.id, {
       ok: false, category: FAILURE.TRANSIENT, attemptCount: QUEUE_MAX_ATTEMPTS,
       error: new Error('still down'), attempts: [],
     }, { handle: db });
@@ -355,20 +355,20 @@ describe('queue bookkeeping', () => {
     expect(JSON.parse(row.payload).html).toBeUndefined();
   });
 
-  it('sweeps delivered rows once they are older than the window', () => {
-    const job = seed();
-    recordQueueOutcome(job.id, { ok: true, provider: 'smtp', messageId: 'x', attempts: [] }, { handle: db });
+  it('sweeps delivered rows once they are older than the window', async () => {
+    const job = await seed();
+    await recordQueueOutcome(job.id, { ok: true, provider: 'smtp', messageId: 'x', attempts: [] }, { handle: db });
 
-    expect(sweepSentMessages({ handle: db, olderThanMs: 60_000 }), 'swept a fresh row').toBe(0);
+    expect(await sweepSentMessages({ handle: db, olderThanMs: 60_000 }), 'swept a fresh row').toBe(0);
     expect(rows()).toHaveLength(1);
 
-    expect(sweepSentMessages({ handle: db, olderThanMs: -1 })).toBe(1);
+    expect(await sweepSentMessages({ handle: db, olderThanMs: -1 })).toBe(1);
     expect(rows()).toHaveLength(0);
   });
 
-  it('never sweeps a row that has not been delivered', () => {
-    seed();
-    expect(sweepSentMessages({ handle: db, olderThanMs: -1 })).toBe(0);
+  it('never sweeps a row that has not been delivered', async () => {
+    await seed();
+    expect(await sweepSentMessages({ handle: db, olderThanMs: -1 })).toBe(0);
     expect(rows(), 'an undelivered message was swept away').toHaveLength(1);
   });
 });

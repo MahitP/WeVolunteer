@@ -40,6 +40,7 @@ describe('hash enforcement and the revision layer, together', () => {
     vi.resetModules();
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     return dbMod.db;
   };
 
@@ -67,7 +68,7 @@ describe('hash enforcement and the revision layer, together', () => {
     let db = await boot();
 
     const { publishRevision } = await import('./legalStore.js');
-    publishRevision(db, {
+    await publishRevision(db, {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nA revision published before the switch.\n',
@@ -90,7 +91,7 @@ describe('hash enforcement and the revision layer, together', () => {
   it('still resolves the revision when enforcement is on', async () => {
     let db = await boot();
     const store = await import('./legalStore.js');
-    store.publishRevision(db, {
+    await store.publishRevision(db, {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nServed under enforcement.\n',
@@ -104,8 +105,9 @@ describe('hash enforcement and the revision layer, together', () => {
 
     const dbMod = await import('./db.js');
     dbMod.initDatabase();
+    await dbMod.completeDatabaseInit();
     const strictStore = await import('./legalStore.js');
-    const resolved = strictStore.resolveDocument(
+    const resolved = await strictStore.resolveDocument(
       dbMod.db, 'cookie-and-tracking-notice', { withBody: true }
     );
 
@@ -126,7 +128,7 @@ describe('hash enforcement and the revision layer, together', () => {
   it('serves a revision even when the policy file cannot be read', async () => {
     const db = await boot();
     const store = await import('./legalStore.js');
-    store.publishRevision(db, {
+    await store.publishRevision(db, {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nStill here without the file.\n',
@@ -140,7 +142,7 @@ describe('hash enforcement and the revision layer, together', () => {
       throw new content.PolicyContentError('file gone');
     });
 
-    const resolved = store.resolveDocument(db, 'cookie-and-tracking-notice', { withBody: true });
+    const resolved = await store.resolveDocument(db, 'cookie-and-tracking-notice', { withBody: true });
     expect(resolved.body).toContain('Still here without the file');
   });
 
@@ -153,7 +155,7 @@ describe('hash enforcement and the revision layer, together', () => {
     let db = await boot();
     const store = await import('./legalStore.js');
     for (const [version, text] of [['1.1.0', 'first'], ['1.2.0', 'second']]) {
-      store.publishRevision(db, {
+      await store.publishRevision(db, {
         slug: 'cookie-and-tracking-notice',
         version,
         body: `# Cookie Notice\n\n${text}\n`,
@@ -163,9 +165,9 @@ describe('hash enforcement and the revision layer, together', () => {
     }
 
     db = await boot();
-    const rows = db.prepare(
+    const rows = (await db.prepare(
       'SELECT version FROM legal_documents WHERE slug = ?'
-    ).all('cookie-and-tracking-notice').map(r => r.version);
+    ).all('cookie-and-tracking-notice')).map(r => r.version);
 
     expect(rows).toContain('1.1.0');
     expect(rows).toContain('1.2.0');
@@ -202,7 +204,7 @@ describe('attacking the editor over HTTP', () => {
       name: 'Adv Owner', username: 'adv_owner', email: 'adv.owner@test.local',
       password: OWNER_PASSWORD, grade: 'Adult', role: 'student',
     });
-    db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
+    await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE email = ?')
       .run('super_admin', 'adv.owner@test.local');
     await enrolTwoFactor(db, 'adv.owner@test.local');
     owner = signed.cookie;
@@ -231,10 +233,10 @@ describe('attacking the editor over HTTP', () => {
       const { grantCapability } = await import('./userCapabilities.js').catch(() => ({}));
       if (!grantCapability) return; // module shape changed; the HTTP case below still covers it
 
-      const target = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
-      expect(() => grantCapability(db, {
+      const target = await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
+      await expect(grantCapability(db, {
         userId: target.id, capability: 'legal.edit', grantedBy: target.id, reason: 'audit',
-      })).toThrow();
+      })).rejects.toThrow();
     });
 
     /**
@@ -243,9 +245,9 @@ describe('attacking the editor over HTTP', () => {
      * SUPER_ONLY test runs before per-user grants are consulted.
      */
     it('does not honour a grant row written directly into the table', async () => {
-      const target = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
+      const target = await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
       try {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO user_capabilities (user_id, capability, granted_by, granted_at, reason)
           VALUES (?, 'legal.edit', ?, ?, 'adversarial test')
         `).run(target.id, target.id, new Date().toISOString());
@@ -258,7 +260,7 @@ describe('attacking the editor over HTTP', () => {
       const res = await srv.call('GET', '/api/admin/legal/documents', undefined, admin);
       expect(res.status).toBe(403);
 
-      db.prepare("DELETE FROM user_capabilities WHERE capability = 'legal.edit'").run();
+      await db.prepare("DELETE FROM user_capabilities WHERE capability = 'legal.edit'").run();
     });
   });
 
@@ -513,18 +515,18 @@ describe('attacking the editor over HTTP', () => {
     });
 
     it('writes no audit row for a publication that was refused', async () => {
-      const before = db.prepare(
+      const before = (await db.prepare(
         "SELECT COUNT(*) AS n FROM admin_audit_logs WHERE action = 'LEGAL_DOCUMENT_PUBLISHED'"
-      ).get().n;
+      ).get()).n;
 
       await publish(
         { body: '# H\n\nRefused.\n', version: 'nope', effectiveAt: '2026-09-01' },
         await grantFor('nope')
       );
 
-      const after = db.prepare(
+      const after = (await db.prepare(
         "SELECT COUNT(*) AS n FROM admin_audit_logs WHERE action = 'LEGAL_DOCUMENT_PUBLISHED'"
-      ).get().n;
+      ).get()).n;
       expect(after).toBe(before);
     });
 
@@ -561,9 +563,9 @@ describe('attacking the editor over HTTP', () => {
     expect(codes).not.toContain(500);
 
     /* And the table holds exactly one row for that version. */
-    const rows = db.prepare(
+    const rows = (await db.prepare(
       'SELECT COUNT(*) AS n FROM legal_document_revisions WHERE slug = ? AND version = ?'
-    ).get(SLUG, '9.0.0').n;
+    ).get(SLUG, '9.0.0')).n;
     expect(rows).toBe(1);
   });
 
@@ -574,9 +576,9 @@ describe('attacking the editor over HTTP', () => {
    */
   it('never lets an earlier revision become the current one', async () => {
     const resolved = await srv.call('GET', `/api/legal/documents/${SLUG}`);
-    const all = db.prepare(
+    const all = (await db.prepare(
       'SELECT version FROM legal_document_revisions WHERE slug = ?'
-    ).all(SLUG).map(r => r.version);
+    ).all(SLUG)).map(r => r.version);
 
     const { compareVersions } = await import('./legalStore.js');
     for (const version of all) {
@@ -622,8 +624,8 @@ describe('attacking the editor over HTTP', () => {
     });
     expect(signed.cookie).toBeTruthy();
 
-    const user = db.prepare("SELECT id FROM users WHERE email = 'after.rev@test.local'").get();
-    const acceptance = db.prepare(`
+    const user = await db.prepare("SELECT id FROM users WHERE email = 'after.rev@test.local'").get();
+    const acceptance = await db.prepare(`
       SELECT version, content_hash FROM legal_acceptances
       WHERE user_id = ? AND document_slug = 'terms-of-service'
     `).get(user.id);

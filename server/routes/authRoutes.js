@@ -2,25 +2,20 @@ import express from 'express';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import {
-  sendVerificationEmail,
-  sendPasswordResetEmail,
-  sendEmailChangeConfirmation,
-  sendEmailChangeNotice
-} from '../email.js';
-import { VALID_GRADES, JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
+import '../email.js';
+import { JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
-import { authenticateToken, selfUserResponse, inTransaction, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
+import { authenticateToken, selfUserResponse, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
-import { withheldCapabilitiesFor } from '../organizerAgreement.js';
-import { grantsFor } from '../userCapabilities.js';
-import { db, initDatabase } from '../db.js';
-import { validateAccountFields, validatePassword, validateUsername, validateEmail, validateProfilePatch } from '../accountValidation.js';
-import { issueVerificationToken, sendVerificationMail, purgeExpiredVerificationTokens } from '../services/verification.js';
+import '../organizerAgreement.js';
+import '../userCapabilities.js';
+import { db } from '../db.js';
+import { validateAccountFields, validatePassword, validateUsername } from '../accountValidation.js';
+import { issueVerificationToken, sendVerificationMail } from '../services/verification.js';
 import { isSuspended, liftIfExpired, suspensionNotice } from '../suspension.js';
 import { ROLE, previewPersonaOf } from '../authz.js';
-import { decryptSecret } from '../cryptoUtils.js';
 import { verifyTotpOnce } from '../totpReplay.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 
 const router = express.Router();
@@ -109,9 +104,9 @@ export function __resetLoginThrottle() {
 }
 
 /** Signs the caller in by setting the session cookie. */
-export function issueSession(res, user, tokenVersion) {
+export async function issueSession(res, user, tokenVersion) {
   try {
-    db.prepare('UPDATE users SET last_sign_in_at = ? WHERE id = ?').run(new Date().toISOString(), user.id);
+    await db.prepare('UPDATE users SET last_sign_in_at = ? WHERE id = ?').run(new Date().toISOString(), user.id);
   } catch (err) {
     console.error('Failed to record last sign-in:', err);
   }
@@ -246,11 +241,11 @@ function demoRoleLabel(row) {
   return 'Student';
 }
 
-router.get('/api/auth/demo-accounts', (req, res) => {
+router.get('/api/auth/demo-accounts', async (req, res) => {
   if (!DEMO_MODE) return res.status(404).json({ error: 'Not found' });
 
   const placeholders = DEMO_ROSTER.map(() => '?').join(', ');
-  const rows = db.prepare(
+  const rows = await db.prepare(
     `SELECT id, name, email, avatar, role, verified, account_status
        FROM users
       WHERE id IN (${placeholders})
@@ -283,12 +278,12 @@ router.get('/api/auth/demo-accounts', (req, res) => {
  * app.js puts it behind a dedicated limiter. A caller who fails the format
  * rules gets the format complaint and no information about the database.
  */
-router.get('/api/auth/check-username', (req, res) => {
+router.get('/api/auth/check-username', async (req, res) => {
   const check = validateUsername(req.query.username);
   if (!check.ok) {
     return res.json({ available: false, valid: false, error: check.error });
   }
-  const taken = db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(check.value);
+  const taken = await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase').get(check.value);
   res.json({ available: !taken, valid: true });
 });
 
@@ -388,10 +383,10 @@ router.post('/api/auth/signup', async (req, res) => {
 
   // Explicit checks for clean, field-attributed messages. The UNIQUE-violation
   // catch below is only the race backstop between here and the INSERT.
-  if (db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE NOCASE').get(fields.username)) {
+  if (await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase').get(fields.username)) {
     return res.status(409).json({ error: 'That username is already taken.', field: 'username' });
   }
-  if (db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE NOCASE').get(fields.email)) {
+  if (await db.prepare('SELECT 1 FROM users WHERE email = ? COLLATE nocase').get(fields.email)) {
     return res.status(409).json({ error: 'An account already exists for that email address.', field: 'email' });
   }
 
@@ -413,7 +408,7 @@ router.post('/api/auth/signup', async (req, res) => {
      */
     const emailVerifiedVal = oauthData && oauthData.providerEmailVerified === true ? 1 : 0;
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /**
        * `graduation_year` is the stored truth about grade level;
        * `fields.grade` is the value DERIVED from it by
@@ -422,7 +417,7 @@ router.post('/api/auth/signup', async (req, res) => {
        * contradiction the derivation exists to prevent — and would let a
        * hand-written request register a ninth grader as a senior.
        */
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO users (id, name, email, username, password_hash, grade, graduation_year, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
@@ -433,7 +428,7 @@ router.post('/api/auth/signup', async (req, res) => {
       );
 
       if (oauthData) {
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(`oauth-${crypto.randomUUID()}`, userId, oauthData.provider, oauthData.providerUserId, oauthData.providerEmail, now, now, now);
@@ -454,7 +449,7 @@ router.post('/api/auth/signup', async (req, res) => {
        * its consent carry an identical timestamp rather than two that differ by
        * a millisecond and invite questions later.
        */
-      recordAcceptances(db, {
+      await recordAcceptances(tx, {
         userId,
         method: oauthData ? 'oauth_signup' : 'signup',
         context: oauthData ? `oauth:${oauthData.provider}` : 'password',
@@ -463,10 +458,10 @@ router.post('/api/auth/signup', async (req, res) => {
       });
     });
 
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
     /* The caller describing themselves, so `grants` and `withheld` travel with
        it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
-    const user = selfUserResponse(userRow);
+    const user = await selfUserResponse(userRow);
 
     /**
      * Sign the new account in either way, and let the email gate decide what
@@ -483,10 +478,10 @@ router.post('/api/auth/signup', async (req, res) => {
      * unconfirmed account to seeing itself and finishing verification, and
      * `emailVerified` on the response tells the client which screen to show.
      */
-    issueSession(res, user, userRow.token_version);
+    await issueSession(res, user, userRow.token_version);
 
     if (emailVerifiedVal !== 1) {
-      sendVerificationMail(fields.email, issueVerificationToken(userId));
+      sendVerificationMail(fields.email, await issueVerificationToken(userId));
     }
 
     res.status(201).json({
@@ -562,8 +557,8 @@ router.post('/api/auth/login', async (req, res) => {
 
   try {
     const identifier = String(email).trim();
-    const userRow = db.prepare(
-      'SELECT * FROM users WHERE email = ? COLLATE NOCASE OR username = ? COLLATE NOCASE'
+    const userRow = await db.prepare(
+      'SELECT * FROM users WHERE email = ? COLLATE nocase OR username = ? COLLATE nocase'
     ).get(identifier, identifier);
 
     const looksLikeEmail = identifier.includes('@');
@@ -647,7 +642,7 @@ router.post('/api/auth/login', async (req, res) => {
      * authenticated place to repeat it, because a suspended account never gets a
      * session — which is the whole point of the suspension.
      */
-    liftIfExpired(db, userRow);
+    await liftIfExpired(db, userRow);
 
     /**
      * An account that signs in only through a provider has the OAUTH_ONLY
@@ -660,7 +655,7 @@ router.post('/api/auth/login', async (req, res) => {
      * use anyway.
      */
     if (userRow.password_hash === OAUTH_ONLY) {
-      const linked = db.prepare('SELECT provider FROM oauth_accounts WHERE user_id = ?').all(userRow.id);
+      const linked = await db.prepare('SELECT provider FROM oauth_accounts WHERE user_id = ?').all(userRow.id);
       const names = linked.map(l => l.provider.charAt(0).toUpperCase() + l.provider.slice(1));
       return res.status(409).json({
         error: names.length
@@ -683,7 +678,7 @@ router.post('/api/auth/login', async (req, res) => {
 
     /* The caller describing themselves, so `grants` and `withheld` travel with
        it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
-    const user = selfUserResponse(userRow);
+    const user = await selfUserResponse(userRow);
     
     if (userRow.tfa_enabled || userRow.tfa_email_enabled) {
       issuePreAuthSession(res, userRow);
@@ -692,11 +687,11 @@ router.post('/api/auth/login', async (req, res) => {
       return res.json({
         require2FA: true,
         userId: userRow.id,
-        availableMethods: enabledSecondFactors(userRow)
+        availableMethods: await enabledSecondFactors(userRow)
       });
     }
 
-    issueSession(res, user, userRow.token_version);
+    await issueSession(res, user, userRow.token_version);
 
     /**
      * A suspended account signs in, and lands on the suspension screen.
@@ -775,7 +770,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     const tokenHash = crypto.createHash('sha256').update(preauthToken).digest('hex');
 
 
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
     if (!userRow || userRow.account_status === 'deleted' || isSuspended(userRow)) {
       res.clearCookie('wev_preauth', clearCookieOptions());
       return res.status(401).json({ error: 'Authentication failed.' });
@@ -801,7 +796,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      * full session is killed, so a preauth `jti` is recorded in the same place
      * rather than in a table of its own.
      */
-    if (isSessionRevoked(payload.jti)) {
+    if (await isSessionRevoked(payload.jti)) {
       res.clearCookie('wev_preauth', clearCookieOptions());
       return res.status(401).json({ error: 'Session expired. Please log in again.' });
     }
@@ -913,7 +908,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      *
      * Counted as neither a guess nor a success, because it is neither.
      */
-    const offered = enabledSecondFactors(userRow);
+    const offered = await enabledSecondFactors(userRow);
     if (!effectiveMethod || !offered.includes(effectiveMethod)) {
       return res.status(400).json({
         error: offered.length
@@ -988,25 +983,38 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      * endpoint is deliberately not a lockout, and it stays that way.
      */
     try {
-      inTransaction(() => {
-        db.prepare(`
+      await runInTransaction(db, async (tx) => {
+        /* ISO-8601 from JS, bound — not `datetime('now')`. Both the write and
+           the window comparison below moved together, because they are compared
+           as text and the two formats disagree at position 10 (`T` sorts above
+           a space), which would make every stored row look newer than any
+           cutoff. Migration 056 converts the rows that already exist. */
+        const attemptAt = new Date().toISOString();
+        /* The increment is table-qualified. Inside DO UPDATE, PostgreSQL has two
+           columns called `attempts` in scope — the existing row's and the
+           proposed row's, under `excluded` — and refuses an unqualified
+           reference as ambiguous. SQLite resolves it to the existing row, so the
+           bare form worked there and took the whole second-factor rate limiter
+           down on PostgreSQL, 198 identical errors in one run. */
+        await tx.prepare(`
           INSERT INTO tfa_login_attempts (token_hash, user_id, attempts, last_attempt_at)
-          VALUES (?, ?, 1, datetime('now'))
+          VALUES (?, ?, 1, ?)
           ON CONFLICT(token_hash) DO UPDATE SET
-            attempts = attempts + 1,
-            last_attempt_at = datetime('now')
-        `).run(tokenHash, payload.id);
+            attempts = tfa_login_attempts.attempts + 1,
+            last_attempt_at = excluded.last_attempt_at
+        `).run(tokenHash, payload.id, attemptAt);
 
-        const forToken = db.prepare(
+        const forToken = (await tx.prepare(
           'SELECT attempts FROM tfa_login_attempts WHERE token_hash = ?'
-        ).get(tokenHash)?.attempts ?? 0;
+        ).get(tokenHash))?.attempts ?? 0;
 
-        const forAccount = db.prepare(
+        const windowStart = new Date(Date.now() - ACCOUNT_WINDOW_MINUTES * 60 * 1000).toISOString();
+        const forAccount = (await tx.prepare(
           `SELECT COALESCE(SUM(attempts), 0) AS attempts
              FROM tfa_login_attempts
             WHERE user_id = ?
-              AND last_attempt_at > datetime('now', '-${ACCOUNT_WINDOW_MINUTES} minutes')`
-        ).get(payload.id)?.attempts ?? 0;
+              AND last_attempt_at > ?`
+        ).get(payload.id, windowStart))?.attempts ?? 0;
 
         /* Strictly greater: this request's own claim is already included, so
            `> 5` is the fifth guess allowed and the sixth refused — the same
@@ -1017,7 +1025,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
       });
     } catch (err) {
       if (err.message !== 'tfa_throttled') throw err;
-      recordSecurityEvent(db, req, payload.id, '2FA_THROTTLED');
+      await recordSecurityEvent(db, req, payload.id, '2FA_THROTTLED');
       return res.status(429).json({ error: 'Too many failed attempts. Please log in again.' });
     }
 
@@ -1054,7 +1062,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        * the distinction, and this refuses the sign-in rather than completing one
        * it cannot make single-use. See server/totpReplay.js.
        */
-      const totpResult = verifyTotpOnce(db, userRow, tokenValue);
+      const totpResult = await verifyTotpOnce(db, userRow, tokenValue);
       if (totpResult === 'unavailable') {
         return res.status(503).json({
           error: 'Verification is temporarily unavailable. Please try again, or use a recovery code.',
@@ -1077,7 +1085,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
        * calendar day rather than its ten minutes — and `datetimeComparison.test.js`
        * exists because this exact mistake has been made here before.
        */
-      const validEmailCodes = db.prepare(
+      const validEmailCodes = await db.prepare(
         'SELECT id, code_hash FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL '
         + 'AND expires_at > ? AND attempts < 3'
       ).all(payload.id, new Date().toISOString());
@@ -1117,18 +1125,18 @@ router.post('/api/auth/login-2fa', async (req, res) => {
          * presentation of a single-use credential. Same shape as the recovery
          * branch below, for the same reason.
          */
-        const claimed = db.prepare(
-          "UPDATE tfa_email_codes SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL"
-        ).run(matched.id);
+        const claimed = await db.prepare(
+          'UPDATE tfa_email_codes SET used_at = ? WHERE id = ? AND used_at IS NULL'
+        ).run(new Date().toISOString(), matched.id);
         isValid = claimed.changes === 1;
       } else {
         for (const emailCode of validEmailCodes) {
-          db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
+          await db.prepare('UPDATE tfa_email_codes SET attempts = attempts + 1 WHERE id = ?').run(emailCode.id);
         }
       }
     } else if (effectiveMethod === 'recovery' && codeValue) {
       // Find all recovery codes for the user. We must bcrypt.compare each one.
-      const recoveryCodes = db.prepare('SELECT id, code_hash FROM recovery_codes WHERE user_id = ?').all(payload.id);
+      const recoveryCodes = await db.prepare('SELECT id, code_hash FROM recovery_codes WHERE user_id = ?').all(payload.id);
       
       /**
        * `await bcrypt.compare` rather than the sync form.
@@ -1156,7 +1164,7 @@ router.post('/api/auth/login-2fa', async (req, res) => {
            * replayed code has always got. Nothing else is needed: DELETE is
            * atomic in SQLite, so exactly one caller can ever see 1 here.
            */
-          const claimed = db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
+          const claimed = await db.prepare('DELETE FROM recovery_codes WHERE id = ?').run(rc.id);
           if (claimed.changes === 1) {
             isValid = true;
             usedRecoveryCodeId = rc.id;
@@ -1186,11 +1194,11 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      * sign-in either.
      */
     if (!isValid) {
-      recordSecurityEvent(db, req, payload.id, '2FA_FAILED', { method: effectiveMethod });
+      await recordSecurityEvent(db, req, payload.id, '2FA_FAILED', { method: effectiveMethod });
       return res.status(401).json({ error: 'Invalid code.' });
     }
 
-    db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(payload.id);
+    await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(payload.id);
 
     /**
      * The grant is spent, once, here — before any session is minted.
@@ -1202,9 +1210,9 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      * the fifteen minutes. Spending it before `issueSession` also means the
      * budget-clearing DELETE above cannot be re-run by a replay.
      */
-    revokeSession({ jti: payload.jti, userId: payload.id, expSeconds: payload.exp });
+    await revokeSession({ jti: payload.jti, userId: payload.id, expSeconds: payload.exp });
 
-    recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
+    await recordSecurityEvent(db, req, payload.id, '2FA_SUCCESS', { method: effectiveMethod });
 
     /**
      * Spending a recovery code is reported back, and told to the account holder.
@@ -1222,13 +1230,13 @@ router.post('/api/auth/login-2fa', async (req, res) => {
      */
     let recoveryCodesRemaining = null;
     if (usedRecoveryCodeId) {
-      recordSecurityEvent(db, req, payload.id, '2FA_RECOVERY_USED', { recovery_id: usedRecoveryCodeId });
-      recoveryCodesRemaining = db.prepare(
+      await recordSecurityEvent(db, req, payload.id, '2FA_RECOVERY_USED', { recovery_id: usedRecoveryCodeId });
+      recoveryCodesRemaining = (await db.prepare(
         'SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id = ?'
-      ).get(payload.id)?.n ?? 0;
+      ).get(payload.id))?.n ?? 0;
       try {
         const { notificationService } = await import('../services/notificationService.js');
-        notificationService.dispatch(
+        await notificationService.dispatch(
           'RECOVERY_CODE_USED',
           { remaining: recoveryCodesRemaining },
           payload.id,
@@ -1245,8 +1253,8 @@ router.post('/api/auth/login-2fa', async (req, res) => {
     res.clearCookie('wev_preauth', clearCookieOptions());
     /* The caller describing themselves, so `grants` and `withheld` travel with
        it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
-    const user = selfUserResponse(userRow);
-    issueSession(res, user, userRow.token_version);
+    const user = await selfUserResponse(userRow);
+    await issueSession(res, user, userRow.token_version);
 
     res.json({
       user,
@@ -1293,34 +1301,50 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
    * the moment it was used. One derivation now answers the question for the
    * screen that offers the choice AND for the route that honours it.
    */
-  const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
-  if (!userRow || !enabledSecondFactors(userRow).includes('email')) {
+  const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id);
+  if (!userRow || !(await enabledSecondFactors(userRow)).includes('email')) {
     return res.status(400).json({
       error: 'Email codes are not available for this account. Use your authenticator app or a recovery code.',
       code: 'method_unavailable',
-      availableMethods: userRow ? enabledSecondFactors(userRow) : [],
+      availableMethods: userRow ? await enabledSecondFactors(userRow) : [],
     });
   }
 
-  const recent = db.prepare(
+  const recent = await db.prepare(
     'SELECT created_at FROM tfa_email_codes WHERE user_id = ? ORDER BY created_at DESC LIMIT 1'
   ).get(userRow.id);
   if (recent) {
     /**
      * An unreadable timestamp holds the cooldown SHUT, not open.
      *
-     * `created_at` is `DEFAULT (datetime('now'))` and this route does not supply
-     * it, so today the value is `2026-08-10 12:00:00` and appending `Z` parses.
-     * The day any other path writes an ISO string there, the concatenation
-     * becomes `…000ZZ`, `getTime()` returns NaN, and `NaN < 60000` is FALSE —
-     * so the one comparison guarding this endpoint would silently stop guarding
-     * it, leaving the send route bounded only by the per-IP mail ceiling.
-     *
      * A rate limit whose failure mode is "no rate limit" is the wrong way
      * round, and the failure is invisible: nothing errors, codes simply start
      * flowing. `Number.isFinite` is the difference between the two directions.
+     *
+     * ── Why the zone suffix is conditional ──
+     *
+     * This column's default is the ONE place in the schema where the two engines
+     * write different shapes. SQLite's `DEFAULT (datetime('now'))` gives
+     * `2026-08-10 12:00:00`, with no `T` and no zone. The generated PostgreSQL
+     * schema gives `2026-08-10T12:00:00.123Z`, matching the ISO-8601 that every
+     * other timestamp in this application uses.
+     *
+     * The previous version appended `'Z'` unconditionally, which is right for
+     * exactly one of those. On PostgreSQL it produced `…123ZZ`, `getTime()`
+     * returned NaN, and the fail-shut branch above then answered 429 to EVERY
+     * request — permanently. Email codes could never be sent, so anyone whose
+     * second factor is email could not finish signing in at all. Failing shut
+     * saved this from being a security hole and turned it into a total outage
+     * instead, which is why it needs handling rather than tolerating.
+     *
+     * Normalising rather than branching on the dialect: the value either carries
+     * a zone already or it does not, and that is answerable from the string.
      */
-    const elapsed = Date.now() - new Date(recent.created_at + 'Z').getTime();
+    const stored = String(recent.created_at ?? '');
+    const withZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(stored)
+      ? stored
+      : `${stored.replace(' ', 'T')}Z`;
+    const elapsed = Date.now() - new Date(withZone).getTime();
     if (!Number.isFinite(elapsed) || elapsed < 60000) {
       const wait = Number.isFinite(elapsed) ? Math.ceil((60000 - elapsed) / 1000) : 60;
       return res.status(429).json({ error: `Please wait ${wait} seconds before requesting another code.`, retryAfter: wait });
@@ -1341,11 +1365,11 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
    * message still opens the account. "Send me another" means the previous one
    * was not received; it should stop working.
    */
-  db.prepare(
-    "UPDATE tfa_email_codes SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL"
-  ).run(userRow.id);
+  await db.prepare(
+    'UPDATE tfa_email_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL'
+  ).run(new Date().toISOString(), userRow.id);
 
-  db.prepare(
+  await db.prepare(
     'INSERT INTO tfa_email_codes (id, user_id, code_hash, expires_at) VALUES (?, ?, ?, ?)'
   ).run(codeId, userRow.id, codeHash, expiresAt);
 
@@ -1419,16 +1443,16 @@ router.post('/api/auth/login-2fa/email/send', async (req, res) => {
  * is server-side and derived per request — this changes what is offered, never
  * what is allowed.
  */
-router.get('/api/auth/me', authenticateToken, (req, res) => {
+router.get('/api/auth/me', authenticateToken, async (req, res) => {
   try {
-    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
 
     res.json({
       /* `grants` and `withheld` come from `selfUserResponse`, which every
          endpoint returning the caller to themselves now uses. A second copy
          here is how the two drift, and briefly did. */
-      ...selfUserResponse(userRow),
+      ...await selfUserResponse(userRow),
       /**
        * Attached by `authenticateToken`, not recomputed here.
        *
@@ -1482,7 +1506,7 @@ router.get('/api/auth/me', authenticateToken, (req, res) => {
  * moved to token_version-based bulk invalidation, and the reason the "sign out
  * everywhere else" control exists for anyone who needs the stronger guarantee.
  */
-router.post('/api/auth/logout', authenticateToken, (req, res) => {
+router.post('/api/auth/logout', authenticateToken, async (req, res) => {
   try {
     /**
      * Revoke THIS session, not the account.
@@ -1499,7 +1523,7 @@ router.post('/api/auth/logout', authenticateToken, (req, res) => {
     const token = req.cookies?.[COOKIE_NAME];
     const claims = token ? jwt.decode(token) : null;
     if (claims?.jti) {
-      revokeSession({ jti: claims.jti, userId: req.user.id, expSeconds: claims.exp });
+      await revokeSession({ jti: claims.jti, userId: req.user.id, expSeconds: claims.exp });
     }
 
     res.clearCookie(COOKIE_NAME, clearCookieOptions());
@@ -1519,11 +1543,11 @@ router.post('/api/auth/logout', authenticateToken, (req, res) => {
  * someone else had their session was told it had been dealt with, and nothing
  * had happened.
  */
-router.post('/api/auth/sign-out-others', authenticateToken, (req, res) => {
+router.post('/api/auth/sign-out-others', authenticateToken, async (req, res) => {
   try {
-    db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(req.user.id);
-    const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-    issueSession(res, selfUserResponse(fresh), fresh.token_version);
+    await db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(req.user.id);
+    const fresh = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    await issueSession(res, await selfUserResponse(fresh), fresh.token_version);
     res.json({ success: true });
   } catch (err) {
     console.error('Sign out others error:', err);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { startTestServer } from './testServer.js';
 
@@ -63,7 +63,7 @@ describe('2FA Security Hardening Regressions', () => {
       expect(generateRes.status).toBe(200);
       expect(generateRes.body.secret).toBeDefined();
 
-      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('leo.chen@example.com');
+      const userRow = await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get('leo.chen@example.com');
       expect(userRow.tfa_secret.startsWith('v1:')).toBe(true);
       expect(decryptSecret(userRow.tfa_secret)).toBe(generateRes.body.secret);
     });
@@ -77,20 +77,33 @@ describe('2FA Security Hardening Regressions', () => {
      * sign in as an administrator at all — a test that damages a shared fixture
      * fails its neighbours rather than itself, which is the hardest kind to read.
      */
-    it('migrates legacy plaintext secrets cleanly without corruption', async () => {
+    /**
+     * SQLite-only: it drives migration 027 directly.
+     *
+     * PostgreSQL never replays the migrations — `initDatabase()` returns before
+     * running one and the generated schema is applied whole — so `027`'s
+     * synchronous SQLite code is handed the async handle and its `.all()`
+     * returns a promise, giving "usersWithPlaintextSecrets is not iterable".
+     * The subject here is the migration pass itself, not the encryption.
+     *
+     * What it protects IS covered on PostgreSQL: the encryption round-trip is
+     * asserted by the neighbouring cases in this file, and the resulting column
+     * shape by db.postgresSchema.test.js.
+     */
+    it.skipIf(RUNNING_ON_POSTGRES)('migrates legacy plaintext secrets cleanly without corruption', async () => {
       const MIGRATION_SUBJECT = 'priya.patel@example.com';
       const plaintextSecret = 'JBSWY3DPEHPK3PXP';
-      db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, MIGRATION_SUBJECT);
+      await db.prepare('UPDATE users SET tfa_secret = ? WHERE email = ?').run(plaintextSecret, MIGRATION_SUBJECT);
 
       const m = await import('./migrations/027_encrypt_tfa_secrets.js');
       m.default.up(db);
       
-      const userRow = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
+      const userRow = await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
       expect(userRow.tfa_secret.startsWith('v1:')).toBe(true);
       expect(decryptSecret(userRow.tfa_secret)).toBe(plaintextSecret);
       
       m.default.up(db);
-      const userRow2 = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
+      const userRow2 = await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(MIGRATION_SUBJECT);
       expect(userRow2.tfa_secret).toBe(userRow.tfa_secret);
     });
   });
@@ -98,11 +111,11 @@ describe('2FA Security Hardening Regressions', () => {
   describe('Recovery codes', () => {
     it('uses bcrypt for storage and verifies correctly', async () => {
       const preauthToken = jwt.sign({ id: 'user-admin', email: 'admin@example.gov', preauth: true }, JWT_SECRET, { expiresIn: '15m' });
-      db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run('user-admin');
+      await db.prepare('UPDATE users SET tfa_enabled = 1 WHERE id = ?').run('user-admin');
 
       const recoveryCode = 'A1B2C3D4E5';
       const hash = bcrypt.hashSync(recoveryCode, 10);
-      db.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))").run('rc-1', 'user-admin', hash);
+      await db.prepare(`INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`).run('rc-1', 'user-admin', hash);
 
       const res = await srv.call('POST', '/api/auth/login-2fa', { method: 'recovery', code: recoveryCode }, undefined, { Cookie: `wev_preauth=${preauthToken}` });
       console.log('Recovery response:', res.status, res.body);
@@ -110,10 +123,10 @@ describe('2FA Security Hardening Regressions', () => {
       expect(res.status).toBe(200);
       expect(res.body.user.id).toBe('user-admin');
 
-      const count = db.prepare('SELECT COUNT(*) as c FROM recovery_codes WHERE id = ?').get('rc-1').c;
+      const count = (await db.prepare('SELECT COUNT(*) as c FROM recovery_codes WHERE id = ?').get('rc-1')).c;
       expect(count).toBe(0);
 
-      const auditLog = db.prepare('SELECT * FROM security_audit_logs WHERE user_id = ? AND event_type = ?').get('user-admin', '2FA_RECOVERY_USED');
+      const auditLog = await db.prepare('SELECT * FROM security_audit_logs WHERE user_id = ? AND event_type = ?').get('user-admin', '2FA_RECOVERY_USED');
       expect(auditLog).toBeDefined();
     });
   });
@@ -156,7 +169,7 @@ describe('2FA Security Hardening Regressions', () => {
       const email = 'leo.chen@example.com';
       const token = await srv.login(email);
 
-      db.prepare(
+      await db.prepare(
         "UPDATE users SET role = 'admin', tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL WHERE email = ?"
       ).run(email);
 
@@ -167,7 +180,7 @@ describe('2FA Security Hardening Regressions', () => {
         expect(res.body.error).toMatch(/Two-factor authentication must be enabled/);
         expect(res.body.code).toBe('tfa_required');
       } finally {
-        db.prepare("UPDATE users SET role = 'student' WHERE email = ?").run(email);
+        await db.prepare("UPDATE users SET role = 'student' WHERE email = ?").run(email);
       }
     });
 
@@ -187,7 +200,7 @@ describe('2FA Security Hardening Regressions', () => {
     it('lets the demo administrator through without one, in a demo process', async () => {
       const token = await srv.login('admin@example.gov');
 
-      db.prepare(
+      await db.prepare(
         'UPDATE users SET tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL WHERE email = ?'
       ).run('admin@example.gov');
 
@@ -197,7 +210,7 @@ describe('2FA Security Hardening Regressions', () => {
       } finally {
         const { encryptSecret } = await import('./cryptoUtils.js');
         const { TEST_TOTP_SECRET } = await import('./testServer.js');
-        db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+        await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
           .run(encryptSecret(TEST_TOTP_SECRET), 'admin@example.gov');
       }
     });

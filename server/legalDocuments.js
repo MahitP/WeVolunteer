@@ -343,6 +343,49 @@ export const LEGAL_DOCUMENTS = [
     contentHash: '63d42b5c1d4e41a0ffd3c8aa81c6b2972ad92b6351407ef058c390f79fb5e458',
     bundledWith: null,
   },
+  {
+    /**
+     * `notice`, not `acknowledge`.
+     *
+     * The assistant is opt-in and off by default, and the enable screen states
+     * what is downloaded and from whom before anybody agrees to anything. That
+     * screen is where the decision is actually made, so collecting a second
+     * acceptance here would record a consent nobody gave in this context — and
+     * `scope: 'signup'` would put it in front of every student at registration
+     * for a feature most will never switch on.
+     */
+    slug: 'ai-and-on-device-processing',
+    /**
+     * Back to 1.0, deliberately.
+     *
+     * This was briefly bumped to 2.0 because the document had gained a section
+     * on dictation — audio sent to a browser vendor's speech service, which is
+     * new sharing and therefore MAJOR by the test at the top of this file.
+     *
+     * That capability is no longer exposed. The control was withdrawn before
+     * release: it is the only third-party audio path in a platform used by
+     * minors, the vendor relationship has not been reviewed by anyone, and the
+     * page cannot observe what is retained — a poor trade for a convenience,
+     * given typing works and the questions are short. The section describing it
+     * came out with it, because a policy that describes an unavailable feature
+     * is inaccurate in the direction that matters least excusably.
+     *
+     * With the section gone the document says what 1.0 said, so 1.0 is what it
+     * is. Nothing was invalidated by the round trip: this is a `notice`, no
+     * acceptance is collected in any version, and the document has never been
+     * deployed. A 2.0 sitting in the registry describing a capability nobody
+     * can use would be the worse record.
+     */
+    version: '1.0',
+    title: 'AI and On-Device Processing Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'Where the optional assistant runs, what is downloaded and from whom, what stays on your device, and what it is not permitted to decide.',
+    effectiveAt: '2026-08-15',
+    file: '12-ai-and-on-device-processing.md',
+    contentHash: '10239aee73d74a7d20bbe75489bd3e2d365319634fcf15798757b2313adbd924',
+    bundledWith: null,
+  },
 ];
 
 /**

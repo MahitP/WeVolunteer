@@ -40,7 +40,7 @@ const PASSWORD = 'password123';
 /** A valid 32-character base32 secret; otplib rejects anything under 16 bytes. */
 const SECRET = 'UZ4DHT22AL6CQMULDYSGGT4YT4UU2GMT';
 
-const userId = (email = EMAIL) => db.prepare('SELECT id FROM users WHERE email = ?').get(email).id;
+const userId = async (email = EMAIL) => (await db.prepare('SELECT id FROM users WHERE email = ?').get(email)).id;
 
 /** Starts a sign-in and returns `{ body, preauth }`. */
 async function beginLogin(email = EMAIL) {
@@ -63,21 +63,21 @@ beforeAll(async () => {
 
 afterAll(async () => { await srv.close(); });
 
-beforeEach(() => {
-  db.prepare(`
+beforeEach(async () => {
+  await db.prepare(`
     UPDATE users
        SET tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL,
            tfa_last_counter = NULL, email_verified = 1
      WHERE email = ?
   `).run(EMAIL);
-  db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(userId());
-  db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(userId());
-  db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(userId());
+  await db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(await userId());
+  await db.prepare('DELETE FROM tfa_login_attempts WHERE user_id = ?').run(await userId());
+  await db.prepare('DELETE FROM tfa_email_codes WHERE user_id = ?').run(await userId());
 });
 
 /** Email 2FA on, and an authenticator secret left behind by an abandoned enrolment. */
-function emailOnlyWithAbandonedSecret() {
-  db.prepare(`
+async function emailOnlyWithAbandonedSecret() {
+  await db.prepare(`
     UPDATE users
        SET tfa_email_enabled = 1, tfa_enabled = 0, tfa_secret = ?
      WHERE email = ?
@@ -86,7 +86,7 @@ function emailOnlyWithAbandonedSecret() {
 
 describe('the methods a sign-in is offered', () => {
   it('does not offer an authenticator that was never confirmed', async () => {
-    emailOnlyWithAbandonedSecret();
+    await emailOnlyWithAbandonedSecret();
 
     const { body } = await beginLogin();
     expect(body.require2FA).toBe(true);
@@ -95,17 +95,17 @@ describe('the methods a sign-in is offered', () => {
   });
 
   it('does not offer recovery codes to an account holding none', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
 
     const { body } = await beginLogin();
     expect(body.availableMethods).toEqual(['email']);
   });
 
   it('offers recovery codes once the account holds some', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
-    db.prepare(
-      "INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, datetime('now'))"
-    ).run('rc-availability-test', userId(), '$2a$10$notarealhashbutthatisfineher.eeeeeeeeeeeeeeeeeeeeeeeeeee');
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare(
+      `INSERT INTO recovery_codes (id, user_id, code_hash, created_at) VALUES (?, ?, ?, '${new Date().toISOString()}')`
+    ).run('rc-availability-test', await userId(), '$2a$10$notarealhashbutthatisfineher.eeeeeeeeeeeeeeeeeeeeeeeeeee');
 
     const { body } = await beginLogin();
     expect(body.availableMethods).toEqual(['email', 'recovery']);
@@ -114,7 +114,7 @@ describe('the methods a sign-in is offered', () => {
 
 describe('the methods a sign-in may actually SPEND', () => {
   it('refuses a TOTP code from an abandoned enrolment on an email-only account', async () => {
-    emailOnlyWithAbandonedSecret();
+    await emailOnlyWithAbandonedSecret();
     const { preauth } = await beginLogin();
 
     /* A genuinely correct code for the stored secret. Before the fix this
@@ -129,7 +129,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('refuses a recovery code when the account holds no recovery codes', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
     const { preauth } = await beginLogin();
 
     const res = await submit({ method: 'recovery', code: 'ABCDEFGHIJ' }, preauth);
@@ -138,7 +138,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('refuses a request that names no method at all', async () => {
-    db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
+    await db.prepare('UPDATE users SET tfa_email_enabled = 1 WHERE email = ?').run(EMAIL);
     const { preauth } = await beginLogin();
 
     const res = await submit({}, preauth);
@@ -147,7 +147,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('does not count a refused method as a failed guess', async () => {
-    emailOnlyWithAbandonedSecret();
+    await emailOnlyWithAbandonedSecret();
     const { preauth } = await beginLogin();
 
     await submit({ method: 'totp', token: generateSync({ secret: SECRET }) }, preauth);
@@ -155,14 +155,14 @@ describe('the methods a sign-in may actually SPEND', () => {
     /* The attempt counters bound how many guesses somebody gets. A method that
        was never on offer is not a guess, and charging for it would let a
        confused client burn the budget the real method needs. */
-    const attempts = db.prepare(
+    const attempts = (await db.prepare(
       'SELECT COALESCE(SUM(attempts), 0) AS n FROM tfa_login_attempts WHERE user_id = ?'
-    ).get(userId()).n;
+    ).get(await userId())).n;
     expect(attempts).toBe(0);
   });
 
   it('still accepts the method the account DOES hold', async () => {
-    emailOnlyWithAbandonedSecret();
+    await emailOnlyWithAbandonedSecret();
     const { preauth } = await beginLogin();
 
     await srv.call('POST', '/api/auth/login-2fa/email/send', {}, undefined,
@@ -172,10 +172,10 @@ describe('the methods a sign-in may actually SPEND', () => {
        way anything can: by re-hashing candidates is impossible, so instead the
        row is replaced with a known hash. */
     const bcrypt = (await import('bcryptjs')).default;
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT id FROM tfa_email_codes WHERE user_id = ? AND used_at IS NULL ORDER BY created_at DESC LIMIT 1'
-    ).get(userId());
-    db.prepare('UPDATE tfa_email_codes SET code_hash = ? WHERE id = ?')
+    ).get(await userId());
+    await db.prepare('UPDATE tfa_email_codes SET code_hash = ? WHERE id = ?')
       .run(await bcrypt.hash('424242', 10), row.id);
 
     const res = await submit({ method: 'email', code: '424242' }, preauth);
@@ -184,7 +184,7 @@ describe('the methods a sign-in may actually SPEND', () => {
   });
 
   it('accepts TOTP normally once the enrolment is actually confirmed', async () => {
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
       .run(encryptSecret(SECRET), EMAIL);
     const { body, preauth } = await beginLogin();
     expect(body.availableMethods).toContain('totp');

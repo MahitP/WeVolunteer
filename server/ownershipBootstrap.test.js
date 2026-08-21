@@ -24,14 +24,15 @@ beforeEach(async () => {
   db = new DatabaseSync(dbPath);
 
   // Run migrations manually for this fresh file
-  const { initDatabase } = await import('./db.js');
+  const { initDatabase, completeDatabaseInit } = await import('./db.js');
   
   // initDatabase creates tables on the cached db instance, so we can't use it directly if cached.
   // Actually, we can just run a child process to initialize the DB!
   const init = spawnSync(process.execPath, ['-e', `
     process.env.WEV_DB_PATH = '${dbPath}';
-    const { initDatabase } = require('./server/db.js');
+    const { initDatabase, completeDatabaseInit } = require('./server/db.js');
     initDatabase();
+    completeDatabaseInit().then(() => {});
   `], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
 
   /**

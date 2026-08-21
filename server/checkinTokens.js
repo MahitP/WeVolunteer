@@ -75,18 +75,18 @@ export function __hashToken(token) {
  *
  * @returns {{token: string, id: string, expiresAt: string, issuedAt: string}}
  */
-export function issueCheckinToken(db, { application, now = new Date() }) {
+export async function issueCheckinToken(db, { application, now = new Date() }) {
   const token = crypto.randomBytes(32).toString('base64url');
   const issuedAt = new Date(now).toISOString();
   const expiresAt = new Date(new Date(now).getTime() + CODE_TTL_MS).toISOString();
   const id = `chk-${crypto.randomUUID()}`;
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE checkin_tokens SET status = 'replaced', resolved_at = ?
     WHERE application_id = ? AND status = 'pending'
   `).run(issuedAt, application.id);
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO checkin_tokens
       (id, token_hash, application_id, event_id, slot_id, user_id, status, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
@@ -129,7 +129,7 @@ export function issueCheckinToken(db, { application, now = new Date() }) {
  *
  * @returns {{ok: true, row: object} | typeof CODE_REJECTED & {logReason: string}}
  */
-export function resolveCheckinToken(db, { token, eventId, now = new Date() }) {
+export async function resolveCheckinToken(db, { token, eventId, now = new Date() }) {
   if (typeof token !== 'string' || !token) {
     return { ...CODE_REJECTED, logReason: describeScanFailure('no code supplied') };
   }
@@ -137,7 +137,7 @@ export function resolveCheckinToken(db, { token, eventId, now = new Date() }) {
     return { ...CODE_REJECTED, logReason: describeScanFailure('not a WeVolunteer code') };
   }
 
-  const row = db.prepare('SELECT * FROM checkin_tokens WHERE token_hash = ?')
+  const row = await db.prepare('SELECT * FROM checkin_tokens WHERE token_hash = ?')
     .get(sha256(token.slice(PREFIX.length)));
 
   if (!row) {
@@ -191,8 +191,8 @@ export function resolveCheckinToken(db, { token, eventId, now = new Date() }) {
  * replay protection: two organizers scanning the same phone at the same instant
  * both reach here, and exactly one UPDATE matches a row.
  */
-export function consumeCheckinToken(db, { tokenId, actorId, now = new Date() }) {
-  const result = db.prepare(`
+export async function consumeCheckinToken(db, { tokenId, actorId, now = new Date() }) {
+  const result = await db.prepare(`
     UPDATE checkin_tokens
     SET status = 'used', resolved_at = ?, resolved_by = ?
     WHERE id = ? AND status = 'pending'
@@ -208,7 +208,7 @@ export function consumeCheckinToken(db, { tokenId, actorId, now = new Date() }) 
  * still answerable in the afternoon. Beyond that it is credential material with
  * no remaining purpose, which is the same reason `tfa_email_codes` is swept.
  */
-export function sweepCheckinTokens(db, now = new Date()) {
+export async function sweepCheckinTokens(db, now = new Date()) {
   const cutoff = new Date(new Date(now).getTime() - 24 * 60 * 60 * 1000).toISOString();
-  return db.prepare('DELETE FROM checkin_tokens WHERE expires_at < ?').run(cutoff).changes;
+  return (await db.prepare('DELETE FROM checkin_tokens WHERE expires_at < ?').run(cutoff)).changes;
 }

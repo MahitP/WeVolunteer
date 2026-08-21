@@ -105,7 +105,7 @@ describe('an upload this application refuses is the caller\'s mistake, not a ser
   beforeAll(async () => { ({ token } = await freshStudent('pic-refusals@example.org')); });
 
   it('answers 413 for a file over the 5 MB limit, not 500', async () => {
-    const before = db.prepare('SELECT COUNT(*) AS c FROM error_events').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) AS c FROM error_events').get()).c;
 
     const oversize = Buffer.alloc(6 * 1024 * 1024, 0x41);
     const res = await postAvatar(token, oversize, 'huge.png', 'image/png');
@@ -118,12 +118,12 @@ describe('an upload this application refuses is the caller\'s mistake, not a ser
     // And it must not land in the triage dashboard: a dashboard full of user
     // mistakes buries the real defects, which is exactly why app.js returns
     // before recordError on its own 413 branch.
-    const after = db.prepare('SELECT COUNT(*) AS c FROM error_events').get().c;
+    const after = (await db.prepare('SELECT COUNT(*) AS c FROM error_events').get()).c;
     expect(after).toBe(before);
   });
 
   it('answers 400 for a file that is not an image, not 500', async () => {
-    const before = db.prepare('SELECT COUNT(*) AS c FROM error_events').get().c;
+    const before = (await db.prepare('SELECT COUNT(*) AS c FROM error_events').get()).c;
 
     const res = await postAvatar(token, Buffer.from('%PDF-1.7\n'), 'resume.pdf', 'application/pdf');
 
@@ -131,7 +131,7 @@ describe('an upload this application refuses is the caller\'s mistake, not a ser
     expect(res.status).not.toBe(500);
     expect(res.body.error).toMatch(/image/i);
 
-    const after = db.prepare('SELECT COUNT(*) AS c FROM error_events').get().c;
+    const after = (await db.prepare('SELECT COUNT(*) AS c FROM error_events').get()).c;
     expect(after).toBe(before);
   });
 
@@ -146,7 +146,7 @@ describe('an upload this application refuses is the caller\'s mistake, not a ser
   });
 
   it('leaves no file behind for any refused upload', async () => {
-    const row = db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
+    const row = await db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
       .get('pic-refusals@example.org');
     expect(row.profile_picture_url).toBeFalsy();
   });
@@ -190,7 +190,7 @@ describe('deleting a profile picture', () => {
     expect(res.status).toBe(200);
     expect(fs.existsSync(onDisk(url))).toBe(false);
 
-    const row = db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
+    const row = await db.prepare('SELECT profile_picture_url FROM users WHERE email = ?')
       .get('pic-delete@example.org');
     expect(row.profile_picture_url).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('deleting a profile picture', () => {
     fs.writeFileSync(sentinel, 'must survive');
     scratchFiles.push(sentinel);
 
-    db.prepare('UPDATE users SET profile_picture_url = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET profile_picture_url = ? WHERE id = ?')
       .run('/uploads/../traversal-sentinel.txt', user.id);
 
     const res = await srv.call('DELETE', '/api/users/me/profile-picture', undefined, token);
@@ -215,7 +215,7 @@ describe('deleting a profile picture', () => {
     // not happen is the unlink.
     expect(res.status).toBe(200);
     expect(fs.existsSync(sentinel)).toBe(true);
-    const row = db.prepare('SELECT profile_picture_url FROM users WHERE id = ?').get(user.id);
+    const row = await db.prepare('SELECT profile_picture_url FROM users WHERE id = ?').get(user.id);
     expect(row.profile_picture_url).toBeNull();
   });
 });
@@ -269,7 +269,7 @@ describe('account deletion and the photograph', () => {
     const res = await srv.call('DELETE', '/api/auth/account', undefined, token, headers);
     expect(res.status).toBe(200);
 
-    const row = db.prepare('SELECT profile_picture_url, account_status FROM users WHERE id = ?')
+    const row = await db.prepare('SELECT profile_picture_url, account_status FROM users WHERE id = ?')
       .get(user.id);
     expect(row.account_status).toBe('deleted');
     // The policy says the profile picture is permanently deleted. Both halves
@@ -308,7 +308,7 @@ describe('denying a pending organizer and the photograph', () => {
     // Become a pending organizer: the state deny operates on. Written directly
     // because no route produces "organizer, not yet verified, already signed in
     // with a picture" — and it is the state, not the way in, that is under test.
-    db.prepare("UPDATE users SET role = 'organizer', verified = 0 WHERE id = ?").run(user.id);
+    await db.prepare("UPDATE users SET role = 'organizer', verified = 0 WHERE id = ?").run(user.id);
 
     const uploaded = await postAvatar(token, await realPng(), 'me.png', 'image/png');
     expect(uploaded.status).toBe(200);
@@ -322,7 +322,7 @@ describe('denying a pending organizer and the photograph', () => {
 
     // Both halves. The row is gone — that part already worked — and the file it
     // pointed at is gone too, which is the part that did not.
-    const row = db.prepare('SELECT id FROM users WHERE id = ?').get(user.id);
+    const row = await db.prepare('SELECT id FROM users WHERE id = ?').get(user.id);
     expect(row, 'the row survived the denial').toBeUndefined();
     expect(fs.existsSync(onDisk(url)), 'the photograph outlived the account').toBe(false);
   });

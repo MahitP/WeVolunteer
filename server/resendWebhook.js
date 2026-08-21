@@ -129,7 +129,7 @@ const domainOf = (address) => {
  *
  * @returns {{applied: boolean, reason?: string, state?: string}}
  */
-export function applyEvent(payload, { handle = db } = {}) {
+export async function applyEvent(payload, { handle = db } = {}) {
   const type = String(payload?.type || '');
   const state = HANDLED_EVENTS[type];
 
@@ -148,10 +148,11 @@ export function applyEvent(payload, { handle = db } = {}) {
   const now = new Date().toISOString();
 
   /* Claim it. `INSERT OR IGNORE` + `changes` is the whole dedupe. */
-  const claimed = handle.prepare(`
-    INSERT OR IGNORE INTO resend_webhook_events
+  const claimed = await handle.prepare(`
+    INSERT INTO resend_webhook_events
       (event_id, event_type, provider_message_id, recipient_domain, occurred_at, received_at, job_id)
     VALUES (?, ?, ?, ?, ?, ?, NULL)
+    ON CONFLICT (event_id) DO NOTHING
   `).run(deliveryId, type, messageId, domainOf(to), payload?.created_at ?? null, now);
 
   if (claimed.changes === 0) return { applied: false, reason: 'duplicate', state };
@@ -165,13 +166,13 @@ export function applyEvent(payload, { handle = db } = {}) {
    * already been swept, matches nothing. That is not an error — the event row
    * above still records the outcome, which is what an operator reads.
    */
-  const job = handle.prepare(
+  const job = await handle.prepare(
     'SELECT id FROM notification_jobs WHERE provider_message_id = ? LIMIT 1'
   ).get(messageId);
 
   if (!job) return { applied: true, state, reason: 'no_matching_job' };
 
-  handle.prepare(
+  await handle.prepare(
     'UPDATE resend_webhook_events SET job_id = ? WHERE event_id = ?'
   ).run(job.id, deliveryId);
 
@@ -183,7 +184,7 @@ export function applyEvent(payload, { handle = db } = {}) {
    * later-arriving good news would erase the bad. The terminal outcome is the
    * one an operator needs, so it wins regardless of arrival order.
    */
-  const existing = handle.prepare(
+  const existing = await handle.prepare(
     'SELECT delivery_state FROM notification_jobs WHERE id = ?'
   ).get(job.id);
 
@@ -191,7 +192,7 @@ export function applyEvent(payload, { handle = db } = {}) {
     return { applied: true, state, reason: 'terminal_state_kept' };
   }
 
-  handle.prepare(`
+  await handle.prepare(`
     UPDATE notification_jobs
        SET delivery_state = ?, delivery_detail = ?, delivery_updated_at = ?
      WHERE id = ?
@@ -207,10 +208,10 @@ export function applyEvent(payload, { handle = db } = {}) {
 }
 
 /** Counts for the admin health view. Safe to serve: no addresses, no bodies. */
-export function deliveryHealth({ handle = db, sinceMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
+export async function deliveryHealth({ handle = db, sinceMs = 7 * 24 * 60 * 60 * 1000 } = {}) {
   try {
     const since = new Date(Date.now() - sinceMs).toISOString();
-    const rows = handle.prepare(
+    const rows = await handle.prepare(
       'SELECT event_type, COUNT(*) AS c FROM resend_webhook_events WHERE received_at > ? GROUP BY event_type'
     ).all(since);
     const byType = Object.fromEntries(rows.map(r => [r.event_type, r.c]));

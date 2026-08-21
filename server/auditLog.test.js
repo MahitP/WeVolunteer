@@ -13,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { recordAudit } from './auditLog.js';
+import { recordAudit, recordAuditSync } from './auditLog.js';
 
 let db;
 
@@ -39,8 +39,8 @@ beforeEach(() => {
 const rows = () => db.prepare('SELECT * FROM admin_audit_logs').all();
 
 describe('recordAudit — writes a complete row', () => {
-  it('stores every field it was given', () => {
-    const { id, createdAt } = recordAudit(db, {
+  it('stores every field it was given', async () => {
+    const { id, createdAt } = await recordAudit(db, {
       adminId: 'admin-1',
       action: 'APPROVE_ORGANIZER',
       targetUserId: 'user-7',
@@ -59,8 +59,8 @@ describe('recordAudit — writes a complete row', () => {
     });
   });
 
-  it('accepts null for the two nullable columns, and only those', () => {
-    recordAudit(db, { adminId: 'admin-1', action: 'SOMETHING_HAPPENED' });
+  it('accepts null for the two nullable columns, and only those', async () => {
+    await recordAudit(db, { adminId: 'admin-1', action: 'SOMETHING_HAPPENED' });
     const [row] = rows();
     expect(row.target_user_id).toBeNull();
     expect(row.details).toBeNull();
@@ -74,16 +74,16 @@ describe('recordAudit — writes a complete row', () => {
    * still generating `Date.now()` ids. Writing in a tight loop is the closest a
    * test gets to that millisecond.
    */
-  it('does not collide when called repeatedly in the same millisecond', () => {
+  it('does not collide when called repeatedly in the same millisecond', async () => {
     for (let i = 0; i < 200; i++) {
-      recordAudit(db, { adminId: 'admin-1', action: 'BULK' });
+      await recordAudit(db, { adminId: 'admin-1', action: 'BULK' });
     }
     expect(rows().length).toBe(200);
     expect(new Set(rows().map(r => r.id)).size).toBe(200);
   });
 
-  it('stamps an ISO-8601 UTC timestamp, not SQLite\'s space-separated form', () => {
-    const { createdAt } = recordAudit(db, { adminId: 'admin-1', action: 'X' });
+  it('stamps an ISO-8601 UTC timestamp, not SQLite\'s space-separated form', async () => {
+    const { createdAt } = await recordAudit(db, { adminId: 'admin-1', action: 'X' });
     // TD-10: `ORDER BY created_at` is a string comparison, and the two formats
     // do not sort together.
     expect(createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
@@ -92,19 +92,19 @@ describe('recordAudit — writes a complete row', () => {
 });
 
 describe('recordAudit — refuses what would lose a record', () => {
-  it('throws when adminId is missing, blank, or not a string', () => {
+  it('rejects when adminId is missing, blank, or not a string', async () => {
     for (const bad of [undefined, null, '', '   ', 42, {}, []]) {
-      expect(
-        () => recordAudit(db, { adminId: bad, action: 'X' }),
+      await expect(recordAudit(db, { adminId: bad, action: 'X' }),
         `adminId ${JSON.stringify(bad)} was accepted`
-      ).toThrow(/adminId is required/);
+      ).rejects.toThrow(/adminId is required/);
     }
     expect(rows().length).toBe(0);
   });
 
-  it('throws when action is missing or blank', () => {
+  it('rejects when action is missing or blank', async () => {
     for (const bad of [undefined, null, '', '  ', 7]) {
-      expect(() => recordAudit(db, { adminId: 'admin-1', action: bad })).toThrow(/action is required/);
+      await expect(recordAudit(db, { adminId: 'admin-1', action: bad }))
+        .rejects.toThrow(/action is required/);
     }
     expect(rows().length).toBe(0);
   });
@@ -114,32 +114,32 @@ describe('recordAudit — refuses what would lose a record', () => {
    * six columns and no severity concept; a dropped field is discovered when
    * someone goes looking for data that was never stored.
    */
-  it('throws on a field the table cannot hold, naming it', () => {
-    expect(() => recordAudit(db, {
+  it('rejects a field the table cannot hold, naming it', async () => {
+    await expect(recordAudit(db, {
       adminId: 'admin-1', action: 'X', severity: 'high'
-    })).toThrow(/unknown field\(s\) severity/);
+    })).rejects.toThrow(/unknown field\(s\) severity/);
 
-    expect(() => recordAudit(db, {
+    await expect(recordAudit(db, {
       adminId: 'admin-1', action: 'X', ip: '1.2.3.4', body: '{}'
-    })).toThrow(/unknown field\(s\) ip, body/);
+    })).rejects.toThrow(/unknown field\(s\) ip, body/);
 
     expect(rows().length).toBe(0);
   });
 
-  it('throws on a non-string targetUserId or details rather than coercing', () => {
-    expect(() => recordAudit(db, { adminId: 'admin-1', action: 'X', targetUserId: 12 }))
-      .toThrow(/targetUserId must be a string or null/);
-    expect(() => recordAudit(db, { adminId: 'admin-1', action: 'X', details: { a: 1 } }))
-      .toThrow(/details must be a string or null/);
+  it('rejects a non-string targetUserId or details rather than coercing', async () => {
+    await expect(recordAudit(db, { adminId: 'admin-1', action: 'X', targetUserId: 12 }))
+      .rejects.toThrow(/targetUserId must be a string or null/);
+    await expect(recordAudit(db, { adminId: 'admin-1', action: 'X', details: { a: 1 } }))
+      .rejects.toThrow(/details must be a string or null/);
     expect(rows().length).toBe(0);
   });
 
-  it('throws without a usable database handle, and on a non-object entry', () => {
-    expect(() => recordAudit(null, { adminId: 'a', action: 'X' })).toThrow(/database handle/);
-    expect(() => recordAudit({}, { adminId: 'a', action: 'X' })).toThrow(/database handle/);
-    expect(() => recordAudit(db, null)).toThrow(/entry object/);
-    expect(() => recordAudit(db, 'nope')).toThrow(/entry object/);
-    expect(() => recordAudit(db, [])).toThrow(/entry object/);
+  it('rejects without a usable database handle, and on a non-object entry', async () => {
+    await expect(recordAudit(null, { adminId: 'a', action: 'X' })).rejects.toThrow(/database handle/);
+    await expect(recordAudit({}, { adminId: 'a', action: 'X' })).rejects.toThrow(/database handle/);
+    await expect(recordAudit(db, null)).rejects.toThrow(/entry object/);
+    await expect(recordAudit(db, 'nope')).rejects.toThrow(/entry object/);
+    await expect(recordAudit(db, [])).rejects.toThrow(/entry object/);
   });
 });
 
@@ -150,22 +150,131 @@ describe('recordAudit — a database failure reaches the caller', () => {
    * recording down with it: a deletion that succeeds while its audit row
    * silently vanishes is invisible, where a failed deletion is a bug report.
    */
-  it('propagates a throwing prepare instead of swallowing it', () => {
+  it('propagates a throwing prepare instead of swallowing it', async () => {
     const hostile = { prepare: () => { throw new Error('database is locked'); } };
-    expect(() => recordAudit(hostile, { adminId: 'admin-1', action: 'X' }))
-      .toThrow(/database is locked/);
+    await expect(recordAudit(hostile, { adminId: 'admin-1', action: 'X' }))
+      .rejects.toThrow(/database is locked/);
   });
 
-  it('propagates a throwing run', () => {
+  it('propagates a throwing run', async () => {
     const hostile = { prepare: () => ({ run: () => { throw new Error('disk I/O error'); } }) };
-    expect(() => recordAudit(hostile, { adminId: 'admin-1', action: 'X' }))
-      .toThrow(/disk I\/O error/);
+    await expect(recordAudit(hostile, { adminId: 'admin-1', action: 'X' }))
+      .rejects.toThrow(/disk I\/O error/);
   });
 
-  it('propagates a real constraint violation — an actor who does not exist', () => {
+  /**
+   * A rejected `.run()` — the PostgreSQL shape, where the failure arrives on the
+   * promise rather than as a throw. Without awaiting the INSERT, `recordAudit`
+   * would resolve and the caller's transaction would commit over a write that
+   * never landed, which is the exact defect the await exists to prevent.
+   */
+  it('propagates a REJECTING run, which is how PostgreSQL fails', async () => {
+    const hostile = {
+      prepare: () => ({ run: () => Promise.reject(new Error('deadlock detected')) }),
+    };
+    await expect(recordAudit(hostile, { adminId: 'admin-1', action: 'X' }))
+      .rejects.toThrow(/deadlock detected/);
+  });
+
+  it('propagates a real constraint violation — an actor who does not exist', async () => {
     db.exec('PRAGMA foreign_keys = ON');
-    expect(() => recordAudit(db, { adminId: 'nobody-at-all', action: 'X' })).toThrow();
+    await expect(recordAudit(db, { adminId: 'nobody-at-all', action: 'X' })).rejects.toThrow();
     expect(rows().length).toBe(0);
+  });
+});
+
+/**
+ * The synchronous twin, which exists for exactly one caller.
+ *
+ * `db.js`'s username dedupe runs inside `initDatabase()` — synchronous, and
+ * called synchronously from `server.js`, the `bin/` scripts and some forty test
+ * files. It cannot await, and dropping an unawaited promise there would turn a
+ * failed audit write into an unhandled rejection delivered after the dedupe had
+ * already committed its renames.
+ */
+describe('recordAuditSync — the same write, for the boot path that cannot await', () => {
+  it('writes the same row the async writer does', () => {
+    const { id, createdAt } = recordAuditSync(db, {
+      adminId: 'admin-1',
+      action: 'USERNAME_DEDUPED',
+      targetUserId: 'user-7',
+      details: 'renamed',
+    });
+
+    expect(rows()).toEqual([{
+      id,
+      admin_id: 'admin-1',
+      action: 'USERNAME_DEDUPED',
+      target_user_id: 'user-7',
+      details: 'renamed',
+      created_at: createdAt,
+    }]);
+  });
+
+  /**
+   * The property the boot path depends on. If this ever returns a promise
+   * instead of throwing, the dedupe commits renames whose audit rows failed.
+   */
+  it('throws SYNCHRONOUSLY rather than returning a rejected promise', () => {
+    db.exec('PRAGMA foreign_keys = ON');
+    expect(() => recordAuditSync(db, { adminId: 'nobody-at-all', action: 'X' })).toThrow();
+    expect(() => recordAuditSync(db, { adminId: 'admin-1', action: '' })).toThrow(/action is required/);
+    expect(rows().length).toBe(0);
+  });
+
+  it('does not return a thenable, so a caller cannot accidentally await work that already happened', () => {
+    const result = recordAuditSync(db, { adminId: 'admin-1', action: 'X' });
+    expect(typeof result.then).toBe('undefined');
+  });
+
+  it('shares its validation with recordAudit rather than reimplementing it', async () => {
+    /* Same message from both writers for the same mistake. A divergence here is
+       the drift the shared core exists to make impossible. */
+    const bad = { adminId: 'admin-1', action: 'X', severity: 'high' };
+    const sync = (() => { try { recordAuditSync(db, bad); } catch (e) { return e.message; } })();
+    const async_ = await recordAudit(db, bad).catch(e => e.message);
+    expect(sync).toBe(async_);
+    expect(sync).toMatch(/unknown field\(s\) severity/);
+  });
+
+  /**
+   * Held to its one caller by name.
+   *
+   * The sync writer drops the promise a PostgreSQL `.run()` returns, so a second
+   * caller would write nothing at all against the pooled engine and pass every
+   * SQLite test while doing it. It is exported only because `db.js` cannot reach
+   * a module-private function, not because it is available.
+   */
+  it('is called from db.js and nowhere else', () => {
+    const root = path.dirname(fileURLToPath(import.meta.url));
+    const repo = path.dirname(root);
+    const helper = path.join(root, 'auditLog.js');
+    const self = fileURLToPath(import.meta.url);
+
+    const scan = (dir, out = []) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === 'scratch') continue;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) scan(full, out);
+        else if (/\.(js|mjs)$/.test(entry.name)) out.push(full);
+      }
+      return out;
+    };
+
+    const callers = [];
+    for (const file of [...scan(root), ...scan(path.join(repo, 'bin'))]) {
+      if (file === helper || file === self) continue;
+      const src = readFileSync(file, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      if (/\brecordAuditSync\s*\(/.test(src)) callers.push(path.relative(repo, file));
+    }
+
+    expect(
+      callers,
+      'recordAuditSync drops the promise a PostgreSQL .run() returns, so anything '
+      + 'but the SQLite boot path must call the async recordAudit instead.'
+    ).toEqual([path.join('server', 'db.js')]);
   });
 });
 
@@ -196,10 +305,29 @@ describe('the helper is the only writer', () => {
     const helper = path.join(root, 'auditLog.js');
     const self = fileURLToPath(import.meta.url);
 
+    /**
+     * Comments are stripped before the scan, so PROSE about this rule cannot
+     * trip it.
+     *
+     * The check was a raw `includes()` over the whole file, which meant a
+     * comment explaining why a module does not write audit rows directly was
+     * counted as a module that does. That is not hypothetical — it fired on a
+     * fixture generator whose comment quoted the rule in order to explain
+     * obeying it, and the tempting "fix" is to reword the comment, which
+     * degrades the explanation to satisfy the measurement.
+     *
+     * Stripping comments creates no hole: a real INSERT is code, and code
+     * survives. String literals are deliberately NOT stripped — the statement
+     * this looks for lives inside one.
+     */
+    const withoutComments = (src) => src
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1);
+
     const offenders = [];
     for (const file of [...scan(root), ...scan(path.join(repo, 'bin'))]) {
       if (file === helper || file === self) continue;
-      const src = readFileSync(file, 'utf8');
+      const src = withoutComments(readFileSync(file, 'utf8'));
       if (src.includes('INSERT INTO admin_audit_logs')) {
         offenders.push(path.relative(repo, file));
       }
@@ -207,7 +335,7 @@ describe('the helper is the only writer', () => {
 
     expect(
       offenders,
-      'raw admin_audit_logs INSERT(s) outside the helper — use recordAudit() so the '
+      'raw admin_audit_logs INSERT(s) outside the helper — use await recordAudit() so the '
       + 'actor check, the UUID id and the error propagation apply'
     ).toEqual([]);
   });

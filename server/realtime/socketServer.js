@@ -45,7 +45,7 @@ export function initSocketServer(httpServer) {
 
   setRealtimeServer(io);
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const cookies = cookie.parse(socket.request.headers.cookie || '');
       const token = cookies[COOKIE_NAME];
@@ -70,7 +70,7 @@ export function initSocketServer(httpServer) {
        * indicators, no read receipts. Nothing surfaced it because no test opened
        * a socket, and the client retried forever in silence.
        */
-      const user = db.prepare(
+      const user = await db.prepare(
         'SELECT id, role, token_version, account_status FROM users WHERE id = ?'
       ).get(payload.id);
 
@@ -97,7 +97,7 @@ export function initSocketServer(httpServer) {
        * connected, so the account kept receiving notifications and messages in
        * real time after signing out — the same gap authenticateToken closes.
        */
-      if (isSessionRevoked(payload.jti)) {
+      if (await isSessionRevoked(payload.jti)) {
         return next(new Error('Authentication error: Session signed out'));
       }
 
@@ -116,14 +116,14 @@ export function initSocketServer(httpServer) {
     
     socket.join(`user:${user.id}`);
     
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       try {
-        const current = db.prepare('SELECT token_version FROM users WHERE id = ?').get(user.id);
+        const current = await db.prepare('SELECT token_version FROM users WHERE id = ?').get(user.id);
         // Signed out mid-connection counts too: the handshake check only runs
         // once, so without this an already-open socket kept streaming
         // notifications to a session the user had ended.
         if (!current || current.token_version !== socket.data.tokenVersion
-            || isSessionRevoked(socket.data.jti)) {
+            || await isSessionRevoked(socket.data.jti)) {
           console.log(`[realtime] disconnected socket=${socket.id} user=${user.id} reason=session_invalidated`);
           socket.emit('session.invalidated');
           socket.disconnect(true);
@@ -155,27 +155,27 @@ export function initSocketServer(httpServer) {
       return true;
     }
 
-    socket.on('typing.start', ({ conversationId }) => {
-      handleTypingEvent(socket, conversationId, 'typing.start', checkTypingRateLimit);
+    socket.on('typing.start', async ({ conversationId }) => {
+      await handleTypingEvent(socket, conversationId, 'typing.start', checkTypingRateLimit);
     });
     
-    socket.on('typing.stop', ({ conversationId }) => {
-      handleTypingEvent(socket, conversationId, 'typing.stop', checkTypingRateLimit);
+    socket.on('typing.stop', async ({ conversationId }) => {
+      await handleTypingEvent(socket, conversationId, 'typing.stop', checkTypingRateLimit);
     });
   });
   
   return io;
 }
 
-function handleTypingEvent(socket, conversationId, eventType, checkLimit) {
+async function handleTypingEvent(socket, conversationId, eventType, checkLimit) {
   if (!conversationId) return;
   if (!checkLimit()) return;
   
   try {
-    const participant = db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').get(conversationId, socket.data.user.id);
+    const participant = await db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').get(conversationId, socket.data.user.id);
     if (!participant) return;
     
-    const otherParticipants = db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id != ?').all(conversationId, socket.data.user.id);
+    const otherParticipants = await db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id != ?').all(conversationId, socket.data.user.id);
     
     otherParticipants.forEach(p => {
       socket.to(`user:${p.user_id}`).emit(eventType, {

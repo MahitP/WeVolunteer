@@ -52,33 +52,33 @@ const account = () => {
   };
 };
 
-const linkProvider = (userId, provider, sub) => {
+const linkProvider = async (userId, provider, sub) => {
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO oauth_accounts
       (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(`oauth-${provider}-${userId}`, userId, provider, sub, `${provider}@example.org`, now, now, now);
 };
 
-const isLinked = (userId, provider) =>
-  !!db.prepare('SELECT 1 FROM oauth_accounts WHERE user_id = ? AND provider = ?').get(userId, provider);
+const isLinked = async (userId, provider) =>
+  !!await db.prepare('SELECT 1 FROM oauth_accounts WHERE user_id = ? AND provider = ?').get(userId, provider);
 
 describe('oauth disconnect: the gate', () => {
   it('refuses a session that has not verified, and names the action', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-1');
+    await linkProvider(user.id, 'google', 'sub-google-1');
 
     const res = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie);
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('reauth_required');
     expect(res.body.action).toBe('oauth.unlink');
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'google')).toBe(true);
   });
 
   it('removes the provider once a grant bound to it is presented', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-2');
+    await linkProvider(user.id, 'google', 'sub-google-2');
 
     const header = await srv.verified(cookie, 'oauth.unlink', {
       password: PW, params: { provider: 'google' }
@@ -86,13 +86,13 @@ describe('oauth disconnect: the gate', () => {
     const res = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie, header);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(isLinked(user.id, 'google')).toBe(false);
+    expect(await isLinked(user.id, 'google')).toBe(false);
   });
 
   it('does not accept a grant bound to a different provider', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-3');
-    linkProvider(user.id, 'microsoft', 'sub-ms-3');
+    await linkProvider(user.id, 'google', 'sub-google-3');
+    await linkProvider(user.id, 'microsoft', 'sub-ms-3');
 
     const header = await srv.verified(cookie, 'oauth.unlink', {
       password: PW, params: { provider: 'microsoft' }
@@ -100,12 +100,12 @@ describe('oauth disconnect: the gate', () => {
     const res = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie, header);
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('params_mismatch');
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'google')).toBe(true);
   });
 
   it('does not accept an oauth.link grant for the same provider', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-4');
+    await linkProvider(user.id, 'google', 'sub-google-4');
 
     const header = await srv.verified(cookie, 'oauth.link', {
       password: PW, params: { provider: 'google' }
@@ -113,13 +113,13 @@ describe('oauth disconnect: the gate', () => {
     const res = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie, header);
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('reauth_required');
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'google')).toBe(true);
   });
 
   it('is single use', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-5');
-    linkProvider(user.id, 'microsoft', 'sub-ms-5');
+    await linkProvider(user.id, 'google', 'sub-google-5');
+    await linkProvider(user.id, 'microsoft', 'sub-ms-5');
 
     const challengeId = await srv.stepUp(cookie, 'oauth.unlink', {
       password: PW, params: { provider: 'google' }
@@ -132,19 +132,19 @@ describe('oauth disconnect: the gate', () => {
     // `requireAAL2` asks `peekChallenge`, which already refuses a spent row, so
     // the early refusal answers before the handler runs. Same shape
     // authz.aal.test.js asserts for a consumed grant.
-    linkProvider(user.id, 'google', 'sub-google-5');
+    await linkProvider(user.id, 'google', 'sub-google-5');
     const replay = await srv.call('POST', '/api/oauth/disconnect', { provider: 'google' }, cookie, header);
     expect(replay.status).toBe(403);
     expect(replay.body.code).toBe('reauth_required');
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'google')).toBe(true);
   });
 });
 
 describe('oauth disconnect: the lockout guard is preserved and comes first', () => {
   it('still refuses to remove a provider-only account\'s last sign-in method', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-6');
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
+    await linkProvider(user.id, 'google', 'sub-google-6');
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
 
     // A provider-only account has no password, so it verifies by re-consent.
     const challengeId = await srv.stepUpOAuth(cookie, 'oauth.unlink', {
@@ -156,18 +156,18 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
     );
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('last_sign_in_method');
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'google')).toBe(true);
 
     // …and the refusal did not cost the verification.
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 
   it('lets a provider-only account with two providers remove one, by re-consent', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-7');
-    linkProvider(user.id, 'microsoft', 'sub-ms-7');
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
+    await linkProvider(user.id, 'google', 'sub-google-7');
+    await linkProvider(user.id, 'microsoft', 'sub-ms-7');
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(OAUTH_ONLY, user.id);
 
     const challengeId = await srv.stepUpOAuth(cookie, 'oauth.unlink', {
       params: { provider: 'microsoft' }, provider: 'google', sub: 'sub-google-7'
@@ -176,13 +176,13 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
       'POST', '/api/oauth/disconnect', { provider: 'microsoft' }, cookie, srv.reauthHeader(challengeId)
     );
     expect(res.status).toBe(200);
-    expect(isLinked(user.id, 'microsoft')).toBe(false);
-    expect(isLinked(user.id, 'google')).toBe(true);
+    expect(await isLinked(user.id, 'microsoft')).toBe(false);
+    expect(await isLinked(user.id, 'google')).toBe(true);
   });
 
   it('answers "not connected" without spending the grant', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-8');
+    await linkProvider(user.id, 'google', 'sub-google-8');
 
     const challengeId = await srv.stepUp(cookie, 'oauth.unlink', {
       password: PW, params: { provider: 'microsoft' }
@@ -192,7 +192,7 @@ describe('oauth disconnect: the lockout guard is preserved and comes first', () 
     );
     expect(res.status).toBe(404);
 
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 });
@@ -208,7 +208,7 @@ describe('oauth link: unchanged by the unlink work', () => {
 
   it('an oauth.unlink grant does not satisfy the link gate', async () => {
     const { cookie, user } = await srv.signupConfirmed(account());
-    linkProvider(user.id, 'google', 'sub-google-9');
+    await linkProvider(user.id, 'google', 'sub-google-9');
 
     const header = await srv.verified(cookie, 'oauth.unlink', {
       password: PW, params: { provider: 'google' }

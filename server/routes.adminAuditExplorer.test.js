@@ -37,8 +37,8 @@ describe('Admin Audit Explorer API', () => {
     db = dbModule.db;
 
     // Seed some specific audit logs for testing filtering and pagination
-    const testAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@example.gov');
-    const testTarget = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com');
+    const testAdmin = await db.prepare('SELECT id FROM users WHERE email = ?').get('admin@example.gov');
+    const testTarget = await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com');
     
     const insertLog = db.prepare(`
       INSERT INTO ` + `admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
@@ -51,13 +51,13 @@ describe('Admin Audit Explorer API', () => {
       const target = i % 2 === 0 ? testTarget.id : null;
       // Make dates descending starting from 2000-08-01 to bypass the 365-day retention trigger during cleanup
       const date = new Date(Date.UTC(2000, 7, 1 + i, 12, 0, 0)).toISOString();
-      insertLog.run(id, testAdmin.id, action, target, `Detail ${i} with term SEARCHABLE`, date);
+      await insertLog.run(id, testAdmin.id, action, target, `Detail ${i} with term SEARCHABLE`, date);
     }
   }, 60000);
 
   afterAll(async () => { 
     // Clean up test data
-    db.prepare("DELETE FROM admin_audit_logs WHERE id LIKE 'audit-test-%'").run();
+    await db.prepare("DELETE FROM admin_audit_logs WHERE id LIKE 'audit-test-%'").run();
     await srv?.close(); 
   });
 

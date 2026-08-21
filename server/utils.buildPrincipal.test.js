@@ -61,19 +61,37 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
    */
   const noWithholdings = () => [];
 
-  it('issues zero calls to the provider when grants is never read', async () => {
+  /**
+   * The laziness is gone, deliberately, and this pins what replaced it.
+   *
+   * `grantsFor` reads the database, so it is async. A property getter cannot
+   * await, so a lazy `grants` could only ever be a **promise** — and `can()`
+   * tests `Array.isArray(principal.grants)`, which is false for one. Every
+   * user-capability grant would have stopped applying with no error at all.
+   *
+   * So `buildPrincipal` resolves grants before returning. The cost is one
+   * indexed lookup per authenticated request on a table that is empty for
+   * almost every account; the alternative was an async `can()`, which is not
+   * available. `authz.js` now throws on a non-array `grants` so the old failure
+   * cannot recur silently.
+   */
+  it('resolves grants eagerly, because a getter cannot await', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn(() => ['report.evidence.read']);
 
-    buildPrincipal(userRow, fetchGrants, noWithholdings);
+    const principal = await buildPrincipal(userRow, fetchGrants, noWithholdings);
 
-    expect(fetchGrants).not.toHaveBeenCalled();
+    expect(fetchGrants, 'grants must be fetched while the principal is built')
+      .toHaveBeenCalledTimes(1);
+    expect(principal.grants, 'grants must be a resolved array, never a promise')
+      .toEqual(['report.evidence.read']);
+    expect(Array.isArray(principal.grants), 'can() tests Array.isArray on this').toBe(true);
   });
 
   it('issues exactly one call no matter how many times grants is read', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn(() => ['report.evidence.read']);
-    const principal = buildPrincipal(userRow, fetchGrants, noWithholdings);
+    const principal = await buildPrincipal(userRow, fetchGrants, noWithholdings);
 
     void principal.grants;
     void principal.grants;
@@ -85,7 +103,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
   it('resolves to whatever the provider returns, and passes it the user id', async () => {
     const { buildPrincipal } = await freshUtils();
     const fetchGrants = vi.fn((id) => (id === 'user-x' ? ['a.capability', 'b.capability'] : []));
-    const principal = buildPrincipal(userRow, fetchGrants, noWithholdings);
+    const principal = await buildPrincipal(userRow, fetchGrants, noWithholdings);
 
     expect(principal.grants).toEqual(['a.capability', 'b.capability']);
     expect(fetchGrants).toHaveBeenCalledWith('user-x');
@@ -106,7 +124,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
      * The real provider's behaviour is covered in
      * server/organizerAgreement.test.js.
      */
-    const principal = buildPrincipal(
+    const principal = await buildPrincipal(
       { id: 'user-x', role: 'organizer' },
       () => ['whatever'],
       () => []
@@ -133,7 +151,7 @@ describe('buildPrincipal — lazy, memoizing grants', () => {
     const { buildPrincipal } = await freshUtils();
     const computeWithheld = vi.fn(() => ['event.create']);
 
-    const principal = buildPrincipal(
+    const principal = await buildPrincipal(
       { id: 'user-x', role: 'organizer' },
       () => [],
       computeWithheld

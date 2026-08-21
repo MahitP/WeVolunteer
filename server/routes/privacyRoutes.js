@@ -1,6 +1,7 @@
 import express from 'express';
+import { runInTransaction } from '../db/connectionContext.js';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
 import { DEMO_MODE } from '../config.js';
 import { requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
@@ -45,7 +46,7 @@ const exportLimiter = rateLimit({
  * export attempts exhaust the window. The gate itself costs no query beyond the
  * one `authenticateToken` has already done.
  */
-router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export'), exportLimiter, (req, res) => {
+router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export'), exportLimiter, async (req, res) => {
   const userId = req.user.id;
 
   /**
@@ -55,7 +56,7 @@ router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export')
    * not cost the user the verification they just performed — they would have to
    * do it again for an export that never started.
    */
-  const existingJob = db.prepare(`
+  const existingJob = await db.prepare(`
     SELECT id, status FROM data_export_jobs
     WHERE user_id = ? AND status IN ('pending', 'processing')
   `).get(userId);
@@ -67,12 +68,12 @@ router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export')
   const jobId = `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // Spent with the job it authorises: no export queued without a spent
       // grant, and no spent grant without a queued export.
-      spendChallenge(db, req, 'data.export', {});
+      await spendChallenge(tx, req, 'data.export', {});
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO data_export_jobs (id, user_id, status, created_at)
         VALUES (?, ?, 'pending', ?)
       `).run(jobId, userId, new Date().toISOString());
@@ -81,7 +82,7 @@ router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export')
       // action and the column is NOT NULL with a foreign key, so there is no
       // administrator to name. (admin_audit_logs is the only audit table this
       // application has; it carries system rows as well as admin ones.)
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: userId,
         action: 'DATA_EXPORT_REQUESTED',
         targetUserId: userId,
@@ -97,10 +98,10 @@ router.post('/api/privacy/export', authenticateToken, requireAAL2('data.export')
   }
 });
 
-router.get('/api/privacy/export/status', authenticateToken, (req, res) => {
+router.get('/api/privacy/export/status', authenticateToken, async (req, res) => {
   const userId = req.user.id;
 
-  const job = db.prepare(`
+  const job = await db.prepare(`
     SELECT id, status, created_at, completed_at, expires_at 
     FROM data_export_jobs 
     WHERE user_id = ? 
@@ -140,11 +141,11 @@ router.get('/api/privacy/export/status', authenticateToken, (req, res) => {
  * request that delivers nothing must not cost the user a verification they then
  * have to repeat. The spend is the last thing before the bytes move.
  */
-router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('data.download'), (req, res) => {
+router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('data.download'), async (req, res) => {
   const userId = req.user.id;
   const jobId = req.params.id;
 
-  const job = db.prepare(`
+  const job = await db.prepare(`
     SELECT id, user_id, status, file_location, expires_at 
     FROM data_export_jobs 
     WHERE id = ?
@@ -193,8 +194,8 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
    * left behind by one that succeeded.
    */
   try {
-    inTransaction(() => {
-      spendChallenge(db, req, 'data.download', { jobId });
+    await runInTransaction(db, async (tx) => {
+      await spendChallenge(tx, req, 'data.download', { jobId });
     });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
@@ -224,7 +225,7 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
    */
   res.set('Cache-Control', 'no-store');
 
-  res.download(job.file_location, 'wevolunteer-data-export.zip', (err) => {
+  res.download(job.file_location, 'wevolunteer-data-export.zip', async (err) => {
     if (err) {
       console.error('Error downloading file:', err);
     } else {
@@ -248,7 +249,7 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
        * this task's "convert the call sites, refactor nothing" boundary.
        */
       try {
-        recordAudit(db, {
+        await recordAudit(db, {
           adminId: userId,
           action: 'DATA_EXPORT_DOWNLOADED',
           targetUserId: userId,

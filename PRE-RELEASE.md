@@ -36,8 +36,43 @@ your SPF and DKIM.
 that commit is still in history, `JWT_SECRET`, `TFA_ENCRYPTION_KEY`, the SMTP
 app password and the Google OAuth client secret should all be rotated too.
 
-- [ ] Check whether the commit is reachable
-- [ ] Rotate all five if it is
+- [x] **Checked 2026-08-15: the commit is NOT reachable.**
+      `git log --all -- .env` returns nothing, so no reachable ref carries the
+      file. Rotation is not required *on these grounds* — but read the next item
+      before concluding those four secrets were never exposed.
+
+### The pre-remediation backup still holds the live secrets, world-readable
+
+`.env.backup-20260809-preremediation` sits beside `.env` in the repository root.
+It is gitignored, so it is not in history and not the finding above. The problem
+is on disk:
+
+- ~~It is mode **644**~~ — **done 2026-08-19**, now `600`. That was the one step
+  here safe to take without deciding anything, so it was taken.
+- Its values are not stale. Re-verified 2026-08-19 by comparing hashes rather
+  than reading the values: `JWT_SECRET`, `GOOGLE_CLIENT_SECRET` and `SMTP_PASS`
+  are still **byte-identical to the current `.env`**. `TFA_ENCRYPTION_KEY` now
+  **differs** — it has been rotated since the copy was taken, so the original
+  "all four" is no longer accurate and three is the live count. "Pre
+  remediation" describes when the copy was taken, not what it contains.
+
+So the care taken over `.env`'s permissions is undone by a world-readable copy of
+the same four secrets one directory listing away. Any other account or process on
+that machine can read the token-signing key and the key that decrypts stored 2FA
+secrets.
+
+- [x] Tighten it now, before deciding anything else — **done 2026-08-19**:
+      ```bash
+      chmod 600 .env.backup-20260809-preremediation
+      ```
+- [ ] Then delete it, or move it to the password manager. Left in place
+      deliberately: deleting a file holding three live secrets is the owner's
+      decision, and the permissions fix already removes the exposure that made
+      it urgent. A backup of secrets
+      that is not encrypted and not needed is only a second place to lose them
+      from. Use `trash`, not `rm`.
+- [ ] If that machine is shared, or has been, treat all four as disclosed and
+      rotate them along with the Resend key above.
 
 ---
 
@@ -118,14 +153,40 @@ variable turns into a leaked authorization code. The runbook calls this out at
 
 ## 5. Production environment
 
-- [ ] `APP_URL=https://wevolunteers.org` — boot refuses without it, and refuses
-      plain http
+- [ ] `APP_URL=https://wevolunteers.org` — boot refuses without it, refuses
+      plain http, and refuses a loopback host even over https (every
+      verification and reset link is built from it)
 - [ ] `MAIL_DOMAIN=wevolunteers.org`
 - [ ] `TRUST_PROXY=1` behind nginx — boot refuses without it in production
 - [ ] `JWT_SECRET` and `TFA_ENCRYPTION_KEY` are real generated values, not the
       published development ones
-- [ ] `WEV_DB_PATH` points outside the deploy directory
 - [ ] `BIND_ADDRESS=127.0.0.1`, port firewalled
+
+**The database. Added 2026-08-19 — this section did not name it.** The engine
+defaults to SQLite, so a deployment configured from the list above alone comes
+up on a local file and Supabase is never contacted. `WEV_DB_PATH` was the only
+database line here and it applies to SQLite only.
+
+- [ ] `DATABASE_ENGINE=postgres` — without it the deployment silently runs on
+      SQLite
+- [ ] `DATABASE_URL` — the Supabase connection string, set in
+      `/etc/wevolunteer/wevolunteer.env` and **not** in the repository's `.env`,
+      which is development-only and is read by every privileged CLI tool and by
+      the test suites
+- [ ] `DATABASE_SSL_CA=deploy/certs/supabase-root-2021.crt` — Supabase issues
+      from a private chain, so without this a verifying connection fails and the
+      only way to connect is to stop verifying
+- [ ] `DATABASE_SSL_INSECURE` **unset** — production refuses to boot with it set,
+      by design
+- [ ] Do **not** set `WEV_DB_PATH` on a PostgreSQL deployment. The server itself
+      would still use PostgreSQL — it resolves the engine in
+      `server/db/engine.js`, which reads `DATABASE_ENGINE` and nothing else — but
+      the privileged CLI tools take the opposite view on purpose: in
+      `bin/resolveDb.mjs` an explicit `WEV_DB_PATH` with no explicit
+      `DATABASE_ENGINE` pins them to SQLite, because naming a file is how a
+      caller says which database it means. Setting both on a production host
+      therefore gives you a server on Supabase and `bin/reset-2fa.mjs` on a
+      SQLite file, which is the confusion this list exists to prevent.
 - [ ] `ALERT_EMAIL` set, or operator alerting is silently off
 - [ ] `RESEND_API_KEY` set; SMTP set as fallback, or accept the "no fallback"
       warning at boot as a decision
@@ -155,17 +216,18 @@ one, and no way to action a safety report.
 
 ## 6. Legal
 
-**Enforcement is now ON.** `LEGAL_HASHES_ENFORCED = true`, all 11 documents match
+**Enforcement is now ON.** `LEGAL_HASHES_ENFORCED = true`, all 12 documents match
 their pinned hashes, and a production server refuses to boot if one drifts.
 
 Editing a published policy is therefore no longer an edit: change the file, run
 `node bin/legal-hashes.mjs`, paste the printed constant into `LEGAL_DOCUMENTS`,
 and decide whether the change is MAJOR (re-acceptance) or MINOR (notice only).
 
-- [x] Run `node bin/legal-hashes.mjs` — all 11 documents report matching
+- [x] Run `node bin/legal-hashes.mjs` — all 12 documents report matching
 - [x] Set `LEGAL_HASHES_ENFORCED = true` in `server/legalDocuments.js`
 - [ ] Boot once and confirm
-      `[legal] 11 published documents verified against their pinned hashes`
+      `[legal] 12 published documents verified against their pinned hashes` — this
+      line now prints in production too; it previously did not
 - [ ] Open each policy in the Legal Center and confirm it still renders
 - [ ] Re-run the suite: `server/consent.test.js` has a case that is skipped
       while the flag is false and starts running when it is true
@@ -257,7 +319,16 @@ observed once, not as current behaviour.
 - [ ] Password reset end to end
 - [ ] Email 2FA end to end
 - [ ] An enforcement notice — confirm it comes from `admin@`, not `noreply@`
-- [ ] A legal-update notice — confirm it comes from `legal@`
+- [ ] ~~A legal-update notice — confirm it comes from `legal@`~~ **Not testable;
+      nothing sends one.** `LEGAL_DOCUMENT_UPDATED` has notification copy, a
+      mandatory-notice exemption and a `legal@` identity mapping, and no code
+      path anywhere dispatches it. The promise the Terms make — "we will tell you
+      in the app" — is kept by `LegalUpdateModal`, which pulls
+      `pendingNoticesFor()` on load; the push half was built and never wired.
+      Deliberately left unwired rather than switched on during a launch pass:
+      turning it on emails every account on the platform the next time a policy
+      is published, and that is a decision about volume and tone, not a defect
+      to quietly repair. See the Final Launch Readiness Report, P1.
 - [ ] Confirm no email carries a `Reply-To` on an authentication message
 - [ ] Confirm the same message looks identical whether Resend or SMTP sent it
 
@@ -265,14 +336,64 @@ observed once, not as current behaviour.
 
 ## 9. Database and migrations
 
-- [ ] Back up the production database before the first deploy
-- [ ] Deploy and confirm migrations reach head **52**
-- [ ] `PRAGMA integrity_check` → `ok`
-- [ ] `PRAGMA foreign_key_check` → empty
-- [ ] Restart once and confirm 0 migrations apply the second time
-- [ ] Rehearse a restore (`bin/verify-restore.sh`)
+> **These steps were written for SQLite and do not apply to the Supabase
+> deployment.** Corrected 2026-08-19. `PRAGMA integrity_check` and
+> `PRAGMA foreign_key_check` do not exist on PostgreSQL, and the 55 migrations
+> never run there — `server/db/postgresSchema.js` is generated by replaying them
+> and applied in one step, so "migrations reach head 55" is not a thing to
+> confirm. Following the old list would have produced either errors or false
+> confidence.
+
+- [ ] Back up the production database before the first deploy —
+      `pg_dump --format=custom "$DATABASE_URL" > pre-deploy.dump`
+- [ ] Confirm the schema is present and complete:
+      65 tables, 87 foreign keys, 171 indexes
+      (`docs/operations/postgres-cutover-and-rollback.md` has the queries)
+- [ ] Confirm the reserved actor exists and is tombstoned:
+      `system-cli`, `account_status = 'deleted'`
+- [ ] Restart once and confirm the boot is idempotent — `applyPostgresSchema()`
+      is `CREATE TABLE IF NOT EXISTS` throughout and must report
+      `[db] postgres: schema applied` without changing anything
+- [ ] `/health` returns `writable: true` — that is a real write reaching the
+      database, not just a socket that opened
+- [ ] Rehearse a restore with `pg_restore`, **not** `bin/verify-restore.sh`
+      (that script is `sqlite3` only). The round trip is already rehearsed and
+      recorded in the cutover document.
+
+### The nightly backup unit does not cover Supabase
+
+`deploy/wevolunteer-backup.service` runs `bin/backup.sh` with
+`WEV_DB_PATH=/var/lib/wevolunteer/wevolunteer.db`, and that script is a
+`sqlite3 .backup`. Against a PostgreSQL deployment there is no such file and
+nothing to copy, so **the scheduled backup does not protect the production
+database**. Verified by reading both, 2026-08-19.
+
+The app now says so rather than staying quiet: `backupStatus()` reports
+`unconfigured` when the backup directory does not exist, and as of 2026-08-19
+that state alerts **in production** (it stays silent in development, where it
+only means a laptop). Before this, a Supabase host with no backups at all was
+the one state that produced no alert.
+
+- [ ] Decide the production backup model and write it down. Two viable answers:
+      - **Supabase managed backups.** Confirm in the dashboard what the plan
+        actually retains — daily snapshots and whether point-in-time recovery is
+        included differs by plan, and this must be checked rather than assumed.
+        Record the retention window and the recovery point.
+      - **A `pg_dump` schedule** you control, written to storage the database
+        host cannot read back, encrypted with the same public-key approach
+        below.
+- [ ] Whichever you choose, rehearse one restore end to end before the first
+      real student signs up.
+- [ ] If you keep the SQLite backup timer running for the legacy pilot file,
+      keep it pointed at that file and do not treat its success as covering
+      production.
 
 ### Encrypt the backups — do this before the first real student signs up
+
+> The public-key approach below is sound and applies to a `pg_dump` archive just
+> as it does to a SQLite one; only the command that produces the archive
+> changes. The `sqlite3`-specific verification at the end of this section
+> applies to the legacy pilot file only.
 
 A backup holds every student's name, address, school, year group, service
 record, messages and safety reports. Unencrypted, one copy of it is a complete
@@ -346,6 +467,15 @@ Live concerns that are now closed. Listed so nobody reopens them.
 
 - **`wevolunteers.org` is verified in Resend.** Sending enabled; DKIM, SPF MX
   and SPF TXT all `verified`. Open and click tracking off.
+- **Two-factor sign-in works on the pilot database again** (migration 055).
+  Every second-factor submission there answered `HTTP 500` — correct code and
+  wrong one alike, email and recovery both — because `tfa_login_attempts` had
+  been created outside the migration system with `preauth_jti` as its key where
+  the sign-in path writes `token_hash`. Migration 025 uses
+  `CREATE TABLE IF NOT EXISTS`, which does not compare shapes, so it saw the name
+  and recorded itself as applied. Every test builds the table from scratch and
+  passed; the only database anyone signs in to could not complete a sign-in.
+  Verified closed against `pilot.db`: head is 55 and the column is `token_hash`.
 - **Auth tokens are hashed at rest** (migration 048). They were stored plaintext,
   which made any readable copy of the database a set of keys to every account
   with an outstanding reset.
@@ -356,7 +486,7 @@ Live concerns that are now closed. Listed so nobody reopens them.
 - **Every authentication message sends from `noreply@wevolunteers.org`**,
   enforced in `server/emailIdentity.js` rather than by convention.
 - **The retired domains** (`wevolunteer.org` singular, `wevolunteer.app`) and the
-  personal Gmail address are gone from shipped code and all eleven policies.
+  personal Gmail address are gone from shipped code and all twelve policies.
 - **Appeals are rate limited** to 5 per person per subject per rolling 30 days.
 - **Service history and certificates are privacy-gated** (migration 049),
   defaulting to public and enforced server-side.

@@ -44,6 +44,7 @@ beforeAll(async () => {
   process.env.WEV_DB_PATH = dbPath;
   const mod = await import('./db.js');
   mod.initDatabase();
+  await mod.completeDatabaseInit();
   db = new DatabaseSync(dbPath);
 }, 60000);
 

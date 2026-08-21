@@ -19,6 +19,7 @@
  * it returns `{ ok, error }` and the routes in Task 5 map that to status codes.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 
 // db.js opens its connection at module scope, so nothing that reaches it may be
@@ -48,16 +49,16 @@ let seq = 0;
  * `oauth_accounts` exactly as oauthRoutes.js writes them: `provider_user_id`
  * holds the provider's `sub` claim.
  */
-function makeUser({ passwordHash = null, providers = [] } = {}) {
+async function makeUser({ passwordHash = null, providers = [] } = {}) {
   const id = `reauth-user-${++seq}`;
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, created_at)
     VALUES (?, ?, ?, ?, ?, 'Adult', 'student', 1, ?)
   `).run(id, 'Test Person', `${id}@example.org`, id, passwordHash ?? PASSWORD_HASH, now);
 
   for (const [provider, sub] of providers) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO oauth_accounts (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(`oauth-${id}-${provider}`, id, provider, sub, `${id}@example.org`, now, now);
@@ -65,18 +66,18 @@ function makeUser({ passwordHash = null, providers = [] } = {}) {
   return id;
 }
 
-const row = (id) => db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
-const setExpiry = (id, iso) =>
-  db.prepare('UPDATE reauth_challenges SET expires_at = ? WHERE id = ?').run(iso, id);
+const row = async (id) => await db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
+const setExpiry = async (id, iso) =>
+  await db.prepare('UPDATE reauth_challenges SET expires_at = ? WHERE id = ?').run(iso, id);
 
 /** Opens a challenge with sensible defaults; returns the openChallenge result. */
-function open({ userId, action = 'account.delete', params = {}, sessionJti = 'jti-a', ipHash = 'ip-a' }) {
-  return reauth.openChallenge({ db, userId, action, params, sessionJti, ipHash });
+async function open({ userId, action = 'account.delete', params = {}, sessionJti = 'jti-a', ipHash = 'ip-a' }) {
+  return await reauth.openChallenge({ db, userId, action, params, sessionJti, ipHash });
 }
 
 /** Opens and grants in one step — the starting point for the consume tests. */
 async function granted(opts) {
-  const ch = open(opts);
+  const ch = await open(opts);
   const res = await reauth.grantByPassword({
     db, challengeId: ch.id, userId: opts.userId, password: PASSWORD
   });
@@ -85,14 +86,14 @@ async function granted(opts) {
 }
 
 describe('openChallenge', () => {
-  it('records a pending, bound, un-granted challenge', () => {
-    const userId = makeUser();
-    const ch = open({ userId, action: 'email.change', params: { newEmail: 'a@x.com' }, sessionJti: 'jti-open' });
+  it('records a pending, bound, un-granted challenge', async () => {
+    const userId = await makeUser();
+    const ch = await open({ userId, action: 'email.change', params: { newEmail: 'a@x.com' }, sessionJti: 'jti-open' });
 
     expect(ch.id).toBeTruthy();
     expect(ch.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
 
-    const r = row(ch.id);
+    const r = await row(ch.id);
     expect(r.user_id).toBe(userId);
     expect(r.action).toBe('email.change');
     expect(r.params_hash).toBe(paramsHash('email.change', { newEmail: 'a@x.com' }));
@@ -104,130 +105,130 @@ describe('openChallenge', () => {
     expect(r.attempts).toBe(0);
   });
 
-  it('refuses an action that is not in the registry', () => {
-    const userId = makeUser();
-    expect(() => open({ userId, action: 'account.rename' })).toThrow(/account\.rename/);
+  it('refuses an action that is not in the registry', async () => {
+    const userId = await makeUser();
+    await expect(open({ userId, action: 'account.rename' })).rejects.toThrow(/account\.rename/);
   });
 
-  it('refuses to open a challenge that is not bound to a session', () => {
+  it('refuses to open a challenge that is not bound to a session', async () => {
     // An unbound grant is not a step-up: anyone holding the challenge id could
     // spend it from anywhere.
-    const userId = makeUser();
-    expect(() => open({ userId, sessionJti: null })).toThrow(/session/i);
+    const userId = await makeUser();
+    await expect(open({ userId, sessionJti: null })).rejects.toThrow(/session/i);
   });
 });
 
 // RULE: expires at exactly 5 minutes.
 describe('the window is exactly five minutes', () => {
-  it('sets expires_at exactly 300000 ms after created_at', () => {
-    const userId = makeUser();
-    const ch = open({ userId });
-    const r = row(ch.id);
+  it('sets expires_at exactly 300000 ms after created_at', async () => {
+    const userId = await makeUser();
+    const ch = await open({ userId });
+    const r = await row(ch.id);
 
     expect(new Date(r.expires_at) - new Date(r.created_at)).toBe(5 * 60 * 1000);
     expect(ch.expiresAt).toBe(r.expires_at);
   });
 
-  it('stores both timestamps as ISO-8601 UTC, never SQLite datetime() (TD-10)', () => {
+  it('stores both timestamps as ISO-8601 UTC, never SQLite datetime() (TD-10)', async () => {
     // expires_at is compared as a STRING, so a `2026-08-01 12:00:00` from
     // datetime('now') would sort against `2026-08-01T12:00:00.000Z` in a way
     // that silently never expires.
-    const r = row(open({ userId: makeUser() }).id);
+    const r = await row((await open({ userId: await makeUser() })).id);
     for (const value of [r.created_at, r.expires_at]) {
       expect(value).toBe(new Date(value).toISOString());
     }
   });
 
   it('will not grant a challenge that has expired', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
-    setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
+    const userId = await makeUser();
+    const ch = await open({ userId });
+    await setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
 
     expect(res).toEqual({ ok: false, error: 'expired' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('will not consume a grant that has since expired', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
-    setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
+    await setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
 
     const res = await reauth.consumeChallenge({
       db, challengeId: ch.id, userId, action: 'account.delete', params: {}, sessionJti: 'jti-a'
     });
 
     expect(res).toEqual({ ok: false, error: 'expired' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 });
 
 // RULE: `methods` omits 'password' for a provider-only account.
 describe('methods reflect what this account can actually satisfy', () => {
-  it('offers both to an account with a password and a linked provider', () => {
-    const userId = makeUser({ providers: [['google', 'sub-both']] });
-    expect(open({ userId }).methods).toEqual(['password', 'oauth']);
+  it('offers both to an account with a password and a linked provider', async () => {
+    const userId = await makeUser({ providers: [['google', 'sub-both']] });
+    expect((await open({ userId })).methods).toEqual(['password', 'oauth']);
   });
 
-  it("omits 'password' for a provider-only account", () => {
+  it("omits 'password' for a provider-only account", async () => {
     // The sentinel is not a hash. Offering a password prompt to someone who has
     // no password to give is an unanswerable question, and the only way out of
     // it would be account recovery.
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-only']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-only']] });
+    const ch = await open({ userId });
 
     expect(ch.methods).not.toContain('password');
     expect(ch.methods).toEqual(['oauth']);
   });
 
-  it("omits 'oauth' for an account with no linked provider", () => {
-    expect(open({ userId: makeUser() }).methods).toEqual(['password']);
+  it("omits 'oauth' for an account with no linked provider", async () => {
+    expect((await open({ userId: await makeUser() })).methods).toEqual(['password']);
   });
 });
 
 describe('grantByPassword', () => {
   it('grants on the right password and records the method', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
 
     expect(res.ok).toBe(true);
-    const r = row(ch.id);
+    const r = await row(ch.id);
     expect(r.granted_at).not.toBe(null);
     expect(r.method).toBe('password');
     expect(r.consumed_at).toBe(null);
   });
 
   it('refuses the wrong password without granting', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'WrongHorse1' });
 
     expect(res.ok).toBe(false);
     expect(res.error).toBe('invalid_password');
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('treats a double-submitted verify form as success, not an error', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
 
     const first = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
-    const grantedAt = row(ch.id).granted_at;
+    const grantedAt = (await row(ch.id)).granted_at;
     const second = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
 
     expect(first).toEqual({ ok: true });
     expect(second).toEqual({ ok: true });
-    expect(row(ch.id).granted_at, 'the second grant moved the clock forward').toBe(grantedAt);
+    expect((await row(ch.id)).granted_at, 'the second grant moved the clock forward').toBe(grantedAt);
   });
 
   it('still demands the password on an already-granted challenge', async () => {
     // The idempotent path above must be reachable only AFTER verification, or
     // one correct grant would make every later wrong guess succeed.
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'WrongHorse1' });
@@ -237,22 +238,22 @@ describe('grantByPassword', () => {
   });
 
   it("will not grant another user's challenge, even with that caller's own correct password", async () => {
-    const owner = makeUser();
-    const stranger = makeUser();
-    const ch = open({ userId: owner });
+    const owner = await makeUser();
+    const stranger = await makeUser();
+    const ch = await open({ userId: owner });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId: stranger, password: PASSWORD });
 
     expect(res).toEqual({ ok: false, error: 'not_found' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 });
 
 // RULE: the password path rejects the '!OAUTH_ONLY!' sentinel explicitly.
 describe("the '!OAUTH_ONLY!' sentinel is rejected explicitly", () => {
   it('reports that no password exists rather than "wrong password"', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-x']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'anything' });
 
@@ -260,41 +261,41 @@ describe("the '!OAUTH_ONLY!' sentinel is rejected explicitly", () => {
     // no password to give would be told their password is wrong, five times,
     // and then be locked out of the challenge entirely.
     expect(res).toEqual({ ok: false, error: 'password_unavailable' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('does not spend an attempt on a prompt the account cannot answer', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-y']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-y']] });
+    const ch = await open({ userId });
 
     await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'anything' });
 
-    expect(row(ch.id).attempts, 'an unanswerable prompt burned the brute-force budget').toBe(0);
+    expect((await row(ch.id)).attempts, 'an unanswerable prompt burned the brute-force budget').toBe(0);
   });
 
   it('does not accept the sentinel string itself as the password', async () => {
-    const userId = makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-z']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ passwordHash: '!OAUTH_ONLY!', providers: [['google', 'sub-z']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: '!OAUTH_ONLY!' });
 
     expect(res.ok).toBe(false);
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 });
 
 // RULE: the OAuth path verifies the returned sub against the linked row.
 describe('grantByOAuth', () => {
   it('grants when the returned sub matches the linked account', async () => {
-    const userId = makeUser({ providers: [['google', 'google-sub-1']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ providers: [['google', 'google-sub-1']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId, provider: 'google', subject: 'google-sub-1'
     });
 
     expect(res.ok).toBe(true);
-    const r = row(ch.id);
+    const r = await row(ch.id);
     expect(r.granted_at).not.toBe(null);
     expect(r.method).toBe('oauth');
   });
@@ -302,8 +303,8 @@ describe('grantByOAuth', () => {
   it('refuses a sub that does not match the linked account', async () => {
     // Otherwise ANY account at that provider satisfies the challenge: the
     // attacker signs in with their own Google account and is re-verified as you.
-    const userId = makeUser({ providers: [['google', 'google-sub-linked']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ providers: [['google', 'google-sub-linked']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId, provider: 'google', subject: 'attacker-sub'
@@ -311,50 +312,50 @@ describe('grantByOAuth', () => {
 
     expect(res.ok).toBe(false);
     expect(res.error).toBe('provider_mismatch');
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it("refuses another user's linked sub at the same provider", async () => {
-    const victim = makeUser({ providers: [['google', 'victim-sub']] });
-    makeUser({ providers: [['google', 'other-sub']] });
-    const ch = open({ userId: victim });
+    const victim = await makeUser({ providers: [['google', 'victim-sub']] });
+    await makeUser({ providers: [['google', 'other-sub']] });
+    const ch = await open({ userId: victim });
 
     const res = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId: victim, provider: 'google', subject: 'other-sub'
     });
 
     expect(res.ok).toBe(false);
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('refuses a provider this account has not linked', async () => {
-    const userId = makeUser({ providers: [['google', 'google-sub-2']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ providers: [['google', 'google-sub-2']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId, provider: 'microsoft', subject: 'google-sub-2'
     });
 
     expect(res).toEqual({ ok: false, error: 'provider_not_linked' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('refuses an absent sub', async () => {
-    const userId = makeUser({ providers: [['google', 'google-sub-3']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ providers: [['google', 'google-sub-3']] });
+    const ch = await open({ userId });
 
     const res = await reauth.grantByOAuth({ db, challengeId: ch.id, userId, provider: 'google', subject: null });
 
     expect(res.ok).toBe(false);
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 });
 
 // RULE: 5 failed attempts locks the challenge.
 describe('five failed attempts lock the challenge', () => {
   it('locks on the fifth wrong password and stays locked for the right one', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
 
     for (let i = 1; i <= 4; i++) {
       const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
@@ -371,18 +372,18 @@ describe('five failed attempts lock the challenge', () => {
      */
     const fifth = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'Wrong5' });
     expect(fifth.error).toBe('account_locked');
-    expect(row(ch.id).attempts).toBe(5);
+    expect((await row(ch.id)).attempts).toBe(5);
 
     // The assertion that matters: the correct password no longer helps. A lock
     // that the right guess can still open is not a lock.
     const correct = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
     expect(correct).toEqual({ ok: false, error: 'account_locked' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   it('counts OAuth sub mismatches toward the same budget', async () => {
-    const userId = makeUser({ providers: [['google', 'right-sub']] });
-    const ch = open({ userId });
+    const userId = await makeUser({ providers: [['google', 'right-sub']] });
+    const ch = await open({ userId });
 
     for (let i = 0; i < 5; i++) {
       await reauth.grantByOAuth({ db, challengeId: ch.id, userId, provider: 'google', subject: `guess-${i}` });
@@ -396,7 +397,7 @@ describe('five failed attempts lock the challenge', () => {
        unchanged — a mismatch costs an attempt, and the right answer arriving
        after the budget is gone does not help. */
     expect(res).toEqual({ ok: false, error: 'account_locked' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 
   /**
@@ -415,15 +416,15 @@ describe('five failed attempts lock the challenge', () => {
    * demonstrably not proved the password, and the account has one.
    */
   it('bounds guessing on a challenge that is already granted but not yet spent', async () => {
-    const userId = makeUser({ providers: [['google', 'granted-sub']] });
-    const ch = open({ userId, action: 'email.change', params: { newEmail: 'a@x.com' } });
+    const userId = await makeUser({ providers: [['google', 'granted-sub']] });
+    const ch = await open({ userId, action: 'email.change', params: { newEmail: 'a@x.com' } });
 
     const grant = await reauth.grantByOAuth({
       db, challengeId: ch.id, userId, provider: 'google', subject: 'granted-sub'
     });
     expect(grant.ok, 'fixture setup: the OAuth grant failed').toBe(true);
-    expect(row(ch.id).granted_at).not.toBe(null);
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).granted_at).not.toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
 
     for (let i = 1; i <= 4; i++) {
       const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
@@ -436,12 +437,12 @@ describe('five failed attempts lock the challenge', () => {
        test is about is unchanged — the counter moved on a granted challenge. */
     const fifth = await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: 'Wrong5' });
     expect(fifth.error).toBe('account_locked');
-    expect(row(ch.id).attempts, 'the counter was frozen by the granted_at guard').toBe(5);
+    expect((await row(ch.id)).attempts, 'the counter was frozen by the granted_at guard').toBe(5);
   });
 
   it('a locked challenge cannot be consumed', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
     for (let i = 0; i < 5; i++) {
       await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
     }
@@ -451,7 +452,7 @@ describe('five failed attempts lock the challenge', () => {
     });
 
     expect(res.ok).toBe(false);
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 });
 
@@ -503,14 +504,14 @@ describe('the account-level guessing ceiling', () => {
    * same budget through its own door.
    */
   async function exhaustAccountBudget(userId, tag, verify) {
-    const spend = verify ?? ((challengeId, i) =>
+    const spend = verify ?? (async (challengeId, i) =>
       reauth.grantByPassword({ db, challengeId, userId, password: `Wrong-${tag}-${i}` }));
 
     let ch = null;
     let onThisChallenge = 0;
     for (let i = 0; i < reauth.MAX_ACCOUNT_ATTEMPTS; i++) {
       if (!ch || onThisChallenge >= reauth.MAX_ATTEMPTS) {
-        ch = open({ userId, sessionJti: `jti-${tag}-${i}` });
+        ch = await open({ userId, sessionJti: `jti-${tag}-${i}` });
         onThisChallenge = 0;
       }
       await spend(ch.id, i);
@@ -520,50 +521,50 @@ describe('the account-level guessing ceiling', () => {
     /* The budget really is gone — otherwise every assertion below passes for the
        wrong reason, which is the failure mode this whole block exists to catch. */
     expect(ch, `${tag}: no challenge was ever opened`).not.toBe(null);
-    expect(row(ch.id).attempts, `${tag}: the last challenge recorded no attempts`)
+    expect((await row(ch.id)).attempts, `${tag}: the last challenge recorded no attempts`)
       .toBeGreaterThan(0);
   }
 
   it('stops guessing across fresh challenges, not just within one', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
 
     // The account's whole budget, spent on wrong answers — spread over as many
     // challenges as it takes, each new one starting its own counter at zero.
     await exhaustAccountBudget(userId, 'acct');
 
     // A brand-new challenge, therefore un-locked by every per-challenge rule.
-    const fresh = open({ userId, sessionJti: 'jti-acct-fresh' });
+    const fresh = await open({ userId, sessionJti: 'jti-acct-fresh' });
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: 'Wrong-again' });
 
     expect(res).toEqual({ ok: false, error: 'account_locked' });
-    expect(row(fresh.id).attempts, 'a refused-by-account guess still charged the challenge').toBe(0);
+    expect((await row(fresh.id)).attempts, 'a refused-by-account guess still charged the challenge').toBe(0);
   }, 20000);
 
   it('refuses the correct password too — a ceiling the right guess opens is not one', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     await exhaustAccountBudget(userId, 'right');
 
-    const fresh = open({ userId, sessionJti: 'jti-right-fresh' });
+    const fresh = await open({ userId, sessionJti: 'jti-right-fresh' });
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
 
     expect(res).toEqual({ ok: false, error: 'account_locked' });
-    expect(row(fresh.id).granted_at).toBe(null);
+    expect((await row(fresh.id)).granted_at).toBe(null);
   }, 20000);
 
   it('is scoped to the account — one user cannot spend another user\'s budget', async () => {
-    const noisy = makeUser();
-    const quiet = makeUser();
+    const noisy = await makeUser();
+    const quiet = await makeUser();
 
     await exhaustAccountBudget(noisy, 'noisy');
 
-    const ch = open({ userId: quiet, sessionJti: 'jti-quiet' });
+    const ch = await open({ userId: quiet, sessionJti: 'jti-quiet' });
     const res = await reauth.grantByPassword({ db, challengeId: ch.id, userId: quiet, password: PASSWORD });
 
     expect(res).toEqual({ ok: true });
   }, 20000);
 
   it('counts only the window, so an old spree does not lock an account for ever', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
 
     // A full spree: at this instant the account can do nothing.
     await exhaustAccountBudget(userId, 'stale');
@@ -571,7 +572,7 @@ describe('the account-level guessing ceiling', () => {
     // Age it past the window. Written directly because the alternative is a
     // fifteen-minute test.
     const old = new Date(Date.now() - reauth.ACCOUNT_ATTEMPT_WINDOW_MS - 1000).toISOString();
-    db.prepare('UPDATE reauth_challenges SET created_at = ? WHERE user_id = ?').run(old, userId);
+    await db.prepare('UPDATE reauth_challenges SET created_at = ? WHERE user_id = ?').run(old, userId);
 
     /**
      * The lock has to lift, or the ceiling is a permanent account lockout that
@@ -579,20 +580,20 @@ describe('the account-level guessing ceiling', () => {
      * the ceiling is safe to enforce, so it is asserted with the CORRECT
      * password: the account is fully usable again, not merely counting again.
      */
-    const fresh = open({ userId, sessionJti: 'jti-window-fresh' });
+    const fresh = await open({ userId, sessionJti: 'jti-window-fresh' });
     const res = await reauth.grantByPassword({ db, challengeId: fresh.id, userId, password: PASSWORD });
 
     expect(res).toEqual({ ok: true });
   }, 20000);
 
   it('applies to the OAuth path on the same budget', async () => {
-    const userId = makeUser({ providers: [['google', 'oauth-ceiling-sub']] });
-    await exhaustAccountBudget(userId, 'oauth', (challengeId, i) =>
+    const userId = await makeUser({ providers: [['google', 'oauth-ceiling-sub']] });
+    await exhaustAccountBudget(userId, 'oauth', async (challengeId, i) =>
       reauth.grantByOAuth({
         db, challengeId, userId, provider: 'google', subject: `wrong-oauth-${i}`
       }));
 
-    const fresh = open({ userId, sessionJti: 'jti-oauth-fresh' });
+    const fresh = await open({ userId, sessionJti: 'jti-oauth-fresh' });
     const res = await reauth.grantByOAuth({
       db, challengeId: fresh.id, userId, provider: 'google', subject: 'oauth-ceiling-sub'
     });
@@ -603,7 +604,7 @@ describe('the account-level guessing ceiling', () => {
 
 describe('consumeChallenge — the happy paths', () => {
   it('consumes a password grant once and marks it spent', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, action: 'data.export' });
 
     const res = await reauth.consumeChallenge({
@@ -611,12 +612,12 @@ describe('consumeChallenge — the happy paths', () => {
     });
 
     expect(res).toEqual({ ok: true });
-    expect(row(ch.id).consumed_at).not.toBe(null);
+    expect((await row(ch.id)).consumed_at).not.toBe(null);
   });
 
   it('consumes an OAuth grant', async () => {
-    const userId = makeUser({ providers: [['google', 'happy-sub']] });
-    const ch = open({ userId, action: 'oauth.link', params: { provider: 'microsoft' } });
+    const userId = await makeUser({ providers: [['google', 'happy-sub']] });
+    const ch = await open({ userId, action: 'oauth.link', params: { provider: 'microsoft' } });
     await reauth.grantByOAuth({ db, challengeId: ch.id, userId, provider: 'google', subject: 'happy-sub' });
 
     const res = await reauth.consumeChallenge({
@@ -624,24 +625,24 @@ describe('consumeChallenge — the happy paths', () => {
     });
 
     expect(res).toEqual({ ok: true });
-    expect(row(ch.id).consumed_at).not.toBe(null);
+    expect((await row(ch.id)).consumed_at).not.toBe(null);
   });
 
   it('refuses to consume a challenge that was never granted', async () => {
-    const userId = makeUser();
-    const ch = open({ userId });
+    const userId = await makeUser();
+    const ch = await open({ userId });
 
     const res = await reauth.consumeChallenge({
       db, challengeId: ch.id, userId, action: 'account.delete', params: {}, sessionJti: 'jti-a'
     });
 
     expect(res).toEqual({ ok: false, error: 'not_granted' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 
   it('refuses to consume an unknown challenge id', async () => {
     const res = await reauth.consumeChallenge({
-      db, challengeId: 'no-such-challenge', userId: makeUser(), action: 'account.delete', params: {}, sessionJti: 'jti-a'
+      db, challengeId: 'no-such-challenge', userId: await makeUser(), action: 'account.delete', params: {}, sessionJti: 'jti-a'
     });
     expect(res).toEqual({ ok: false, error: 'not_found' });
   });
@@ -650,7 +651,7 @@ describe('consumeChallenge — the happy paths', () => {
 // RULE: single use, set atomically.
 describe('a grant is spendable exactly once', () => {
   it('refuses the second consume of the same grant', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
 
     const first = await reauth.consumeChallenge({
@@ -675,7 +676,7 @@ describe('a grant is spendable exactly once', () => {
      * implementation would still fail this test (both callers would see
      * consumed_at NULL before either wrote) which is the shape being guarded.
      */
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
 
     const results = await Promise.all(
@@ -689,7 +690,7 @@ describe('a grant is spendable exactly once', () => {
   });
 
   it('cannot be re-granted after being consumed', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
     await reauth.consumeChallenge({
       db, challengeId: ch.id, userId, action: 'account.delete', params: {}, sessionJti: 'jti-a'
@@ -711,24 +712,24 @@ describe('a grant is spendable exactly once', () => {
    * reachable the moment guessing in the granted window started counting.
    */
   it('cannot be consumed after guessing locked it, even though it was granted', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
 
     for (let i = 0; i < reauth.MAX_ATTEMPTS; i++) {
       await reauth.grantByPassword({ db, challengeId: ch.id, userId, password: `Wrong${i}` });
     }
-    expect(row(ch.id).attempts).toBe(reauth.MAX_ATTEMPTS);
-    expect(row(ch.id).granted_at, 'the grant itself should survive — only its spendability dies').not.toBe(null);
+    expect((await row(ch.id)).attempts).toBe(reauth.MAX_ATTEMPTS);
+    expect((await row(ch.id)).granted_at, 'the grant itself should survive — only its spendability dies').not.toBe(null);
 
     const res = await reauth.consumeChallenge({
       db, challengeId: ch.id, userId, action: 'account.delete', params: {}, sessionJti: 'jti-a'
     });
 
     expect(res).toEqual({ ok: false, error: 'locked' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
 
     // And the middleware agrees, which is the point.
-    expect(reauth.peekChallenge({ db, challengeId: ch.id, userId })).toEqual({ ok: false, error: 'locked' });
+    expect(await reauth.peekChallenge({ db, challengeId: ch.id, userId })).toEqual({ ok: false, error: 'locked' });
   });
 });
 
@@ -751,42 +752,112 @@ describe('a grant is spendable exactly once', () => {
  */
 describe('the grant is re-checked after bcrypt, not before it', () => {
   it('refuses a correct password whose challenge was locked during the comparison', async () => {
-    const userId = makeUser();
-    const ch = open({ userId, sessionJti: 'jti-race' });
+    const userId = await makeUser();
+    const ch = await open({ userId, sessionJti: 'jti-race' });
 
     const pending = reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
 
     // Synchronous, therefore before bcrypt resolves: the parallel guessers that
     // a real attacker would have running against the same challenge.
-    db.prepare('UPDATE reauth_challenges SET attempts = ? WHERE id = ?')
+    await db.prepare('UPDATE reauth_challenges SET attempts = ? WHERE id = ?')
       .run(reauth.MAX_ATTEMPTS, ch.id);
 
     const res = await pending;
 
-    // notGrantable() saw attempts = 0 and let this through. Only the duplicated
-    // `attempts < ?` in commitGrant's WHERE clause can refuse it.
-    expect(res).toEqual({ ok: false, error: 'locked' });
-    expect(row(ch.id).granted_at).toBe(null);
+    /**
+     * Refused, and nothing granted. That is the security property, and it is
+     * unchanged.
+     *
+     * ── Why the error code is no longer pinned ──
+     *
+     * `MAX_ACCOUNT_ATTEMPTS === MAX_ATTEMPTS`, so a challenge at its own
+     * ceiling necessarily puts the ACCOUNT at its ceiling too. The two gates
+     * are indistinguishable by construction; which one answers depends only on
+     * whether the account check reads the row before or after the UPDATE below.
+     *
+     * It used to read before, because the read was synchronous. Every read is
+     * async now — it must be, PostgreSQL has no synchronous API — so the check
+     * yields, observes the bumped counter, and answers `account_locked` where
+     * it once fell through to `commitGrant` and answered `locked`.
+     *
+     * Both are correct refusals of the same attack, so this asserts the
+     * property rather than the diagnosis. `commitGrant`'s own WHERE clause is
+     * still covered: behaviourally by the `consumed_at` race below, which the
+     * account gate cannot pre-empt, and structurally by the guard after it.
+     */
+    expect(res.ok, 'a challenge locked mid-comparison must never be granted').toBe(false);
+    expect(['locked', 'account_locked']).toContain(res.error);
+    expect((await row(ch.id)).granted_at, 'nothing may be granted').toBe(null);
+  });
+
+  /**
+   * The same race, on a predicate the account ceiling cannot pre-empt.
+   *
+   * `consumed_at` has nothing to do with attempt counts, so this reaches
+   * `commitGrant` however the earlier gates are ordered — which makes it the
+   * behavioural proof that the WHERE clause is re-checking state AFTER bcrypt
+   * rather than trusting the row read before it.
+   */
+  it('refuses a correct password whose challenge was consumed during the comparison', async () => {
+    const userId = await makeUser();
+    const ch = await open({ userId, sessionJti: 'jti-race-consumed' });
+
+    const pending = reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
+
+    /* Synchronous, therefore inside the bcrypt window. */
+    await db.prepare('UPDATE reauth_challenges SET consumed_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), ch.id);
+
+    const res = await pending;
+
+    expect(res.ok, 'a consumed challenge must not be granted').toBe(false);
+    expect((await row(ch.id)).granted_at, 'nothing may be granted').toBe(null);
+  });
+
+  /**
+   * `commitGrant`'s WHERE clause, asserted structurally.
+   *
+   * `attempts < ?` is deliberately duplicated from `notGrantable` — it is the
+   * last line of defence, re-checked after bcrypt on the row as it stands at
+   * COMMIT time. With the two ceilings equal it can no longer be reached
+   * through the public API (see the race above), so behaviour cannot prove it
+   * and a source assertion is the honest substitute. Deleting any of these
+   * predicates must fail the build.
+   */
+  it('re-states every precondition in commitGrant, after bcrypt', () => {
+    const src = readFileSync(new URL('./reauth.js', import.meta.url), 'utf8');
+    const from = src.indexOf('async function commitGrant');
+    expect(from, 'commitGrant not found — this guard is checking nothing').toBeGreaterThan(-1);
+    const clause = src.slice(from, src.indexOf('.run(', from));
+
+    for (const predicate of [
+      'consumed_at IS NULL',
+      'granted_at IS NULL',
+      'expires_at > ?',
+      'attempts < ?',
+    ]) {
+      expect(clause, `commitGrant must re-check ${predicate} at commit time`).toContain(predicate);
+    }
   });
 
   it('refuses a correct password whose challenge expired during the comparison', async () => {
-    const userId = makeUser();
-    const ch = open({ userId, sessionJti: 'jti-race-expiry' });
+    const userId = await makeUser();
+    const ch = await open({ userId, sessionJti: 'jti-race-expiry' });
 
     const pending = reauth.grantByPassword({ db, challengeId: ch.id, userId, password: PASSWORD });
-    setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
+    await setExpiry(ch.id, new Date(Date.now() - 1000).toISOString());
 
     const res = await pending;
 
     expect(res).toEqual({ ok: false, error: 'expired' });
-    expect(row(ch.id).granted_at).toBe(null);
+    expect((await row(ch.id)).granted_at).toBe(null);
   });
 });
 
 // RULE: bound to action.
 describe('a grant is bound to its action', () => {
   it('will not let a grant for one action authorise another', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, action: 'email.change', params: { newEmail: 'a@x.com' } });
 
     const res = await reauth.consumeChallenge({
@@ -794,13 +865,13 @@ describe('a grant is bound to its action', () => {
     });
 
     expect(res).toEqual({ ok: false, error: 'action_mismatch' });
-    expect(row(ch.id).consumed_at, 'the grant was spent on an action it never authorised').toBe(null);
+    expect((await row(ch.id)).consumed_at, 'the grant was spent on an action it never authorised').toBe(null);
   });
 
   it('treats an unregistered action as a mismatch rather than throwing', async () => {
     // consumeChallenge runs inside the handler's transaction; a throw there
     // would roll back the caller's work rather than simply denying it.
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId });
 
     const res = await reauth.consumeChallenge({
@@ -808,14 +879,14 @@ describe('a grant is bound to its action', () => {
     });
 
     expect(res).toEqual({ ok: false, error: 'action_mismatch' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 });
 
 // RULE: bound to params_hash.
 describe('a grant is bound to the params it was opened for', () => {
   it('will not move the address the user did not verify', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, action: 'email.change', params: { newEmail: 'a@x.com' } });
 
     const res = await reauth.consumeChallenge({
@@ -824,14 +895,14 @@ describe('a grant is bound to the params it was opened for', () => {
     });
 
     expect(res).toEqual({ ok: false, error: 'params_mismatch' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 
   it('binds only the params the action declares, in a key-order-independent way', async () => {
     // `oauth.link` binds `provider` and nothing else, so an unbound field and a
     // reordered body must both still match — a binding that fails legitimate
     // calls gets removed by the next person who hits it.
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, action: 'oauth.link', params: { provider: 'google', extra: 1 } });
 
     const res = await reauth.consumeChallenge({
@@ -846,7 +917,7 @@ describe('a grant is bound to the params it was opened for', () => {
 // RULE: bound to session_jti.
 describe('a grant is bound to the session that opened it', () => {
   it('cannot be spent from a different session', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, sessionJti: 'jti-original' });
 
     const res = await reauth.consumeChallenge({
@@ -854,11 +925,11 @@ describe('a grant is bound to the session that opened it', () => {
     });
 
     expect(res).toEqual({ ok: false, error: 'session_mismatch' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 
   it('cannot be spent with no session at all', async () => {
-    const userId = makeUser();
+    const userId = await makeUser();
     const ch = await granted({ userId, sessionJti: 'jti-original' });
 
     const res = await reauth.consumeChallenge({
@@ -866,12 +937,12 @@ describe('a grant is bound to the session that opened it', () => {
     });
 
     expect(res.ok).toBe(false);
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 
   it("cannot be spent by a different user holding the id", async () => {
-    const owner = makeUser();
-    const stranger = makeUser();
+    const owner = await makeUser();
+    const stranger = await makeUser();
     const ch = await granted({ userId: owner });
 
     const res = await reauth.consumeChallenge({
@@ -879,6 +950,6 @@ describe('a grant is bound to the session that opened it', () => {
     });
 
     expect(res).toEqual({ ok: false, error: 'not_found' });
-    expect(row(ch.id).consumed_at).toBe(null);
+    expect((await row(ch.id)).consumed_at).toBe(null);
   });
 });

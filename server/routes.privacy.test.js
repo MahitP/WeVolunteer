@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
 import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
 
 // One server for the whole file (Tasks 5 and 6 append more describes below).
@@ -118,7 +117,7 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
     expect(res.body.volunteer.email).toBe('privacy.fresh.student@example.org');
   });
 
-  it('reveals grade/school/bio/email to the seeded hosting-organizer relationship (Priya <-> jwhitfield)', async () => {
+  it('reveals grade/school/bio/email to the seeded hosting-organizer await relationship(Priya <-> jwhitfield)', async () => {
     const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, hostingOrgToken);
     expect(res.status).toBe(200);
     expect(res.body.volunteer.grade).toBe('11');
@@ -187,11 +186,10 @@ describe('leaderboard privacy', () => {
   });
 
   it('shows a student once leaderboard_opt_in is set to 1 directly in the DB', async () => {
-    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
+    const { db: rawDb } = await import('./db.js');
     try {
-      rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
     } finally {
-      rawDb.close();
     }
 
     const res = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
@@ -200,20 +198,18 @@ describe('leaderboard privacy', () => {
     expect(ids).toContain('user-student-3');
 
     // Reset so this test doesn't leak state into the others below.
-    const rawDb2 = new DatabaseSync(process.env.WEV_DB_PATH);
+    const { db: rawDb2 } = await import('./db.js');
     try {
-      rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
     } finally {
-      rawDb2.close();
     }
   });
 
   it('never returns school or grade on leaderboard rows', async () => {
-    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
+    const { db: rawDb } = await import('./db.js');
     try {
-      rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
     } finally {
-      rawDb.close();
     }
 
     const res = await srv.call('GET', '/api/leaderboard', undefined, leoToken);
@@ -224,11 +220,10 @@ describe('leaderboard privacy', () => {
       expect(row).not.toHaveProperty('grade');
     }
 
-    const rawDb2 = new DatabaseSync(process.env.WEV_DB_PATH);
+    const { db: rawDb2 } = await import('./db.js');
     try {
-      rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
     } finally {
-      rawDb2.close();
     }
   });
 
@@ -272,11 +267,10 @@ describe('privacy: event listing requires auth and scopes instructions', () => {
     hostingOrgToken = await srv.login('jordan.whitfield@example.org');
     adminToken = await srv.login('admin@example.gov');
 
-    const rawDb = new DatabaseSync(process.env.WEV_DB_PATH);
+    const { db: rawDb } = await import('./db.js');
     try {
-      rawDb.prepare("UPDATE events SET instructions = ? WHERE id = 'event-softball'").run(SOFTBALL_INSTRUCTIONS);
+      await rawDb.prepare("UPDATE events SET instructions = ? WHERE id = 'event-softball'").run(SOFTBALL_INSTRUCTIONS);
     } finally {
-      rawDb.close();
     }
   });
 
@@ -373,20 +367,17 @@ describe('privacy: data export', () => {
     srv.call('POST', '/api/privacy/export', undefined, token, challengeId ? srv.reauthHeader(challengeId) : {});
 
   /** Lets the next request through the "already in progress" check. */
-  const finishRunningJobs = (userId) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare(`
+  const finishRunningJobs = async (userId) => {
+    const { db } = await import('./db.js');
+    await db.prepare(`
       UPDATE data_export_jobs SET status = 'completed', completed_at = ?
       WHERE user_id = ? AND status IN ('pending', 'processing')
     `).run(new Date().toISOString(), userId);
-    db.close();
   };
 
-  const challengeRow = (id) => {
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const row = db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
-    db.close();
-    return row;
+  const challengeRow = async (id) => {
+    const { db } = await import('./db.js');
+    return await db.prepare('SELECT * FROM reauth_challenges WHERE id = ?').get(id);
   };
 
   beforeAll(async () => {
@@ -434,7 +425,7 @@ describe('privacy: data export', () => {
     expect(statusRes.body.status).toBe('pending');
 
     // The grant was spent with the job, not merely checked on the way in.
-    expect(challengeRow(challengeId).consumed_at).not.toBeNull();
+    expect((await challengeRow(challengeId)).consumed_at).not.toBeNull();
   });
 
   it('rejects concurrent export requests without spending the grant', async () => {
@@ -451,29 +442,29 @@ describe('privacy: data export', () => {
     const res = await requestExport(studentToken, challengeId);
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/already in progress/i);
-    expect(challengeRow(challengeId).consumed_at).toBeNull();
+    expect((await challengeRow(challengeId)).consumed_at).toBeNull();
 
     // Unspent, so the same verification still works once the first one finishes.
-    finishRunningJobs(studentId);
+    await finishRunningJobs(studentId);
     expect((await requestExport(studentToken, challengeId)).status).toBe(202);
   });
 
   it('spends the grant exactly once', async () => {
-    finishRunningJobs(studentId);
+    await finishRunningJobs(studentId);
     const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
 
     expect((await requestExport(studentToken, challengeId)).status).toBe(202);
 
     // A grant that survived its own use would be an unlimited supply of archives
     // for the rest of its five minutes.
-    finishRunningJobs(studentId);
+    await finishRunningJobs(studentId);
     const replay = await requestExport(studentToken, challengeId);
     expect(replay.status).toBe(403);
     expect(replay.body.code).toBe('reauth_required');
   });
 
   it('400s if download is requested before it is completed', async () => {
-    finishRunningJobs(studentId);
+    await finishRunningJobs(studentId);
     const challengeId = await srv.stepUp(studentToken, 'data.export', { password: 'Password123' });
     expect((await requestExport(studentToken, challengeId)).status).toBe(202);
 

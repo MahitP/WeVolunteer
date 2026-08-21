@@ -230,8 +230,8 @@ describe('U1 — forgot-password accepts a username', () => {
     // readable — the token itself is a SHA-256 digest in the table now, so a
     // column that still exists is selected instead of the one that does not.
     const { db } = await import('./db.js');
-    const user = db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(EMAIL);
-    const token = db.prepare('SELECT user_id FROM password_reset_tokens WHERE user_id = ?').get(user.id);
+    const user = await db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(EMAIL);
+    const token = await db.prepare('SELECT user_id FROM password_reset_tokens WHERE user_id = ?').get(user.id);
     expect(token).toBeTruthy();
   });
 

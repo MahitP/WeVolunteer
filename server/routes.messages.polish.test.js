@@ -86,7 +86,7 @@ describe('messages/users/search result scoping (Task 7d)', () => {
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     const { db } = await import('./db.js');
-    db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('search-partner-7d@test.local');
+    await db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('search-partner-7d@test.local');
     partnerToken = partnerSigned.cookie;
   });
 
@@ -122,17 +122,17 @@ describe('messages/users/search result scoping (Task 7d)', () => {
     // directly, the same way other suites (e.g. routes.recommendations.test.js)
     // build fixtures outside the capability system rather than through it.
     const { db } = await import('./db.js');
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     const now = new Date();
     const future = new Date(now.getTime() + 40 * 864e5).toISOString();
     const futureEnd = new Date(now.getTime() + 40 * 864e5 + 108e5).toISOString();
     const deadline = new Date(now.getTime() + 35 * 864e5).toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
       VALUES ('event-admin-search-7d', 'Admin-hosted event for search scoping', 'd', 'Other', 'Hall', ?, ?, 'open', ?)
     `).run(deadline, adminId, now.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES ('slot-admin-search-7d', 'event-admin-search-7d', 'Shift', 'd', ?, ?, 5)
     `).run(future, futureEnd);
@@ -183,13 +183,13 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     const { db } = await import('./db.js');
-    db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
-    db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
+    await db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
+    await db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
     partnerToken = partnerSigned.cookie;
     superAdminToken = superAdminSigned.cookie;
 
-    studentId = db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get().id;
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    studentId = (await db.prepare("SELECT id FROM users WHERE email = 'leo.chen@example.com'").get()).id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
 
     // An event the organizer fixture actually hosts, with a real application
     // from the student — exercises the organizer's ownership check and the
@@ -214,11 +214,11 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     const deadline = new Date(Date.now() + 30 * 864e5).toISOString();
     const futureStart = new Date(Date.now() + 35 * 864e5).toISOString();
     const futureEnd = new Date(Date.now() + 35 * 864e5 + 108e5).toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at)
       VALUES (?, 'Unhosted-by-organizer event', 'd', 'Other', 'Hall', ?, ?, 'open', ?)
     `).run(unhostedEventId, deadline, adminId, new Date().toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES ('slot-resolve-unhosted-7e', ?, 'Shift', 'd', ?, ?, 5)
     `).run(unhostedEventId, futureStart, futureEnd);
@@ -258,5 +258,65 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId: hostedEventId, studentId }, partnerToken);
     expect(res.status).toBe(403);
     expect(res.body.error).toMatch(/Access denied/);
+  });
+});
+
+describe('banned student messaging prevention', () => {
+  let orgToken, studentToken;
+  let eventId, orgId, bannedStudentId, convId;
+
+  beforeAll(async () => {
+    orgToken = await srv.login('jordan.whitfield@example.org');
+    const student = await srv.signupConfirmed({
+      name: 'Banned Msg Student', username: 'banned_msg_student', email: 'banned-msg@test.local',
+      password: 'Password123', grade: '10', role: 'student'
+    });
+    studentToken = student.cookie;
+    const { db } = await import('./db.js');
+    bannedStudentId = (await db.prepare("SELECT id FROM users WHERE email = 'banned-msg@test.local'").get()).id;
+
+    // Create an organization and an event under it
+    orgId = 'org-msg-ban-test';
+    await db.prepare(`
+      INSERT INTO organizations (id, name, slug, created_at, updated_at)
+      VALUES (?, 'Ban Test Org', 'ban-test-org', ?, ?)
+      ON CONFLICT (id) DO NOTHING
+    `).run(orgId, new Date().toISOString(), new Date().toISOString());
+
+    const future = new Date(Date.now() + 30 * 864e5).toISOString();
+    const mk = await srv.call('POST', '/api/events', {
+      title: 'Banned Msg Event', description: 'd', category: 'Other', location: 'Hall',
+      applicationDeadline: new Date(Date.now() + 20 * 864e5).toISOString(),
+      slots: [{ name: 'Shift', description: 'd', startDatetime: future, endDatetime: new Date(Date.now() + 30 * 864e5 + 108e5).toISOString(), maxSpots: 5 }]
+    }, orgToken);
+    expect(mk.status).toBe(201);
+    eventId = mk.body.id;
+    await db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
+
+    const slot = (await srv.call('GET', '/api/events', undefined, orgToken)).body.find(e => e.id === eventId).slots[0];
+    await srv.call('POST', `/api/events/${eventId}/apply`, { slotId: slot.id }, studentToken);
+
+    // Resolve conversation prior to ban
+    const convRes = await srv.call('POST', '/api/messages/conversations/resolve', { eventId, studentId: bannedStudentId }, studentToken);
+    expect(convRes.status).toBe(200);
+    convId = convRes.body.conversation.id;
+
+    // Now ban the student from this organization
+    await db.prepare(`
+      INSERT INTO organization_bans (id, organization_id, user_id, reason, created_at)
+      VALUES ('ban-msg-1', ?, ?, 'Violation of rules', ?)
+    `).run(orgId, bannedStudentId, new Date().toISOString());
+  });
+
+  it('refuses to resolve conversation for a banned student', async () => {
+    const res = await srv.call('POST', '/api/messages/conversations/resolve', { eventId, studentId: bannedStudentId }, studentToken);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/banned/i);
+  });
+
+  it('refuses to send messages from a banned student in an existing conversation', async () => {
+    const res = await srv.call('POST', `/api/messages/conversations/${convId}/messages`, { body: 'Should fail' }, studentToken);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('banned');
   });
 });

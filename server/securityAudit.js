@@ -27,7 +27,12 @@ const VALID_EVENT_TYPES = Object.freeze([
  * @param {string} eventType - the action type
  * @param {object} metadata - optional JSON metadata (do NOT put secrets here)
  */
-export function recordSecurityEvent(db, req, userId, eventType, metadata = null) {
+/* Async as of wave 7. The validation above still throws synchronously in effect —
+   an async function's throw becomes a rejection, which every caller's existing
+   try/catch still sees because they now await it. The INSERT is awaited so that
+   on PostgreSQL it completes inside the caller's transaction rather than being a
+   promise nobody waited for. */
+export async function recordSecurityEvent(db, req, userId, eventType, metadata = null) {
   if (!db || typeof db.prepare !== 'function') {
     throw new Error('recordSecurityEvent: database handle required');
   }
@@ -49,7 +54,7 @@ export function recordSecurityEvent(db, req, userId, eventType, metadata = null)
      throw new Error('recordSecurityEvent: metadata appears to contain sensitive fields');
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO security_audit_logs (id, user_id, event_type, ip_address, user_agent, metadata, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(id, userId, eventType, ipAddress, userAgent, metadataStr, createdAt);

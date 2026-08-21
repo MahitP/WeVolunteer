@@ -100,7 +100,30 @@ export default defineConfig({
            * This is not a licence to write slow tests. A case that needs longer
            * than this should say so at the call site, as several already do.
            */
-          testTimeout: 15_000
+          testTimeout: 15_000,
+
+          /**
+           * Hooks get longer than tests, because they do strictly more.
+           *
+           * `hookTimeout` was left at its 10-second default while `testTimeout`
+           * was raised, which made `beforeAll` the tightest budget in the suite
+           * despite being the part that boots a server, applies a schema and
+           * seeds it.
+           *
+           * On PostgreSQL that gap became a wrong answer rather than a slow one.
+           * Every file gets its own schema namespace, so `startTestServer()`
+           * creates ~65 tables and ~95 indexes before the first test runs, and a
+           * fixture's inserts are round-trips instead of function calls. Five
+           * files tipped over ten seconds — and vitest reports EVERY test in a
+           * file whose suite hook failed as *skipped*, so 76 tests silently
+           * stopped running and the failure count improved while coverage got
+           * worse. That is the most misleading shape a suite can take, and it is
+           * the same cascade this migration has now hit three times.
+           *
+           * Thirty seconds is still far below anything a correct hook needs; a
+           * genuine hang in setup still fails the file.
+           */
+          hookTimeout: 30_000
         }
       }
     ]

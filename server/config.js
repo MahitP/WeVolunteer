@@ -6,6 +6,8 @@
  * notification sweep. That is what makes route tests possible.
  */
 
+import { readFileSync } from 'node:fs';
+
 export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export const DEMO_MODE = process.env.DEMO_MODE === 'true';
 export const PORT = Number(process.env.API_PORT) || 5050;
@@ -129,7 +131,66 @@ export const JWT_SECRET = resolvedSecret;
  */
 const DEV_TFA_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
+/**
+ * Refuse to boot when an env file defines TFA_ENCRYPTION_KEY more than once.
+ *
+ * Node's `--env-file` is LAST-WINS and silent about it. A local .env carried two
+ * different keys this way until 2026-08-09: only the last could decrypt stored
+ * secrets, every enrolled authenticator failed verification, and nothing in the
+ * process said which key was in force. Until now the only thing standing between
+ * that and a repeat was a comment in .env.example asking for exactly one line,
+ * and a comment does not survive a hurried edit.
+ *
+ * This reads the files Node was actually launched with rather than inspecting
+ * `process.env`, because by the time this module runs the duplicate has already
+ * collapsed into a single value and the evidence is gone.
+ *
+ * Fatal everywhere, development included, on the same reasoning the malformed-key
+ * check uses: there is no safe interpretation. The guard deliberately does NOT
+ * pick a winner and carry on — choosing either line is a guess, and guessing
+ * wrong makes every enrolled authenticator unrecoverable.
+ */
+function assertSingleTfaKeyDefinition() {
+  const args = [...process.execArgv, ...(process.env.NODE_OPTIONS ?? '').split(/\s+/)];
+  const files = args
+    .map((arg) => /^--env-file(?:-if-exists)?=(.+)$/.exec(arg))
+    .filter(Boolean)
+    .map((m) => m[1]);
+
+  for (const file of files) {
+    let contents;
+    try {
+      contents = readFileSync(file, 'utf8');
+    } catch {
+      /* `--env-file-if-exists` pointing at a missing file is a supported state,
+         and an unreadable file is the launcher's problem to report, not ours. */
+      continue;
+    }
+
+    /* Assignment lines only. A commented-out key is not a definition, and the
+       warning comment in .env.example mentions the name several times. */
+    const lines = contents.split('\n');
+    const defined = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (/^\s*(?:export\s+)?TFA_ENCRYPTION_KEY\s*=/.test(lines[i])) defined.push(i + 1);
+    }
+
+    if (defined.length > 1) {
+      throw new Error(
+        `FATAL: ${file} defines TFA_ENCRYPTION_KEY ${defined.length} times `
+        + `(lines ${defined.join(', ')}). Node's --env-file is last-wins, so the `
+        + 'final line silently shadows the rest and any secret encrypted under a '
+        + 'different one stops decrypting.\n'
+        + 'Keep exactly one. If you are unsure which is live, test one against a '
+        + 'stored secret BEFORE deleting anything — removing the wrong line makes '
+        + 'every enrolled authenticator unrecoverable.'
+      );
+    }
+  }
+}
+
 function resolveTfaKey() {
+  assertSingleTfaKeyDefinition();
   const configured = process.env.TFA_ENCRYPTION_KEY;
 
   if (!configured) {
@@ -505,10 +566,60 @@ export const OAUTH_PROVIDERS_CONFIGURED = {
 // SCHOOL_NAME in src/config.js, which IS used; email.js keeps its own
 // EMAIL_FROM. Nothing here changes behaviour.
 
-export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+/**
+ * Cross-origin callers permitted to reach /api with credentials.
+ *
+ * The development default is NOT applied in production.
+ *
+ * It used to be unconditional, so a production process started without
+ * CORS_ORIGINS granted `http://localhost:5173` and `http://localhost:4173`
+ * standing permission to make credentialed cross-origin calls and read the
+ * replies. Anything the user happened to be running on those ports — any dev
+ * server, any local tool — could therefore act as them against the live API,
+ * on a deployment whose operator never configured CORS at all.
+ *
+ * Empty in production is the safe default rather than a broken one: app.js
+ * admits same-origin requests by comparing Origin to the request's own Host,
+ * and the single-origin topology (this process serving both the SPA and the
+ * API) is the documented one. So a deployment that needs no cross-origin
+ * caller needs no CORS_ORIGINS, and one that does states it explicitly.
+ */
+const CORS_ORIGINS_RAW = process.env.CORS_ORIGINS
+  ?? (IS_PRODUCTION ? '' : 'http://localhost:5173,http://localhost:4173');
+
+export const ALLOWED_ORIGINS = CORS_ORIGINS_RAW
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
+
+/**
+ * A loopback origin in a production allowlist is refused, not ignored.
+ *
+ * Silently dropping it would leave the operator believing a configured origin
+ * is in force. This is the same judgement as OAUTH_REDIRECT_URI above: the
+ * development value surviving into production is a misconfiguration worth
+ * stopping for, and the message names the fix.
+ */
+if (IS_PRODUCTION) {
+  const loopback = ALLOWED_ORIGINS.filter((origin) => {
+    let host;
+    try { ({ hostname: host } = new URL(origin)); } catch { return false; }
+    return host === 'localhost' || host === '127.0.0.1'
+      || host === '::1' || host === '[::1]';
+  });
+
+  if (loopback.length > 0) {
+    throw new Error(
+      `FATAL: CORS_ORIGINS allows a loopback origin in production (${loopback.join(', ')}).\n`
+      + 'That grants anything running on the operator\'s or a user\'s own machine\n'
+      + 'credentialed cross-origin access to the live API. Set it to this\n'
+      + 'deployment\'s public origin, e.g.\n'
+      + '  CORS_ORIGINS=https://volunteers.example.org\n'
+      + 'or leave it unset entirely if the SPA and the API share one origin —\n'
+      + 'same-origin requests are admitted without it.'
+    );
+  }
+}
 
 /**
  * Whether a new account must confirm its email address before using the app.
@@ -532,6 +643,27 @@ export const ALLOWED_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:51
  * Set REQUIRE_EMAIL_VERIFICATION=false to opt out deliberately.
  */
 export const REQUIRE_EMAIL_VERIFICATION = process.env.REQUIRE_EMAIL_VERIFICATION !== 'false';
+
+/**
+ * Turning it off in production is legitimate but must not be silent.
+ *
+ * A warning rather than a refusal, because the flag is a documented opt-out and
+ * refusing it would overrule a deployment that meant it — the same line
+ * OAUTH_REDIRECT_URI draws when the provider, not this process, is the
+ * authority. But nothing else reports it: with the gate off, sign-in never
+ * consults `email_verified`, so an account registered against an address its
+ * holder does not own works completely, and the only trace is a line in an env
+ * file nobody re-reads. On a platform holding minors' records that is worth one
+ * line at boot.
+ */
+if (IS_PRODUCTION && !REQUIRE_EMAIL_VERIFICATION) {
+  console.warn(
+    '[config] WARNING: REQUIRE_EMAIL_VERIFICATION=false in production.\n'
+    + '         Accounts can be used without confirming the address, so anyone\n'
+    + '         able to type an address they do not own gets a working account.\n'
+    + '         Unset the variable to restore the default (verification required).'
+  );
+}
 
 // Paths an authenticated-but-unverified user may still reach when
 // REQUIRE_EMAIL_VERIFICATION is on: enough to see their own account and finish

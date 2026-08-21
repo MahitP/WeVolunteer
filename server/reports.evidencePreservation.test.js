@@ -48,35 +48,35 @@ async function seedReportableThread(key, { ageDays = 4 * 365 } = {}) {
   const at = Date.now() - ageDays * 86400000;
   const iso = (offset = 0) => new Date(at + offset).toISOString();
 
-  db.prepare(`INSERT INTO events (id, title, description, category, location,
+  await db.prepare(`INSERT INTO events (id, title, description, category, location,
                                  application_deadline, organizer_id, created_at)
               VALUES (?, ?, 'x', 'Other', 'Somewhere', '2030-01-01', ?, ?)`)
     .run(eventId, `Event ${key}`, organizerId, iso());
-  db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+  await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
               VALUES (?, ?, ?, ?, ?, ?)`)
     .run(convId, eventId, user.id, organizerId, organizerId, iso());
   for (const [uid, role] of [[user.id, 'student'], [organizerId, 'organizer']]) {
-    db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+    await db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
                 VALUES (?, ?, ?, ?)`).run(convId, uid, role, iso());
   }
   const messageIds = [];
   for (let i = 0; i < 30; i++) {
     const id = `msg_${key}_${i}`;
     messageIds.push(id);
-    db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+    await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                 VALUES (?, ?, ?, ?, ?)`)
       .run(id, convId, i % 2 ? user.id : organizerId, `body ${i}`, iso(i * 1000));
   }
   return { cookie, user, eventId, convId, messageIds };
 }
 
-const messagesLeft = (convId) =>
-  db.prepare('SELECT COUNT(*) c FROM messages WHERE conversation_id = ?').get(convId).c;
+const messagesLeft = async (convId) =>
+  (await db.prepare('SELECT COUNT(*) c FROM messages WHERE conversation_id = ?').get(convId)).c;
 
 beforeAll(async () => {
   srv = await startTestServer();
   db = (await import('./db.js')).db;
-  const org = db.prepare("SELECT id, email FROM users WHERE role = 'organizer' LIMIT 1").get();
+  const org = await db.prepare("SELECT id, email FROM users WHERE role = 'organizer' LIMIT 1").get();
   organizerId = org.id;
   organizerEmail = org.email;
 });
@@ -98,11 +98,11 @@ describe('the retention sweep does not delete under a live investigation', () =>
     expect(filed.status).toBe(200);
 
     const { sweep } = await import('./workers/retentionWorker.js');
-    sweep(db, { now: new Date() });
+    await sweep(db, { now: new Date() });
 
-    expect(messagesLeft(convId), 'four-year-old messages under a live report were swept').toBe(30);
+    expect(await messagesLeft(convId), 'four-year-old messages under a live report were swept').toBe(30);
     expect(
-      db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId).c,
+      (await db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId)).c,
       'the frozen snapshot did not survive its own sweep',
     ).toBe(30);
   });
@@ -115,11 +115,11 @@ describe('the retention sweep does not delete under a live investigation', () =>
     expect(filed.status).toBe(201);
 
     const { sweep } = await import('./workers/retentionWorker.js');
-    sweep(db, { now: new Date() });
+    await sweep(db, { now: new Date() });
 
     // The whole thread is held while the report is live: the snapshot is bounded
     // and message 30 is still evidence while somebody is reading message 10.
-    expect(messagesLeft(convId)).toBe(30);
+    expect(await messagesLeft(convId)).toBe(30);
   });
 
   /**
@@ -136,20 +136,20 @@ describe('the retention sweep does not delete under a live investigation', () =>
     }, cookie);
 
     const { sweep } = await import('./workers/retentionWorker.js');
-    sweep(db, { now: new Date() });
-    expect(messagesLeft(convId)).toBe(30);
+    await sweep(db, { now: new Date() });
+    expect(await messagesLeft(convId)).toBe(30);
 
     await srv.call('PATCH', `/api/admin/reports/${filed.body.reportId}`, {
       status: 'resolved', resolution: 'no_action', resolutionNote: 'Reviewed and closed out.',
     }, await adminToken());
 
-    sweep(db, { now: new Date() });
-    expect(messagesLeft(convId), 'the hold never released').toBe(0);
+    await sweep(db, { now: new Date() });
+    expect(await messagesLeft(convId), 'the hold never released').toBe(0);
     expect(
-      db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId).c,
+      (await db.prepare('SELECT COUNT(*) c FROM report_evidence WHERE report_id = ?').get(filed.body.reportId)).c,
       'the evidence went with the messages — the snapshot IS the record',
     ).toBe(30);
-    expect(db.prepare('SELECT 1 FROM reports WHERE id = ?').get(filed.body.reportId)).toBeTruthy();
+    expect(await db.prepare('SELECT 1 FROM reports WHERE id = ?').get(filed.body.reportId)).toBeTruthy();
   });
 
   /**
@@ -165,8 +165,8 @@ describe('the retention sweep does not delete under a live investigation', () =>
       { status: 'escalated' }, await adminToken());
 
     const { sweep } = await import('./workers/retentionWorker.js');
-    sweep(db, { now: new Date() });
-    expect(messagesLeft(convId)).toBe(30);
+    await sweep(db, { now: new Date() });
+    expect(await messagesLeft(convId)).toBe(30);
   });
 
   it('leaves the preserved tables untouched on every pass', async () => {
@@ -195,12 +195,12 @@ describe('a report outlives what it is about', () => {
 
   it('refuses to delete a reported comment, and points at what to do instead', async () => {
     const { cookie } = await freshReporter();
-    const comment = db.prepare('SELECT id, user_id FROM event_comments LIMIT 1').get();
+    const comment = await db.prepare('SELECT id, user_id FROM event_comments LIMIT 1').get();
     await srv.call('POST', '/api/reports', {
       targetType: 'comment', targetId: comment.id, reason: 'hate_or_discrimination',
     }, cookie);
 
-    const author = db.prepare('SELECT email FROM users WHERE id = ?').get(comment.user_id);
+    const author = await db.prepare('SELECT email FROM users WHERE id = ?').get(comment.user_id);
     const res = await srv.call('DELETE', `/api/comments/${comment.id}`, undefined, await srv.login(author.email));
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('under_review');
@@ -223,15 +223,15 @@ describe('a report outlives what it is about', () => {
     }, cookie);
 
     const { userIsPartyToLiveReport } = await import('./evidenceHolds.js');
-    expect(userIsPartyToLiveReport(db, subject.id), 'the reported person is not held').toBe(true);
-    expect(userIsPartyToLiveReport(db, user.id), 'the reporter is not held').toBe(true);
+    expect(await userIsPartyToLiveReport(db, subject.id), 'the reported person is not held').toBe(true);
+    expect(await userIsPartyToLiveReport(db, user.id), 'the reporter is not held').toBe(true);
 
     await srv.call('PATCH', `/api/admin/reports/${filed.body.reportId}`, {
       status: 'dismissed', resolution: 'no_action', resolutionNote: 'Nothing to act on here.',
     }, await adminToken());
 
-    expect(userIsPartyToLiveReport(db, subject.id), 'the hold never releases').toBe(false);
-    expect(userIsPartyToLiveReport(db, user.id)).toBe(false);
+    expect(await userIsPartyToLiveReport(db, subject.id), 'the hold never releases').toBe(false);
+    expect(await userIsPartyToLiveReport(db, user.id)).toBe(false);
   });
 
   it('keeps the report readable after the reporter’s account is anonymised', async () => {
@@ -241,7 +241,7 @@ describe('a report outlives what it is about', () => {
       details: 'do not lose this',
     }, cookie);
 
-    db.prepare("UPDATE users SET account_status = 'deleted', deleted_at = ?, name = 'Deleted user' WHERE id = ?")
+    await db.prepare("UPDATE users SET account_status = 'deleted', deleted_at = ?, name = 'Deleted user' WHERE id = ?")
       .run(new Date().toISOString(), user.id);
 
     const q = await srv.call('GET', '/api/admin/reports?status=all', undefined, await adminToken());
@@ -257,11 +257,11 @@ describe('a report outlives what it is about', () => {
       targetType: 'user', targetId: 'frozen_subject', reason: 'other', details: 'the original words',
     }, cookie);
 
-    expect(() => db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId))
+    await expect(async () => await db.prepare('DELETE FROM reports WHERE id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    expect(() => db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
-      .run(filed.body.reportId)).toThrow(/record of what was said/);
-    expect(db.prepare('SELECT description FROM reports WHERE id = ?').get(filed.body.reportId).description)
+    await expect(async () => await db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?")
+      .run(filed.body.reportId)).rejects.toThrow(/record of what was said/);
+    expect((await db.prepare('SELECT description FROM reports WHERE id = ?').get(filed.body.reportId)).description)
       .toBe('the original words');
   });
 
@@ -271,10 +271,10 @@ describe('a report outlives what it is about', () => {
       targetType: 'conversation', targetId: convId, reason: 'sexual_content',
     }, cookie);
 
-    expect(() => db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId))
+    await expect(async () => await db.prepare('DELETE FROM report_evidence WHERE report_id = ?').run(filed.body.reportId)).rejects
       .toThrow(/never deleted/);
-    expect(() => db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
-      .run(filed.body.reportId)).toThrow(/never edited/);
+    await expect(async () => await db.prepare("UPDATE report_evidence SET body = 'rewritten' WHERE report_id = ?")
+      .run(filed.body.reportId)).rejects.toThrow(/never edited/);
   });
 
   /**
@@ -291,8 +291,8 @@ describe('a report outlives what it is about', () => {
       status: 'resolved', resolution: 'escalated_offline', resolutionNote: 'Referred to the district.',
     }, await adminToken());
 
-    db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(convId);
-    db.prepare('DELETE FROM conversations WHERE id = ?').run(convId);
+    await db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(convId);
+    await db.prepare('DELETE FROM conversations WHERE id = ?').run(convId);
 
     const evidence = await srv.readEvidence(await adminToken(), filed.body.reportId);
     expect(evidence.status).toBe(200);
@@ -318,19 +318,19 @@ describe('reading evidence is logged to both trails', () => {
     }, cookie);
     const reportId = filed.body.reportId;
 
-    const beforeAudit = db.prepare(
+    const beforeAudit = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c;
+    ).get()).c;
 
     const res = await srv.readEvidence(await adminToken(), reportId);
     expect(res.status).toBe(200);
 
     expect(
-      db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'").get().c,
+      (await db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'").get()).c,
       'private messages left the building with no administrative record',
     ).toBe(beforeAudit + 1);
 
-    const history = db.prepare(
+    const history = await db.prepare(
       "SELECT actor_id FROM moderation_actions WHERE report_id = ? AND action = 'evidence_viewed'"
     ).all(reportId);
     expect(history.length, 'the durable trail has no record of the read').toBe(1);

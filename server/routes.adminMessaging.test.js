@@ -48,9 +48,9 @@ describe('opening a thread', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
     const id = res.body.conversation.id;
-    const participants = db.prepare(
+    const participants = (await db.prepare(
       'SELECT user_id FROM conversation_participants WHERE conversation_id = ?'
-    ).all(id).map(r => r.user_id);
+    ).all(id)).map(r => r.user_id);
 
     expect(participants, 'the admin must be a participant or every read 404s')
       .toContain('user-admin');
@@ -72,7 +72,7 @@ describe('opening a thread', () => {
    */
   it('is not scoped to an event', async () => {
     const res = await openThread(STUDENT);
-    const row = db.prepare('SELECT event_id, student_id, organizer_id FROM conversations WHERE id = ?')
+    const row = await db.prepare('SELECT event_id, student_id, organizer_id FROM conversations WHERE id = ?')
       .get(res.body.conversation.id);
 
     expect(row.event_id).toBe(null);
@@ -86,18 +86,18 @@ describe('opening a thread', () => {
     const second = await openThread(STUDENT);
 
     expect(second.body.conversation.id).toBe(first.body.conversation.id);
-    expect(db.prepare(`
+    expect((await db.prepare(`
       SELECT COUNT(*) c FROM conversations
        WHERE kind = 'admin_student' AND created_by = 'user-admin' AND student_id = ?
-    `).get(STUDENT).c).toBe(1);
+    `).get(STUDENT)).c).toBe(1);
   });
 
   it('records that a channel was opened, naming who and to whom', async () => {
     await openThread(STUDENT);
-    const row = db.prepare(`
+    const row = await db.prepare(`
       SELECT admin_id, target_user_id, details FROM admin_audit_logs
        WHERE action = 'ADMIN_CONVERSATION_OPENED' AND target_user_id = ?
-       ORDER BY rowid DESC LIMIT 1
+       ORDER BY created_at DESC, id DESC LIMIT 1
     `).get(STUDENT);
 
     expect(row, 'opening a line to a student must be on the record').toBeTruthy();
@@ -149,10 +149,10 @@ describe('using the thread', () => {
     expect(conversation.lifecycle.writable).toBe(true);
 
     const { computeConversationLifecycle } = await import('./messaging.js');
-    const row = db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversation.id);
+    const row = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(conversation.id);
 
     // Far enough in the future that every event-based window has long closed.
-    const lifecycle = computeConversationLifecycle(row, new Date('2099-01-01T00:00:00.000Z'));
+    const lifecycle = await computeConversationLifecycle(row, new Date('2099-01-01T00:00:00.000Z'));
     expect(lifecycle.writable).toBe(true);
     expect(lifecycle.state).toBe('active');
   });
@@ -203,22 +203,22 @@ describe('refusals', () => {
  * handlers, and the second admin-messaging feature somebody writes in a year.
  */
 describe('the shape is enforced by the schema', () => {
-  const insert = (over) => {
+  const insert = async (over) => {
     const row = {
       id: `conv_test_${Math.random().toString(36).slice(2)}`,
       kind: 'admin_student', event_id: null,
       student_id: STUDENT, organizer_id: null,
       created_by: 'user-admin', created_at: new Date().toISOString(), ...over,
     };
-    return db.prepare(`
+    return await db.prepare(`
       INSERT INTO conversations (id, kind, event_id, student_id, organizer_id, created_by, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(row.id, row.kind, row.event_id, row.student_id, row.organizer_id,
       row.created_by, row.created_at);
   };
 
-  it('refuses an unknown kind', () => {
-    expect(() => insert({ kind: 'admin_everybody' })).toThrow();
+  it('refuses an unknown kind', async () => {
+    await expect(async () => await insert({ kind: 'admin_everybody' })).rejects.toThrow();
   });
 
   /**
@@ -226,16 +226,16 @@ describe('the shape is enforced by the schema', () => {
    * thread about no event — which every event query and the lifecycle rules would
    * read as a thread about nothing.
    */
-  it('still requires an event, a student and an organizer for an event thread', () => {
-    expect(() => insert({ kind: 'student_organizer', event_id: null })).toThrow();
+  it('still requires an event, a student and an organizer for an event thread', async () => {
+    await expect(async () => await insert({ kind: 'student_organizer', event_id: null })).rejects.toThrow();
   });
 
-  it('refuses an admin_student row that also names an organizer', () => {
-    expect(() => insert({ kind: 'admin_student', organizer_id: ORGANIZER })).toThrow();
+  it('refuses an admin_student row that also names an organizer', async () => {
+    await expect(async () => await insert({ kind: 'admin_student', organizer_id: ORGANIZER })).rejects.toThrow();
   });
 
-  it('refuses an admin_organizer row with no organizer', () => {
-    expect(() => insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null }))
+  it('refuses an admin_organizer row with no organizer', async () => {
+    await expect(async () => await insert({ kind: 'admin_organizer', student_id: STUDENT, organizer_id: null })).rejects
       .toThrow();
   });
 
@@ -246,15 +246,15 @@ describe('the shape is enforced by the schema', () => {
    */
   it('refuses a duplicate thread between the same admin and person', async () => {
     await openThread(ORGANIZER);
-    expect(() => insert({
+    await expect(async () => await insert({
       kind: 'admin_organizer', student_id: null, organizer_id: ORGANIZER,
-    })).toThrow(/UNIQUE|constraint/i);
+    })).rejects.toThrow(/UNIQUE|constraint/i);
   });
 
-  it('allows a second administrator their own thread with the same person', () => {
+  it('allows a second administrator their own thread with the same person', async () => {
     // Distinct `created_by`, so this is a different thread and not a duplicate —
     // a moderation contact belongs to the person who opened it, not to a shared
     // mailbox.
-    expect(() => insert({ created_by: 'user-org-1', student_id: STUDENT })).not.toThrow();
+    await insert({ created_by: 'user-org-1', student_id: STUDENT });
   });
 });

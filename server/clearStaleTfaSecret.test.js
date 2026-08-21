@@ -68,7 +68,7 @@ function createTestDb(dir) {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       code_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT ('${new Date().toISOString()}')
     );
     CREATE TABLE admin_audit_logs (
       id TEXT PRIMARY KEY,

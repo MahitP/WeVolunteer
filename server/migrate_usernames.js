@@ -33,12 +33,12 @@ try {
     let counter = 1;
 
     // Ensure uniqueness
-    while (checkUsername.get(username)) {
+    while (await checkUsername.get(username)) {
       username = `${baseName}${counter}`;
       counter++;
     }
 
-    updateUsername.run(username, user.id);
+    await updateUsername.run(username, user.id);
     migrated++;
     console.log(`- ${user.email} -> @${username}`);
   }

@@ -48,8 +48,8 @@ function seed() {
 }
 
 /** What the attendance screen writes when an organizer marks somebody present. */
-function creditThroughTheApp() {
-  recordHoursChange(db, {
+async function creditThroughTheApp() {
+  await recordHoursChange(db, {
     userId: 'u1', eventId: 'e1', slotId: 's1',
     action: 'credited',
     presentBefore: null, hoursBefore: null,
@@ -67,25 +67,25 @@ const rows = () =>
 beforeEach(seed);
 
 describe('the backfill', () => {
-  it('records an attendance row the ledger has never seen', () => {
+  it('records an attendance row the ledger has never seen', async () => {
     /* The control. Without it every assertion below would pass against a
        backfill that had simply stopped working. */
-    const res = backfillHoursLedger(db);
+    const res = await backfillHoursLedger(db);
     expect(res.inserted).toBe(1);
     expect(rows()).toBe(1);
     expect(total()).toBe(HOURS);
   });
 
-  it('does not re-record a credit the app already wrote', () => {
+  it('does not re-record a credit the app already wrote', async () => {
     /**
      * THE regression. Before the fix this produced two rows and double the
      * hours, because the skip test asked "is there a row with MY id" rather than
      * "is this credit already recorded".
      */
-    creditThroughTheApp();
+    await creditThroughTheApp();
     expect(rows()).toBe(1);
 
-    const res = backfillHoursLedger(db);
+    const res = await backfillHoursLedger(db);
 
     expect(res.inserted, 'the backfill duplicated a credit the app had already recorded').toBe(0);
     expect(res.skipped).toBe(1);
@@ -93,27 +93,27 @@ describe('the backfill', () => {
     expect(total()).toBe(HOURS);
   });
 
-  it('stays idempotent across repeated boots', () => {
+  it('stays idempotent across repeated boots', async () => {
     /* It runs on every start, so "twice" is not a hypothetical. */
-    backfillHoursLedger(db);
-    backfillHoursLedger(db);
-    backfillHoursLedger(db);
+    await backfillHoursLedger(db);
+    await backfillHoursLedger(db);
+    await backfillHoursLedger(db);
     expect(rows()).toBe(1);
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 
-  it('keeps the ledger in parity when both paths run in either order', () => {
-    creditThroughTheApp();
-    backfillHoursLedger(db);
-    expect(verifyLedgerParity(db).ok).toBe(true);
+  it('keeps the ledger in parity when both paths run in either order', async () => {
+    await creditThroughTheApp();
+    await backfillHoursLedger(db);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 });
 
 describe('migration 053, repairing what was already written', () => {
   /** Reproduces the exact pre-fix state: one real row and one migrated row. */
-  function corrupt() {
-    creditThroughTheApp();
-    recordHoursChange(db, {
+  async function corrupt() {
+    await creditThroughTheApp();
+    await recordHoursChange(db, {
       id: 'migrate:s1:u1',
       userId: 'u1', eventId: 'e1', slotId: 's1',
       action: 'migrated',
@@ -123,23 +123,23 @@ describe('migration 053, repairing what was already written', () => {
     });
   }
 
-  it('removes the migrated copy and restores parity', () => {
-    corrupt();
+  it('removes the migrated copy and restores parity', async () => {
+    await corrupt();
     expect(rows()).toBe(2);
     expect(total()).toBe(HOURS * 2);
-    expect(verifyLedgerParity(db).ok).toBe(false);
+    expect((await verifyLedgerParity(db)).ok).toBe(false);
 
     removeDuplicates(db);
 
     expect(rows()).toBe(1);
     expect(total()).toBe(HOURS);
-    expect(verifyLedgerParity(db).ok).toBe(true);
+    expect((await verifyLedgerParity(db)).ok).toBe(true);
   });
 
-  it('keeps the richer record, not whichever came first', () => {
+  it('keeps the richer record, not whichever came first', async () => {
     /* The real row carries an actor and before/after state; the migrated one
        carries NULLs and a reason saying prior history is unreconstructable. */
-    corrupt();
+    await corrupt();
     removeDuplicates(db);
 
     const kept = db.prepare('SELECT source, actor_id FROM hours_ledger WHERE user_id = ?').get('u1');
@@ -147,14 +147,14 @@ describe('migration 053, repairing what was already written', () => {
     expect(kept.actor_id).toBe('org-1');
   });
 
-  it('leaves a genuinely historical migrated row alone', () => {
+  it('leaves a genuinely historical migrated row alone', async () => {
     /**
      * The case that must NOT be swept up. Attendance that predates the ledger
      * has only ever had a migrated row, and it is the only record of those
      * hours — deleting it would be the data loss this migration exists to avoid
      * causing.
      */
-    backfillHoursLedger(db);
+    await backfillHoursLedger(db);
     expect(rows()).toBe(1);
 
     removeDuplicates(db);
@@ -163,8 +163,8 @@ describe('migration 053, repairing what was already written', () => {
     expect(total()).toBe(HOURS);
   });
 
-  it('does nothing to a database that was never affected', () => {
-    creditThroughTheApp();
+  it('does nothing to a database that was never affected', async () => {
+    await creditThroughTheApp();
     const before = rows();
     removeDuplicates(db);
     expect(rows()).toBe(before);

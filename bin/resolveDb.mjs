@@ -3,6 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** Kept as literals rather than imported from server/db/engine.js: that module
+    throws on an unrunnable engine at import time, which is a rule about serving
+    traffic and must not stop an operator repairing a database. */
+const SQLITE_ENGINE = 'sqlite';
+const POSTGRES_ENGINE = 'postgres';
+
 /**
  * Which database a privileged command-line script is about to change.
  *
@@ -97,7 +103,28 @@ function anchorRelative(value) {
  * not have a stray `.env` override them.
  */
 function loadDotEnv() {
-  const explicit = process.env.WEV_DB_PATH;
+  /**
+   * A value the CALLER set wins over `.env`, for the engine and the URL as well
+   * as the path.
+   *
+   * Only `WEV_DB_PATH` used to be preserved. Once a deployment put
+   * `DATABASE_ENGINE=postgres` and a production `DATABASE_URL` into `.env`,
+   * `process.loadEnvFile` overwrote whatever the caller had set — so
+   *
+   *     DATABASE_ENGINE=sqlite node bin/reset-2fa.mjs someone@example.org
+   *
+   * silently operated on PRODUCTION instead of the local database the operator
+   * named. That is the same defect this module was written for: a privileged
+   * command quietly acting on a database nobody meant.
+   *
+   * Caught by six privileged-CLI suites the moment a real `DATABASE_URL`
+   * appeared in `.env`, which is exactly when it would have started to matter.
+   */
+  const explicit = {
+    WEV_DB_PATH: process.env.WEV_DB_PATH,
+    DATABASE_ENGINE: process.env.DATABASE_ENGINE,
+    DATABASE_URL: process.env.DATABASE_URL,
+  };
   const envFile = path.join(REPO_ROOT, '.env');
 
   if (fs.existsSync(envFile)) {
@@ -110,7 +137,39 @@ function loadDotEnv() {
     }
   }
 
-  if (explicit) process.env.WEV_DB_PATH = explicit;
+  for (const [key, value] of Object.entries(explicit)) {
+    /* An explicitly EMPTY value is a deliberate "unset this" and is honoured as
+       such — a test proving a command fails closed without a URL cannot have
+       `.env` hand one back. */
+    if (value !== undefined) process.env[key] = value;
+  }
+
+  /**
+   * Naming a FILE and being sent to a SERVER are contradictory instructions, and
+   * the caller's is the specific one.
+   *
+   * The loop above only protects variables the caller actually set. A caller
+   * that says `WEV_DB_PATH=/tmp/scratch.db` has said everything it thinks it
+   * needs to — it named the database — and never mentions `DATABASE_ENGINE`, so
+   * `.env` still supplied one. That is not a hypothetical: it is exactly how two
+   * `super_admin` accounts were written into the production database on
+   * 2026-08-19. `ownerBootstrap.test.js` spawns `bin/bootstrap-owners.mjs` with
+   * `WEV_DB_PATH` pointed at a throwaway file, `.env` carried a production
+   * `DATABASE_ENGINE`/`DATABASE_URL`, and the tool announced the Supabase host
+   * and created the accounts there.
+   *
+   * Reproduced after the first fix and still broken, which is why this second
+   * rule exists: preserving what the caller SET was not enough, because the
+   * dangerous case is the variable the caller never mentions.
+   *
+   * So an explicit `WEV_DB_PATH` with no explicit `DATABASE_ENGINE` pins the
+   * engine to SQLite. A caller that genuinely wants PostgreSQL says so —
+   * production sets `DATABASE_ENGINE` in its own environment, and that path is
+   * untouched because the value is then caller-explicit.
+   */
+  if (explicit.WEV_DB_PATH !== undefined && explicit.DATABASE_ENGINE === undefined) {
+    process.env.DATABASE_ENGINE = 'sqlite';
+  }
   return process.env.WEV_DB_PATH || DEFAULT_DB;
 }
 
@@ -125,8 +184,97 @@ function loadDotEnv() {
  * @param {string} command  e.g. `bin/grant-ownership.mjs`, used in the messages.
  * @returns {{ db: DatabaseSync, dbPath: string }}
  */
-export function openPrivilegedDb(command) {
+export async function openPrivilegedDb(command) {
   const dbPath = anchorRelative(loadDotEnv());
+  const engine = (process.env.DATABASE_ENGINE ?? SQLITE_ENGINE).trim().toLowerCase();
+
+  /**
+   * PostgreSQL, when the deployment is on PostgreSQL.
+   *
+   * These scripts are the emergency path, not a convenience. `bin/reset-2fa.mjs`
+   * is the ONLY way to clear a locked-out account's two-factor enrolment — every
+   * `/api/2fa/*` route is self-service behind `requireAAL2`, so you must already
+   * hold a second factor to remove one — and REQUIRE_ADMIN_2FA defaults on. A
+   * PostgreSQL deployment without working tooling is a deployment where a lost
+   * authenticator is unrecoverable, including for an administrator.
+   *
+   * Deliberately NOT gated on `POSTGRES_READY`. That flag governs whether the
+   * server may SERVE TRAFFIC on PostgreSQL; it has nothing to say about whether
+   * an operator may repair a database. Gating here would make the cutover
+   * rehearsal impossible and would keep the tooling broken for exactly as long
+   * as the flag is false, which is the window in which it is most needed.
+   *
+   * The application's own connection class and placeholder translator are reused
+   * rather than reimplemented: identical SQL through an identical adapter is the
+   * only way these commands are guaranteed to mean the same thing the server
+   * would mean by them.
+   */
+  if (engine === POSTGRES_ENGINE) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      console.error('Refused: DATABASE_ENGINE=postgres but DATABASE_URL is not set.');
+      console.error('');
+      console.error('  There is nothing to connect to, and this script will not guess.');
+      process.exit(1);
+    }
+
+    const { PostgresDatabase } = await import('../server/db/postgresConnection.js');
+    const { translatePlaceholders } = await import('../server/db/sqlPlaceholders.js');
+
+    /* Two connections is more than a single-threaded script can use. A CLI that
+       opens the server's ten would sit on a meaningful slice of a small
+       deployment's pool while it waits at a confirmation prompt. */
+    const db = new PostgresDatabase({
+      connectionString,
+      translate: translatePlaceholders,
+      max: 2,
+    });
+    const close = () => db.close();
+
+    /**
+     * Never the whole URL: it carries the password, and these transcripts get
+     * pasted into incident notes. Host and database name are what the operator
+     * needs in order to answer "is that the right server".
+     */
+    let target = 'the configured PostgreSQL server';
+    try {
+      const u = new URL(connectionString);
+      target = `${u.hostname}${u.port ? `:${u.port}` : ''}${u.pathname}`;
+    } catch { /* an unparseable URL still connects or fails loudly below */ }
+
+    let reachable;
+    try {
+      reachable = await db.prepare(
+        "SELECT to_regclass('users') IS NOT NULL AS has_users"
+      ).get();
+    } catch (err) {
+      console.error(`Database: ${target}`);
+      console.error(`Refused: could not query ${target}.`);
+      console.error(`  ${err.message}`);
+      await close();
+      process.exit(1);
+    }
+
+    /* Same check the SQLite path makes, and for the same reason: a database
+       without a `users` table makes every script below report "user not found"
+       for a user who exists, which reads as a data problem rather than a
+       wrong-database problem. */
+    if (!reachable?.has_users) {
+      console.error(`Database: ${target}`);
+      console.error(`Refused: ${target} is not an initialised WeVolunteer database.`);
+      console.error('It has no `users` table. Run the migration or start the server');
+      console.error('against it once, or point DATABASE_URL at the right database.');
+      await close();
+      process.exit(1);
+    }
+
+    const migrations = await db.prepare(
+      "SELECT COUNT(*) AS n FROM schema_migrations WHERE to_regclass('schema_migrations') IS NOT NULL"
+    ).get().catch(() => ({ n: 0 }));
+
+    console.log(`Database: ${target} (postgres, ${Number(migrations?.n ?? 0)} migrations applied)`);
+    return { db, dbPath: target, engine, close };
+  }
 
   /**
    * Which file the configuration resolved to, said the same way on every exit
@@ -183,7 +331,10 @@ export function openPrivilegedDb(command) {
 
   console.log(`Database: ${dbPath} (${migrations} migrations applied)`);
 
-  return { db, dbPath };
+  /* `close` exists on both engines so a caller never has to ask which it got.
+     On SQLite it is nearly a formality; on PostgreSQL an unclosed pool keeps
+     the event loop alive and the script hangs after printing success. */
+  return { db, dbPath, engine, close: () => db.close() };
 }
 
 /** Exported for the test that pins the fallback, so it cannot drift silently. */

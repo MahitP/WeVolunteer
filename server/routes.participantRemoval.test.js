@@ -30,9 +30,9 @@ describe('removing a participant', () => {
   let eventId;
   let slotId;
 
-  const setSlotWindow = (offsetMinutesStart, offsetMinutesEnd) => {
+  const setSlotWindow = async (offsetMinutesStart, offsetMinutesEnd) => {
     const now = Date.now();
-    db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE id = ?').run(
+    await db.prepare('UPDATE slots SET start_datetime = ?, end_datetime = ? WHERE id = ?').run(
       new Date(now + offsetMinutesStart * 60000).toISOString(),
       new Date(now + offsetMinutesEnd * 60000).toISOString(),
       slotId,
@@ -42,8 +42,8 @@ describe('removing a participant', () => {
   const setStatus = (status, session = organizer, appId = application.id) =>
     srv.call('PATCH', `/api/applications/${appId}`, { status }, session);
 
-  const statusOf = (appId = application.id) =>
-    db.prepare('SELECT status FROM applications WHERE id = ?').get(appId)?.status;
+  const statusOf = async (appId = application.id) =>
+    (await db.prepare('SELECT status FROM applications WHERE id = ?').get(appId))?.status;
 
   beforeAll(async () => {
     srv = await startTestServer();
@@ -60,17 +60,17 @@ describe('removing a participant', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run(application.id);
-    db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
-    setSlotWindow(60 * 24, 60 * 25);
+  beforeEach(async () => {
+    await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?").run(application.id);
+    await db.prepare("UPDATE events SET status = 'open' WHERE id = ?").run(eventId);
+    await setSlotWindow(60 * 24, 60 * 25);
   });
 
   describe('before the shift starts', () => {
     it('lets the host remove an accepted volunteer', async () => {
       const res = await setStatus('rejected');
       expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(statusOf()).toBe('rejected');
+      expect(await statusOf()).toBe('rejected');
     });
 
     it('accepts a move to the waitlist', async () => {
@@ -88,19 +88,19 @@ describe('removing a participant', () => {
        */
       const res = await setStatus('waitlisted');
       expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(['waitlisted', 'accepted']).toContain(statusOf());
+      expect(['waitlisted', 'accepted']).toContain(await statusOf());
     });
 
     it('frees the place, so the slot can be filled again', async () => {
-      const before = db.prepare(
+      const before = (await db.prepare(
         "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
-      ).get(slotId).c;
+      ).get(slotId)).c;
 
       await setStatus('rejected');
 
-      const after = db.prepare(
+      const after = (await db.prepare(
         "SELECT COUNT(*) AS c FROM applications WHERE slot_id = ? AND status = 'accepted'"
-      ).get(slotId).c;
+      ).get(slotId)).c;
       /* Either the count dropped, or the waitlist promoted somebody into the
          place — both are the place being freed, and which one happened is the
          existing promotion rule's business, not this guard's. */
@@ -109,7 +109,7 @@ describe('removing a participant', () => {
   });
 
   describe('once the shift has started', () => {
-    beforeEach(() => { setSlotWindow(-30, 90); });
+    beforeEach(async () => { await setSlotWindow(-30, 90); });
 
     it('refuses to remove the volunteer', async () => {
       const res = await setStatus('rejected');
@@ -128,25 +128,25 @@ describe('removing a participant', () => {
 
     it('leaves the signup exactly as it was', async () => {
       await setStatus('rejected');
-      expect(statusOf()).toBe('accepted');
+      expect(await statusOf()).toBe('accepted');
     });
 
     it('refuses at the exact moment the shift begins', async () => {
       /* The boundary itself: `slotHasStarted` is `start <= now`, so a shift
          starting this instant has started. */
-      setSlotWindow(0, 120);
+      await setSlotWindow(0, 120);
       const res = await setStatus('rejected');
       expect(res.status).toBe(409);
     });
 
     it('still allows it one minute before', async () => {
-      setSlotWindow(1, 121);
+      await setSlotWindow(1, 121);
       const res = await setStatus('rejected');
       expect(res.status, JSON.stringify(res.body)).toBe(200);
     });
 
     it('refuses long after the shift has finished', async () => {
-      setSlotWindow(-60 * 48, -60 * 47);
+      await setSlotWindow(-60 * 48, -60 * 47);
       const res = await setStatus('rejected');
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('shift_started');
@@ -161,14 +161,14 @@ describe('removing a participant', () => {
        * must not move. This route writes `applications.status` and nothing
        * else — the test is what keeps that true.
        */
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(application.userId);
 
       const res = await setStatus('rejected');
       expect(res.status).toBe(200);
 
-      const after = db.prepare(
+      const after = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(application.userId);
 
@@ -179,8 +179,8 @@ describe('removing a participant', () => {
       /* A volunteer who was checked in, then the organizer tries to remove
          them. The shift has started, so the guard refuses — and the attendance
          row is still there afterwards either way. */
-      setSlotWindow(-30, 90);
-      db.prepare(`
+      await setSlotWindow(-30, 90);
+      await db.prepare(`
         INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
         VALUES (?, ?, ?, 1, 2)
         ON CONFLICT(slot_id, user_id) DO UPDATE SET present = 1
@@ -188,29 +188,29 @@ describe('removing a participant', () => {
 
       await setStatus('rejected');
 
-      const row = db.prepare('SELECT present FROM attendance WHERE slot_id = ? AND user_id = ?')
+      const row = await db.prepare('SELECT present FROM attendance WHERE slot_id = ? AND user_id = ?')
         .get(slotId, application.userId);
       expect(row?.present).toBe(1);
 
-      db.prepare('DELETE FROM attendance WHERE slot_id = ? AND user_id = ?').run(slotId, application.userId);
+      await db.prepare('DELETE FROM attendance WHERE slot_id = ? AND user_id = ?').run(slotId, application.userId);
     });
   });
 
   describe('authorization', () => {
     it('refuses an organizer who does not host this event', async () => {
-      const outsider = db.prepare(
+      const outsider = await db.prepare(
         "SELECT id FROM users WHERE role = 'organizer' AND id <> (SELECT organizer_id FROM events WHERE id = ?)"
       ).get(eventId);
       expect(outsider, 'the seed has only one organizer').toBeTruthy();
 
-      const realHost = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId).organizer_id;
-      db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(outsider.id, eventId);
+      const realHost = (await db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(eventId)).organizer_id;
+      await db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(outsider.id, eventId);
 
       const res = await setStatus('rejected');
       expect(res.status).toBe(403);
-      expect(statusOf()).toBe('accepted');
+      expect(await statusOf()).toBe('accepted');
 
-      db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(realHost, eventId);
+      await db.prepare('UPDATE events SET organizer_id = ? WHERE id = ?').run(realHost, eventId);
     });
 
     it('refuses a student trying to remove somebody else', async () => {
@@ -218,7 +218,7 @@ describe('removing a participant', () => {
          cascade must not let that branch touch another person's. */
       const res = await setStatus('rejected', student);
       expect([403, 404]).toContain(res.status);
-      expect(statusOf()).toBe('accepted');
+      expect(await statusOf()).toBe('accepted');
     });
 
     it('refuses an unauthenticated caller', async () => {
@@ -235,8 +235,8 @@ describe('removing a participant', () => {
        * the time. A guard that caught this would be stopping ordinary work to
        * enforce a rule about something else.
        */
-      setSlotWindow(-60 * 48, -60 * 47);
-      db.prepare("UPDATE applications SET status = 'pending' WHERE id = ?").run(application.id);
+      await setSlotWindow(-60 * 48, -60 * 47);
+      await db.prepare("UPDATE applications SET status = 'pending' WHERE id = ?").run(application.id);
 
       const res = await setStatus('rejected');
       expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -245,8 +245,8 @@ describe('removing a participant', () => {
     it('still lets an organizer accept somebody after the shift started', async () => {
       /* Late acceptance is how an organizer records that a volunteer who
          turned up unexpectedly was in fact welcome. */
-      setSlotWindow(-30, 90);
-      db.prepare("UPDATE applications SET status = 'pending' WHERE id = ?").run(application.id);
+      await setSlotWindow(-30, 90);
+      await db.prepare("UPDATE applications SET status = 'pending' WHERE id = ?").run(application.id);
 
       const res = await setStatus('accepted');
       expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -265,24 +265,24 @@ describe('removing a participant', () => {
       srv.call('PATCH', '/api/applications/bulk', { applicationIds: ids, status }, session);
 
     it('skips an accepted volunteer whose shift has started, and says why', async () => {
-      setSlotWindow(-30, 90);
+      await setSlotWindow(-30, 90);
 
       const res = await bulk([application.id], 'rejected');
 
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       expect(res.body.skipped).toContainEqual({ id: application.id, reason: 'shift_started' });
       expect(res.body.applied).toEqual([]);
-      expect(statusOf(), 'the volunteer must still hold their place').toBe('accepted');
+      expect(await statusOf(), 'the volunteer must still hold their place').toBe('accepted');
     });
 
     it('removes normally when the shift has not started', async () => {
-      setSlotWindow(60 * 24, 60 * 25);
+      await setSlotWindow(60 * 24, 60 * 25);
 
       const res = await bulk([application.id], 'rejected');
 
       expect(res.status).toBe(200);
       expect(res.body.skipped ?? []).toEqual([]);
-      expect(statusOf()).toBe('rejected');
+      expect(await statusOf()).toBe('rejected');
     });
 
     it('does not lose the rest of the batch to one started shift', async () => {
@@ -291,12 +291,12 @@ describe('removing a participant', () => {
        * clearing a backlog should not have twenty good decisions discarded
        * because the twenty-first is out of time.
        */
-      const others = db.prepare(
+      const others = await db.prepare(
         "SELECT id FROM applications WHERE status = 'pending' AND id != ? LIMIT 1"
       ).all(application.id);
       if (others.length === 0) return; // seed has none spare; the skip case above still holds
 
-      setSlotWindow(-30, 90);
+      await setSlotWindow(-30, 90);
       const res = await bulk([application.id, others[0].id], 'rejected');
 
       expect(res.status).toBe(200);
@@ -305,14 +305,14 @@ describe('removing a participant', () => {
     });
 
     it('never touches attendance or credited hours when it skips', async () => {
-      const before = db.prepare(
+      const before = await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(application.userId);
 
-      setSlotWindow(-60 * 24, -60 * 23);
+      await setSlotWindow(-60 * 24, -60 * 23);
       await bulk([application.id], 'rejected');
 
-      expect(db.prepare(
+      expect(await db.prepare(
         'SELECT COUNT(*) AS rows, COALESCE(SUM(hours_awarded), 0) AS hours FROM attendance WHERE user_id = ?'
       ).get(application.userId)).toEqual(before);
     });

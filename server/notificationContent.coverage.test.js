@@ -61,7 +61,7 @@ export function matchDispatchedEventNames(src) {
   return names;
 }
 
-/** The same, for the indirect `notifyConfirmedVolunteers(id, EVENT, …)` form. */
+/** The same, for the indirect `await notifyConfirmedVolunteers(id, EVENT, …)` form. */
 export function matchIndirectEventNames(src) {
   const names = [];
   for (const m of stripComments(src).matchAll(/notifyConfirmedVolunteers\(\s*[^,]+,\s*['"`]([A-Z0-9_]+)['"`]/g)) names.push(m[1]);
@@ -390,8 +390,8 @@ describe('the dispatch scanner itself', () => {
   }
 
   it('finds an indirect dispatch through notifyConfirmedVolunteers in any quote style', () => {
-    expect(matchIndirectEventNames("notifyConfirmedVolunteers(id, 'PROBE_EVENT', {})")).toContain('PROBE_EVENT');
-    expect(matchIndirectEventNames('notifyConfirmedVolunteers(id, "PROBE_EVENT", {})')).toContain('PROBE_EVENT');
+    expect(matchIndirectEventNames("await notifyConfirmedVolunteers(id, 'PROBE_EVENT', {})")).toContain('PROBE_EVENT');
+    expect(matchIndirectEventNames('await notifyConfirmedVolunteers(id, "PROBE_EVENT", {})')).toContain('PROBE_EVENT');
   });
 
   it('does not match a lowercase or mixed-case argument', () => {

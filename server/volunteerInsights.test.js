@@ -117,14 +117,14 @@ describe('buildStreak', () => {
 });
 
 describe('monthlyHours', () => {
-  it('always returns exactly six entries, oldest first', () => {
+  it('always returns exactly six entries, oldest first', async () => {
     credit('u1', '2026-08-02T15:00:00.000Z');
-    const series = monthlyHours(db, 'u1', { now: NOW });
+    const series = await monthlyHours(db, 'u1', { now: NOW });
     expect(series).toHaveLength(6);
     expect(series.map(r => r.month)).toEqual(['2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08']);
   });
 
-  it('fills a quiet month with zero rather than dropping it', () => {
+  it('fills a quiet month with zero rather than dropping it', async () => {
     /**
      * The query returns only months with hours, so a quiet month used to vanish
      * from the series and the chart drew the remaining months side by side —
@@ -133,63 +133,63 @@ describe('monthlyHours', () => {
     credit('u1', '2026-06-02T15:00:00.000Z', { hours: 4 });
     credit('u1', '2026-08-02T15:00:00.000Z', { hours: 2 });
 
-    const series = monthlyHours(db, 'u1', { now: NOW });
+    const series = await monthlyHours(db, 'u1', { now: NOW });
     expect(series.find(r => r.month === '2026-07').hours).toBe(0);
     expect(series.find(r => r.month === '2026-06').hours).toBe(4);
     expect(series.find(r => r.month === '2026-08').hours).toBe(2);
   });
 
-  it('makes the last entry always the current month', () => {
+  it('makes the last entry always the current month', async () => {
     /* This is what makes `highlightLast` mean "this month" rather than "the
        most recent month that happened to have activity". */
     credit('u1', '2026-05-02T15:00:00.000Z');
-    expect(monthlyHours(db, 'u1', { now: NOW }).at(-1)).toEqual({ month: '2026-08', hours: 0 });
+    expect((await monthlyHours(db, 'u1', { now: NOW })).at(-1)).toEqual({ month: '2026-08', hours: 0 });
   });
 
-  it('counts nothing for an absent shift', () => {
+  it('counts nothing for an absent shift', async () => {
     credit('u1', '2026-08-02T15:00:00.000Z', { present: 0, hours: 3 });
-    expect(monthlyHours(db, 'u1', { now: NOW }).at(-1).hours).toBe(0);
+    expect((await monthlyHours(db, 'u1', { now: NOW })).at(-1).hours).toBe(0);
   });
 
-  it('is scoped to one volunteer', () => {
+  it('is scoped to one volunteer', async () => {
     credit('u1', '2026-08-02T15:00:00.000Z', { hours: 5 });
     credit('u2', '2026-08-03T15:00:00.000Z', { hours: 9 });
-    expect(monthlyHours(db, 'u1', { now: NOW }).at(-1).hours).toBe(5);
+    expect((await monthlyHours(db, 'u1', { now: NOW })).at(-1).hours).toBe(5);
   });
 
-  it('returns six zeroes for a volunteer who has done nothing', () => {
-    expect(monthlyHours(db, 'u1', { now: NOW }).every(r => r.hours === 0)).toBe(true);
+  it('returns six zeroes for a volunteer who has done nothing', async () => {
+    expect((await monthlyHours(db, 'u1', { now: NOW })).every(r => r.hours === 0)).toBe(true);
   });
 });
 
 describe('record figures', () => {
-  it('counts distinct kinds of service, not shifts', () => {
+  it('counts distinct kinds of service, not shifts', async () => {
     credit('u1', '2026-07-02T15:00:00.000Z', { category: 'School' });
     credit('u1', '2026-07-09T15:00:00.000Z', { category: 'School' });
     credit('u1', '2026-08-02T15:00:00.000Z', { category: 'Food Pantry' });
-    expect(kindsOfService(db, 'u1')).toBe(2);
+    expect(await kindsOfService(db, 'u1')).toBe(2);
   });
 
-  it('reports the first credited shift, and never after the last', () => {
+  it('reports the first credited shift, and never after the last', async () => {
     credit('u1', '2026-05-02T15:00:00.000Z');
     credit('u1', '2026-08-02T15:00:00.000Z');
-    expect(firstVolunteeredAt(db, 'u1')).toBe('2026-05-02T15:00:00.000Z');
+    expect(await firstVolunteeredAt(db, 'u1')).toBe('2026-05-02T15:00:00.000Z');
   });
 
-  it('has no first shift for a new account', () => {
-    expect(firstVolunteeredAt(db, 'u1')).toBeNull();
+  it('has no first shift for a new account', async () => {
+    expect(await firstVolunteeredAt(db, 'u1')).toBeNull();
   });
 
-  it('excludes a cancelled event from upcoming commitments', () => {
+  it('excludes a cancelled event from upcoming commitments', async () => {
     /* A commitment to something that is not happening is not a commitment. */
     credit('u1', '2027-01-02T15:00:00.000Z', { status: 'cancelled' });
     credit('u1', '2027-01-09T15:00:00.000Z', { status: 'open' });
-    expect(upcomingCount(db, 'u1', { now: NOW.toISOString() })).toBe(1);
+    expect(await upcomingCount(db, 'u1', { now: NOW.toISOString() })).toBe(1);
   });
 });
 
 describe('milestoneInputs', () => {
-  it('counts distinct events, not shifts', () => {
+  it('counts distinct events, not shifts', async () => {
     const { eventId } = credit('u1', '2026-07-02T15:00:00.000Z', { hours: 2 });
     /* A second shift at the same event. */
     db.prepare('INSERT INTO slots (id, event_id, start_datetime, end_datetime) VALUES (?, ?, ?, ?)')
@@ -197,13 +197,13 @@ describe('milestoneInputs', () => {
     db.prepare('INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded) VALUES (?, ?, ?, ?, ?)')
       .run(eventId, 's-extra', 'u1', 1, 3);
 
-    const inputs = milestoneInputs(db, 'u1');
+    const inputs = await milestoneInputs(db, 'u1');
     expect(inputs.events).toBe(1);
     expect(inputs.shifts).toBe(2);
     expect(inputs.hours).toBe(5);
   });
 
-  it('counts a cancelled event, because the service still happened', () => {
+  it('counts a cancelled event, because the service still happened', async () => {
     /**
      * Deliberately different from `volunteerStats().eventsAttended`, which
      * excludes cancelled events. The profile route has always derived milestone
@@ -211,22 +211,22 @@ describe('milestoneInputs', () => {
      * tier is earned. This test is the reason the derivation is shared.
      */
     credit('u1', '2026-07-02T15:00:00.000Z', { status: 'cancelled' });
-    expect(milestoneInputs(db, 'u1').events).toBe(1);
+    expect((await milestoneInputs(db, 'u1')).events).toBe(1);
   });
 
-  it('is zero, not null, for an untouched account', () => {
+  it('is zero, not null, for an untouched account', async () => {
     /* `null >= 0` is true, so a null here would earn the first milestone at
        zero events. */
-    expect(milestoneInputs(db, 'u1')).toEqual({ hours: 0, events: 0, shifts: 0 });
+    expect(await milestoneInputs(db, 'u1')).toEqual({ hours: 0, events: 0, shifts: 0 });
   });
 });
 
 describe('volunteerInsights', () => {
-  it('composes the whole payload', () => {
+  it('composes the whole payload', async () => {
     credit('u1', '2026-07-02T15:00:00.000Z', { hours: 4, category: 'School' });
     credit('u1', '2026-08-02T15:00:00.000Z', { hours: 6, category: 'Food Pantry' });
 
-    const out = volunteerInsights(db, 'u1', { now: NOW });
+    const out = await volunteerInsights(db, 'u1', { now: NOW });
 
     expect(out.monthlyHours).toHaveLength(6);
     expect(out.record.hoursCredited).toBe(10);
@@ -236,8 +236,8 @@ describe('volunteerInsights', () => {
     expect(out.serviceHourGoal).toBeGreaterThan(0);
   });
 
-  it('answers for a volunteer who has done nothing without throwing', () => {
-    const out = volunteerInsights(db, 'u1', { now: NOW });
+  it('answers for a volunteer who has done nothing without throwing', async () => {
+    const out = await volunteerInsights(db, 'u1', { now: NOW });
     expect(out.record.hoursCredited).toBe(0);
     expect(out.streak).toEqual({ current: 0, longest: 0 });
     expect(out.milestones.every(m => m.earned === false)).toBe(true);

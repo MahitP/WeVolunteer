@@ -211,14 +211,84 @@ const parseList = (raw) => {
  * lists its members, and hiding the same fact on the profile side would be a
  * privacy control that protects nothing while making the two pages disagree.
  */
-function organizationsFor(db, userId) {
-  return db.prepare(`
-    SELECT o.id, o.slug, o.name, m.member_role AS memberRole
+/**
+ * The organizations somebody belongs to, and what they have done through each.
+ *
+ * ── Archived organizations are kept ──
+ *
+ * This filtered on `o.status = 'active'`, which meant a club archiving erased
+ * every member's history with it from their profile. That is the wrong way
+ * round: `organizationHours.js` deliberately keeps a volunteer's hours after
+ * they LEAVE a club, on the grounds that they still performed them — and an
+ * organization closing is even less the volunteer's doing than leaving is.
+ *
+ * A student who put thirty hours into a club that wound up at the end of the
+ * year should still be able to show that. So the row survives and carries
+ * `archived`, and the surface says so rather than quietly dropping it.
+ *
+ * ── Why the hours are one query and not one per organization ──
+ *
+ * The obvious shape is a loop calling `organizationHoursForUser` per row, which
+ * is an N+1 on a page any member can open about any other member. This is a
+ * single grouped aggregate over the same join — `attendance → events →
+ * organization_id` — so a student in twelve clubs costs the same two queries as
+ * a student in one.
+ *
+ * It is the SAME arithmetic as the platform-wide total over a subset of the
+ * same rows, so the two can never disagree. Note that they also do not sum to
+ * each other: an event with no `organization_id` counts platform-wide and
+ * toward no club, which is correct and is why the profile does not present
+ * these as a breakdown of the total.
+ *
+ * @param {boolean} withHours  whether this viewer may see service figures at
+ *   all. Decided by `canSeeHours` at the call site, from the subject's
+ *   `hours_visibility` — the same setting that gates `stats` and the service
+ *   history. Organization hours are service hours; they get the same answer.
+ */
+async function organizationsFor(db, userId, { withHours = false } = {}) {
+  const rows = await db.prepare(`
+    SELECT o.id, o.slug, o.name, o.status, m.member_role AS "memberRole"
     FROM organization_members m
     JOIN organizations o ON o.id = m.organization_id
-    WHERE m.user_id = ? AND o.status = 'active'
-    ORDER BY o.name COLLATE NOCASE
+    WHERE m.user_id = ?
+    ORDER BY o.name COLLATE nocase
   `).all(userId);
+
+  const shaped = rows.map(r => ({
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    memberRole: r.memberRole,
+    /* A flag rather than the raw status: the client needs to say "archived",
+       not to reason about a status vocabulary it does not own. */
+    archived: r.status === 'archived',
+  }));
+
+  if (!withHours || shaped.length === 0) return shaped;
+
+  const totals = new Map();
+  for (const t of await db.prepare(`
+    SELECT e.organization_id                 AS "organizationId",
+           COALESCE(SUM(a.hours_awarded), 0) AS hours,
+           COUNT(DISTINCT a.event_id)        AS events
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    /* Cancelled events count for nothing, the same rule organizationHours.js
+       applies - this figure and the one on the organization's own page describe
+       the same service and must not differ.
+       No backticks in this comment: it lives inside a template literal and one
+       would end the string mid-SQL. */
+    WHERE a.user_id = ? AND a.present = 1 AND e.organization_id IS NOT NULL
+      AND e.status <> 'cancelled'
+    GROUP BY e.organization_id
+  `).all(userId)) {
+    totals.set(t.organizationId, { hours: Number(t.hours), events: Number(t.events) });
+  }
+
+  /* Zero rather than absent for a club somebody has joined but not yet
+     volunteered for: "0 hours" is true and readable, while a missing figure on
+     one card in a list reads as an error. */
+  return shaped.map(o => ({ ...o, ...(totals.get(o.id) ?? { hours: 0, events: 0 }) }));
 }
 
 /**
@@ -231,7 +301,7 @@ function organizationsFor(db, userId) {
  * @param {boolean} opts.canSeeContact  viewer holds `user.contact.read`
  * @param {boolean} opts.isFriend       an ACCEPTED friendship exists both ways
  */
-export function publicProfile(db, row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
+export async function publicProfile(db, row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
   const isSelf = Boolean(viewerId) && viewerId === row.id;
 
   /**
@@ -246,7 +316,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
     || stated === 'public'
     || (stated === 'friends' && isFriend);
 
-  const stats = volunteerStats(db, row.id);
+  const stats = await volunteerStats(db, row.id);
 
   /**
    * Whether this reader may see the service figures at all.
@@ -300,7 +370,18 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
        able to say "they keep this private" instead of rendering an empty
        record — and the count is what would leak if only the list were hidden. */
     serviceVisibility,
-    organizations: organizationsFor(db, row.id),
+    /**
+     * Membership is always listed; the HOURS follow the service-privacy
+     * setting, because organization hours are service hours.
+     *
+     * The split is deliberate. Which clubs somebody belongs to is already the
+     * baseline this profile publishes — it is how members find each other, and
+     * the organization's own page lists its roster regardless. What
+     * `hours_visibility` governs is the service RECORD, and a per-club figure is
+     * exactly that: withholding the platform total while publishing twelve
+     * numbers that add up to most of it would make the setting decorative.
+     */
+    organizations: await organizationsFor(db, row.id, { withHours: hoursVisible }),
     /**
      * How the account is INTRODUCED, for every reader.
      *
@@ -377,7 +458,7 @@ export function publicProfile(db, row, { viewerId = null, canSeeContact = false,
    * subject so their own profile can link there with a count.
    */
   if (isSelf) {
-    profile.externalService = externalHoursSummary(db, row.id);
+    profile.externalService = await externalHoursSummary(db, row.id);
   }
 
   if (sensitiveVisible) {

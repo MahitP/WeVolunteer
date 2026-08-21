@@ -80,9 +80,31 @@ describe('the error-report limiter', () => {
      * groups asserted the grouping behaviour instead of the limiter, and read as
      * "the limiter leaked" when it had not.
      */
-    const recorded = db.prepare(
+    /**
+     * Waited for, not sampled.
+     *
+     * `POST /api/errors/report` answers 202 BEFORE it writes, deliberately, so
+     * that a reporting failure cannot become a client-visible failure. On SQLite
+     * the write was synchronous and had always landed by the time `fetch`
+     * resolved; on PostgreSQL it is a round trip and the read overtakes it.
+     *
+     * Waiting for the count to REACH the limit is the honest form: it still
+     * fails if more than `LIMIT` reports land, because the count is asserted
+     * again after the wait and a leak would push it past. A plain sample was
+     * reading a half-written state and reporting it as a limiter leak.
+     */
+    const countRecorded = async () => Number((await db.prepare(
       "SELECT COALESCE(SUM(occurrences), 0) AS n FROM error_groups WHERE source = 'client'"
-    ).get().n;
+    ).get()).n);
+
+    for (let i = 0; i < 300 && await countRecorded() < LIMIT; i += 1) {
+      await new Promise(r => setTimeout(r, 10));
+    }
+    /* Then let any surplus write that should NOT exist have its chance to land,
+       so this cannot pass by reading too early. */
+    await new Promise(r => setTimeout(r, 50));
+
+    const recorded = await countRecorded();
     expect(recorded, 'a rate-limited report still reached the database').toBe(LIMIT);
   }, 60000);
 

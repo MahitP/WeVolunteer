@@ -27,14 +27,14 @@ import { startTestServer } from './testServer.js';
 describe('a suspended session cannot write anything', () => {
   let srv, db, suspended, admin;
 
-  const suspend = (id) => db.prepare(`
+  const suspend = async (id) => await db.prepare(`
     UPDATE users SET account_status = 'suspended', suspended_at = ?, suspended_until = NULL,
                      suspension_reason = 'Messaging a student after being asked to stop',
                      suspension_lifted_at = NULL
      WHERE id = ?
   `).run('2026-08-01T09:00:00.000Z', id);
 
-  const unsuspend = (id) => db.prepare(`
+  const unsuspend = async (id) => await db.prepare(`
     UPDATE users SET account_status = 'active', suspended_at = NULL, suspended_until = NULL,
                      suspension_reason = NULL WHERE id = ?
   `).run(id);
@@ -48,9 +48,9 @@ describe('a suspended session cannot write anything', () => {
   afterAll(async () => { await srv?.close(); });
 
   beforeEach(async () => {
-    unsuspend('user-student-2');
+    await unsuspend('user-student-2');
     suspended = await srv.login('priya.patel@example.com');
-    suspend('user-student-2');
+    await suspend('user-student-2');
   });
 
   /* ── The two that matter most ─────────────────────────────────────────── */
@@ -73,7 +73,7 @@ describe('a suspended session cannot write anything', () => {
     expect(res.body.code).toBe('account_suspended');
 
     /* And the role is untouched, whatever the token was. */
-    expect(db.prepare('SELECT role FROM users WHERE id = ?').get('user-student-2').role)
+    expect((await db.prepare('SELECT role FROM users WHERE id = ?').get('user-student-2')).role)
       .toBe('student');
   });
 
@@ -87,7 +87,7 @@ describe('a suspended session cannot write anything', () => {
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('account_suspended');
 
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT account_status, deleted_at FROM users WHERE id = ?'
     ).get('user-student-2');
     expect(row.account_status).toBe('suspended');
@@ -138,17 +138,17 @@ describe('a suspended session cannot write anything', () => {
    * suspension gate running before it.
    */
   it('cannot use administrative writes even holding the capability', async () => {
-    suspend('user-admin');
+    await suspend('user-admin');
     try {
       const res = await srv.call('POST', '/api/admin/users/user-student-1/suspend',
         { reason: 'Retaliating while suspended myself' }, admin);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('account_suspended');
 
-      expect(db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-1')
+      expect((await db.prepare('SELECT account_status FROM users WHERE id = ?').get('user-student-1'))
         .account_status).toBe('active');
     } finally {
-      unsuspend('user-admin');
+      await unsuspend('user-admin');
     }
   });
 

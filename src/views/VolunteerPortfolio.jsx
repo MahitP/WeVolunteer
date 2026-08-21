@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { formatHours, formatDay } from '../utils/helpers';
 import { aggregateServiceByEvent, totalServiceHours } from '../utils/serviceRecord';
@@ -40,6 +40,25 @@ export default function VolunteerPortfolio({ currentUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  /**
+   * An optional organization filter, as `?organization=<slug>`.
+   *
+   * ── Why a filter and not a second transcript ──
+   *
+   * The brief asked for an "Organization Transcript". This IS that document —
+   * the same generator, the same layout, the same print stylesheet, restricted
+   * to one club's events. A parallel transcript system would be two places to
+   * fix a formatting bug and two documents that could disagree about the same
+   * student's hours, which is the one thing a record like this may not do.
+   *
+   * The slug is a display filter over rows the viewer is ALREADY authorised to
+   * see: `completed[]` is gated on `canSeeContact` at the endpoint, so narrowing
+   * it here can only ever show less. Nothing about permission is decided in this
+   * file.
+   */
+  const organizationSlug = searchParams.get('organization');
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +73,27 @@ export default function VolunteerPortfolio({ currentUser }) {
     return () => { cancelled = true; };
   }, [currentUser]);
 
-  const events = useMemo(() => aggregateServiceByEvent(data?.completed), [data]);
+  /**
+   * Filtered BEFORE aggregation, so hours, event count and the table are all
+   * computed from the same restricted set and cannot disagree.
+   *
+   * Matching on the slug the server sent rather than on the organization's
+   * name: two clubs may share a name (the pilot database has three called
+   * "Volunteering Club"), and the slug is the unique one.
+   */
+  const events = useMemo(() => {
+    const rows = data?.completed ?? [];
+    const scoped = organizationSlug
+      ? rows.filter(r => r.organizationSlug === organizationSlug)
+      : rows;
+    return aggregateServiceByEvent(scoped);
+  }, [data, organizationSlug]);
+
+  /* The club's name, taken from the rows themselves so a slug that matches
+     nothing produces no title — and the empty state below explains why. */
+  const organizationName = useMemo(() => (organizationSlug
+    ? (data?.completed ?? []).find(r => r.organizationSlug === organizationSlug)?.organizationName ?? null
+    : null), [data, organizationSlug]);
 
   if (loading) return <LoadingSkeleton heights={[120, 400]} />;
 
@@ -69,11 +108,43 @@ export default function VolunteerPortfolio({ currentUser }) {
     );
   }
 
+  /**
+   * A filter that matches nothing gets an explanation, not a transcript with
+   * zeroes on it.
+   *
+   * An empty record printed under somebody's name reads as "this person has
+   * never volunteered", which would be a false statement about them — the same
+   * reason `profileSerializer` omits `stats` rather than zeroing it when hours
+   * are private.
+   */
+  if (organizationSlug && events.length === 0) {
+    return (
+      <EmptyState
+        icon={FileWarning}
+        title="No verified service with this organization"
+        message="Hours appear here once an organizer confirms you were at one of their events."
+        style={{ margin: 'var(--s6)' }}
+        action={<Link className="btn btn-secondary" to="/portfolio">See your full transcript</Link>}
+      />
+    );
+  }
+
   const { volunteer, stats } = data;
   /* From the rows on the page, so the headline and the table can never
      disagree. `stats.hours` is the same figure by a different route; if the two
      ever diverge the document should show what it is actually printing. */
   const totalHours = totalServiceHours(events);
+  /**
+   * Shifts, counted from the ROWS rather than from `stats`.
+   *
+   * `stats.shiftsCompleted` is the platform-wide figure. On an unfiltered
+   * transcript the two agree; on one narrowed to a single organization it does
+   * not — it would print that club's four events beside every shift the student
+   * has ever worked anywhere, which is both wrong and a small disclosure about
+   * service elsewhere. Deriving it here keeps the same rule the hours already
+   * follow: the headline is computed from what is actually on the page.
+   */
+  const shiftsShown = events.reduce((n, e) => n + (e.shifts ?? 0), 0);
   const generated = formatDay(new Date().toISOString());
 
   return (
@@ -94,6 +165,17 @@ export default function VolunteerPortfolio({ currentUser }) {
           <div>
             <p className="transcript-org">{APP_NAME}</p>
             <h2 className="transcript-title">Record of Verified Service</h2>
+            {/* Named under the title rather than inside it, so the document is
+                recognisably the same record either way — a school office
+                comparing two of these should not have to read a heading twice
+                to see that they are the same kind of thing. */}
+            {organizationSlug && (
+              <p className="transcript-sub">
+                {organizationName
+                  ? `Service with ${organizationName}`
+                  : 'Service with one organization'}
+              </p>
+            )}
           </div>
           <div className="transcript-issued">
             <div>{SCHOOL_NAME}</div>
@@ -116,10 +198,10 @@ export default function VolunteerPortfolio({ currentUser }) {
             <p className="transcript-label">Events</p>
             <p className="transcript-figure tnum">{events.length}</p>
           </div>
-          {stats?.shiftsCompleted > events.length && (
+          {shiftsShown > events.length && (
             <div>
               <p className="transcript-label">Shifts</p>
-              <p className="transcript-figure tnum">{stats.shiftsCompleted}</p>
+              <p className="transcript-figure tnum">{shiftsShown}</p>
             </div>
           )}
         </section>

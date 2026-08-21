@@ -47,9 +47,9 @@ async function freshReporter() {
 }
 
 const adminToken = () => srv.login('admin@example.gov');
-const rowFor = (id) => db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
-const historyFor = (id) => db.prepare(
-  'SELECT * FROM moderation_actions WHERE report_id = ? ORDER BY created_at, rowid'
+const rowFor = async (id) => await db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
+const historyFor = async (id) => await db.prepare(
+  'SELECT * FROM moderation_actions WHERE report_id = ? ORDER BY created_at, id'
 ).all(id);
 
 /** Files a report from somebody with no other involvement, and returns its id. */
@@ -66,8 +66,8 @@ async function fileReport(overrides = {}) {
 beforeAll(async () => {
   srv = await startTestServer();
   db = (await import('./db.js')).db;
-  eventIds = db.prepare('SELECT id FROM events ORDER BY id').all().map(r => r.id);
-  const org = db.prepare("SELECT id, email FROM users WHERE role = 'organizer' LIMIT 1").get();
+  eventIds = (await db.prepare('SELECT id FROM events ORDER BY id').all()).map(r => r.id);
+  const org = await db.prepare("SELECT id, email FROM users WHERE role = 'organizer' LIMIT 1").get();
   organizerId = org.id;
   organizerEmail = org.email;
 });
@@ -99,7 +99,7 @@ describe('who may work the queue', () => {
     expect((await srv.call('GET', '/api/admin/reports', undefined, a)).status).toBe(200);
     expect((await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'reviewing' }, a)).status)
       .toBe(200);
-    expect(rowFor(reportId).status).toBe('reviewing');
+    expect((await rowFor(reportId)).status).toBe('reviewing');
   });
 
   it('404s a report that does not exist rather than reporting success', async () => {
@@ -116,7 +116,7 @@ describe('conflict of interest', () => {
    */
   it('refuses a moderator acting on a report whose subject is themselves', async () => {
     const { cookie } = await freshReporter();
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     const filed = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: adminId, reason: 'threatened_me', details: 'about the moderator',
     }, cookie);
@@ -126,7 +126,7 @@ describe('conflict of interest', () => {
     }, await adminToken());
 
     expect(res.status).toBe(403);
-    expect(rowFor(filed.body.reportId).status, 'the refusal did not prevent the write').toBe('open');
+    expect((await rowFor(filed.body.reportId)).status, 'the refusal did not prevent the write').toBe('open');
   });
 
   /** The reporter is a party too: closing your own report is deciding your own case. */
@@ -144,7 +144,7 @@ describe('conflict of interest', () => {
 
   it('refuses a moderator acting on a report about their own event', async () => {
     // Promote the organizer so they hold report.resolve while still owning the event.
-    db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(organizerId);
+    await db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(organizerId);
     try {
       const { cookie } = await freshReporter();
       const filed = await srv.call('POST', '/api/reports', {
@@ -155,7 +155,7 @@ describe('conflict of interest', () => {
       }, await srv.login(organizerEmail));
       expect(res.status).toBe(403);
     } finally {
-      db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(organizerId);
+      await db.prepare("UPDATE users SET role = 'organizer' WHERE id = ?").run(organizerId);
     }
   });
 
@@ -165,7 +165,7 @@ describe('conflict of interest', () => {
    */
   it('still lets the subject read the queue containing a report about them', async () => {
     const { cookie } = await freshReporter();
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     const filed = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: adminId, reason: 'hate_or_discrimination',
     }, cookie);
@@ -195,19 +195,19 @@ describe('conflict of interest', () => {
    */
   it('lets a super_admin decide a report the ordinary admin is the subject of', async () => {
     const { cookie } = await freshReporter();
-    const adminRow = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
+    const adminRow = await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get();
     const filed = await srv.call('POST', '/api/reports', {
       targetType: 'user', targetId: adminRow.id, reason: 'threatened_me',
     }, cookie);
 
-    db.prepare("UPDATE users SET role = 'super_admin' WHERE email = 'admin@example.gov'").run();
+    await db.prepare("UPDATE users SET role = 'super_admin' WHERE email = 'admin@example.gov'").run();
     try {
       const res = await srv.call('PATCH', `/api/admin/reports/${filed.body.reportId}`, {
         status: 'resolved', resolution: 'no_action', resolutionNote: 'w'.repeat(25),
       }, await adminToken());
       expect(res.status).toBe(200);
     } finally {
-      db.prepare("UPDATE users SET role = 'admin' WHERE email = 'admin@example.gov'").run();
+      await db.prepare("UPDATE users SET role = 'admin' WHERE email = 'admin@example.gov'").run();
     }
   });
 });
@@ -224,7 +224,7 @@ describe('resolving requires a stated reason', () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('resolution_required');
     expect(res.body.allowed, 'the refusal should name the legal values').toContain('no_action');
-    expect(rowFor(reportId).status).toBe('open');
+    expect((await rowFor(reportId)).status).toBe('open');
   });
 
   /**
@@ -245,7 +245,7 @@ describe('resolving requires a stated reason', () => {
       status: 'resolved', resolution: 'content_removed', resolutionNote: 'x'.repeat(20),
     }, await adminToken());
     expect(okRes.status).toBe(200);
-    const row = rowFor(ok);
+    const row = await rowFor(ok);
     expect(row.resolution).toBe('content_removed');
     expect(row.resolved_by, 'stamped server-side, never accepted from the client').toBeTruthy();
     expect(row.resolved_at).toBeTruthy();
@@ -256,14 +256,14 @@ describe('resolving requires a stated reason', () => {
     const a = await adminToken();
     expect((await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'closed' }, a)).status).toBe(400);
     expect((await srv.call('PATCH', `/api/admin/reports/${reportId}`, { priority: 'critical' }, a)).status).toBe(400);
-    expect(rowFor(reportId).status).toBe('open');
+    expect((await rowFor(reportId)).status).toBe('open');
   });
 
   it('lets a moderator raise and lower priority, leaving a record', async () => {
     const reportId = await fileReport();
     const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { priority: 'urgent' }, await adminToken());
     expect(res.status).toBe(200);
-    expect(rowFor(reportId).priority).toBe('urgent');
+    expect((await rowFor(reportId)).priority).toBe('urgent');
   });
 
   /**
@@ -335,8 +335,8 @@ describe('assignment', () => {
     const reportId = await fileReport();
     const res = await srv.call('PATCH', `/api/admin/reports/${reportId}`, { assignedTo: 'me' }, await adminToken());
     expect(res.status).toBe(200);
-    const row = rowFor(reportId);
-    expect(row.assigned_to).toBe(db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id);
+    const row = await rowFor(reportId);
+    expect(row.assigned_to).toBe((await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id);
     expect(row.assigned_at, 'unassigned and assigned-at-an-unknown-time are different states').toBeTruthy();
   });
 
@@ -349,32 +349,32 @@ describe('assignment', () => {
 
   it('accepts a real moderator id and accepts null to unassign', async () => {
     const reportId = await fileReport();
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     const a = await adminToken();
 
     // Filed by somebody else and about somebody else, so no conflict fires.
     expect((await srv.call('PATCH', `/api/admin/reports/${reportId}`, { assignedTo: adminId }, a)).status).toBe(200);
-    expect(rowFor(reportId).assigned_to).toBe(adminId);
+    expect((await rowFor(reportId)).assigned_to).toBe(adminId);
 
     expect((await srv.call('PATCH', `/api/admin/reports/${reportId}`, { assignedTo: null }, a)).status).toBe(200);
-    expect(rowFor(reportId).assigned_to).toBeNull();
+    expect((await rowFor(reportId)).assigned_to).toBeNull();
   });
 });
 
 describe('what a decision records', () => {
   it('writes both an admin_audit_logs row and a moderation_actions row', async () => {
     const reportId = await fileReport();
-    const beforeAudit = db.prepare(
+    const beforeAudit = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'MODERATE_REPORT'"
-    ).get().c;
+    ).get()).c;
 
     await srv.call('PATCH', `/api/admin/reports/${reportId}`, {
       status: 'resolved', resolution: 'no_action', resolutionNote: 'decided because '.repeat(2),
     }, await adminToken());
 
-    expect(db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'MODERATE_REPORT'").get().c)
+    expect((await db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'MODERATE_REPORT'").get()).c)
       .toBe(beforeAudit + 1);
-    const history = historyFor(reportId);
+    const history = await historyFor(reportId);
     expect(history.some(h => h.actor_id && h.new_status === 'resolved'),
       'no attributed history row for the decision').toBe(true);
   });
@@ -384,30 +384,30 @@ describe('what a decision records', () => {
    * test asserting it checks the code path somebody wrote; a trigger checks every
    * path anybody ever writes, including a `bin/` script.
    */
-  it('cannot have its history edited or deleted, by any path', () => {
-    const row = db.prepare('SELECT id FROM moderation_actions LIMIT 1').get();
+  it('cannot have its history edited or deleted, by any path', async () => {
+    const row = await db.prepare('SELECT id FROM moderation_actions LIMIT 1').get();
     expect(row, 'no history to test against').toBeTruthy();
-    expect(() => db.prepare("UPDATE moderation_actions SET action = 'x' WHERE id = ?").run(row.id))
-      .toThrow(/append-only/);
-    expect(() => db.prepare('DELETE FROM moderation_actions WHERE id = ?').run(row.id))
-      .toThrow(/append-only/);
-    expect(db.prepare('SELECT COUNT(*) c FROM moderation_actions WHERE id = ?').get(row.id).c).toBe(1);
+    await expect(async () => await db.prepare("UPDATE moderation_actions SET action = 'x' WHERE id = ?").run(row.id)).rejects.toThrow(/append-only/);
+    await expect(async () => await db.prepare('DELETE FROM moderation_actions WHERE id = ?').run(row.id)).rejects.toThrow(/append-only/);
+    expect((await db.prepare('SELECT COUNT(*) c FROM moderation_actions WHERE id = ?').get(row.id)).c).toBe(1);
   });
 
   it('refuses to delete a report at all', async () => {
     const reportId = await fileReport();
-    expect(() => db.prepare('DELETE FROM reports WHERE id = ?').run(reportId))
-      .toThrow(/never deleted/);
+    await expect(async () => await db.prepare('DELETE FROM reports WHERE id = ?').run(reportId)).rejects.toThrow(/never deleted/);
   });
 
   it('refuses to edit what a report says, while allowing its workflow to move', async () => {
     const reportId = await fileReport();
-    expect(() => db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?").run(reportId))
-      .toThrow(/record of what was said/);
-    expect(() => db.prepare("UPDATE reports SET category = 'other' WHERE id = ?").run(reportId))
-      .toThrow(/record of what was said/);
-    expect(() => db.prepare("UPDATE reports SET status = 'reviewing' WHERE id = ?").run(reportId))
-      .not.toThrow();
+    await expect(async () => await db.prepare("UPDATE reports SET description = 'rewritten' WHERE id = ?").run(reportId)).rejects.toThrow(/record of what was said/);
+    await expect(async () => await db.prepare("UPDATE reports SET category = 'other' WHERE id = ?").run(reportId)).rejects.toThrow(/record of what was said/);
+    /* The positive case is asserted by doing it and checking the effect, not
+       with `.resolves.not.toThrow()`: `.resolves` accepts only a promise, and
+       SQLite's `.run()` returns a plain object. Executing it here fails the test
+       on either a throw or a rejection, and additionally proves the workflow
+       column really moved — which is the actual claim. */
+    await db.prepare("UPDATE reports SET status = 'reviewing' WHERE id = ?").run(reportId);
+    expect((await rowFor(reportId)).status, 'the workflow column must still be movable').toBe('reviewing');
   });
 
   /**
@@ -427,9 +427,9 @@ describe('what a decision records', () => {
    */
   it('writes one history row per status change, not two', async () => {
     const reportId = await fileReport();
-    const before = historyFor(reportId).length;
+    const before = (await historyFor(reportId)).length;
     await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'reviewing' }, await adminToken());
-    expect(historyFor(reportId).length - before).toBe(1);
+    expect((await historyFor(reportId)).length - before).toBe(1);
   });
 
   /**
@@ -442,10 +442,10 @@ describe('what a decision records', () => {
    */
   it('moves updated_at when the report changes', async () => {
     const reportId = await fileReport();
-    const before = rowFor(reportId).updated_at;
+    const before = (await rowFor(reportId)).updated_at;
     await new Promise(r => setTimeout(r, 20));
     await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'reviewing' }, await adminToken());
-    expect(rowFor(reportId).updated_at).not.toBe(before);
+    expect((await rowFor(reportId)).updated_at).not.toBe(before);
   });
 
   /**
@@ -465,7 +465,7 @@ describe('what a decision records', () => {
     }, a);
     await srv.call('PATCH', `/api/admin/reports/${reportId}`, { status: 'open' }, a);
 
-    const row = rowFor(reportId);
+    const row = await rowFor(reportId);
     expect(row.status).toBe('open');
     expect(row.resolution).toBeNull();
     expect(row.resolved_by).toBeNull();
@@ -483,8 +483,8 @@ describe('the queue a moderator actually reads', () => {
    */
   it('still shows a report whose reporter has been purged, named from the snapshot', async () => {
     const reportId = await fileReport({ details: 'filed by somebody now gone' });
-    const snapshot = rowFor(reportId).reporter_name_snapshot;
-    db.prepare('UPDATE reports SET reporter_id = NULL WHERE id = ?').run(reportId);
+    const snapshot = (await rowFor(reportId)).reporter_name_snapshot;
+    await db.prepare('UPDATE reports SET reporter_id = NULL WHERE id = ?').run(reportId);
 
     const q = await srv.call('GET', '/api/admin/reports', undefined, await adminToken());
     const row = q.body.find(r => r.id === reportId);
@@ -505,7 +505,7 @@ describe('the queue a moderator actually reads', () => {
   it('falls back to the literal when there is no snapshot either', async () => {
     const id = 'rep_pre_snapshot';
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, reporter_name_snapshot, target_type, target_id,
                            category, description, status, priority, created_at, updated_at)
       VALUES (?, NULL, NULL, 'event', ?, 'other', 'filed long ago', 'open', 'normal', ?, ?)
@@ -519,15 +519,15 @@ describe('the queue a moderator actually reads', () => {
     const { cookie, user } = await freshReporter();
     const convId = 'conv_queue_evidence';
     const base = Date.now() - 3600_000;
-    db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+    await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(convId, eventIds[0], user.id, organizerId, organizerId, new Date(base).toISOString());
     for (const [uid, role] of [[user.id, 'student'], [organizerId, 'organizer']]) {
-      db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+      await db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
                   VALUES (?, ?, ?, ?)`).run(convId, uid, role, new Date(base).toISOString());
     }
     for (let i = 0; i < 5; i++) {
-      db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+      await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                   VALUES (?, ?, ?, ?, ?)`)
         .run(`qm_${i}`, convId, organizerId, `body ${i}`, new Date(base + i * 1000).toISOString());
     }
@@ -561,14 +561,14 @@ describe('the queue a moderator actually reads', () => {
     const { cookie, user } = await freshReporter();
     const convId = 'conv_queue_render';
     const base = Date.now() - 3600_000;
-    db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+    await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(convId, eventIds[0], user.id, organizerId, organizerId, new Date(base).toISOString());
     for (const [uid, role] of [[user.id, 'student'], [organizerId, 'organizer']]) {
-      db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+      await db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
                   VALUES (?, ?, ?, ?)`).run(convId, uid, role, new Date(base).toISOString());
     }
-    db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+    await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                 VALUES (?, ?, ?, ?, ?)`)
       .run('qr_0', convId, organizerId, 'meet me alone', new Date(base).toISOString());
 
@@ -690,7 +690,7 @@ describe('queue ordering and filters', () => {
   it('filters by assignee, including me and unassigned', async () => {
     const reportId = await fileReport({ targetId: eventIds[1 % eventIds.length] });
     const a = await adminToken();
-    const adminId = db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get().id;
+    const adminId = (await db.prepare("SELECT id FROM users WHERE email = 'admin@example.gov'").get()).id;
     await srv.call('PATCH', `/api/admin/reports/${reportId}`, { assignedTo: 'me' }, a);
 
     const mine = await srv.call('GET', '/api/admin/reports?assignee=me', undefined, a);
@@ -722,22 +722,22 @@ describe('queue ordering and filters', () => {
     const { cookie, user } = await freshReporter();
     const convId = 'conv_queue_types';
     const base = Date.now() - 3600_000;
-    db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+    await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(convId, eventIds[0], user.id, organizerId, organizerId, new Date(base).toISOString());
     for (const [uid, role] of [[user.id, 'student'], [organizerId, 'organizer']]) {
-      db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+      await db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
                   VALUES (?, ?, ?, ?)`).run(convId, uid, role, new Date(base).toISOString());
     }
-    db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+    await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                 VALUES ('qt_0', ?, ?, 'a reported line', ?)`)
       .run(convId, organizerId, new Date(base).toISOString());
 
     const filed = {};
     const cases = [
       ['event', eventIds[0]],
-      ['comment', db.prepare('SELECT id FROM event_comments LIMIT 1').get().id],
-      ['announcement', db.prepare('SELECT id FROM event_announcements LIMIT 1').get().id],
+      ['comment', (await db.prepare('SELECT id FROM event_comments LIMIT 1').get()).id],
+      ['announcement', (await db.prepare('SELECT id FROM event_announcements LIMIT 1').get()).id],
       ['user', organizerId],
       ['certificate', 'WEV-A2B3-C4D5'],
       ['conversation', convId],
@@ -787,15 +787,15 @@ describe('reading preserved evidence', () => {
   async function reportedConversation(id) {
     const { cookie, user } = await freshReporter();
     const base = Date.now() - 3600_000;
-    db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+    await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(id, eventIds[0], user.id, organizerId, organizerId, new Date(base).toISOString());
     for (const [uid, role] of [[user.id, 'student'], [organizerId, 'organizer']]) {
-      db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
+      await db.prepare(`INSERT INTO conversation_participants (conversation_id, user_id, role_at_creation, joined_at)
                   VALUES (?, ?, ?, ?)`).run(id, uid, role, new Date(base).toISOString());
     }
     for (let i = 0; i < 3; i++) {
-      db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+      await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                   VALUES (?, ?, ?, ?, ?)`)
         .run(`${id}_m${i}`, id, organizerId, `evidence body ${i}`, new Date(base + i * 1000).toISOString());
     }
@@ -813,9 +813,9 @@ describe('reading preserved evidence', () => {
    */
   it('returns the frozen bodies and logs who read them', async () => {
     const reportId = await reportedConversation('conv_evidence_read');
-    const before = db.prepare(
+    const before = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c;
+    ).get()).c;
 
     const res = await srv.readEvidence(await adminToken(), reportId);
     expect(res.status).toBe(200);
@@ -824,7 +824,7 @@ describe('reading preserved evidence', () => {
     expect(res.body.messages[0].sender_name).toBeTruthy();
 
     expect(
-      db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'").get().c,
+      (await db.prepare("SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'").get()).c,
       'private messages left the building without a record of who read them',
     ).toBe(before + 1);
   });
@@ -866,7 +866,7 @@ describe('reading preserved evidence', () => {
   it('records the evidence read on the durable report history too', async () => {
     const reportId = await reportedConversation('conv_evidence_history');
     await srv.readEvidence(await adminToken(), reportId);
-    expect(historyFor(reportId).some(h => h.action === 'evidence_viewed')).toBe(true);
+    expect((await historyFor(reportId)).some(h => h.action === 'evidence_viewed')).toBe(true);
   });
 });
 
@@ -904,7 +904,7 @@ describe('report detail', () => {
      * it to `urgent` is frequently a no-op, and a no-op writes no history row.
      * The test would then be asserting the absence of a change it never made.
      */
-    const flipped = rowFor(reportId).priority === 'urgent' ? 'normal' : 'urgent';
+    const flipped = (await rowFor(reportId)).priority === 'urgent' ? 'normal' : 'urgent';
     await srv.call('PATCH', `/api/admin/reports/${reportId}`,
       { priority: flipped }, await adminToken());
 
@@ -981,16 +981,16 @@ describe('report detail', () => {
    */
   it('does not log a metadata read as an evidence read', async () => {
     const reportId = await fileReport();
-    const before = db.prepare(
+    const before = (await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c;
+    ).get()).c;
 
     await srv.call('GET', `/api/admin/reports/${reportId}`, undefined, await adminToken());
 
-    expect(db.prepare(
+    expect((await db.prepare(
       "SELECT COUNT(*) c FROM admin_audit_logs WHERE action = 'REPORT_EVIDENCE_VIEWED'"
-    ).get().c).toBe(before);
-    expect(historyFor(reportId).some(h => h.action === 'evidence_viewed')).toBe(false);
+    ).get()).c).toBe(before);
+    expect((await historyFor(reportId)).some(h => h.action === 'evidence_viewed')).toBe(false);
   });
 
   /**

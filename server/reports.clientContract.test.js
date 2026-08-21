@@ -40,8 +40,8 @@ afterAll(async () => { await srv.close(); });
  * row. Each case gets its own target so it is testing what it says it is.
  */
 let evSeq = 0;
-const anyEventId = () => {
-  const rows = db.prepare('SELECT id FROM events ORDER BY id').all();
+const anyEventId = async () => {
+  const rows = await db.prepare('SELECT id FROM events ORDER BY id').all();
   const row = rows[evSeq++ % rows.length];
   return row.id;
 };
@@ -54,7 +54,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     // targetId, reason: trimmed })`, where `trimmed` is the textarea contents.
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'This event is misleading and is not a real volunteering opportunity.',
     }, t);
 
@@ -67,7 +67,7 @@ describe('POST /api/reports accepts the shipped client payload', () => {
      * keep a taxonomy tidy would make the report unreadable to the moderator who
      * has to decide it.
      */
-    const row = db.prepare('SELECT category, description FROM reports WHERE id = ?')
+    const row = await db.prepare('SELECT category, description FROM reports WHERE id = ?')
       .get(res.body.reportId);
     expect(row.category, 'prose should land in the catch-all category, not be rejected')
       .toBe('other');
@@ -80,13 +80,13 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     const t = await srv.login('cameron.caldwell@example.com');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'spam_or_advertising',
       details: 'Recruiting for something that is not volunteering.',
     }, t);
 
     expect(res.status).toBe(200);
-    const row = db.prepare('SELECT category, description FROM reports WHERE id = ?')
+    const row = await db.prepare('SELECT category, description FROM reports WHERE id = ?')
       .get(res.body.reportId);
     expect(row.category).toBe('spam_or_advertising');
     expect(row.description).toBe('Recruiting for something that is not volunteering.');
@@ -98,13 +98,13 @@ describe('POST /api/reports accepts the shipped client payload', () => {
     const t = await srv.login('admin@example.gov');
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'event',
-      targetId: anyEventId(),
+      targetId: await anyEventId(),
       reason: 'The headline complaint.',
       details: 'The extra context.',
     }, t);
 
     expect(res.status).toBe(200);
-    const row = db.prepare('SELECT description FROM reports WHERE id = ?').get(res.body.reportId);
+    const row = await db.prepare('SELECT description FROM reports WHERE id = ?').get(res.body.reportId);
     expect(row.description).toContain('The headline complaint.');
     expect(row.description).toContain('The extra context.');
   });
@@ -127,13 +127,13 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
     // targetType, targetId, reason: category, details })`.
     const res = await srv.call('POST', '/api/reports', {
       targetType: 'comment',
-      targetId: db.prepare('SELECT id FROM event_comments LIMIT 1').get().id,
+      targetId: (await db.prepare('SELECT id FROM event_comments LIMIT 1').get()).id,
       reason: 'bullying_or_harassment',
       details: 'They keep replying to everything I post.',
     }, t);
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = db.prepare('SELECT category, description, priority FROM reports WHERE id = ?')
+    const row = await db.prepare('SELECT category, description, priority FROM reports WHERE id = ?')
       .get(res.body.reportId);
     expect(row.category).toBe('bullying_or_harassment');
     expect(row.description).toBe('They keep replying to everything I post.');
@@ -153,7 +153,7 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
     }, t);
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const row = db.prepare('SELECT category, description FROM reports WHERE id = ?')
+    const row = await db.prepare('SELECT category, description FROM reports WHERE id = ?')
       .get(res.body.reportId);
     expect(row.category).toBe('something_feels_wrong');
     expect(row.description).toBeNull();
@@ -172,27 +172,32 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
         targetType: 'user', targetId: `contract_${category}`, reason: category,
       }, t);
       expect(res.status, `${category} was refused: ${JSON.stringify(res.body)}`).toBe(200);
-      expect(db.prepare('SELECT category FROM reports WHERE id = ?').get(res.body.reportId).category)
+      expect((await db.prepare('SELECT category FROM reports WHERE id = ?').get(res.body.reportId)).category)
         .toBe(category);
     }
   });
 
   it('takes the conversation dialog’s category through the conversation route', async () => {
-    const student = db.prepare("SELECT id, email FROM users WHERE role = 'student' LIMIT 1").get();
-    const organizer = db.prepare("SELECT id FROM users WHERE role = 'organizer' LIMIT 1").get();
-    const eventId = db.prepare('SELECT id FROM events LIMIT 1').get().id;
+    /* Live, and ordered: `system-cli` is a reserved tombstone carrying
+       `role = 'student'`, and an unordered LIMIT 1 selects it. See the longer
+       note in routes.reports.test.js. */
+    const student = await db.prepare(
+      "SELECT id, email FROM users WHERE role = 'student' AND account_status <> 'deleted' ORDER BY id LIMIT 1"
+    ).get();
+    const organizer = await db.prepare("SELECT id FROM users WHERE role = 'organizer' LIMIT 1").get();
+    const eventId = (await db.prepare('SELECT id FROM events LIMIT 1').get()).id;
     const convId = 'conv_contract_1';
     const now = new Date(Date.now() - 60_000).toISOString();
 
-    db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
+    await db.prepare(`INSERT INTO conversations (id, event_id, student_id, organizer_id, created_by, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
       .run(convId, eventId, student.id, organizer.id, organizer.id, now);
     for (const [uid, role] of [[student.id, 'student'], [organizer.id, 'organizer']]) {
-      db.prepare(`INSERT INTO conversation_participants
+      await db.prepare(`INSERT INTO conversation_participants
                     (conversation_id, user_id, role_at_creation, joined_at)
                   VALUES (?, ?, ?, ?)`).run(convId, uid, role, now);
     }
-    db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
+    await db.prepare(`INSERT INTO messages (id, conversation_id, sender_id, body, created_at)
                 VALUES ('m_contract_1', ?, ?, 'where do you live', ?)`)
       .run(convId, organizer.id, now);
 
@@ -203,7 +208,7 @@ describe('POST /api/reports accepts the rewritten client payload', () => {
     }, await srv.login(student.email));
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const row = db.prepare('SELECT category, description, priority FROM reports WHERE id = ?')
+    const row = await db.prepare('SELECT category, description, priority FROM reports WHERE id = ?')
       .get(res.body.reportId);
     expect(row.category).toBe('asked_to_meet_alone');
     expect(row.description).toBe('He keeps asking where I live.');

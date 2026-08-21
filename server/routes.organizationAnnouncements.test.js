@@ -47,10 +47,11 @@ describe('organization announcements', () => {
   const setAllowReplies = (allow) =>
     srv.call('PATCH', `/api/organizations/${orgKey}`, { allowReplies: allow }, manager);
 
-  const join = (userId, role = 'member') => {
-    db.prepare(`
-      INSERT OR REPLACE INTO organization_members (organization_id, user_id, member_role, joined_at)
+  const join = async (userId, role = 'member') => {
+    await db.prepare(`
+      INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
       VALUES (?, ?, ?, ?)
+      ON CONFLICT (organization_id, user_id) DO UPDATE SET member_role = excluded.member_role, joined_at = excluded.joined_at
     `).run(orgId, userId, role, new Date().toISOString());
   };
 
@@ -75,11 +76,11 @@ describe('organization announcements', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_announcements WHERE organization_id = ?').run(orgId);
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
-    join(managerId, 'manager');
-    join(studentId, 'member');
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_announcements WHERE organization_id = ?').run(orgId);
+    await db.prepare('DELETE FROM organization_members WHERE organization_id = ?').run(orgId);
+    await join(managerId, 'manager');
+    await join(studentId, 'member');
   });
 
   describe('posting', () => {
@@ -139,15 +140,15 @@ describe('organization announcements', () => {
          uses. Reaching for another seeded organizer instead proved nothing: the
          only spare one is unverified, so its capabilities are withheld and it is
          refused by the middleware long before `canManage` is consulted. */
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
 
       const res = await post({ body: 'Posting as somebody else.' });
 
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('not_manager');
-      expect(db.prepare('SELECT COUNT(*) AS c FROM organization_announcements WHERE organization_id = ?')
-        .get(orgId).c).toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) AS c FROM organization_announcements WHERE organization_id = ?')
+        .get(orgId)).c).toBe(0);
     });
 
     it('refuses a plain member of this organization', async () => {
@@ -255,12 +256,12 @@ describe('organization announcements', () => {
     });
 
     it('cannot be toggled by somebody who does not manage the organization', async () => {
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
 
       const res = await setAllowReplies(false);
       expect(res.status).toBe(403);
-      join(managerId, 'manager');
+      await join(managerId, 'manager');
 
       const found = (await list()).body.announcements.find(a => a.id === announcementId);
       expect(found.repliesEnabled).toBe(true);
@@ -282,11 +283,11 @@ describe('organization announcements', () => {
     });
 
     it('refuses an edit from an organizer who does not manage this organization', async () => {
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
       const res = await patch(announcementId, { body: 'Rewritten by a stranger.' });
       expect(res.status).toBe(403);
-      join(managerId, 'manager');
+      await join(managerId, 'manager');
 
       const found = (await list()).body.announcements.find(a => a.id === announcementId);
       expect(found.body).toBe('Original wording.');
@@ -297,15 +298,15 @@ describe('organization announcements', () => {
       expect((await remove(announcementId)).status).toBe(200);
 
       expect((await list()).body.announcements.find(a => a.id === announcementId)).toBeUndefined();
-      expect(db.prepare('SELECT COUNT(*) AS c FROM organization_announcement_replies WHERE announcement_id = ?')
-        .get(announcementId).c).toBe(0);
+      expect((await db.prepare('SELECT COUNT(*) AS c FROM organization_announcement_replies WHERE announcement_id = ?')
+        .get(announcementId)).c).toBe(0);
     });
 
     it('refuses a delete from an outsider', async () => {
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
       expect((await remove(announcementId)).status).toBe(403);
-      join(managerId, 'manager');
+      await join(managerId, 'manager');
       expect((await list()).body.announcements.find(a => a.id === announcementId)).toBeTruthy();
     });
 
@@ -396,7 +397,7 @@ describe('organization announcements', () => {
     });
   
     it('refuses an image upload from somebody who does not manage the organization', async () => {
-      db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+      await db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
         .run(orgId, managerId);
   
       const res = await srv.call('DELETE', `/api/organizations/${orgKey}/image`, undefined, manager);
@@ -404,7 +405,7 @@ describe('organization announcements', () => {
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('not_manager');
   
-      join(managerId, 'manager');
+      await join(managerId, 'manager');
     });
   
     it('refuses an unauthenticated caller', async () => {

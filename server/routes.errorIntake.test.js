@@ -33,13 +33,34 @@ afterAll(async () => {
   delete process.env.ERROR_REPORT_RATE_LIMIT;
 });
 
-beforeEach(() => {
-  db.prepare('DELETE FROM error_events').run();
-  db.prepare('DELETE FROM error_groups').run();
+/**
+ * The reset has to DRAIN, not just delete.
+ *
+ * `POST /api/errors/report` answers 202 before it writes, deliberately. So a
+ * report accepted by the previous test can still be in flight when this hook
+ * runs: the delete removes nothing, the write lands a moment later, and the
+ * next test sees a row it never created. That is what made
+ * "answers 400 for a bare scalar body" — which asserts NOTHING was stored —
+ * fail on one run in two while every other assertion in the file passed.
+ *
+ * Deleting twice with a tick between is enough: a straggler either landed
+ * before the first delete or is awaiting its own round trip, and one macrotask
+ * is longer than the remaining work. The loop then confirms the table is
+ * actually empty rather than assuming it.
+ */
+beforeEach(async () => {
+  for (let i = 0; i < 50; i += 1) {
+    await db.prepare('DELETE FROM error_events').run();
+    await db.prepare('DELETE FROM error_groups').run();
+    await new Promise(r => setTimeout(r, 5));
+    const left = Number((await db.prepare('SELECT COUNT(*) AS c FROM error_groups').get()).c);
+    if (left === 0) return;
+  }
+  throw new Error('the error intake kept writing while the suite tried to reset');
 });
 
-const groups = () => db.prepare('SELECT * FROM error_groups').all();
-const events = () => db.prepare('SELECT * FROM error_events').all();
+const groups = async () => await db.prepare('SELECT * FROM error_groups').all();
+const events = async () => await db.prepare('SELECT * FROM error_events').all();
 
 /** Raw POST, so a non-JSON or oversized body can be sent deliberately. */
 const post = (body, headers = {}) =>
@@ -49,7 +70,74 @@ const post = (body, headers = {}) =>
     body: typeof body === 'string' ? body : JSON.stringify(body),
   });
 
-const report = (over = {}) => post({ kind: 'TypeError', message: 'client boom', route: '/events', ...over });
+/**
+ * The intake answers 202 BEFORE it writes, deliberately.
+ *
+ * `POST /api/errors/report` sends its response first and records afterwards, so
+ * that a reporting failure can never become a client-visible failure on a path
+ * with no session to recover. That is the behaviour, and it is correct.
+ *
+ * It also means the response arriving says nothing about the row existing. On
+ * SQLite the write was synchronous, so it had always landed by the time `fetch`
+ * resolved and every assertion below could read immediately — an accident of the
+ * engine, not a guarantee the endpoint makes. On PostgreSQL the write is a real
+ * round-trip and the read overtakes it.
+ *
+ * So the wait is explicit. Nothing is weakened: the assertions still check the
+ * stored row's exact contents, and a report that never lands still fails, just
+ * with a timeout instead of a confusing `undefined`.
+ *
+ * ── Total occurrences across every group — a counter that only ever goes up.
+ *
+ * Waiting for "the row count stopped changing" is not enough: two consecutive
+ * reads both see zero before the write has even begun, and the wait returns
+ * immediately. Every accepted report increments this by exactly one, whether it
+ * creates a group or collapses into an existing one, so waiting for it to RISE
+ * is a positive signal rather than the absence of one.
+ */
+const recorded = async () =>
+  (await groups()).reduce((n, g) => n + Number(g.occurrences ?? 0), 0);
+
+/**
+ * Blocks until the report has fully landed — GROUP and EVENT — or fails loudly.
+ *
+ * Waiting only on the occurrence counter is not enough. `recordError` writes the
+ * group first and the event row after it, so a wait that stops at the group can
+ * return while the event insert is still in flight. Tests that read
+ * `events()[0]` then saw an empty array, intermittently: two of three
+ * consecutive suite runs failed here on different cases.
+ *
+ * So the event count is settled too, by reading it twice with a tick between.
+ * The counter rising is the positive signal that work happened; the second read
+ * is what confirms the tail of it finished.
+ */
+const waitForRecord = async (before) => {
+  for (let i = 0; i < 300; i += 1) {
+    if (await recorded() > before) break;
+    await new Promise(r => setTimeout(r, 10));
+    if (i === 299) throw new Error('the intake accepted a report that was never recorded');
+  }
+  let last = -1;
+  for (let i = 0; i < 300; i += 1) {
+    const n = (await events()).length;
+    if (n === last) return;
+    last = n;
+    await new Promise(r => setTimeout(r, 10));
+  }
+  throw new Error('the intake never stopped writing event rows');
+};
+
+/**
+ * `{ records: false }` is for the one case that makes recording FAIL on
+ * purpose. Waiting there would time out on the thing the test is asserting.
+ */
+const report = async (over = {}, { records = true } = {}) => {
+  const before = await recorded();
+  const res = await post({ kind: 'TypeError', message: 'client boom', route: '/events', ...over });
+  /* A refused body never reaches the reporter, so only a 202 is waited on. */
+  if (res.status === 202 && records) await waitForRecord(before);
+  return res;
+};
 
 describe('intake: accepts a report without a session', () => {
   it('answers 202 and stores one group and one event', async () => {
@@ -57,40 +145,44 @@ describe('intake: accepts a report without a session', () => {
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ accepted: true });
 
-    expect(groups().length).toBe(1);
-    expect(events().length).toBe(1);
-    expect(groups()[0]).toMatchObject({ source: 'client', kind: 'TypeError', status: 'open', occurrences: 1 });
+    expect((await groups()).length).toBe(1);
+    expect((await events()).length).toBe(1);
+    expect((await groups())[0]).toMatchObject({ source: 'client', kind: 'TypeError', status: 'open', occurrences: 1 });
   });
 
   it('leaves user_hash null when nobody is signed in, and sets it when they are', async () => {
     await report({ message: 'anon report' });
-    expect(events()[0].user_hash).toBeNull();
+    expect((await events())[0].user_hash).toBeNull();
 
     const cookie = await srv.login('leo.chen@example.com');
+    const before = await recorded();
     const res = await fetch(`${srv.base}/api/errors/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: `wev_session=${cookie}` },
       body: JSON.stringify({ kind: 'TypeError', message: 'signed-in report', route: '/events' }),
     });
     expect(res.status).toBe(202);
+    await waitForRecord(before);
 
-    const signedIn = groups().find(g => g.message.includes('signed-in'));
-    const ev = db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
+    const signedIn = (await groups()).find(g => g.message.includes('signed-in'));
+    const ev = await db.prepare('SELECT * FROM error_events WHERE fingerprint = ?').get(signedIn.fingerprint);
     expect(ev.user_hash).toMatch(/^[0-9a-f]{32}$/);
     // A hash, never the id.
-    expect(JSON.stringify(events())).not.toContain('user-student-1');
+    expect(JSON.stringify(await events())).not.toContain('user-student-1');
   });
 
   it('answers 202 for a garbage or expired session rather than 401', async () => {
     // A broken session is one of the states most worth hearing about; refusing
     // the report would also make this endpoint a token-validity oracle.
+    const before = await recorded();
     const res = await post(
       { kind: 'Error', message: 'broken session report', route: '/login' },
       { Cookie: 'wev_session=not-a-real-token' }
     );
     expect(res.status).toBe(202);
-    expect(groups().length).toBe(1);
-    expect(events()[0].user_hash).toBeNull();
+    await waitForRecord(before);
+    expect((await groups()).length).toBe(1);
+    expect((await events())[0].user_hash).toBeNull();
   });
 });
 
@@ -111,7 +203,7 @@ describe('intake: the client cannot assign what the server owns', () => {
     });
     expect(res.status).toBe(202);
 
-    const [g] = groups();
+    const [g] = await groups();
     expect(g.source, 'a client escaped the client ceiling by claiming to be the server').toBe('client');
     expect(g.release).not.toBe('9.9.9-attacker');
     expect(g.status).toBe('open');
@@ -121,7 +213,7 @@ describe('intake: the client cannot assign what the server owns', () => {
     expect(g.fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(g.first_seen_at.startsWith('1999'), 'a client backdated its own report').toBe(false);
 
-    const ev = events()[0];
+    const ev = (await events())[0];
     expect(ev.user_hash).not.toBe('attacker-chosen-hash');
     expect(ev.occurred_at.startsWith('1999')).toBe(false);
   });
@@ -131,7 +223,7 @@ describe('intake: the client cannot assign what the server owns', () => {
       context: { component: 'Login', password: 'hunter2', newEmail: 'a@b.com', challengeId: 'reauth-xyz' },
       message: 'context probe',
     });
-    const ctx = events()[0].context ?? '';
+    const ctx = (await events())[0].context ?? '';
     expect(ctx).toContain('Login');
     for (const leak of ['hunter2', 'a@b.com', 'reauth-xyz', 'password', 'newEmail', 'challengeId']) {
       expect(ctx, `${leak} reached the context column`).not.toContain(leak);
@@ -142,49 +234,49 @@ describe('intake: the client cannot assign what the server owns', () => {
 describe('intake: fingerprints', () => {
   it('collapses identical reports into one group', async () => {
     for (let i = 0; i < 4; i++) await report({ message: 'the same failure' });
-    expect(groups().length).toBe(1);
-    expect(groups()[0].occurrences).toBe(4);
+    expect((await groups()).length).toBe(1);
+    expect((await groups())[0].occurrences).toBe(4);
   });
 
   it('separates genuinely different reports', async () => {
     await report({ message: 'alpha failure' });
     await report({ message: 'beta failure' });
     await report({ message: 'alpha failure', kind: 'RangeError' });
-    expect(groups().length).toBe(3);
+    expect((await groups()).length).toBe(3);
   });
 });
 
 describe('intake: route privacy, asserted on stored values', () => {
-  const storedRoute = () => groups()[0].route;
+  const storedRoute = async () => (await groups())[0].route;
 
   it('never persists a query string', async () => {
     await report({ route: '/events?q=12%20Maple%20Ave&city=Princeton' });
-    expect(storedRoute()).toBe('/events');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('Maple');
+    expect(await storedRoute()).toBe('/events');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('Maple');
   });
 
   it('never persists a fragment', async () => {
     await report({ route: '/calendar#section-private' });
-    expect(storedRoute()).toBe('/calendar');
-    expect(JSON.stringify(groups())).not.toContain('section-private');
+    expect(await storedRoute()).toBe('/calendar');
+    expect(JSON.stringify(await groups())).not.toContain('section-private');
   });
 
   it('never persists an email carried in a route', async () => {
     await report({ route: '/login?email=leo.chen@example.com' });
-    expect(storedRoute()).toBe('/login');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('leo.chen@example.com');
+    expect(await storedRoute()).toBe('/login');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('leo.chen@example.com');
   });
 
   it('never persists a token carried in a route', async () => {
     await report({ route: '/reset-password?token=eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.sig' });
-    expect(storedRoute()).toBe('/reset-password');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('eyJhbGci');
+    expect(await storedRoute()).toBe('/reset-password');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('eyJhbGci');
   });
 
   it('never persists a real id sitting in a path parameter', async () => {
     await report({ route: '/checkin/event-softball-2026' });
-    expect(storedRoute()).toBe('/checkin/:eventId');
-    expect(JSON.stringify(groups())).not.toContain('softball');
+    expect(await storedRoute()).toBe('/checkin/:eventId');
+    expect(JSON.stringify(await groups())).not.toContain('softball');
   });
 
   /**
@@ -195,8 +287,8 @@ describe('intake: route privacy, asserted on stored values', () => {
    */
   it('stores unknown for /users/user-student-2/profile, and keeps the id out', async () => {
     await report({ route: '/users/user-student-2/profile' });
-    expect(storedRoute()).toBe('unknown');
-    expect(JSON.stringify([...groups(), ...events()])).not.toContain('user-student-2');
+    expect(await storedRoute()).toBe('unknown');
+    expect(JSON.stringify([...await groups(), ...await events()])).not.toContain('user-student-2');
   });
 
   it('stores unknown for arbitrary and hostile paths, never the raw path', async () => {
@@ -204,19 +296,19 @@ describe('intake: route privacy, asserted on stored values', () => {
       '/admin/secret-panel', '/../../etc/passwd', '//evil.com/x',
       'https://evil.com/events', 'not-a-path', '/' + 'a'.repeat(4000),
     ]) {
-      db.prepare('DELETE FROM error_groups').run();
+      await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: hostile, message: `hostile ${hostile.slice(0, 12)}` });
       expect(res.status).toBe(202);
-      expect(storedRoute(), `${hostile} was stored raw`).toBe('unknown');
+      expect(await storedRoute(), `${hostile} was stored raw`).toBe('unknown');
     }
   });
 
   it('neutralises a route that is not a string at all', async () => {
     for (const bad of [null, 42, { a: 1 }, ['/events'], true]) {
-      db.prepare('DELETE FROM error_groups').run();
+      await db.prepare('DELETE FROM error_groups').run();
       const res = await report({ route: bad, message: 'non-string route' });
       expect(res.status, 'intake failed on hostile input instead of neutralising it').toBe(202);
-      expect(storedRoute()).toBe('unknown');
+      expect(await storedRoute()).toBe('unknown');
     }
   });
 
@@ -231,7 +323,7 @@ describe('intake: route privacy, asserted on stored values', () => {
       await report({ route, message: `sweep ${String(route).slice(0, 10)}` });
     }
 
-    const stored = new Set(groups().map(g => g.route).filter(Boolean));
+    const stored = new Set((await groups()).map(g => g.route).filter(Boolean));
     for (const r of stored) {
       expect(allowed.has(r), `stored route "${r}" is outside the approved set`).toBe(true);
     }
@@ -255,12 +347,12 @@ describe('intake: the ceiling is a bound, not an oracle', () => {
 
     expect([...statuses], 'the response varied, which tells an attacker when the ceiling was hit').toEqual([202]);
 
-    const real = db.prepare(
+    const real = (await db.prepare(
       "SELECT COUNT(*) c FROM error_groups WHERE source = 'client' AND fingerprint != ?"
-    ).get(OVERFLOW_FINGERPRINT).c;
+    ).get(OVERFLOW_FINGERPRINT)).c;
     expect(real).toBeLessThanOrEqual(CLIENT_GROUP_CEILING);
 
-    const overflow = db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
+    const overflow = await db.prepare('SELECT * FROM error_groups WHERE fingerprint = ?').get(OVERFLOW_FINGERPRINT);
     expect(overflow, 'the flood vanished silently instead of being counted').toBeTruthy();
     expect(overflow.occurrences).toBeGreaterThan(0);
   }, 120000);
@@ -271,7 +363,7 @@ describe('intake: failures never reach the client', () => {
     const reporter = await import('./errorReporter.js');
     const spy = vi.spyOn(reporter, 'recordError').mockImplementation(() => { throw new Error('reporter exploded'); });
 
-    const res = await report({ message: 'resilience probe' });
+    const res = await report({ message: 'resilience probe' }, { records: false });
 
     const called = spy.mock.calls.length;
     spy.mockRestore();
@@ -279,7 +371,7 @@ describe('intake: failures never reach the client', () => {
     expect(called, 'the spy never intercepted — this test proves nothing').toBeGreaterThan(0);
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ accepted: true });
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('answers 202 for an empty object and an array body', async () => {
@@ -301,7 +393,7 @@ describe('intake: failures never reach the client', () => {
       const res = await post(body);
       expect(res.status, `body ${body} was accepted`).toBe(400);
     }
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('answers 400 for malformed JSON without leaking internals', async () => {
@@ -319,7 +411,7 @@ describe('intake: the 8 kB body cap actually engages', () => {
       res.status,
       'the 8 kB cap is not active — a route-level parser after the global one is a no-op'
     ).toBe(413);
-    expect(groups().length).toBe(0);
+    expect((await groups()).length).toBe(0);
   });
 
   it('accepts a body comfortably under the cap', async () => {

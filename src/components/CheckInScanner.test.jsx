@@ -49,7 +49,7 @@ describe('CheckInScanner', () => {
   describe('layering, which is a hard requirement on a phone', () => {
     it('renders through the modal overlay, which sits above the bottom navigation', () => {
       grantCamera();
-      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+      const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
 
       /**
        * The bottom navigation is `position: fixed; z-index: 100`. The modal
@@ -58,7 +58,7 @@ describe('CheckInScanner', () => {
        * camera inline inside CheckInView would put it underneath, on every
        * phone.
        */
-      expect(container.querySelector('.modal-overlay')).toBeTruthy();
+      expect(baseElement.querySelector('.modal-overlay')).toBeTruthy();
     });
 
     it('sets no z-index of its own', () => {
@@ -66,9 +66,9 @@ describe('CheckInScanner', () => {
          works until something else moves, and then it is a number nobody can
          reason about. */
       grantCamera();
-      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+      const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
 
-      for (const el of container.querySelectorAll('[style]')) {
+      for (const el of baseElement.querySelectorAll('[style]')) {
         expect(el.getAttribute('style')).not.toMatch(/z-index/i);
       }
     });
@@ -86,9 +86,9 @@ describe('CheckInScanner', () => {
       /* Laid out above and below the video rather than over it, so the preview
          can never occlude them at any width. */
       grantCamera();
-      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+      const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
 
-      const viewport = container.querySelector('.scanner-viewport');
+      const viewport = baseElement.querySelector('.scanner-viewport');
       expect(viewport).toBeTruthy();
       expect(viewport.querySelector('button')).toBeNull();
 
@@ -250,20 +250,20 @@ describe('CheckInScanner', () => {
       grantCamera();
       decodes('not-a-code');
 
-      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+      const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
 
       await screen.findAllByText(/isn't a WeVolunteer check-in code/);
-      expect(container.querySelector('.scanner-result.is-bad')).toBeTruthy();
+      expect(baseElement.querySelector('.scanner-result.is-bad')).toBeTruthy();
     });
 
     it('announces the refusal through the live region', async () => {
       grantCamera();
       decodes('not-a-code');
 
-      const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+      const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
 
       await waitFor(() => expect(
-        container.querySelector('[role="status"][aria-live="polite"]').textContent,
+        baseElement.querySelector('[role="status"][aria-live="polite"]').textContent,
       ).toMatch(/isn't a WeVolunteer check-in code/));
     });
   });
@@ -273,7 +273,7 @@ describe('CheckInScanner', () => {
        unmounts as the next scan begins — a region that disappears while it is
        being read announces nothing. */
     grantCamera();
-    const { container } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
-    expect(container.querySelector('[role="status"][aria-live="polite"]')).toBeTruthy();
+    const { baseElement } = render(<CheckInScanner eventId="e1" onClose={vi.fn()} />);
+    expect(baseElement.querySelector('[role="status"][aria-live="polite"]')).toBeTruthy();
   });
 });

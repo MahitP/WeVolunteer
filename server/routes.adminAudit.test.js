@@ -33,7 +33,7 @@ afterAll(async () => { await srv?.close(); });
 
 const auditRows = async (action) => {
   const { db } = await import('./db.js');
-  return db.prepare('SELECT * FROM admin_audit_logs WHERE action = ? ORDER BY created_at DESC').all(action);
+  return await db.prepare('SELECT * FROM admin_audit_logs WHERE action = ? ORDER BY created_at DESC').all(action);
 };
 
 /** Files a report as a student so there is something to moderate. */
@@ -46,7 +46,7 @@ async function fileReport() {
   }, student);
   expect([200, 201]).toContain(res.status);
   const { db } = await import('./db.js');
-  return db.prepare('SELECT id FROM reports ORDER BY created_at DESC LIMIT 1').get().id;
+  return (await db.prepare('SELECT id FROM reports ORDER BY created_at DESC LIMIT 1').get()).id;
 }
 
 describe('moderation decisions are recorded', () => {
@@ -106,7 +106,7 @@ describe('moderation decisions are recorded', () => {
 describe('the pre-existing audit trail still works', () => {
   it('logs organizer approval', async () => {
     const { db } = await import('./db.js');
-    const pending = db.prepare("SELECT id FROM users WHERE role='organizer' AND verified = 0 LIMIT 1").get();
+    const pending = await db.prepare("SELECT id FROM users WHERE role='organizer' AND verified = 0 LIMIT 1").get();
     if (!pending) return; // nothing pending in this seed
     const before = (await auditRows('APPROVE_ORGANIZER')).length;
     const res = await srv.call('POST', `/api/admin/organizers/${pending.id}/approve`, {}, admin);
@@ -118,7 +118,7 @@ describe('the pre-existing audit trail still works', () => {
 describe('every audit row is complete enough to act on', () => {
   it('has an actor, an action and a timestamp', async () => {
     const { db } = await import('./db.js');
-    const rows = db.prepare('SELECT * FROM admin_audit_logs').all();
+    const rows = await db.prepare('SELECT * FROM admin_audit_logs').all();
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       expect(r.admin_id, `row ${r.id} has no actor`).toBeTruthy();

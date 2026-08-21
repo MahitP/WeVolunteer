@@ -16,7 +16,8 @@
  */
 
 import express from 'express';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { can, requireCap } from '../authz.js';
 import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
@@ -43,15 +44,15 @@ const router = express.Router();
 /** Member and event counts, computed in the same statement as the row. */
 const ORG_SELECT = `
   SELECT o.*,
-         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS memberCount,
-         (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS eventCount
+         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+         (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
   FROM organizations o
 `;
 
 /** Loads an organization by slug or id, or answers 404. */
-function loadOrganization(req, res) {
+async function loadOrganization(req, res) {
   const key = req.params.key;
-  const row = db.prepare(`${ORG_SELECT} WHERE (o.slug = ? COLLATE NOCASE OR o.id = ?)`).get(key, key);
+  const row = await db.prepare(`${ORG_SELECT} WHERE (o.slug = ? COLLATE nocase OR o.id = ?)`).get(key, key);
   if (!row) {
     res.status(404).json({ error: 'No such organization.', code: 'not_found' });
     return null;
@@ -66,7 +67,7 @@ function loadOrganization(req, res) {
  * name; this is the "show me what exists" list, and it is bounded for the same
  * reason that one is.
  */
-router.get('/api/organizations', authenticateToken, requireCap('directory.read'), (req, res) => {
+router.get('/api/organizations', authenticateToken, requireCap('directory.read'), async (req, res) => {
   const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
   const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
   const mineOnly = req.query.mine === 'true';
@@ -76,12 +77,17 @@ router.get('/api/organizations', authenticateToken, requireCap('directory.read')
        from the ones they merely belong to. Without it every organization on the
        "mine" list looks the same and the page cannot offer Manage on the right
        ones — which is the whole point of that page. */
-    ? db.prepare(`${ORG_SELECT.replace('SELECT o.*', 'SELECT o.*, mm.member_role AS viewer_role')}
+    ? await db.prepare(`${ORG_SELECT.replace('SELECT o.*', 'SELECT o.*, mm.member_role AS viewer_role')}
         JOIN organization_members mm ON mm.organization_id = o.id AND mm.user_id = ?
-        WHERE o.status = 'active' ORDER BY o.name COLLATE NOCASE LIMIT ? OFFSET ?`)
+        WHERE o.status = 'active' ORDER BY o.name COLLATE nocase LIMIT ? OFFSET ?`)
       .all(req.principal.userId, limit + 1, offset)
-    : db.prepare(`${ORG_SELECT} WHERE o.status = 'active'
-        ORDER BY memberCount DESC, o.name COLLATE NOCASE LIMIT ? OFFSET ?`)
+    /* `"memberCount"` is QUOTED here because it is quoted where ORG_SELECT
+       defines it. PostgreSQL folds an unquoted identifier to lower case, so a
+       bare `memberCount` looks for `membercount`, which does not exist — and
+       this is an ORDER BY, so the whole query fails rather than sorting oddly.
+       SQLite matched it either way, which is why it shipped. */
+    : await db.prepare(`${ORG_SELECT} WHERE o.status = 'active'
+        ORDER BY "memberCount" DESC, o.name COLLATE nocase LIMIT ? OFFSET ?`)
       .all(limit + 1, offset);
 
   res.json({
@@ -98,8 +104,8 @@ router.get('/api/organizations', authenticateToken, requireCap('directory.read')
  * roster must not become the route by which somebody reads a field a profile
  * would have withheld.
  */
-router.get('/api/organizations/:key', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.get('/api/organizations/:key', authenticateToken, requireCap('directory.read'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
 
   /**
@@ -119,20 +125,20 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    * than 403 for everybody else, matching `loadOrganization`: a distinguishable
    * refusal would confirm the organization exists.
    */
-  const mayManage = canManage(db, row.id, req.principal.userId, {
+  const mayManage = await canManage(db, row.id, req.principal.userId, {
     hasModerate: can(req.principal, 'organization.moderate'),
   });
   if (row.status !== 'active' && !mayManage) {
     return res.status(404).json({ error: 'No such organization.', code: 'not_found' });
   }
 
-  const members = db.prepare(`
+  const members = await db.prepare(`
     SELECT u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location,
-           m.member_role AS memberRole, m.joined_at AS joinedAt
+           m.member_role AS "memberRole", m.joined_at AS "joinedAt"
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'
-    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE NOCASE
+    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE nocase
     LIMIT 100
   `).all(row.id);
 
@@ -141,17 +147,17 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    * organization page is a shop window, and an event that is not happening is
    * not something to advertise.
    */
-  const events = db.prepare(`
-    SELECT e.id, e.title, e.category, e.location, e.status, e.credits_hours AS creditsHours,
-           e.application_deadline AS applicationDeadline,
-           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS startsAt
+  const events = await db.prepare(`
+    SELECT e.id, e.title, e.category, e.location, e.status, e.credits_hours AS "creditsHours",
+           e.application_deadline AS "applicationDeadline",
+           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS "startsAt"
     FROM events e
     WHERE e.organization_id = ? AND e.status <> 'cancelled'
-    ORDER BY startsAt DESC
+    ORDER BY "startsAt" DESC
     LIMIT 50
   `).all(row.id);
 
-  const membership = db.prepare(
+  const membership = await db.prepare(
     'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(row.id, req.principal.userId);
 
@@ -180,8 +186,8 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    * ranked classmates by hours is a leaderboard nobody asked for, and on a page
    * about a school club it would read as one.
    */
-  const viewerHours = organizationHoursForUser(db, row.id, req.principal.userId);
-  const memberHours = mayManage ? organizationHoursByUser(db, row.id) : null;
+  const viewerHours = await organizationHoursForUser(db, row.id, req.principal.userId);
+  const memberHours = mayManage ? await organizationHoursByUser(db, row.id) : null;
 
   res.json({
     organization: formatOrganization(row),
@@ -213,27 +219,49 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
          Student Organizer Agreement was shown the composer and met a 403 on
          save — the same defect this file fixed one route over. */
       canPost: can(req.principal, 'organization.post.create')
-        && canHelpRun(db, row.id, req.principal.userId, {
+        && await canHelpRun(db, row.id, req.principal.userId, {
           hasModerate: can(req.principal, 'organization.moderate'),
         }),
       hours: viewerHours.hours,
       events: viewerHours.events,
-      history: organizationHistoryForUser(db, row.id, req.principal.userId),
+      history: await organizationHistoryForUser(db, row.id, req.principal.userId),
+      /**
+       * Whether the viewer is banned from here, and what they can do about it.
+       *
+       * ── Why the client is told at all ──
+       *
+       * The ban itself is enforced on the join route and nowhere else — that is
+       * the security boundary and it does not move. This exists so the page can
+       * stop OFFERING an action the server will refuse: a banned student was
+       * shown an ordinary Join button, pressed it, and got an error. The button
+       * was not a hole, it was a lie.
+       *
+       * ── Why the reason travels but the banner's name does not ──
+       *
+       * A person told they are banned and not told why has nothing to appeal
+       * against, so the reason is theirs to see; the schema makes it NOT NULL for
+       * that reason. Who pressed the button is a different matter — it is the
+       * club's decision rather than an individual's (see the appeals note further
+       * down), and naming one manager to the person they excluded invites the
+       * conversation to go around the process rather than through it. Managers
+       * see it in the moderation list; the subject does not.
+       */
+      ban: await viewerBanState(row.id, req.principal.userId),
     },
-    totals: mayManage ? organizationHoursTotal(db, row.id) : null,
+    totals: mayManage ? await organizationHoursTotal(db, row.id) : null,
   });
 });
 
 /** Create one. The creator becomes its first manager, in the same transaction. */
-router.post('/api/organizations', authenticateToken, requireCap('organization.create'), (req, res) => {
+router.post('/api/organizations', authenticateToken, requireCap('organization.create'), async (req, res) => {
   const check = validateOrganization(req.body ?? {});
   if (!check.ok) return res.status(400).json({ error: check.error, field: check.field });
 
-  const creator = db.prepare('SELECT id, name FROM users WHERE id = ?').get(req.principal.userId);
+  const creator = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(req.principal.userId);
   let orgId;
   try {
-    inTransaction(() => {
-      orgId = createOrganization(db, {
+    await runInTransaction(db, async (tx) => {
+      orgId = await createOrganization(tx, {
         name: check.value.name,
         description: check.value.description ?? '',
         tags: check.value.tags ?? [],
@@ -245,15 +273,15 @@ router.post('/api/organizations', authenticateToken, requireCap('organization.cr
     return res.status(500).json({ error: 'Could not create the organization.' });
   }
 
-  const row = db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(orgId);
+  const row = await db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(orgId);
   res.status(201).json({ organization: formatOrganization(row) });
 });
 
 /** Edit one. Managers of that organization, or a moderator. */
-router.patch('/api/organizations/:key', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.patch('/api/organizations/:key', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
   }
 
@@ -273,7 +301,7 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
      * there is no evidence yet that anybody needs one; adding it later is
      * additive.
      */
-    if (check.value.name !== row.name) { updates.push('slug = ?'); values.push(uniqueSlug(db, check.value.name)); }
+    if (check.value.name !== row.name) { updates.push('slug = ?'); values.push(await uniqueSlug(db, check.value.name)); }
   }
   if (check.value.description !== undefined) { updates.push('description = ?'); values.push(check.value.description); }
   if (check.value.tags !== undefined) { updates.push('tags = ?'); values.push(JSON.stringify(check.value.tags)); }
@@ -296,14 +324,14 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(row.id);
-  db.prepare(`UPDATE organizations SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await db.prepare(`UPDATE organizations SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-  res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
+  res.json({ organization: formatOrganization(await db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
 });
 
 /** Join. Idempotent — tapping Join twice is not an error worth an error page. */
-router.post('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.post('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
   if (row.status !== 'active') {
     return res.status(409).json({ error: 'That organization is no longer accepting members.', code: 'archived' });
@@ -317,7 +345,7 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
    * exactly the case the record exists for. `lifted_at IS NULL` is what makes a
    * lifted ban stop applying without deleting the fact that it happened.
    */
-  const ban = db.prepare(`
+  const ban = await db.prepare(`
     SELECT reason FROM organization_bans
     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
   `).get(row.id, req.principal.userId);
@@ -329,13 +357,13 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
     });
   }
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
     VALUES (?, ?, 'member', ?)
     ON CONFLICT(organization_id, user_id) DO NOTHING
   `).run(row.id, req.principal.userId, new Date().toISOString());
 
-  res.json({ isMember: true, memberCount: countMembers(row.id) });
+  res.json({ isMember: true, memberCount: await countMembers(row.id) });
 });
 
 /**
@@ -346,19 +374,19 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
  * administrator, and only if somebody notices. Refusing is a far better answer
  * than silently creating orphans.
  */
-router.delete('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.delete('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
 
-  const mine = db.prepare(
+  const mine = await db.prepare(
     'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(row.id, req.principal.userId);
-  if (!mine) return res.json({ isMember: false, memberCount: countMembers(row.id) });
+  if (!mine) return res.json({ isMember: false, memberCount: await countMembers(row.id) });
 
   if (mine.member_role === 'manager') {
-    const managers = db.prepare(
+    const managers = (await db.prepare(
       `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
-    ).get(row.id).n;
+    ).get(row.id)).n;
     if (managers <= 1) {
       return res.status(409).json({
         error: 'You are the only manager. Make somebody else a manager before you leave.',
@@ -370,13 +398,13 @@ router.delete('/api/organizations/:key/membership', authenticateToken, requireCa
   /* One transaction, for the reason the removal route gives: a throw between
      the two statements would leave somebody who has walked out of the club
      still holding the rank it granted. */
-  inTransaction(() => {
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+  await runInTransaction(db, async (tx) => {
+    await tx.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(row.id, req.principal.userId);
     /* Walking out of the club you helped run takes the rank with you. */
-    syncOrganizerCapabilities(db, req.principal.userId, req.principal.userId);
+    await syncOrganizerCapabilities(tx, req.principal.userId, req.principal.userId);
   });
-  res.json({ isMember: false, memberCount: countMembers(row.id) });
+  res.json({ isMember: false, memberCount: await countMembers(row.id) });
 });
 
 /**
@@ -410,14 +438,14 @@ router.delete('/api/organizations/:key/membership', authenticateToken, requireCa
  * clicks their own row gets an error telling them to use a different button for
  * the same thing, and `DELETE …/membership` already exists for exactly this.
  */
-router.delete('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.delete('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
   }
 
-  const target = db.prepare(
+  const target = await db.prepare(
     'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(row.id, req.params.userId);
   if (!target) {
@@ -425,9 +453,9 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
   }
 
   if (target.member_role === 'manager') {
-    const managers = db.prepare(
+    const managers = (await db.prepare(
       `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
-    ).get(row.id).n;
+    ).get(row.id)).n;
     if (managers <= 1) {
       return res.status(409).json({
         error: 'This is the only manager. Make somebody else a manager first.',
@@ -472,22 +500,44 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
 
   const now = new Date().toISOString();
 
-  inTransaction(() => {
-    db.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
+  await runInTransaction(db, async (tx) => {
+    await tx.prepare('DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?')
       .run(row.id, req.params.userId);
     /* Inside the transaction with the removal, so a rollback cannot leave the
        capability behind on somebody the club believes it has just removed. */
-    syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
+    await syncOrganizerCapabilities(tx, req.params.userId, req.principal.userId);
 
     if (mode === 'ban') {
       /* `INSERT OR IGNORE` against the partial unique index: banning somebody
          already banned is the state the caller wanted, not an error. */
-      db.prepare(`
-        INSERT OR IGNORE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+      await tx.prepare(`
+        INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (organization_id, user_id) WHERE lifted_at IS NULL DO NOTHING
       `).run(`orgban-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         row.id, req.params.userId, req.principal.userId, reason, now);
     }
+  });
+
+  /**
+   * On the audit log, not only in a notification to the person affected.
+   *
+   * The notification below tells the subject. It does not produce a record the
+   * club or an administrator can read later — so "who banned this student, and
+   * when" was answerable only by reading `organization_bans` directly, and a
+   * plain removal left no trace at all. Both are moderation actions taken over
+   * somebody else's participation, and both belong in the same log as every
+   * other one.
+   */
+  await recordAudit(db, {
+    adminId: req.principal.userId,
+    action: mode === 'ban' ? 'ORGANIZATION_BANNED' : 'ORGANIZATION_MEMBERSHIP_REMOVED',
+    targetUserId: req.params.userId,
+    /* The reason is already stored on the ban row, where an appeal is heard
+       against it. It is repeated here so the audit line stands on its own. */
+    details: mode === 'ban'
+      ? `Banned from ${row.name} (${row.id}): ${reason}`
+      : `Removed from ${row.name} (${row.id})`,
   });
 
   /**
@@ -496,8 +546,8 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
    * Dispatched outside the transaction: a notification that fails must not roll
    * back a removal the manager has already been shown as done.
    */
-  const actor = db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
-  notificationService.dispatch(
+  const actor = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+  await notificationService.dispatch(
     mode === 'ban' ? 'ORGANIZATION_BANNED' : 'ORGANIZATION_MEMBERSHIP_REMOVED',
     {
       organizationName: row.name,
@@ -514,15 +564,15 @@ router.delete('/api/organizations/:key/members/:userId', authenticateToken, requ
     userId: req.params.userId,
     isMember: false,
     banned: mode === 'ban',
-    memberCount: countMembers(row.id),
+    memberCount: await countMembers(row.id),
   });
 });
 
 /** Promote or demote a member. Managers only. */
-router.patch('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.patch('/api/organizations/:key/members/:userId', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
   }
   const memberRole = req.body?.memberRole;
@@ -550,13 +600,13 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
    * somewhere else.
    */
   if (memberRole !== 'manager') {
-    const current = db.prepare(
+    const current = await db.prepare(
       'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
     ).get(row.id, req.params.userId);
     if (current?.member_role === 'manager') {
-      const managers = db.prepare(
+      const managers = (await db.prepare(
         `SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ? AND member_role = 'manager'`
-      ).get(row.id).n;
+      ).get(row.id)).n;
       if (managers <= 1) {
         return res.status(409).json({
           error: 'This is the only manager. Make somebody else a manager first.',
@@ -570,10 +620,10 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
      throw in between would leave a demoted member holding what the rank gave
      them, which is the one state this pair exists to make impossible. */
   let changes = 0;
-  inTransaction(() => {
-    changes = db.prepare(
+  await runInTransaction(db, async (tx) => {
+    changes = (await tx.prepare(
       'UPDATE organization_members SET member_role = ? WHERE organization_id = ? AND user_id = ?'
-    ).run(memberRole, row.id, req.params.userId).changes;
+    ).run(memberRole, row.id, req.params.userId)).changes;
     if (!changes) return;
 
     /**
@@ -582,7 +632,7 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
      * Student Organizer in another, and reading the new value alone would strip
      * a rank they still hold somewhere else.
      */
-    syncOrganizerCapabilities(db, req.params.userId, req.principal.userId);
+    await syncOrganizerCapabilities(tx, req.params.userId, req.principal.userId);
   });
   if (!changes) return res.status(404).json({ error: 'That person is not a member.', code: 'not_member' });
 
@@ -595,7 +645,7 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
    * usually students. "Who gave this person access, and when" had no answer
    * anywhere before this line.
    */
-  recordAudit(db, {
+  await recordAudit(db, {
     adminId: req.principal.userId,
     action: 'ORGANIZATION_RANK_CHANGED',
     targetUserId: req.params.userId,
@@ -605,9 +655,9 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
   res.json({ userId: req.params.userId, memberRole });
 });
 
-function countMembers(organizationId) {
-  return db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ?')
-    .get(organizationId).n;
+async function countMembers(organizationId) {
+  return (await db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ?')
+    .get(organizationId)).n;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -658,16 +708,16 @@ const ANNOUNCEMENT_SELECT = `
  * per announcement is how a club with forty posts becomes forty-one round
  * trips.
  */
-router.get('/api/organizations/:key/announcements', authenticateToken, requireCap('directory.read'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.get('/api/organizations/:key/announcements', authenticateToken, requireCap('directory.read'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
 
-  const announcements = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.organization_id = ? ORDER BY a.created_at DESC LIMIT 100`)
+  const announcements = await db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.organization_id = ? ORDER BY a.created_at DESC LIMIT 100`)
     .all(row.id);
   if (announcements.length === 0) return res.json({ announcements: [] });
 
   const placeholders = announcements.map(() => '?').join(',');
-  const replyRows = db.prepare(`
+  const replyRows = await db.prepare(`
     SELECT r.*, u.name AS author_name, u.avatar AS author_avatar
     FROM organization_announcement_replies r
     LEFT JOIN users u ON u.id = r.author_id
@@ -700,10 +750,10 @@ router.get('/api/organizations/:key/announcements', authenticateToken, requireCa
  * Without the second half any organizer could post as any club, which is
  * impersonation with a byline.
  */
-router.post('/api/organizations/:key/announcements', authenticateToken, requireCap('organization.post.create'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.post('/api/organizations/:key/announcements', authenticateToken, requireCap('organization.post.create'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only somebody who helps run this organization can post announcements.', code: 'not_manager' });
   }
   /**
@@ -730,12 +780,12 @@ router.post('/api/organizations/:key/announcements', authenticateToken, requireC
      organization — one setting in Manage Organization, no individual override.
      The column 041 created is left in place but is no longer consulted. */
   const id = `organn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organization_announcements (id, organization_id, author_id, body, created_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(id, row.id, req.principal.userId, body, new Date().toISOString());
 
-  const created = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(id);
+  const created = await db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(id);
   return res.status(201).json({ announcement: formatAnnouncement(created) });
 });
 
@@ -748,14 +798,14 @@ router.post('/api/organizations/:key/announcements', authenticateToken, requireC
  * would carry on believing they had been heard. A closed thread is what this
  * means everywhere else, so nobody has to be taught it.
  */
-router.patch('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.patch('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only somebody who helps run this organization can edit announcements.', code: 'not_manager' });
   }
 
-  const existing = db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
+  const existing = await db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
     .get(req.params.announcementId, row.id);
   if (!existing) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
 
@@ -774,21 +824,21 @@ router.patch('/api/organizations/:key/announcements/:announcementId', authentica
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(existing.id);
-  db.prepare(`UPDATE organization_announcements SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await db.prepare(`UPDATE organization_announcements SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-  const updated = db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(existing.id);
+  const updated = await db.prepare(`${ANNOUNCEMENT_SELECT} WHERE a.id = ?`).get(existing.id);
   return res.json({ announcement: formatAnnouncement(updated) });
 });
 
 /** Removing an announcement. Its replies cascade with it. */
-router.delete('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.delete('/api/organizations/:key/announcements/:announcementId', authenticateToken, requireCap('organization.post.manage'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canHelpRun(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only somebody who helps run this organization can delete announcements.', code: 'not_manager' });
   }
 
-  const result = db.prepare('DELETE FROM organization_announcements WHERE id = ? AND organization_id = ?')
+  const result = await db.prepare('DELETE FROM organization_announcements WHERE id = ? AND organization_id = ?')
     .run(req.params.announcementId, row.id);
   if (result.changes === 0) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
 
@@ -804,11 +854,11 @@ router.delete('/api/organizations/:key/announcements/:announcementId', authentic
  * announcement is addressed to the people in the club, and a stranger answering
  * it is a stranger in the room.
  */
-router.post('/api/organizations/:key/announcements/:announcementId/replies', authenticateToken, requireCap('organization.join'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.post('/api/organizations/:key/announcements/:announcementId/replies', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
 
-  const announcement = db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
+  const announcement = await db.prepare('SELECT * FROM organization_announcements WHERE id = ? AND organization_id = ?')
     .get(req.params.announcementId, row.id);
   if (!announcement) return res.status(404).json({ error: 'No such announcement.', code: 'not_found' });
 
@@ -823,7 +873,7 @@ router.post('/api/organizations/:key/announcements/:announcementId/replies', aut
     return res.status(409).json({ error: 'This organization has turned off replies.', code: 'replies_disabled' });
   }
 
-  const isMember = db.prepare('SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?')
+  const isMember = await db.prepare('SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?')
     .get(row.id, req.principal.userId);
   if (!isMember && !can(req.principal, 'organization.moderate')) {
     return res.status(403).json({ error: 'Join the organization to reply.', code: 'not_member' });
@@ -836,12 +886,12 @@ router.post('/api/organizations/:key/announcements/:announcementId/replies', aut
   }
 
   const id = `orgrep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO organization_announcement_replies (id, announcement_id, author_id, body, created_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(id, announcement.id, req.principal.userId, body, new Date().toISOString());
 
-  const created = db.prepare(`
+  const created = await db.prepare(`
     SELECT r.*, u.name AS author_name, u.avatar AS author_avatar
     FROM organization_announcement_replies r
     LEFT JOIN users u ON u.id = r.author_id
@@ -887,9 +937,9 @@ router.post('/api/organizations/:key/announcements/:announcementId/replies', aut
  * a logo is ugly in the worst case; cropping one is illegible.
  */
 router.post('/api/organizations/:key/image', authenticateToken, requireCap('organization.manage.own'), receiveAvatar, async (req, res) => {
-  const row = loadOrganization(req, res);
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only a manager of this organization can change its image.', code: 'not_manager' });
   }
   if (!req.file) return res.status(400).json({ error: 'No image provided.', code: 'no_file' });
@@ -913,7 +963,7 @@ router.post('/api/organizations/:key/image', authenticateToken, requireCap('orga
   }
 
   try {
-    const previous = db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id)?.image_url;
+    const previous = (await db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id))?.image_url;
 
     const filename = `org-${row.id}-${Date.now()}.webp`;
     await sharp(req.file.buffer)
@@ -922,14 +972,14 @@ router.post('/api/organizations/:key/image', authenticateToken, requireCap('orga
       .toFile(path.join(AVATAR_UPLOADS_DIR, filename));
 
     const relativeUrl = `/uploads/avatars/${filename}`;
-    db.prepare('UPDATE organizations SET image_url = ?, image_uploaded_at = ?, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE organizations SET image_url = ?, image_uploaded_at = ?, updated_at = ? WHERE id = ?')
       .run(relativeUrl, new Date().toISOString(), new Date().toISOString(), row.id);
 
     /* Written before the old one is removed, so a failed unlink leaves an
        orphaned file rather than an organization pointing at nothing. */
     if (previous && previous !== relativeUrl) deleteUploadedFile(previous);
 
-    return res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
+    return res.json({ organization: formatOrganization(await db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
   } catch (err) {
     console.error('Organization image upload error:', err.message);
     return res.status(500).json({ error: 'That image could not be saved.', code: 'upload_failed' });
@@ -937,19 +987,19 @@ router.post('/api/organizations/:key/image', authenticateToken, requireCap('orga
 });
 
 /** Removing it, falling the page back to the emoji and then the glyph. */
-router.delete('/api/organizations/:key/image', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadOrganization(req, res);
+router.delete('/api/organizations/:key/image', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadOrganization(req, res);
   if (!row) return undefined;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     return res.status(403).json({ error: 'Only a manager of this organization can change its image.', code: 'not_manager' });
   }
 
-  const previous = db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id)?.image_url;
-  db.prepare('UPDATE organizations SET image_url = NULL, image_uploaded_at = NULL, updated_at = ? WHERE id = ?')
+  const previous = (await db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id))?.image_url;
+  await db.prepare('UPDATE organizations SET image_url = NULL, image_uploaded_at = NULL, updated_at = ? WHERE id = ?')
     .run(new Date().toISOString(), row.id);
   if (previous) deleteUploadedFile(previous);
 
-  return res.json({ organization: formatOrganization(db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
+  return res.json({ organization: formatOrganization(await db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
 });
 
 /**
@@ -977,11 +1027,61 @@ router.delete('/api/organizations/:key/image', authenticateToken, requireCap('or
  * A parallel org-appeal system would have been a second thing to keep correct.
  */
 
+/**
+ * The viewer's own ban, and the state of any appeal against it.
+ *
+ * Returns `null` for the ordinary case — not banned — so the client's check is
+ * `viewer.ban && …` and an absent field cannot be mistaken for a ban.
+ *
+ * The appeal is looked up by `(user, subject, subject_ref)`, which is exactly the
+ * key `POST /api/appeals` enforces one-live-appeal-per on, so "is there an appeal
+ * open" is answered by the same rule that decides whether another may be filed.
+ * Without that agreement the button would offer an appeal the appeals route would
+ * then refuse as a duplicate.
+ */
+async function viewerBanState(organizationId, userId) {
+  if (!userId) return null;
+
+  const ban = await db.prepare(`
+    SELECT id, reason, created_at
+      FROM organization_bans
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).get(organizationId, userId);
+  if (!ban) return null;
+
+  /* Only an appeal filed against THIS ban. An appeal about an older, already
+     lifted ban must not disable the button for a new one — that would leave
+     somebody banned a second time with no way to say anything about it. */
+  const appeal = await db.prepare(`
+    SELECT id, status, decision, created_at
+      FROM appeals
+     WHERE user_id = ? AND subject = 'organization_ban' AND subject_ref = ?
+       AND created_at >= ?
+     ORDER BY created_at DESC
+     LIMIT 1
+  `).get(userId, organizationId, ban.created_at);
+
+  return {
+    reason: ban.reason,
+    bannedAt: ban.created_at,
+    appeal: appeal
+      ? {
+        status: appeal.status,
+        decision: appeal.decision ?? null,
+        submittedAt: appeal.created_at,
+        /* The one thing the button needs: may another be filed? Derived here
+           rather than in the client so both ends read the same rule. */
+        pending: appeal.status === 'open' || appeal.status === 'reviewing',
+      }
+      : null,
+  };
+}
+
 /** The organization behind a request, or a refusal. Shared by the two routes below. */
-function loadManagedOrganization(req, res) {
-  const row = loadOrganization(req, res);
+async function loadManagedOrganization(req, res) {
+  const row = await loadOrganization(req, res);
   if (!row) return null;
-  if (!canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
+  if (!await canManage(db, row.id, req.principal.userId, { hasModerate: can(req.principal, 'organization.moderate') })) {
     res.status(403).json({ error: 'You do not manage this organization.', code: 'not_manager' });
     return null;
   }
@@ -995,11 +1095,11 @@ function loadManagedOrganization(req, res) {
  * read another's — the capability says "may manage an organization", and
  * `canManage` says which one.
  */
-router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadManagedOrganization(req, res);
+router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
   if (!row) return;
 
-  const appeals = db.prepare(`
+  const appeals = await db.prepare(`
     SELECT a.id, a.user_id, a.statement, a.status, a.decision, a.reasoning,
            a.created_at, a.updated_at, a.decided_at,
            a.reviewer_id, a.reviewer_name_snapshot,
@@ -1025,7 +1125,9 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
   `).all(row.id);
 
   res.json({
-    appeals: appeals.map(a => ({
+    /* `Promise.all` + an async callback: the issuer lookup below is a query, so
+       a bare `.map` would put pending promises in the response body. */
+    appeals: await Promise.all(appeals.map(async (a) => ({
       id: a.id,
       status: a.status,
       decision: a.decision,
@@ -1059,11 +1161,14 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
        * one was told they were the issuer. Since this route surfaces the
        * conflict rather than enforcing it, that flag is the whole safeguard.
        */
-      youIssuedThisBan: db.prepare(`
+      /* Parenthesised: `await x.get(…)?.banned_by` would await the PROPERTY of
+         a pending promise, which is `undefined`, and every manager would be
+         told they did not issue the ban. */
+      youIssuedThisBan: (await db.prepare(`
         SELECT banned_by FROM organization_bans
          WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
-      `).get(row.id, a.user_id)?.banned_by === req.principal.userId,
-    })),
+      `).get(row.id, a.user_id))?.banned_by === req.principal.userId,
+    }))),
   });
 });
 
@@ -1075,8 +1180,8 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
  * gains `lifted_at`/`lifted_by` rather than disappearing, because "banned, then
  * unbanned" is what an appeal produces and erasing it loses the outcome.
  */
-router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateToken, requireCap('organization.manage.own'), (req, res) => {
-  const row = loadManagedOrganization(req, res);
+router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
   if (!row) return;
 
   const { decision } = req.body || {};
@@ -1097,7 +1202,7 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
   /* Scoped in the WHERE clause, not checked afterwards: an appeal id from
      another organization simply does not match, so it cannot be decided by
      guessing an id. */
-  const appeal = db.prepare(`
+  const appeal = await db.prepare(`
     SELECT id, user_id, status FROM appeals
      WHERE id = ? AND subject = 'organization_ban' AND subject_ref = ?
   `).get(req.params.appealId, row.id);
@@ -1133,13 +1238,13 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
   }
 
   const now = new Date().toISOString();
-  const actor = db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+  const actor = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
 
   try {
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       /* Guarded on the status we read, so a concurrent decision loses rather
          than both appearing to win. */
-      const { changes } = db.prepare(`
+      const { changes } = await tx.prepare(`
         UPDATE appeals
            SET status = 'resolved', decision = ?, reasoning = ?, reviewer_id = ?,
                reviewer_name_snapshot = COALESCE(reviewer_name_snapshot, ?),
@@ -1162,7 +1267,7 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
          * ban, which nobody had appealed and nobody had reviewed. The reviewer's
          * screen showed them a statement about the first one.
          */
-        db.prepare(`
+        await tx.prepare(`
           UPDATE organization_bans
              SET lifted_at = ?, lifted_by = ?
            WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
@@ -1170,7 +1275,7 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
         `).run(now, req.principal.userId, row.id, appeal.user_id, appeal.id);
       }
 
-      recordAppealEvent(db, {
+      await recordAppealEvent(tx, {
         appealId: appeal.id,
         actorId: req.principal.userId,
         actorRole: 'organization_manager',
@@ -1188,9 +1293,20 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
     return res.status(500).json({ error: 'We could not record that decision. Please try again.' });
   }
 
+  /* The appeal's own history is in `appeal_events`, which is where a question
+     about the appeal belongs. This entry is for the other question — "what
+     moderation has happened in this club" — which reads the audit log and would
+     otherwise show the ban with no outcome beside it. */
+  await recordAudit(db, {
+    adminId: req.principal.userId,
+    action: decision === 'reversed' ? 'ORGANIZATION_BAN_APPEAL_REVERSED' : 'ORGANIZATION_BAN_APPEAL_STANDS',
+    targetUserId: appeal.user_id,
+    details: `Appeal against the ban in ${row.name} (${row.id}) ${decision === 'reversed' ? 'upheld; ban lifted' : 'denied; ban stands'}`,
+  });
+
   /* Outside the transaction: a notification that fails must not roll back a
      decision the manager has already been shown as made. */
-  notificationService.dispatch(
+  await notificationService.dispatch(
     decision === 'reversed' ? 'ORGANIZATION_BAN_APPEAL_REVERSED' : 'ORGANIZATION_BAN_APPEAL_STANDS',
     {
       organizationName: row.name,
@@ -1203,6 +1319,173 @@ router.post('/api/organizations/:key/appeals/:appealId/decision', authenticateTo
   );
 
   res.json({ id: appeal.id, status: 'resolved', decision });
+});
+
+/**
+ * Who is currently banned from this organization.
+ *
+ * ── Why this is its own route rather than part of the roster ──
+ *
+ * The roster answers "who is in this club". A banned person is precisely not,
+ * and folding them in would put somebody the club has excluded into every list
+ * that walks the membership — the events page, the hours totals, the member
+ * count. This is a moderation view, read by the moderation screen, and it is the
+ * only place the two meet.
+ *
+ * ── What a manager is shown, and what they are not ──
+ *
+ * Name, username and avatar so the person is identifiable; when, why, and who
+ * issued it, because a standing decision that nobody can attribute is one nobody
+ * can review; and the appeal state so the same screen answers "is this waiting on
+ * me". Nothing else about the account travels: `profileSummary` is the shared
+ * allowlist every other surface uses, so a new column on `users` does not become
+ * visible here by accident.
+ *
+ * Lifted bans are deliberately excluded. "Currently banned" is the question this
+ * answers, and a history of every ban ever lifted would bury it — the record of a
+ * lifted ban survives in the table and in the audit log, which is where a
+ * question about the past belongs.
+ */
+router.get('/api/organizations/:key/bans', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  /* `u.role` and `u.location` are selected because `profileSummary` reads them —
+     `distinction` is derived from the role. Omitting it rendered every banned
+     account as an ordinary one, a partner organization included. */
+  const bans = await db.prepare(`
+    SELECT b.id, b.user_id, b.reason, b.created_at, b.banned_by,
+           u.name, u.username, u.avatar, u.avatar_color, u.profile_picture_url,
+           u.role, u.location,
+           issuer.name AS banned_by_name
+      FROM organization_bans b
+      JOIN users u ON u.id = b.user_id
+      LEFT JOIN users issuer ON issuer.id = b.banned_by
+     WHERE b.organization_id = ? AND b.lifted_at IS NULL
+     ORDER BY b.created_at DESC
+  `).all(row.id);
+
+  /* One query for every appeal in this organization rather than one per banned
+     person: the list is small but the N+1 shape is what turns a moderation
+     screen into a slow one the first time a club bans twenty people. */
+  const appeals = await db.prepare(`
+    SELECT user_id, status, decision, created_at
+      FROM appeals
+     WHERE subject = 'organization_ban' AND subject_ref = ?
+     ORDER BY created_at DESC
+  `).all(row.id);
+  const latestAppeal = new Map();
+  for (const a of appeals) if (!latestAppeal.has(a.user_id)) latestAppeal.set(a.user_id, a);
+
+  res.json({
+    bans: bans.map(b => {
+      const appeal = latestAppeal.get(b.user_id);
+      /* Only an appeal filed against the ban that is still standing — the same
+         bound the decision route applies when it lifts one. */
+      const relevant = appeal && appeal.created_at >= b.created_at ? appeal : null;
+      return {
+        id: b.id,
+        user: profileSummary({
+          id: b.user_id,
+          name: b.name,
+          username: b.username,
+          avatar: b.avatar,
+          avatar_color: b.avatar_color,
+          profile_picture_url: b.profile_picture_url,
+          role: b.role,
+          location: b.location,
+        }),
+        reason: b.reason,
+        bannedAt: b.created_at,
+        bannedBy: b.banned_by ? { id: b.banned_by, name: b.banned_by_name } : null,
+        appeal: relevant
+          ? {
+            status: relevant.status,
+            decision: relevant.decision ?? null,
+            submittedAt: relevant.created_at,
+            pending: relevant.status === 'open' || relevant.status === 'reviewing',
+          }
+          : null,
+      };
+    }),
+  });
+});
+
+/**
+ * Lift a ban directly, with no appeal involved.
+ *
+ * ── Why this exists alongside the appeal decision route ──
+ *
+ * An appeal is ONE route to being unbanned, not the only one. A manager who bans
+ * the wrong person, or who simply changes their mind, must be able to undo it
+ * without requiring the person they excluded to first write a formal statement
+ * asking to be let back in. Making the subject perform an appeal for a mistake
+ * the club made is a bad rule, and it also produces a worse record: an appeal
+ * "granted" where nothing was ever contested.
+ *
+ * ── Why it is a lift and not a delete ──
+ *
+ * Same reason as everywhere else this table is touched. `lifted_at` is set and
+ * the row stays: that somebody was banned and then unbanned is the fact, and
+ * deleting the row would erase the ban along with its reversal.
+ *
+ * ── What it deliberately does NOT do ──
+ *
+ * It does not restore membership. A ban removed the membership row and lifting
+ * it means "you may join again", not "you are back in" — re-adding somebody to a
+ * club without their asking would be the mirror of the original problem. They
+ * join through the ordinary route, which now stops refusing them.
+ *
+ * An open appeal against the lifted ban is left open on purpose rather than
+ * auto-resolved. Deciding it is a separate act with a reasoning attached, and
+ * silently closing it here would file a decision nobody made under a manager's
+ * name. The moderation screen shows the appeal is still waiting.
+ */
+router.post('/api/organizations/:key/bans/:userId/lift', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const now = new Date().toISOString();
+
+  /* The UPDATE is the authorization on the ban's existence as well as the write:
+     `lifted_at IS NULL` means a second press, or two managers pressing at once,
+     cannot rewrite who lifted it or when. `changes === 0` is the honest 404. */
+  const { changes } = await db.prepare(`
+    UPDATE organization_bans
+       SET lifted_at = ?, lifted_by = ?
+     WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+  `).run(now, req.principal.userId, row.id, req.params.userId);
+
+  if (changes === 0) {
+    return res.status(404).json({
+      error: 'That person is not currently banned from this organization.',
+      code: 'not_banned',
+    });
+  }
+
+  await recordAudit(db, {
+    adminId: req.principal.userId,
+    action: 'ORGANIZATION_BAN_LIFTED',
+    targetUserId: req.params.userId,
+    details: `Lifted the ban in ${row.name} (${row.id}) without an appeal`,
+  });
+
+  /* Outside no transaction to roll back, but still after the write: a
+     notification that fails must not make a completed unban look failed. */
+  const actor = await db.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+  await notificationService.dispatch(
+    'ORGANIZATION_BAN_LIFTED',
+    {
+      organizationName: row.name,
+      organizationSlug: row.slug,
+      organizationId: row.id,
+      actorName: actor?.name || 'A manager',
+    },
+    req.params.userId,
+    `org-unban:${row.id}:${now}`,
+  );
+
+  res.json({ userId: req.params.userId, banned: false, liftedAt: now });
 });
 
 export default router;

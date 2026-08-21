@@ -633,6 +633,33 @@ export function can(principal, capability) {
    * WHAT to withhold and this function only enforces THAT it is withheld. See
    * `server/organizerAgreement.js`.
    */
+  /**
+   * ── Why a wrong TYPE here throws instead of being tolerated ──
+   *
+   * This was `Array.isArray(principal.withheld) && …`, which reads as
+   * defensive and is the opposite. A `withheld` that is not an array made the
+   * condition false, so the withholding check was **skipped and the capability
+   * granted** — silently, for every capability the caller meant to withhold.
+   *
+   * The PostgreSQL port makes that reachable. `withheldCapabilitiesFor` reads
+   * the database, so it is async now, and a caller that forgets to await it
+   * passes a Promise. `Array.isArray(promise)` is false, so an organizer who
+   * has not accepted the Organizer Agreement would silently get every withheld
+   * capability back — the exact enforcement this list exists to apply.
+   *
+   * A non-array is always a programming error: `principalFor` defaults it to
+   * `[]`, so the only way to get one is to pass something wrong. Refusing loudly
+   * turns a silent grant into a stack trace at the first request.
+   */
+  if (principal.withheld != null && !Array.isArray(principal.withheld)) {
+    throw new TypeError(
+      'principal.withheld must be an array — received '
+      + (typeof principal.withheld === 'object' && typeof principal.withheld.then === 'function'
+        ? 'a Promise, which means a caller did not await withheldCapabilitiesFor()'
+        : typeof principal.withheld)
+      + '. A non-array silently skipped the withholding check and GRANTED the capability.'
+    );
+  }
   if (Array.isArray(principal.withheld) && principal.withheld.includes(capability)) return false;
 
   /**
@@ -689,6 +716,22 @@ export function can(principal, capability) {
    */
   if (SUPER_ONLY_SET.has(capability)) return false;
   if (principal.actualRole && principal.actualRole !== role) return false;
+  /**
+   * A wrong TYPE throws, for the reason spelled out on the `withheld` check
+   * above: `Array.isArray(promise)` is false, so an unresolved `grants` would
+   * silently deny every granted capability instead of applying it.
+   * `buildPrincipal` resolves this eagerly; anything else is a programming
+   * error worth a stack trace.
+   */
+  if (principal.grants != null && !Array.isArray(principal.grants)) {
+    throw new TypeError(
+      'principal.grants must be an array — received '
+      + (typeof principal.grants === 'object' && typeof principal.grants.then === 'function'
+        ? 'a Promise, which means a caller did not await grantsFor()'
+        : typeof principal.grants)
+      + '. A non-array silently denied every user-capability grant.'
+    );
+  }
   return Array.isArray(principal.grants) && principal.grants.includes(capability);
 }
 

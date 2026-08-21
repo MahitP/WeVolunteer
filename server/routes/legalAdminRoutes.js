@@ -1,8 +1,10 @@
 import express from 'express';
+import { isUniqueViolation } from '../db/dialectSql.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import rateLimit from 'express-rate-limit';
 import { DEMO_MODE } from '../config.js';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
 import { requireCap, requireAAL2 } from '../authz.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
 import { recordAudit } from '../auditLog.js';
@@ -112,10 +114,10 @@ router.get(
   '/api/admin/legal/documents',
   authenticateToken,
   requireCap('legal.edit'),
-  (req, res) => {
+  async (req, res) => {
     try {
       res.json({
-        documents: effectiveDocuments(db).map(editorMeta),
+        documents: (await effectiveDocuments(db)).map(editorMeta),
         limits: { maxBodyLength: MAX_BODY_LENGTH },
       });
     } catch (err) {
@@ -137,17 +139,17 @@ router.get(
   '/api/admin/legal/documents/:slug',
   authenticateToken,
   requireCap('legal.edit'),
-  (req, res) => {
+  async (req, res) => {
     if (!documentBySlug(req.params.slug)) {
       return res.status(404).json({ error: 'No such legal document.' });
     }
 
     try {
-      const doc = resolveDocument(db, req.params.slug, { withBody: true });
+      const doc = await resolveDocument(db, req.params.slug, { withBody: true });
       res.json({
         ...editorMeta(doc),
         body: doc.body,
-        history: revisionHistory(db, doc.slug),
+        history: await revisionHistory(db, doc.slug),
       });
     } catch (err) {
       /* The file is unreadable or has lost its `## Draft` marker. A 500, not a
@@ -203,7 +205,7 @@ router.post(
   authenticateToken,
   requireCap('legal.edit'),
   requireAAL2('legal.publish'),
-  (req, res) => {
+  async (req, res) => {
     const { slug } = req.params;
     if (!documentBySlug(slug)) {
       return res.status(404).json({ error: 'No such legal document.' });
@@ -222,19 +224,19 @@ router.post(
        * owner's step-up grant still intact — they fix the field and press save
        * again without proving who they are a second time.
        */
-      validatePublication(db, { slug, version, body, effectiveAt });
+      await validatePublication(db, { slug, version, body, effectiveAt });
 
-      inTransaction(() => {
+      await runInTransaction(db, async (tx) => {
         /* Bound to the values about to be WRITTEN, never the ones the client
            claimed: `version` is the string that lands in the row. A grant taken
            out for the Cookie Notice at 1.0.1 cannot publish the Terms. */
-        spendChallenge(db, req, 'legal.publish', { slug, version });
+        await spendChallenge(tx, req, 'legal.publish', { slug, version });
 
-        const result = publishRevision(db, {
+        const result = await publishRevision(tx, {
           slug, body, version, effectiveAt, userId: req.user.id,
         });
 
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.user.id,
           action: 'LEGAL_DOCUMENT_PUBLISHED',
           targetUserId: null,
@@ -248,6 +250,27 @@ router.post(
       if (err instanceof LegalValidationError) {
         return res.status(400).json({ error: err.message, field: err.field });
       }
+      /**
+       * Two publishes of the same version, racing.
+       *
+       * Validation rejects a version that already exists, but under a
+       * connection pool both requests can pass that check before either has
+       * inserted — so the loser reaches the unique index instead, and answered
+       * 500. SQLite's process-wide write queue serialised them, so the second
+       * one saw the committed row and took the validation path.
+       *
+       * A 500 tells the editor their work may or may not have saved. This is an
+       * ordinary conflict and says so, with the same shape validation would have
+       * produced.
+       */
+      if (isUniqueViolation(err)) {
+        return res.status(409).json({
+          error: 'That version was just published by someone else. '
+            + 'Reload to see it, then publish your changes as a new version.',
+          field: 'version',
+        });
+      }
+
       console.error('Failed to publish legal document revision:', err);
       return res.status(500).json({
         error: 'This could not be saved. Your changes have not been lost — '
@@ -265,11 +288,11 @@ router.post(
      * because that is the value the reader will actually be served. A second
      * field carrying the same fact is a second field to keep in step.
      */
-    const doc = resolveDocument(db, slug, { withBody: true });
+    const doc = await resolveDocument(db, slug, { withBody: true });
     res.json({
       ...editorMeta(doc),
       body: doc.body,
-      history: revisionHistory(db, slug),
+      history: await revisionHistory(db, slug),
     });
   }
 );

@@ -60,3 +60,27 @@ afterEach(() => {
     + `Markers found: ${leaked.join(' ')}`,
   ).toEqual([]);
 });
+
+/**
+ * `ResizeObserver`, which jsdom does not implement.
+ *
+ * The mobile navigation measures its own scroll geometry to decide whether to
+ * show the "there is more this way" fade, and observes the strip so that a
+ * rotation or an opening keyboard re-measures. jsdom has no layout engine and
+ * no `ResizeObserver`, so without this every test that mounts the app shell
+ * throws `ResizeObserver is not defined` from an effect.
+ *
+ * A no-op is the honest stub rather than a lie: jsdom reports every element as
+ * zero-sized, so a faithful implementation would fire a resize that means
+ * nothing. What the component needs from the test environment is only that
+ * constructing one does not throw; the geometry it would report is not
+ * something jsdom can be asked about, and the fade is a visual affordance
+ * rather than behaviour a test should assert through a fake layout.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

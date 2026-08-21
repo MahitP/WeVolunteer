@@ -1,9 +1,11 @@
 import express from 'express';
 
 import {
-  authenticateToken, inTransaction,
+  authenticateToken,
   assignWaitlistOrder, promoteFromWaitlist, notifyPromotions
 } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
+import { forUpdate } from '../db/dialectSql.js';
 import { can, requireCap, requireCapAny } from '../authz.js';
 import { notificationService } from '../services/notificationService.js';
 import { friendsToNotify } from '../relationships.js';
@@ -17,7 +19,7 @@ import { slotHasStarted } from '../attendance.js';
 
 const router = express.Router();
 
-router.get('/api/applications', authenticateToken, (req, res) => {
+router.get('/api/applications', authenticateToken, async (req, res) => {
   try {
     let rows;
     const BASE_QUERY = `
@@ -89,10 +91,10 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     // default to seeing nothing, never to seeing everything.
     if (can(req.principal, 'application.read_all')) {
       // admin, and super_admin via the wildcard: every application.
-      rows = db.prepare(BASE_QUERY).all();
+      rows = await db.prepare(BASE_QUERY).all();
     } else if (can(req.principal, 'applicant.review')) {
       // organizer: applications to the events they host.
-      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
         .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'organization.event.manage.own')) {
       /**
@@ -107,11 +109,11 @@ router.get('/api/applications', authenticateToken, (req, res) => {
        * Scoped by the same rule `canRunEvent` applies: events they host, plus
        * events belonging to a club they manage.
        */
-      rows = db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
+      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
         .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
     } else if (can(req.principal, 'application.withdraw')) {
       // student: their own applications only.
-      rows = db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
+      rows = await db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
     } else {
       // No recognised capability (e.g. partner, deliberate correction v1.2a):
       // deny by default rather than falling through to unscoped access. Partner
@@ -123,7 +125,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     // Batch the volunteer history lookups once instead of three queries per
     // row — organizers sort and filter on these, so they load on every view.
     const historyByUser = new Map();
-    for (const h of db.prepare(`
+    for (const h of await db.prepare(`
       SELECT a.user_id,
              COALESCE(SUM(a.hours_awarded), 0) as total_hours,
              COUNT(DISTINCT a.event_id) as completed_events,
@@ -137,7 +139,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     }
 
     const attendanceByKey = new Map();
-    for (const a of db.prepare('SELECT slot_id, user_id, present, hours_awarded FROM attendance').all()) {
+    for (const a of await db.prepare('SELECT slot_id, user_id, present, hours_awarded FROM attendance').all()) {
       attendanceByKey.set(`${a.slot_id}:${a.user_id}`, a);
     }
 
@@ -160,10 +162,10 @@ router.get('/api/applications', authenticateToken, (req, res) => {
      * cannot un-see the number. The same argument the profile counts are built
      * on; see the note in volunteerStats.js.
      */
-    const participation = participationCountsFor(db, rows.map(r => r.user_id));
+    const participation = await participationCountsFor(db, rows.map(r => r.user_id));
 
     const conflictsByAppId = new Set();
-    for (const c of db.prepare('SELECT application_id FROM application_conflicts').all()) {
+    for (const c of await db.prepare('SELECT application_id FROM application_conflicts').all()) {
       conflictsByAppId.add(c.application_id);
     }
 
@@ -190,7 +192,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
     if (rows.length > 0) {
       const userIds = [...new Set(rows.map(r => r.user_id))];
       const placeholders = userIds.map(() => '?').join(',');
-      const badgeRows = db.prepare(`
+      const badgeRows = await db.prepare(`
         SELECT ub.user_id, b.name, b.icon, b.category, b.criteria_type, b.criteria_value, ub.earned_at
         FROM user_badges ub
         JOIN badges b ON b.id = ub.badge_id
@@ -297,7 +299,7 @@ router.get('/api/applications', authenticateToken, (req, res) => {
 });
 
 // 7. Apply to an Event Slot (Student only)
-router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'), (req, res) => {
+router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'), async (req, res) => {
   const eventId = req.params.id;
   const { slotId } = req.body;
 
@@ -320,7 +322,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
   }
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     if (event.status !== 'open') return res.status(400).json({ error: 'Event registrations are closed' });
 
@@ -346,7 +348,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
      * event row, so a client cannot nominate the organization it would like to
      * be measured against.
      */
-    const eligibility = eventApplicationEligibility(event, req.user.id);
+    const eligibility = await eventApplicationEligibility(event, req.user.id);
     if (!eligibility.ok) {
       return res.status(eligibility.status).json({
         error: eligibility.error,
@@ -356,7 +358,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
     }
 
     // Verify slot belongs to event
-    const slot = db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
+    const slot = await db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
     if (!slot) return res.status(404).json({ error: 'Selected slot does not belong to this event' });
 
     // Enforce deadline check
@@ -368,7 +370,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
     // Schedule Conflict Detection
     // Check if the user has any pending, accepted, or waitlisted slots that overlap
     // with this slot's time. Overlap occurs if existing_start < new_end AND existing_end > new_start.
-    const overlap = db.prepare(`
+    const overlap = await db.prepare(`
       SELECT a.id as app_id, a.status, e.title, s.name as slot_name, s.start_datetime, s.end_datetime
       FROM applications a
       JOIN slots s ON a.slot_id = s.id
@@ -401,7 +403,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
     // cost the student nothing while applications are still open, so the old
     // row is revived rather than blocking — UNIQUE(user_id, slot_id) means a
     // second INSERT is not an option.
-    const existing = db.prepare(
+    const existing = await db.prepare(
       'SELECT id, status FROM applications WHERE slot_id = ? AND user_id = ?'
     ).get(slotId, req.user.id);
 
@@ -413,11 +415,11 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
       return res.status(400).json({ error: 'You have already applied for this time slot' });
     } else if (existing) {
       appId = existing.id;
-      db.prepare('UPDATE applications SET status = ?, applied_at = ?, waitlist_order = NULL WHERE id = ?')
+      await db.prepare('UPDATE applications SET status = ?, applied_at = ?, waitlist_order = NULL WHERE id = ?')
         .run(status, appliedAt, appId);
     } else {
       appId = `app-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(appId, req.user.id, eventId, slotId, status, appliedAt);
@@ -425,16 +427,16 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 
     if (overlap && req.body.overrideConflict) {
       const conflictId = `conf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO application_conflicts (id, application_id, conflicting_application_id, conflict_type, acknowledged_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(conflictId, appId, overlap.app_id, overlap.status, appliedAt, appliedAt);
 
-      notificationService.dispatch('SCHEDULE_CONFLICT_WARNING', { eventId: event.id, eventTitle: event.title }, req.user.id);
+      await notificationService.dispatch('SCHEDULE_CONFLICT_WARNING', { eventId: event.id, eventTitle: event.title }, req.user.id);
     }
 
     // Notify organizer
-    notificationService.dispatch('NEW_APPLICATION', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
+    await notificationService.dispatch('NEW_APPLICATION', { eventId: event.id, eventTitle: event.title }, event.organizer_id);
 
     /**
      * Tell this volunteer's friends, if this volunteer allows it.
@@ -468,15 +470,15 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
        * either one alone empties the list.
        */
       const rosterPublic = (event.attendee_visibility || 'accepted') === 'accepted';
-      const recipients = rosterPublic ? friendsToNotify(db, req.user.id) : [];
+      const recipients = rosterPublic ? await friendsToNotify(db, req.user.id) : [];
       if (recipients.length > 0) {
-        const actor = db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.user.id);
+        const actor = await db.prepare('SELECT name, username FROM users WHERE id = ?').get(req.user.id);
         const payload = {
           actorName: actor?.name, actorUsername: actor?.username,
           eventId: event.id, eventTitle: event.title,
         };
         for (const friendId of recipients) {
-          notificationService.dispatch('FRIEND_SIGNED_UP', payload, friendId, `friend-signup:${req.user.id}:${event.id}`);
+          await notificationService.dispatch('FRIEND_SIGNED_UP', payload, friendId, `friend-signup:${req.user.id}:${event.id}`);
         }
       }
     } catch (err) {
@@ -501,7 +503,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 // capacity rules — so the two cannot diverge. All writes happen in one
 // transaction; notifications and waitlist promotion run only after it commits,
 // because createNotification performs its own writes.
-router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own']), (req, res) => {
+router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own']), async (req, res) => {
   const { applicationIds, status } = req.body;
 
   if (!Array.isArray(applicationIds) || applicationIds.length === 0) {
@@ -517,14 +519,14 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
     // applying part of it — a half-done bulk action is worse than a refused one.
     const apps = [];
     for (const id of applicationIds) {
-      const app = db.prepare(`
+      const app = await db.prepare(`
         SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title, e.auto_approve
         FROM applications a
         JOIN events e ON a.event_id = e.id
         WHERE a.id = ?
       `).get(id);
       if (!app) return res.status(404).json({ error: `Application not found: ${id}` });
-      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+      if (!await canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
       // A withdrawn application is the volunteer's own choice to leave; an
@@ -546,27 +548,46 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
     const applied = [];
     const skipped = [];
     const remainingBySlot = {};
-    if (status === 'accepted') {
-      for (const app of apps) {
-        if (remainingBySlot[app.slot_id] === undefined) {
-          const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
-          const slotMaxSpots = slot ? slot.max_spots : 0;
-          const slotAccepted = db.prepare(`
-            SELECT COUNT(*) as count FROM applications
-            WHERE slot_id = ? AND status = 'accepted'
-          `).get(app.slot_id).count;
-          remainingBySlot[app.slot_id] = Math.max(0, slotMaxSpots - slotAccepted);
-        }
-      }
-    }
 
     const promotions = [];
     const freedSlots = new Set();
     /* One clock for the whole batch, so a long transaction cannot let two
        applications on the same slot disagree about whether it had started. */
     const removalClock = new Date();
-    inTransaction(() => {
-      const update = db.prepare('UPDATE applications SET status = ? WHERE id = ?');
+    await runInTransaction(db, async (tx) => {
+      /**
+       * Capacity is counted INSIDE the transaction, behind a row lock per slot.
+       *
+       * It used to be counted just above, before the transaction opened. That was
+       * safe for exactly as long as `instanceLock.js` says it was: one process,
+       * `node:sqlite` synchronous, and a handler that never awaited between the
+       * read and the write. PostgreSQL removes that premise — every statement is
+       * a promise now — so the interleaving stopped needing a second instance to
+       * happen. Three concurrent bulk calls on a two-spot slot each read
+       * "2 remaining" and each accepted 2: six volunteers into two places, three
+       * 200s, and nothing anywhere said the roster was overfull.
+       *
+       * Slots are locked in a deterministic order — sorted by id — rather than in
+       * whatever order the applications arrived. Two batches spanning the same two
+       * slots in opposite orders would otherwise be able to take the locks
+       * head-on and deadlock; a total order on acquisition removes that outright.
+       */
+      if (status === 'accepted') {
+        const slotIds = [...new Set(apps.map(a => a.slot_id))].sort();
+        for (const slotId of slotIds) {
+          const slot = await tx.prepare(
+            `SELECT max_spots FROM slots WHERE id = ?${forUpdate(db)}`
+          ).get(slotId);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = Number((await tx.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(slotId)).count);
+          remainingBySlot[slotId] = Math.max(0, slotMaxSpots - slotAccepted);
+        }
+      }
+
+      const update = await tx.prepare('UPDATE applications SET status = ? WHERE id = ?');
       for (const app of apps) {
         if (app.status === 'accepted' && status === 'accepted') {
           // Already accepted — a no-op that must not consume a fresh spot.
@@ -595,18 +616,18 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
          * and should not be lost to one application that cannot move.
          */
         if (wasAccepted && status !== 'accepted') {
-          const slot = db.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+          const slot = await tx.prepare('SELECT start_datetime FROM slots WHERE id = ?').get(app.slot_id);
           if (slotHasStarted(slot, removalClock) !== false) {
             skipped.push({ id: app.id, reason: 'shift_started' });
             continue;
           }
         }
 
-        update.run(status, app.id);
+        await update.run(status, app.id);
         applied.push({ id: app.id, status, userId: app.user_id, eventId: app.event_id, eventTitle: app.event_title });
 
         if (status === 'waitlisted') {
-          assignWaitlistOrder(app.id, app.slot_id);
+          await assignWaitlistOrder(app.id, app.slot_id);
         }
 
         // Slots whose capacity this batch may have freed. Collected rather than
@@ -624,19 +645,19 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
       // Still inside the transaction, so a promotion cannot be visible without
       // the demotion that made room for it.
       for (const slotId of freedSlots) {
-        promotions.push(...promoteFromWaitlist(slotId));
+        promotions.push(...await promoteFromWaitlist(slotId));
       }
     });
 
     // Notifications only after the commit — see promoteFromWaitlist.
-    notifyPromotions(promotions);
+    await notifyPromotions(promotions);
     for (const a of applied) {
       if (status === 'accepted') {
-        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+        await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
       } else if (status === 'waitlisted') {
-        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+        await notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
       } else if (status === 'rejected') {
-        notificationService.dispatch('APPLICATION_REJECTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
+        await notificationService.dispatch('APPLICATION_REJECTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);
       }
     }
 
@@ -662,7 +683,7 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 // stack is what puts this route in front of Guard 2's scanner instead of
 // leaving it to a hand-written ROUTE_REGISTRY entry.
 router.patch('/api/applications/:id', authenticateToken,
-  requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own', 'application.withdraw']), (req, res) => {
+  requireCapAny(['applicant.review', 'event.moderate', 'organization.event.manage.own', 'application.withdraw']), async (req, res) => {
   const appId = req.params.id;
   const { status } = req.body; // 'accepted', 'waitlisted', 'rejected'
 
@@ -690,13 +711,13 @@ router.patch('/api/applications/:id', authenticateToken,
    * applicant in bulk and be told "students may only withdraw their own
    * applications" for the identical act on the identical row.
    */
-  const appForGate = db.prepare(`
+  const appForGate = await db.prepare(`
     SELECT a.id, e.organizer_id, e.organization_id
       FROM applications a JOIN events e ON e.id = a.event_id
      WHERE a.id = ?
   `).get(appId);
   const runsThisEvent = can(req.principal, 'organization.event.manage.own')
-    && canRunEvent(db, appForGate, req.principal.userId, {
+    && await canRunEvent(db, appForGate, req.principal.userId, {
       hasModerate: can(req.principal, 'event.moderate'),
     });
 
@@ -706,7 +727,7 @@ router.patch('/api/applications/:id', authenticateToken,
     }
 
     try {
-      const app = db.prepare(`
+      const app = await db.prepare(`
         SELECT a.*, e.organizer_id, e.organization_id, e.title as event_title
         FROM applications a
         JOIN events e ON a.event_id = e.id
@@ -714,7 +735,7 @@ router.patch('/api/applications/:id', authenticateToken,
       `).get(appId);
 
       if (!app) return res.status(404).json({ error: 'Application not found' });
-      if (!canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+      if (!await canRunEvent(db, app, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
         return res.status(403).json({ error: 'Access denied: You do not host this event' });
       }
 
@@ -729,19 +750,11 @@ router.patch('/api/applications/:id', authenticateToken,
         });
       }
 
-      // Check spots capacity at the slot level if accepting
-      if (status === 'accepted') {
-        const slot = db.prepare('SELECT max_spots FROM slots WHERE id = ?').get(app.slot_id);
-        const slotMaxSpots = slot ? slot.max_spots : 0;
-        const slotAccepted = db.prepare(`
-          SELECT COUNT(*) as count FROM applications
-          WHERE slot_id = ? AND status = 'accepted'
-        `).get(app.slot_id).count;
-
-        if (slotAccepted >= slotMaxSpots) {
-          return res.status(400).json({ error: `Cannot accept: This slot is full (${slotMaxSpots} spots).` });
-        }
-      }
+      /* The capacity check moved INSIDE the transaction below, behind a row
+         lock on the slot. Checking here read the count on the ambient handle
+         and wrote several statements later, so two organizers pressing Accept
+         together both saw room: five simultaneous accepts put five volunteers
+         into a two-spot shift. SQLite's process-wide write queue hid it. */
 
       const wasAccepted = app.status === 'accepted';
 
@@ -771,7 +784,7 @@ router.patch('/api/applications/:id', authenticateToken,
        * A removed volunteer keeps every hour they earned.
        */
       if (wasAccepted && status !== 'accepted') {
-        const slot = db.prepare('SELECT id, name, start_datetime FROM slots WHERE id = ?').get(app.slot_id);
+        const slot = await db.prepare('SELECT id, name, start_datetime FROM slots WHERE id = ?').get(app.slot_id);
         const started = slotHasStarted(slot, new Date());
 
         if (started === null) {
@@ -793,12 +806,32 @@ router.patch('/api/applications/:id', authenticateToken,
       // The status change and any resulting promotion must land together: a spot
       // freed but not refilled, or refilled twice, are both worse than neither.
       let promotions = [];
-      inTransaction(() => {
-        db.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
+      let slotFull = null;
+      await runInTransaction(db, async (tx) => {
+        if (status === 'accepted') {
+          /* Lock the SLOT, then count. The lock is on the slot rather than the
+             applications because the rows counted are not the rows locked — an
+             application can be inserted between the two. */
+          const slot = await tx.prepare(
+            `SELECT max_spots FROM slots WHERE id = ?${forUpdate(db)}`
+          ).get(app.slot_id);
+          const slotMaxSpots = slot ? slot.max_spots : 0;
+          const slotAccepted = (await tx.prepare(`
+            SELECT COUNT(*) as count FROM applications
+            WHERE slot_id = ? AND status = 'accepted'
+          `).get(app.slot_id)).count;
+
+          if (Number(slotAccepted) >= Number(slotMaxSpots)) {
+            slotFull = slotMaxSpots;
+            return;
+          }
+        }
+
+        await tx.prepare('UPDATE applications SET status = ? WHERE id = ?').run(status, appId);
 
         // Joining the waitlist means joining the back of the queue.
         if (status === 'waitlisted') {
-          assignWaitlistOrder(appId, app.slot_id);
+          await assignWaitlistOrder(appId, app.slot_id);
         }
 
         // A spot only opens if this person was actually holding one. Rejecting a
@@ -807,18 +840,25 @@ router.patch('/api/applications/:id', authenticateToken,
         // No `auto_approve` check: promotion depends on capacity and queue order,
         // not on how the organizer chooses people. See promoteFromWaitlist.
         if (wasAccepted && status !== 'accepted') {
-          promotions = promoteFromWaitlist(app.slot_id);
+          promotions = await promoteFromWaitlist(app.slot_id);
         }
       });
-      notifyPromotions(promotions);
+
+      /* Refused inside the transaction, answered outside it: returning from the
+         callback would have committed a no-op rather than sending a response. */
+      if (slotFull !== null) {
+        return res.status(400).json({ error: `Cannot accept: This slot is full (${slotFull} spots).` });
+      }
+
+      await notifyPromotions(promotions);
 
       // Notify the volunteer
       if (status === 'accepted') {
-        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+        await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
       } else if (status === 'waitlisted') {
-        notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+        await notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
       } else if (status === 'rejected') {
-        notificationService.dispatch('APPLICATION_REJECTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+        await notificationService.dispatch('APPLICATION_REJECTED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
       }
 
       return res.json({
@@ -843,7 +883,7 @@ router.patch('/api/applications/:id', authenticateToken,
       return res.status(403).json({ error: 'Students may only withdraw their own applications.' });
     }
     try {
-      const app = db.prepare(`
+      const app = await db.prepare(`
         SELECT a.*, e.title as event_title, e.organizer_id, s.name as slot_name, s.start_datetime
         FROM applications a
         JOIN events e ON a.event_id = e.id
@@ -866,26 +906,26 @@ router.patch('/api/applications/:id', authenticateToken,
       }
 
       let promotions = [];
-      inTransaction(() => {
-        db.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
+      await runInTransaction(db, async (tx) => {
+        await tx.prepare('UPDATE applications SET status = ?, waitlist_order = NULL WHERE id = ?')
           .run('withdrawn', appId);
 
         // Releasing a confirmed spot is the case the waitlist exists for.
         // Previously gated on auto_approve, which left organizer-managed events
         // sitting under capacity with someone waiting and nobody informed.
         if (wasConfirmed) {
-          promotions = promoteFromWaitlist(app.slot_id);
+          promotions = await promoteFromWaitlist(app.slot_id);
         }
       });
 
       if (wasConfirmed) {
         // Notify student releasing spot
-        notificationService.dispatch('SPOT_RELEASED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
+        await notificationService.dispatch('SPOT_RELEASED', { eventId: app.event_id, eventTitle: app.event_title }, app.user_id);
 
         // Notify organizer
-        notificationService.dispatch('VOLUNTEER_RELEASED_SPOT', { eventId: app.event_id, eventTitle: app.event_title }, app.organizer_id);
+        await notificationService.dispatch('VOLUNTEER_RELEASED_SPOT', { eventId: app.event_id, eventTitle: app.event_title }, app.organizer_id);
 
-        notifyPromotions(promotions);
+        await notifyPromotions(promotions);
       }
 
       return res.json({

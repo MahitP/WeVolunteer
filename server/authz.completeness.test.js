@@ -791,18 +791,18 @@ describe('authorization hygiene', () => {
       // see). See each entry's reason for the actual check and file:line. ──
 
       'GET /api/users/:id/profile': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (userRoutes.js) — this is what keeps partner, an EXTERNAL organization deliberately outside the member directory, off it; then canSeeContact = isSelf || can(user.contact.read) || hostsApplicant gates the PII fields' },
-      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else 403 (eventRoutes.js:392-394)' },
+      'GET /api/events/:id': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND await canRunEvent(host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else 403 (eventRoutes.js:392-394)' },
       'GET /api/applications': { category: CATEGORY.INLINE_GATED, reason: 'deny-by-default cascade can(user.contact.read) -> can(applicant.review) -> can(application.withdraw) -> [] (applicationRoutes.js:45-60); covered by authz.matrix.test.js' },
       'DELETE /api/comments/:id': { category: CATEGORY.INLINE_GATED, reason: 'own comment (user_id === caller) OR can(event.moderate), else 403 (contentRoutes.js:135)' },
-      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:156)' },
-      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND canRunEvent (host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:201)' },
+      'GET /api/events/:id/attendees': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND await canRunEvent(host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:156)' },
+      'GET /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'isStaff = a capability from EVENT_STAFF_CAPABILITIES AND await canRunEvent(host, or a manager of the owning organization) — the capability half is what consults principal.withheld, else accepted-applicant-only visibility (contentRoutes.js:201)' },
       'POST /api/events/:id/announcements': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:245,248)' },
       'PATCH /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:295,298)' },
       'DELETE /api/announcements/:id': { category: CATEGORY.INLINE_GATED, reason: 'can(announcement.post) OR can(event.moderate), plus ownership check (contentRoutes.js:316,319)' },
       'GET /api/recommendations': { category: CATEGORY.INLINE_GATED, reason: 'can(event.apply) gates the feature; non-holders get [] instead of 403, documented in-file as deliberate existing behaviour (contentRoutes.js:499)' },
-      'GET /api/messages/conversations': { category: CATEGORY.INLINE_GATED, reason: 'listConversationsForUser(req.user.id) — participant-scoped, never returns a conversation the caller is not in' },
-      'POST /api/messages/conversations/resolve': { category: CATEGORY.INLINE_GATED, reason: 'gated by eligibleRelationship()\'s capability checks in server/messaging.js (event.moderate / applicant.review+ownership / event.apply); see the v1.2a messaging.js fix and its 5-role test' },
-      'GET /api/messages/conversations/:id/messages': { category: CATEGORY.INLINE_GATED, reason: 'isConversationParticipant(conversation.id, caller), else 404 (messageRoutes.js:92)' },
+      'GET /api/messages/conversations': { category: CATEGORY.INLINE_GATED, reason: 'await listConversationsForUser(req.user.id) — participant-scoped, never returns a conversation the caller is not in' },
+      'POST /api/messages/conversations/resolve': { category: CATEGORY.INLINE_GATED, reason: 'gated by await eligibleRelationship()\'s capability checks in server/messaging.js (event.moderate / applicant.review+ownership / event.apply); see the v1.2a messaging.js fix and its 5-role test' },
+      'GET /api/messages/conversations/:id/messages': { category: CATEGORY.INLINE_GATED, reason: 'await isConversationParticipant(conversation.id, caller), else 404 (messageRoutes.js:92)' },
       'POST /api/messages/conversations/:id/messages': { category: CATEGORY.INLINE_GATED, reason: 'isConversationParticipant check, else 404 (messageRoutes.js:139)' },
       'POST /api/messages/conversations/:id/read': { category: CATEGORY.INLINE_GATED, reason: 'isConversationParticipant check, else 404 (messageRoutes.js:210)' },
       'PATCH /api/messages/conversations/:id/preferences': { category: CATEGORY.INLINE_GATED, reason: 'isConversationParticipant check, else 404 (messageRoutes.js:247)' },
@@ -1017,11 +1017,32 @@ describe('authorization hygiene', () => {
      * mistake this is about — adding a gate and forgetting the spend entirely.
      */
 
-    /** `spendChallenge(db, req, '<action>', …)` call sites in one source file. */
+    /**
+     * `spendChallenge(<handle>, req, '<action>', …)` call sites in one source file.
+     *
+     * ── Why the handle is a wildcard rather than the literal `db` ──
+     *
+     * It was `db` exactly, and wave 7 of the PostgreSQL migration broke it: the
+     * 2FA handlers now open an async transaction and spend the grant on the
+     * TRANSACTION handle (`spendChallenge(tx, req, …)`), which is strictly more
+     * correct — the spend and the action it authorises are provably on the same
+     * connection. The guard reported all six 2FA gates as unspent anyway.
+     *
+     * This is the fourth time in this project a guard has matched one spelling
+     * of a thing the codebase writes two ways (TD-12, TD-23, and the raw-BEGIN
+     * scan). The property being asserted is "the gate is paired with a spend for
+     * the same action" — the identifier holding the database handle was never
+     * part of it, and pinning it made the guard report a security finding that
+     * was not one.
+     *
+     * The second and third arguments still matter and are still pinned: `req`
+     * carries the challenge id and the binding, and the action string is the
+     * whole point of the pairing.
+     */
     function findSpendCallSites(src) {
       const found = [];
       stripComments(src).split('\n').forEach((line, i) => {
-        for (const m of line.matchAll(/\bspendChallenge\s*\(\s*db\s*,\s*req\s*,\s*(['"`])([^'"`]*)\1/g)) {
+        for (const m of line.matchAll(/\bspendChallenge\s*\(\s*[A-Za-z_$][\w$]*\s*,\s*req\s*,\s*(['"`])([^'"`]*)\1/g)) {
           found.push({ line: i + 1, action: m[2] });
         }
       });
@@ -1036,18 +1057,18 @@ describe('authorization hygiene', () => {
      * with fixtures containing the exact defect.
      */
     it('recognises a spend, ignores comments, and does not match a different shape', () => {
-      expect(findSpendCallSites("      spendChallenge(db, req, 'account.delete', {});")[0].action)
+      expect(findSpendCallSites("      await spendChallenge(db, req, 'account.delete', {});")[0].action)
         .toBe('account.delete');
       // Whitespace and quote style must not matter.
-      expect(findSpendCallSites('spendChallenge( db , req , "email.change" , { newEmail } )')[0].action)
+      expect(findSpendCallSites('await spendChallenge( db , req , "email.change" , { newEmail } )')[0].action)
         .toBe('email.change');
-      expect(findSpendCallSites('spendChallenge(db, req, `oauth.link`, { provider })')[0].action)
+      expect(findSpendCallSites('await spendChallenge(db, req, `oauth.link`, { provider })')[0].action)
         .toBe('oauth.link');
       // Prose about spending is not spending.
-      expect(findSpendCallSites(" * calls spendChallenge(db, req, 'data.export', {}) below")).toEqual([]);
+      expect(findSpendCallSites(" * calls await spendChallenge(db, req, 'data.export', {}) below")).toEqual([]);
       // A call that does not pass the request cannot carry the three bindings,
       // so it must not be counted as one.
-      expect(findSpendCallSites("spendChallenge(db, { id: 'x' }, 'data.export', {})")).toEqual([]);
+      expect(findSpendCallSites("await spendChallenge(db, { id: 'x' }, 'data.export', {})")).toEqual([]);
     });
 
     it('finds no gated action left unspent anywhere in server/', () => {
@@ -1068,7 +1089,7 @@ describe('authorization hygiene', () => {
           if (!spent.has(gate.action)) {
             offenders.push(
               `${key}:${gate.line}: requireAAL2('${gate.action}') with no `
-              + `spendChallenge(db, req, '${gate.action}', …) in the same file. `
+              + `await spendChallenge(db, req, '${gate.action}', …) in the same file. `
               + 'The gate is an early refusal, not the check — without the spend the grant '
               + 'stays live for its full five minutes and the action can be replayed with '
               + 'the same challenge id. Spend it inside the handler\'s own transaction.'
@@ -1178,7 +1199,7 @@ describe('authorization hygiene', () => {
         }
         offenders.push(
           `${key}:${sites[0].line}: calls consumeChallenge() directly. Prefer `
-          + 'spendChallenge(db, req, action, params), which reads the three bindings off the '
+          + 'await spendChallenge(db, req, action, params), which reads the three bindings off the '
           + 'request so a caller cannot pick up two of three — and which Guard 5 can see. '
           + 'If this call site genuinely has no authenticated request (the OAuth callback is '
           + 'the only such case today), add it to DECLARED_DIRECT_CONSUMERS with the reason '
@@ -1270,5 +1291,321 @@ describe('the reviewed-exception anchoring', () => {
 
   it('records nothing for a file with no matches', () => {
     expect(groupByAnchor('f.js', ['const a = 1;', 'const b = 2;'], hitsFor).size).toBe(0);
+  });
+});
+
+/**
+ * Guard 7 — every challenge spend is awaited.
+ *
+ * ── The failure this exists to make unrepresentable ──
+ *
+ * `spendChallenge` refuses by THROWING `ChallengeNotSpent`, and its callers rely
+ * on that throw to roll their transaction back. If it is async and a caller does
+ * not await it, the throw becomes an unhandled rejection inside a promise nobody
+ * holds: the transaction commits, the challenge is never marked consumed, and it
+ * stays replayable for its full five minutes. The sensitive action proceeds.
+ *
+ * **The step-up gate fails open, silently.**
+ *
+ * That is not hypothetical. Wave 7 step 2 of the PostgreSQL migration converted
+ * the callee ahead of its callers and produced exactly this: 17 tests across 7
+ * files went red, and every one of them was a step-up refusal that had stopped
+ * refusing. The conversion was reverted and this guard written so that the
+ * intermediate state cannot exist again — the callee and its call sites move
+ * together or the build fails.
+ *
+ * ── Why a source scan rather than a runtime assertion ──
+ *
+ * A missing `await` produces no error at the call site and no failure at
+ * runtime unless a test happens to exercise the refusal path for that specific
+ * action. There are 19 call sites across 7 files; the scan sees all of them
+ * whether or not anybody wrote a test for that gate.
+ */
+describe('Guard 7 — no contract-bearing write is left unawaited', () => {
+  /**
+   * Writers whose contract breaks if a caller forgets to await them.
+   *
+   * Each either REFUSES BY THROWING or returns a value a caller may act on. Left
+   * unawaited once async, the throw becomes an unhandled rejection — the
+   * transaction commits, the refusal never happens, and nothing is raised.
+   *
+   * `spendChallenge` / `consumeChallenge` are the step-up gate: unawaited, the
+   * grant is never consumed and stays replayable. That is not hypothetical; it
+   * happened, and 17 tests caught it.
+   *
+   * `recordAudit` / `recordSecurityEvent` throw on an unknown field or a missing
+   * actor, and write the trail that moderation decisions are accountable
+   * through. Unawaited inside a transaction, the row can land outside it —
+   * surviving a rollback that was supposed to erase the action it describes, or
+   * vanishing with one that was not.
+   */
+  const WRITERS = {
+    spendChallenge: 'reauthResponses.js',
+    consumeChallenge: 'reauth.js',
+    recordAudit: 'auditLog.js',
+    recordSecurityEvent: 'securityAudit.js',
+  };
+  const NAMES = Object.keys(WRITERS).join('|');
+
+  /** Whether the callee is declared async, which is what makes an await required. */
+  const calleeIsAsync = (name) => {
+    const src = readFileSync(new URL(WRITERS[name], import.meta.url), 'utf8');
+    return new RegExp(`export\\s+async\\s+function\\s+${name}\\b`).test(src);
+  };
+
+  const spendSites = () => {
+    const sites = [];
+    for (const { url, key } of collectServerJsFiles()) {
+      /* The definitions themselves, and the response helper that wraps one. */
+      if (new RegExp(`(${Object.values(WRITERS).join('|')})$`.replace(/\./g, '\\.')).test(key)) continue;
+      const src = readFileSync(url, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      src.split('\n').forEach((line, i) => {
+        const m = line.match(new RegExp(`\\b(${NAMES})\\s*\\(`));
+        if (!m) return;
+        sites.push({
+          key, line: i + 1, text: line.trim(), name: m[1],
+          awaited: new RegExp(`await\\s+${m[1]}\\s*\\(`).test(line),
+        });
+      });
+    }
+    return sites;
+  };
+
+  it('finds the call sites at all, so it cannot pass vacuously', () => {
+    expect(spendSites().length, 'no spend call sites found — the scan is measuring nothing')
+      .toBeGreaterThan(10);
+  });
+
+  /**
+   * The same question asked of `bin/`, because this guard could not see it.
+   *
+   * `recordAudit` was made async in wave 8c and every one of its ~38 server call
+   * sites was converted under this guard. Six more sat in `bin/` — five CLI
+   * tools plus the stale-2FA-secret command — reaching the table through
+   * `recordCliAudit`, and the scan above walks `server/` only, so it reported a
+   * clean build while all six silently dropped their promise.
+   *
+   * They are the worst possible set to miss. Each writes the audit row for a
+   * privilege change — `make-admin`, `grant-ownership`, `revoke-ownership`,
+   * `bootstrap-owners`, `reset-2fa` — from inside `BEGIN … COMMIT`, and each
+   * relies on the write throwing to roll the grant back. Unawaited, the promotion
+   * commits and the rejection arrives afterwards, unhandled: an administrator
+   * created with nothing in the trail saying who created them.
+   *
+   * This is the eighth time in this project a guard's scan has been narrower than
+   * the behaviour it polices (TD-12, TD-23, the raw-BEGIN prose scan, Guard 5's
+   * handle literal, the `inTransaction` spelling, the multi-line handler
+   * signature, the `recordAudit` classifier). The lesson has not changed: widen
+   * the scan to the behaviour, not to the place the behaviour happened to live.
+   */
+  const CLI_WRITERS = { recordAudit: 'auditLog.js', recordCliAudit: '../bin/cliAudit.mjs' };
+
+  const binSites = () => {
+    const binDir = new URL('../bin/', import.meta.url);
+    const sites = [];
+    for (const entry of readdirSync(binDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !/\.(js|mjs)$/.test(entry.name)) continue;
+      /* `cliAudit.mjs` DEFINES `recordCliAudit`, and a declaration is not a call
+         site. Its own `recordAudit` call is scanned by the server guard's rules
+         nowhere, so it is asserted directly below instead. */
+      if (entry.name === 'cliAudit.mjs') continue;
+      const src = readFileSync(new URL(entry.name, binDir), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      src.split('\n').forEach((line, i) => {
+        const m = line.match(new RegExp(`\\b(${Object.keys(CLI_WRITERS).join('|')})\\s*\\(`));
+        if (!m) return;
+        sites.push({
+          key: `bin/${entry.name}`, line: i + 1, text: line.trim(), name: m[1],
+          awaited: new RegExp(`await\\s+${m[1]}\\s*\\(`).test(line),
+        });
+      });
+    }
+    return sites;
+  };
+
+  it('finds the bin/ call sites at all, so that scan cannot pass vacuously', () => {
+    const sites = binSites();
+    expect(sites.length, 'no bin/ audit call sites found — the scan is measuring nothing')
+      .toBeGreaterThan(4);
+    expect(sites.map(s => s.key)).toContain('bin/make-admin.mjs');
+  });
+
+  it('awaits every audit write in bin/, where a privilege grant is the thing being recorded', () => {
+    const asyncInBin = (name) => {
+      const src = readFileSync(new URL(CLI_WRITERS[name], import.meta.url), 'utf8');
+      return new RegExp(`export\\s+async\\s+function\\s+${name}\\b`).test(src);
+    };
+    const offenders = binSites()
+      .filter(s => asyncInBin(s.name) && !s.awaited)
+      .map(s => `${s.key}:${s.line} — ${s.text}`);
+
+    expect(
+      offenders,
+      'These write an audit row for a command-line privilege change without awaiting it.\n'
+      + 'Each runs inside BEGIN … COMMIT and depends on the write throwing to roll the\n'
+      + 'grant back; unawaited, the grant commits and the failure arrives afterwards as an\n'
+      + 'unhandled rejection — an administrator with no record of who made them.',
+    ).toEqual([]);
+  });
+
+  it('keeps recordCliAudit itself awaiting the row it delegates', () => {
+    /* The one call site the scan above deliberately skips. `recordCliAudit` is a
+       thin wrapper: if IT drops the promise, all six callers await a promise that
+       resolved before the INSERT was checked. */
+    const src = readFileSync(new URL('../bin/cliAudit.mjs', import.meta.url), 'utf8');
+    expect(src, 'recordCliAudit must be async').toMatch(/export\s+async\s+function\s+recordCliAudit\b/);
+    expect(src, 'recordCliAudit must await the row it writes').toMatch(/return\s+await\s+recordAudit\s*\(/);
+  });
+
+  it('awaits every call to an async spend helper', () => {
+    const offenders = spendSites()
+      .filter(s => calleeIsAsync(s.name) && !s.awaited)
+      .map(s => `${s.key}:${s.line} — ${s.text}`);
+
+    expect(
+      offenders,
+      'These call an ASYNC contract-bearing writer without awaiting it. The refusal is a\n'
+      + 'throw, so an unawaited call becomes an unhandled rejection: the transaction commits,\n'
+      + 'the grant is never consumed, and the step-up gate fails open.',
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Guard 8 — no authorization predicate is ever evaluated as a pending promise.
+ *
+ * ── The failure this exists to make unrepresentable ──
+ *
+ * Phase 8 converts ~823 query call sites to async. Most of them return rows,
+ * and a row that arrives as a promise breaks loudly the moment anything reads a
+ * property off it. The dangerous minority return **booleans**, and those do not
+ * break at all:
+ *
+ *     if (canRunEvent(db, event, userId)) { ...grant the action... }
+ *
+ * A pending promise is an object, and every object is truthy. The instant
+ * `canRunEvent` becomes async without this call site awaiting it, that branch
+ * stops asking a question and starts answering "yes" — to everyone, for every
+ * event, with no error raised and every SQLite test still green, because on
+ * SQLite the value was never a promise in the first place.
+ *
+ * That is a total authorization bypass produced by a missing keyword, and it is
+ * the single most dangerous shape in this phase. `recordSecurityEvent` and the
+ * step-up gate (Guard 7) fail CLOSED when unawaited — a lost throw. These fail
+ * OPEN.
+ *
+ * ── Why a source scan, and why it is armed before the conversion ──
+ *
+ * While a predicate is still synchronous this guard is deliberately inert:
+ * `calleeIsAsync` is false, so no call site is required to await. It is
+ * committed in that state on purpose, so that the moment anybody flips one of
+ * these to `async` — this session or a later one — every unawaited call site
+ * fails the build in the same change, rather than shipping a silent bypass.
+ *
+ * The vacuity tripwire runs either way, so the scan cannot quietly stop finding
+ * the call sites it is supposed to police.
+ */
+describe('Guard 8 — no authorization predicate is left unawaited', () => {
+  /**
+   * Predicates whose return value decides whether an action is permitted.
+   *
+   * The test is not "does it touch the database" but "is it read as a boolean
+   * in a branch that grants something". A new one belongs here the moment it is
+   * written, not the moment it becomes async.
+   */
+  const PREDICATES = {
+    canManage: 'organizations.js',
+    canHelpRun: 'organizations.js',
+    canRunEvent: 'organizations.js',
+    isMemberOf: 'eventEligibility.js',
+    activeBanFor: 'eventEligibility.js',
+    /* Relationship gates. `areFriends` decides whether the friends-only tier of
+       a profile opens, so unawaited it hands a stranger a minor's school and
+       grade. */
+    areFriends: 'relationships.js',
+    arePeers: 'relationships.js',
+    isRestrictedBetween: 'relationships.js',
+    isBlockedBetween: 'blocking.js',
+    /* Evidence holds. Polarity decides which way these fail, and both
+       directions exist in the codebase today: `if (hasLiveReport) refuse` fails
+       closed on a truthy promise, but `if (!isPartyToLiveReport) delete` fails
+       OPEN — and what it deletes is moderation evidence for an open report. */
+    eventHasLiveReport: 'evidenceHolds.js',
+    commentHasLiveReport: 'evidenceHolds.js',
+    userIsPartyToLiveReport: 'evidenceHolds.js',
+    /* Decides whether a Student Organizer keeps their capabilities. */
+    helpsRunAnywhere: 'organizationRoles.js',
+    /* Agreement acceptance. Read as `if (accepted) return []` — i.e. "withhold
+       nothing" — so a truthy pending promise means an organizer who never
+       accepted the Organizer Agreement keeps every capability it gates. */
+    hasAcceptedOrganizerAgreement: 'organizerAgreement.js',
+    hasAcceptedStudentOrganizerAgreement: 'studentOrganizerAgreement.js',
+  };
+  /* `collectServerJsFiles` keys are `server/`-prefixed, POSIX-separated. */
+  const DEFINING_FILES = new Set(Object.values(PREDICATES).map(f => `server/${f}`));
+
+  const predicateIsAsync = (name) => {
+    const src = readFileSync(new URL(PREDICATES[name], import.meta.url), 'utf8');
+    return new RegExp(`export\\s+async\\s+function\\s+${name}\\b`).test(src);
+  };
+
+  const predicateSites = () => {
+    const names = Object.keys(PREDICATES).join('|');
+    const sites = [];
+    for (const { url, key } of collectServerJsFiles()) {
+      /* A definition is not a call site, and each of these modules calls its own
+         predicates internally where the local reasoning is visible. */
+      if (DEFINING_FILES.has(key)) continue;
+      const src = readFileSync(url, 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^\s*\/\/.*$/gm, '');
+      src.split('\n').forEach((line, i) => {
+        const m = line.match(new RegExp(`\\b(${names})\\s*\\(`));
+        if (!m) return;
+        sites.push({
+          key, line: i + 1, text: line.trim(), name: m[1],
+          /* `await x(` also matches `!(await x(` and `? await x(` — the negated
+             and ternary forms these predicates are usually read in. */
+          awaited: new RegExp(`await\\s+${m[1]}\\s*\\(`).test(line),
+        });
+      });
+    }
+    return sites;
+  };
+
+  it('finds the predicate call sites at all, so it cannot pass vacuously', () => {
+    const sites = predicateSites();
+    expect(sites.length, 'no authorization predicate call sites found — the scan is measuring nothing')
+      .toBeGreaterThan(15);
+    /* Named anchors: if the scan silently stopped seeing the busiest consumer,
+       the count alone could still look healthy. */
+    expect(sites.map(s => s.key)).toContain('server/routes/eventRoutes.js');
+  });
+
+  it('awaits every call to an async authorization predicate', () => {
+    const offenders = predicateSites()
+      .filter(s => predicateIsAsync(s.name) && !s.awaited)
+      .map(s => `${s.key}:${s.line} — ${s.text}`);
+
+    expect(
+      offenders,
+      'These read an ASYNC authorization predicate without awaiting it.\n'
+      + 'A pending promise is truthy, so the branch grants the action to everyone —\n'
+      + 'silently, with no error, and green on SQLite where the value was never a promise.\n'
+      + 'This is a fail-OPEN bypass, unlike the fail-closed cases in Guard 7.',
+    ).toEqual([]);
+  });
+
+  it('knows whether each predicate is currently async, so the check cannot silently disarm', () => {
+    /* If a defining file were renamed or a predicate removed, `predicateIsAsync`
+       would throw rather than quietly answer false for everything and let the
+       guard above pass over unawaited calls. */
+    for (const name of Object.keys(PREDICATES)) {
+      expect(typeof predicateIsAsync(name), `${name} could not be resolved in ${PREDICATES[name]}`)
+        .toBe('boolean');
+    }
   });
 });

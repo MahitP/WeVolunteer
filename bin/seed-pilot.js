@@ -72,7 +72,7 @@ if (fs.existsSync(dbPath + '-wal')) fs.unlinkSync(dbPath + '-wal');
 if (fs.existsSync(dbPath + '-shm')) fs.unlinkSync(dbPath + '-shm');
 
 // 2. Initialize the schema
-const { initDatabase, db } = await import('../server/db.js');
+const { initDatabase, completeDatabaseInit, db } = await import('../server/db.js');
 // Temporarily disable DEMO_MODE so it doesn't insert the default seeds
 process.env.DEMO_MODE = '';
 initDatabase();
@@ -113,7 +113,7 @@ const insertAttendance = db.prepare(`
 console.log('Seeding accounts...');
 
 // 1 Admin
-insertUser.run('admin-1', 'Pilot Admin', 'admin@sbvolunteers.org', passwordHash, 'N/A', 'admin', 1, '🛡️', 'System Administrator', 'District', '[]', nowStr);
+insertUser.run('admin-1', 'Pilot Admin', 'pilot-admin@example.org', passwordHash, 'N/A', 'admin', 1, '🛡️', 'System Administrator', 'District', '[]', nowStr);
 
 // 5 Organizers
 insertUser.run('org-1', 'Sarah Jenkins', 'sjenkins@hs.org', passwordHash, 'Adult', 'organizer', 1, '👩‍🏫', 'Student Council Advisor', 'High School', '[]', nowStr);
@@ -221,10 +221,11 @@ for (let i = 6; i <= 10; i++) {
 insertApp.run('app-wd', 'stu-1', 'evt-setup', 'slot-set-1', 'withdrawn', nowStr);
 
 // Backfill hours ledger & certificates to make everything consistent
-initDatabase(); // This will trigger initHoursLedger and initCertificates on the existing db!
+initDatabase();
+await completeDatabaseInit(); // hours ledger backfill + parity, now async
 
 console.log('---');
 console.log('Pilot seeding complete!');
 console.log('Database written to:', dbPath);
 console.log('All accounts use password:', sharedPassword);
-console.log('Admin account: admin@sbvolunteers.org');
+console.log('Admin account: pilot-admin@example.org');

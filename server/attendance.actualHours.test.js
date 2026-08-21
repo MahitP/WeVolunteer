@@ -31,16 +31,16 @@ describe('actual hours, and events that credit none', () => {
     const appId = `app-${Math.random().toString(36).slice(2)}`;
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, created_at, credits_hours)
       VALUES (?, 'Past shift', 'd', 'Other', 'Somewhere', ?, ?, 'open', ?, ?)
     `).run(eventId, start.toISOString(), organizerId, now, creditsHours ? 1 : 0);
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
       VALUES (?, ?, 'Shift', 'd', ?, ?, 5)
     `).run(slotId, eventId, start.toISOString(), end.toISOString());
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
       VALUES (?, ?, ?, ?, 'accepted', ?)
     `).run(appId, studentId, eventId, slotId, now);
@@ -48,12 +48,12 @@ describe('actual hours, and events that credit none', () => {
     return { eventId, slotId, appId };
   }
 
-  const credited = (slotId) => db.prepare(
+  const credited = async (slotId) => await db.prepare(
     'SELECT present, hours_awarded FROM attendance WHERE slot_id = ? AND user_id = ?'
   ).get(slotId, studentId);
 
-  const ledger = (slotId) => db.prepare(
-    'SELECT * FROM hours_ledger WHERE slot_id = ? ORDER BY rowid'
+  const ledger = async (slotId) => await db.prepare(
+    'SELECT * FROM hours_ledger WHERE slot_id = ? ORDER BY created_at, id'
   ).all(slotId);
 
   beforeAll(async () => {
@@ -62,8 +62,8 @@ describe('actual hours, and events that credit none', () => {
     admin = await srv.login('admin@example.gov');
     student = await srv.login('leo.chen@example.com');
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
-    organizerId = db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org').id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com')).id;
+    organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('jordan.whitfield@example.org')).id;
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
@@ -75,7 +75,7 @@ describe('actual hours, and events that credit none', () => {
         attendanceMap: { [appId]: true },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
   });
 
@@ -87,7 +87,7 @@ describe('actual hours, and events that credit none', () => {
         hoursMap: { [appId]: 2.5 },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId)).toMatchObject({ present: 1, hours_awarded: 2.5 });
+      expect(await credited(slotId)).toMatchObject({ present: 1, hours_awarded: 2.5 });
     });
 
     it('credits more hours when a volunteer stayed on', async () => {
@@ -95,7 +95,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 4 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
 
     /**
@@ -108,14 +108,14 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
 
       const res = await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 1.5 },
         reason: 'Left after the first hour and a half.',
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId).hours_awarded).toBe(1.5);
+      expect((await credited(slotId)).hours_awarded).toBe(1.5);
     });
   });
 
@@ -139,7 +139,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 2 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(4);
+      expect((await credited(slotId)).hours_awarded).toBe(4);
     });
 
     it('refuses an out-of-range or unparseable number', async () => {
@@ -166,7 +166,7 @@ describe('actual hours, and events that credit none', () => {
         reason: 'Left early — family pickup.',
       }, organizer);
 
-      const rows = ledger(slotId);
+      const rows = await ledger(slotId);
       expect(rows).toHaveLength(2);
       expect(rows[0].action).toBe('credited');
       expect(rows[1]).toMatchObject({
@@ -204,7 +204,7 @@ describe('actual hours, and events that credit none', () => {
         attendanceMap: { [appId]: true },
       }, organizer);
       expect(res.status).toBe(200);
-      expect(credited(slotId)).toMatchObject({ present: 1, hours_awarded: 0 });
+      expect(await credited(slotId)).toMatchObject({ present: 1, hours_awarded: 0 });
     });
 
     /* The flag carries the meaning, so an hours override on such an event has
@@ -214,7 +214,7 @@ describe('actual hours, and events that credit none', () => {
       await srv.call('POST', `/api/events/${eventId}/attendance`, {
         attendanceMap: { [appId]: true }, hoursMap: { [appId]: 6 },
       }, organizer);
-      expect(credited(slotId).hours_awarded).toBe(0);
+      expect((await credited(slotId)).hours_awarded).toBe(0);
     });
 
     it('is created through the API with creditsHours: false, and reports it back', async () => {
@@ -265,14 +265,14 @@ describe('actual hours, and events that credit none', () => {
     });
 
     it('does not disturb the derived-hours total', async () => {
-      const before = db.prepare(
+      const before = (await db.prepare(
         'SELECT COALESCE(SUM(hours_awarded), 0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-      ).get(studentId).h;
+      ).get(studentId)).h;
       const { eventId, appId } = await pastEventWithApplicant({ creditsHours: false, hours: 8 });
       await srv.call('POST', `/api/events/${eventId}/attendance`, { attendanceMap: { [appId]: true } }, organizer);
-      const after = db.prepare(
+      const after = (await db.prepare(
         'SELECT COALESCE(SUM(hours_awarded), 0) AS h FROM attendance WHERE user_id = ? AND present = 1'
-      ).get(studentId).h;
+      ).get(studentId)).h;
       expect(after).toBe(before);
     });
 
@@ -280,9 +280,9 @@ describe('actual hours, and events that credit none', () => {
     it('still counts toward the participation statistics', async () => {
       const { volunteerStats } = await import('./volunteerStats.js');
       const { eventId, appId } = await pastEventWithApplicant({ creditsHours: false, hours: 2 });
-      const before = volunteerStats(db, studentId).eventsAttended;
+      const before = (await volunteerStats(db, studentId)).eventsAttended;
       await srv.call('POST', `/api/events/${eventId}/attendance`, { attendanceMap: { [appId]: true } }, organizer);
-      expect(volunteerStats(db, studentId).eventsAttended).toBe(before + 1);
+      expect((await volunteerStats(db, studentId)).eventsAttended).toBe(before + 1);
     });
   });
 });

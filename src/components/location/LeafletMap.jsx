@@ -3,13 +3,6 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Fix the default marker icon issue with bundlers.
-// Vite resolves these imports to hashed asset URLs in dist/, so they
-// work without touching the Content Security Policy.
-import markerIcon from 'leaflet/dist/images/marker-icon.png';
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
-import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-
 const customIcon = L.divIcon({
   className: 'custom-map-pin',
   html: '<div class="custom-map-pin-inner"></div>',

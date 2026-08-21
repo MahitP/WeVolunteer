@@ -50,24 +50,24 @@ describe('viewerBan on an event', () => {
     orgId = created.body.organization.id;
 
     /* An event belonging to that organization — the link the notice depends on. */
-    const template = db.prepare('SELECT * FROM events LIMIT 1').get();
+    const template = await db.prepare('SELECT * FROM events LIMIT 1').get();
     expect(template, 'no event to clone').toBeTruthy();
     eventId = 'evt-ban-notice';
     const row = { ...template, id: eventId, title: 'Ban notice fixture', status: 'open', organization_id: orgId, organizer_id: organizerId };
     const cols = Object.keys(row);
-    db.prepare(`INSERT OR REPLACE INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+    await db.prepare(`INSERT INTO events (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
       .run(...cols.map(c => row[c]));
   }, 60000);
 
   afterAll(async () => { await srv?.close(); });
 
-  beforeEach(() => {
-    db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
-    db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')").run(bannedId);
+  beforeEach(async () => {
+    await db.prepare('DELETE FROM organization_bans WHERE organization_id = ?').run(orgId);
+    await db.prepare("UPDATE appeals SET status = 'resolved' WHERE user_id = ? AND status IN ('open','reviewing')").run(bannedId);
   });
 
-  const ban = () => {
-    db.prepare(`INSERT OR REPLACE INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
+  const ban = async () => {
+    await db.prepare(`INSERT INTO organization_bans (id, organization_id, user_id, banned_by, reason, created_at)
                 VALUES ('ban-notice-1', ?, ?, ?, 'Repeatedly no-showed shifts.', ?)`)
       .run(orgId, bannedId, organizerId, new Date().toISOString());
   };
@@ -97,7 +97,7 @@ describe('viewerBan on an event', () => {
   });
 
   it('tells a banned reader that they are, and why', async () => {
-    ban();
+    await ban();
     const res = await fetchEvent(banned);
     expect(res.body.event.viewerBan).toMatchObject({ banned: true, reason: 'Repeatedly no-showed shifts.' });
   });
@@ -107,7 +107,7 @@ describe('viewerBan on an event', () => {
      * The disclosure. A bystander opening the same event must not learn that
      * somebody else is banned, nor read the reason — which names conduct.
      */
-    ban();
+    await ban();
     const res = await fetchEvent(bystander);
     expect(res.body.event.viewerBan).toBeNull();
     expect(JSON.stringify(res.raw), 'the reason leaked into somebody else\'s response').not.toMatch(/no-showed/);
@@ -116,21 +116,21 @@ describe('viewerBan on an event', () => {
   it('says nothing to the organizer who issued it either, on this surface', async () => {
     /* Managers read bans through the organization's own authorized surfaces.
        This field answers "am I banned", and the organizer is not. */
-    ban();
+    await ban();
     const res = await fetchEvent(organizer);
     expect(res.body.event.viewerBan).toBeNull();
   });
 
   it('stops mentioning it once the ban is lifted', async () => {
-    ban();
-    db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
+    await ban();
+    await db.prepare('UPDATE organization_bans SET lifted_at = ? WHERE organization_id = ? AND user_id = ?')
       .run(new Date().toISOString(), orgId, bannedId);
     const res = await fetchEvent(banned);
     expect(res.body.event.viewerBan).toBeNull();
   });
 
   it('carries an appeal already filed, so a second is not offered', async () => {
-    ban();
+    await ban();
     const filed = await srv.call('POST', '/api/appeals', {
       subject: 'organization_ban',
       organizationId: orgId,
@@ -143,7 +143,7 @@ describe('viewerBan on an event', () => {
   });
 
   it('carries the outcome once that appeal has been decided', async () => {
-    ban();
+    await ban();
     const filed = await srv.call('POST', '/api/appeals', {
       subject: 'organization_ban', organizationId: orgId,
       statement: 'Two of those shifts were cancelled and nobody told me.',
@@ -156,7 +156,7 @@ describe('viewerBan on an event', () => {
   });
 
   it('says nothing to a reader with no session at all', async () => {
-    ban();
+    await ban();
     const res = await fetchEvent();
     /* The list itself requires a session, so the field is unreachable without
        one — but assert on the outcome rather than on the mechanism, since a
@@ -167,14 +167,14 @@ describe('viewerBan on an event', () => {
 
   it('says nothing on an event that belongs to no organization', async () => {
     /* There is no ban to speak of, and the absence must not be an error. */
-    ban();
-    db.prepare('UPDATE events SET organization_id = NULL WHERE id = ?').run(eventId);
+    await ban();
+    await db.prepare('UPDATE events SET organization_id = NULL WHERE id = ?').run(eventId);
     try {
       const res = await fetchEvent(banned);
       expect(res.status).toBe(200);
       expect(res.body.event.viewerBan).toBeNull();
     } finally {
-      db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
+      await db.prepare('UPDATE events SET organization_id = ? WHERE id = ?').run(orgId, eventId);
     }
   });
 });

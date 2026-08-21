@@ -42,91 +42,11 @@ import crypto from 'node:crypto';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { db } from '../db.js';
+import { validateExternalHours } from '../externalHoursRules.js';
 
 const router = express.Router();
 
-const ACTIVITY_MAX = 200;
-const ORGANIZATION_MAX = 200;
-const DESCRIPTION_MAX = 2000;
-
-/**
- * The ceiling on a single entry.
- *
- * Not a guess: a day has 24 hours, and one external record describes one
- * activity on one date. The bound exists because an unbounded REAL from a form
- * is how a volunteer log ends up claiming 100000 hours — which would be
- * obviously wrong to a person and completely invisible to a SUM.
- */
-const HOURS_MAX = 24;
-
-export function validateExternalHours(payload, { partial = false } = {}) {
-  const out = {};
-  const need = (key) => !partial || payload[key] !== undefined;
-
-  if (need('organizationName')) {
-    if (typeof payload.organizationName !== 'string' || !payload.organizationName.trim()) {
-      return { ok: false, field: 'organizationName', error: 'Who did you volunteer with?' };
-    }
-    if (payload.organizationName.length > ORGANIZATION_MAX) {
-      return { ok: false, field: 'organizationName', error: `That must be ${ORGANIZATION_MAX} characters or fewer.` };
-    }
-    out.organizationName = payload.organizationName.trim();
-  }
-
-  if (need('activityName')) {
-    if (typeof payload.activityName !== 'string' || !payload.activityName.trim()) {
-      return { ok: false, field: 'activityName', error: 'Give the activity a name.' };
-    }
-    if (payload.activityName.length > ACTIVITY_MAX) {
-      return { ok: false, field: 'activityName', error: `That must be ${ACTIVITY_MAX} characters or fewer.` };
-    }
-    out.activityName = payload.activityName.trim();
-  }
-
-  if (payload.description !== undefined) {
-    if (payload.description !== null && typeof payload.description !== 'string') {
-      return { ok: false, field: 'description', error: 'The description must be text.' };
-    }
-    const d = payload.description ?? '';
-    if (d.length > DESCRIPTION_MAX) {
-      return { ok: false, field: 'description', error: `The description must be ${DESCRIPTION_MAX} characters or fewer.` };
-    }
-    out.description = d;
-  }
-
-  if (need('occurredOn')) {
-    const raw = payload.occurredOn;
-    if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw) || Number.isNaN(Date.parse(raw))) {
-      return { ok: false, field: 'occurredOn', error: 'Pick the date you volunteered.' };
-    }
-    /**
-     * A future date is refused.
-     *
-     * An external record is a report of something that already happened. A date
-     * in the future is either a typo or a claim about work not yet done, and
-     * both are better caught at the form than discovered in a service record.
-     * Compared as date strings against today's, so a shift earlier today is
-     * still accepted regardless of the server's clock time.
-     */
-    if (raw > new Date().toISOString().slice(0, 10)) {
-      return { ok: false, field: 'occurredOn', error: 'That date is in the future.' };
-    }
-    out.occurredOn = raw;
-  }
-
-  if (need('hours')) {
-    const h = Number(payload.hours);
-    if (!Number.isFinite(h) || h <= 0) {
-      return { ok: false, field: 'hours', error: 'Enter how many hours you volunteered.' };
-    }
-    if (h > HOURS_MAX) {
-      return { ok: false, field: 'hours', error: `A single entry cannot be more than ${HOURS_MAX} hours. Split it across the days you worked.` };
-    }
-    out.hours = Number(h.toFixed(2));
-  }
-
-  return { ok: true, value: out };
-}
+export { validateExternalHours, HOURS_MAX, ACTIVITY_MAX, ORGANIZATION_MAX, DESCRIPTION_MAX } from '../externalHoursRules.js';
 
 /**
  * `selfReported: true` is emitted on every entry, unconditionally.
@@ -149,28 +69,28 @@ const format = (r) => ({
 });
 
 /** The caller's own external records. Self-scoped by construction. */
-router.get('/api/external-hours', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const rows = db.prepare(
+router.get('/api/external-hours', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const rows = await db.prepare(
     'SELECT * FROM external_hours WHERE user_id = ? ORDER BY occurred_on DESC, created_at DESC'
   ).all(req.principal.userId);
   res.json({ entries: rows.map(format) });
 });
 
 /** Log one. */
-router.post('/api/external-hours', authenticateToken, requireCap('portfolio.write'), (req, res) => {
+router.post('/api/external-hours', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
   const check = validateExternalHours(req.body ?? {});
   if (!check.ok) return res.status(400).json({ error: check.error, field: check.field });
 
   const now = new Date().toISOString();
   const id = `ext-${crypto.randomUUID()}`;
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO external_hours
       (id, user_id, organization_name, activity_name, description, occurred_on, hours, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, req.principal.userId, check.value.organizationName, check.value.activityName,
     check.value.description ?? '', check.value.occurredOn, check.value.hours, now, now);
 
-  res.status(201).json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(id)) });
+  res.status(201).json({ entry: format(await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(id)) });
 });
 
 /**
@@ -181,8 +101,8 @@ router.post('/api/external-hours', authenticateToken, requireCap('portfolio.writ
  * afternoon; if they wrote down the wrong date they should be able to fix it
  * without deleting and retyping the rest.
  */
-router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
+router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const row = await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
   /* 404, not 403, for somebody else's record: a distinguishable refusal would
      confirm the id exists. Same rule as the export download in privacyRoutes. */
   if (!row || row.user_id !== req.principal.userId) {
@@ -204,18 +124,18 @@ router.patch('/api/external-hours/:id', authenticateToken, requireCap('portfolio
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(row.id);
-  db.prepare(`UPDATE external_hours SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  await db.prepare(`UPDATE external_hours SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-  res.json({ entry: format(db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
+  res.json({ entry: format(await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(row.id)) });
 });
 
 /** Delete one. The owner's record, the owner's to remove. */
-router.delete('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), (req, res) => {
-  const row = db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
+router.delete('/api/external-hours/:id', authenticateToken, requireCap('portfolio.write'), async (req, res) => {
+  const row = await db.prepare('SELECT * FROM external_hours WHERE id = ?').get(req.params.id);
   if (!row || row.user_id !== req.principal.userId) {
     return res.status(404).json({ error: 'No such entry.', code: 'not_found' });
   }
-  db.prepare('DELETE FROM external_hours WHERE id = ?').run(row.id);
+  await db.prepare('DELETE FROM external_hours WHERE id = ?').run(row.id);
   res.json({ success: true });
 });
 

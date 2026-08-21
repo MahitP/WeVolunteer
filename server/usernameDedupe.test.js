@@ -35,8 +35,9 @@ function initAgainst(dbFile) {
     process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
     process.env.JWT_SECRET = 'test';
     process.env.DEMO_MODE = 'false';
-    const { initDatabase } = await import('${root}/server/db.js');
+    const { initDatabase, completeDatabaseInit } = await import('${root}/server/db.js');
     initDatabase();
+    await completeDatabaseInit();
   `], { cwd: process.cwd(), stdio: 'pipe' });
 }
 

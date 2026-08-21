@@ -22,7 +22,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
  * so the module-scope environment set here does not leak.
  */
 describe('the sign-in limiter under shared NAT', () => {
-  let app, db, server, base, initDatabase;
+  let app, db, server, base, initDatabase, completeDatabaseInit;
 
   /* The limits under test, low enough to exercise in a test but exercising the
      real code paths and the real key generators. */
@@ -43,12 +43,13 @@ describe('the sign-in limiter under shared NAT', () => {
     process.env.LOGIN_RATE_LIMIT = String(PER_PAIR);
     process.env.LOGIN_IP_CEILING = String(IP_CEILING);
 
-    ({ db, initDatabase } = await import('./db.js'));
+    ({ db, initDatabase, completeDatabaseInit } = await import('./db.js'));
     /* The connection binds at module scope, so prove it is the throwaway file
        rather than trusting the env var — the same guard startTestServer uses. */
-    const opened = db.prepare('PRAGMA database_list').all().find(r => r.name === 'main')?.file || '';
+    const opened = (await db.prepare('PRAGMA database_list').all()).find(r => r.name === 'main')?.file || '';
     if (!opened.startsWith(dir)) throw new Error(`wrong database: ${opened}`);
     initDatabase();
+    await completeDatabaseInit();
 
     ({ app } = await import('./app.js'));
     server = app.listen(0, '127.0.0.1');
@@ -62,7 +63,7 @@ describe('the sign-in limiter under shared NAT', () => {
       VALUES (?,?,?,?,?,'11','student',1,1,?)`);
     db.exec('BEGIN');
     for (let i = 0; i < 12; i++) {
-      ins.run(`rl-${i}`, `Student ${i}`, `student.${i}@example.com`, `rl_student_${i}`, hash, new Date().toISOString());
+      await ins.run(`rl-${i}`, `Student ${i}`, `student.${i}@example.com`, `rl_student_${i}`, hash, new Date().toISOString());
     }
     db.exec('COMMIT');
   }, 60000);
@@ -166,7 +167,7 @@ describe('the sign-in limiter under shared NAT', () => {
   /* 11 — a refusal is a wait, never a disabled account. */
   it('never disables the account row', async () => {
     for (let n = 0; n < PER_PAIR + 3; n++) await wrong(0);
-    expect(db.prepare('SELECT account_status FROM users WHERE id = ?').get('rl-0').account_status).toBe('active');
+    expect((await db.prepare('SELECT account_status FROM users WHERE id = ?').get('rl-0')).account_status).toBe('active');
   });
 
   /* 9 — the response says how long to wait, in the shape the client parses. */

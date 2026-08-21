@@ -53,7 +53,7 @@ describe('the member directory: what one member may learn about another', () => 
     admin = await srv.login('admin@example.gov');
 
     ({ db } = await import('./db.js'));
-    studentId = db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com').id;
+    studentId = (await db.prepare('SELECT id FROM users WHERE email = ?').get('leo.chen@example.com')).id;
 
     /* A second student, so the "one member reading another" case is a real one
        rather than a self-read wearing a disguise. */
@@ -64,7 +64,7 @@ describe('the member directory: what one member may learn about another', () => 
     otherStudent = signup.cookie;
     otherId = signup.user.id;
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE users SET bio = ?, school = ?, location = ?,
                        hobbies = ?, skills = ?, profile_visibility = 'public'
       WHERE id = ?
@@ -124,8 +124,8 @@ describe('the member directory: what one member may learn about another', () => 
   });
 
   describe('a private profile', () => {
-    beforeAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
+    beforeAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
     });
 
     /**
@@ -169,8 +169,8 @@ describe('the member directory: what one member may learn about another', () => 
       expect(res.body.profile.bio).toBe('I like helping out.');
     });
 
-    afterAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
+    afterAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
     });
   });
 
@@ -180,8 +180,8 @@ describe('the member directory: what one member may learn about another', () => 
    * think to check.
    */
   describe('no alternate route discloses more than the profile does', () => {
-    beforeAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
+    beforeAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(otherId);
     });
 
     it('search results carry no private field', async () => {
@@ -195,13 +195,13 @@ describe('the member directory: what one member may learn about another', () => 
     });
 
     it('search never returns a suspended or deleted account', async () => {
-      db.prepare(`UPDATE users SET account_status = 'deleted' WHERE id = ?`).run(otherId);
+      await db.prepare(`UPDATE users SET account_status = 'deleted' WHERE id = ?`).run(otherId);
       const res = await srv.call('GET', '/api/directory/search?q=Priya', undefined, student);
       expect(res.body.users.find(u => u.id === otherId)).toBeUndefined();
 
       const profile = await srv.call('GET', '/api/users/by-username/priya', undefined, student);
       expect(profile.status).toBe(404);
-      db.prepare(`UPDATE users SET account_status = 'active' WHERE id = ?`).run(otherId);
+      await db.prepare(`UPDATE users SET account_status = 'active' WHERE id = ?`).run(otherId);
     });
 
     /**
@@ -249,7 +249,7 @@ describe('the member directory: what one member may learn about another', () => 
         username: 'partnerorg', role: 'student', password: 'TestPass123!',
       });
       const partnerToken = partner.cookie;
-      db.prepare(`UPDATE users SET role = 'partner' WHERE email = ?`).run('partner.dir@test.local');
+      await db.prepare(`UPDATE users SET role = 'partner' WHERE email = ?`).run('partner.dir@test.local');
 
       for (const path of [
         '/api/directory/search?q=priya',
@@ -290,8 +290,8 @@ describe('the member directory: what one member may learn about another', () => 
       expect(res.status).toBe(403);
     });
 
-    afterAll(() => {
-      db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
+    afterAll(async () => {
+      await db.prepare(`UPDATE users SET profile_visibility = 'public' WHERE id = ?`).run(otherId);
     });
   });
 
@@ -319,9 +319,16 @@ describe('the member directory: what one member may learn about another', () => 
       /* There is no latitude/longitude on `users` and there must not be one:
          an event's coordinates are a meeting point an organizer published; a
          student's would be a child's whereabouts. */
-      const columns = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
-      expect(columns).not.toContain('latitude');
-      expect(columns).not.toContain('longitude');
+      /* Asked of the table rather than of the catalogue: `PRAGMA table_info`
+         does not exist on PostgreSQL, and the claim — users carry no
+         coordinates — is engine-independent. Selecting a column that is not
+         there raises on both engines, so the raise IS the passing case. */
+      for (const column of ['latitude', 'longitude']) {
+        let present = true;
+        try { await db.prepare(`SELECT ${column} FROM users LIMIT 0`).all(); }
+        catch { present = false; }
+        expect(present, `users gained a ${column} column — that is a child's whereabouts`).toBe(false);
+      }
     });
   });
 });

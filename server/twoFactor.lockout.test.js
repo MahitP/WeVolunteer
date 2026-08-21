@@ -47,7 +47,7 @@ describe('two-factor controls cannot lock somebody out', () => {
     /* The seeded administrator is enrolled by the harness, which is exactly the
        state this guard is about. */
     const token = await srv.login(ADMIN);
-    const before = db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(ADMIN).tfa_secret;
+    const before = (await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(ADMIN)).tfa_secret;
 
     const res = await srv.call('POST', '/api/2fa/generate', {}, token,
       await stepUpHeader(token, '2fa.generate'));
@@ -58,7 +58,7 @@ describe('two-factor controls cannot lock somebody out', () => {
     /* The assertion that actually matters: the working secret is untouched. A
        409 that had already overwritten it would satisfy a status check and lock
        the person out anyway. */
-    expect(db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(ADMIN).tfa_secret)
+    expect((await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(ADMIN)).tfa_secret)
       .toBe(before);
   });
 
@@ -70,7 +70,7 @@ describe('two-factor controls cannot lock somebody out', () => {
    */
   it('still lets an unenrolled account generate a secret', async () => {
     const token = await srv.login(STUDENT);
-    db.prepare('UPDATE users SET tfa_enabled = 0, tfa_secret = NULL WHERE email = ?').run(STUDENT);
+    await db.prepare('UPDATE users SET tfa_enabled = 0, tfa_secret = NULL WHERE email = ?').run(STUDENT);
 
     const res = await srv.call('POST', '/api/2fa/generate', {}, token,
       await stepUpHeader(token, '2fa.generate'));
@@ -78,7 +78,7 @@ describe('two-factor controls cannot lock somebody out', () => {
     expect(res.status).toBe(200);
     expect(res.body.secret).toBeTruthy();
     /* Stored encrypted, never as plaintext — the `v1:` envelope from cryptoUtils. */
-    expect(db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(STUDENT).tfa_secret)
+    expect((await db.prepare('SELECT tfa_secret FROM users WHERE email = ?').get(STUDENT)).tfa_secret)
       .toMatch(/^v1:/);
   });
 
@@ -94,7 +94,7 @@ describe('two-factor controls cannot lock somebody out', () => {
     expect(res.status).toBe(403);
 
     /* Still enrolled — and therefore still able to administer. */
-    const row = db.prepare('SELECT tfa_enabled FROM users WHERE email = ?').get(ADMIN);
+    const row = await db.prepare('SELECT tfa_enabled FROM users WHERE email = ?').get(ADMIN);
     expect(row.tfa_enabled).toBe(1);
   });
 
@@ -120,7 +120,7 @@ describe('two-factor controls cannot lock somebody out', () => {
    */
   it('lets an ordinary volunteer disable theirs', async () => {
     const { encryptSecret } = await import('./cryptoUtils.js');
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE email = ?')
       .run(encryptSecret(TEST_TOTP_SECRET), STUDENT);
 
     const token = await srv.login(STUDENT);
@@ -129,7 +129,7 @@ describe('two-factor controls cannot lock somebody out', () => {
       await stepUpHeader(token, '2fa.disable'));
 
     expect(res.status).toBe(200);
-    expect(db.prepare('SELECT tfa_enabled FROM users WHERE email = ?').get(STUDENT).tfa_enabled)
+    expect((await db.prepare('SELECT tfa_enabled FROM users WHERE email = ?').get(STUDENT)).tfa_enabled)
       .toBe(0);
   });
 });

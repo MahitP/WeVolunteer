@@ -111,7 +111,7 @@ function hashIp(req) {
  * address to a@x.com cannot also authorise moving it to the attacker's — the
  * binding most step-up implementations omit.
  */
-router.post('/api/auth/reauth/challenge', authenticateToken, (req, res) => {
+router.post('/api/auth/reauth/challenge', authenticateToken, async (req, res) => {
   const { action, params } = req.body ?? {};
 
   /**
@@ -133,7 +133,7 @@ router.post('/api/auth/reauth/challenge', authenticateToken, (req, res) => {
 
   let opened;
   try {
-    opened = openChallenge({
+    opened = await openChallenge({
       db,
       userId: req.user.id,
       action,
@@ -219,7 +219,7 @@ router.post('/api/auth/reauth/password', authenticateToken, async (req, res) => 
  * callback requires the SAME authenticated session to present it. That is the
  * binding the nonce cookie is a substitute for, not a weaker version of it.
  */
-router.get('/api/auth/reauth/oauth/:provider', authenticateToken, (req, res) => {
+router.get('/api/auth/reauth/oauth/:provider', authenticateToken, async (req, res) => {
   const resolved = resolveProvider(req.params.provider);
   if (!resolved.ok) return res.status(resolved.status).json({ error: resolved.error });
   const { key: providerName, provider } = resolved;
@@ -243,7 +243,7 @@ router.get('/api/auth/reauth/oauth/:provider', authenticateToken, (req, res) => 
    * rather than after the round trip means the user is not sent to Google to
    * come back to an error.
    */
-  const peeked = peekChallenge({ db, challengeId, userId: req.user.id });
+  const peeked = await peekChallenge({ db, challengeId, userId: req.user.id });
   if (!peeked.ok && peeked.error !== E.NOT_GRANTED) return refuseReauth(res, peeked);
 
   const state = jwt.sign(

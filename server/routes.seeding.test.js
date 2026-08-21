@@ -18,8 +18,9 @@ describe('demo seeding is gated on DEMO_MODE', () => {
       process.env.WEV_DB_PATH = ${JSON.stringify(dbFile)};
       process.env.JWT_SECRET = 'test';
       delete process.env.DEMO_MODE;
-      const { initDatabase } = await import('${process.cwd().replace(/\\/g, '/')}/server/db.js');
+      const { initDatabase, completeDatabaseInit } = await import('${process.cwd().replace(/\\/g, '/')}/server/db.js');
       initDatabase();
+      await completeDatabaseInit();
     `], { cwd: process.cwd(), stdio: 'pipe' });
 
     const db = new DatabaseSync(dbFile);

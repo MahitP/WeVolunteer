@@ -20,7 +20,7 @@
  * than it was before.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { rmSync, writeFileSync, mkdirSync, utimesSync, mkdtempSync } from 'fs';
+import { rmSync, writeFileSync, utimesSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { startTestServer } from './testServer.js';
@@ -88,7 +88,7 @@ describe('notification queue health is reported', () => {
     const { db } = await import('./db.js');
 
     // A permanently failed job — previously invisible outside a manual SQL query.
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notification_jobs (id, channel, payload, status, attempts, next_attempt_at, created_at)
       VALUES ('j-dead', 'email', '{}', 'failed', 5, ?, ?)
     `).run(new Date().toISOString(), new Date().toISOString());

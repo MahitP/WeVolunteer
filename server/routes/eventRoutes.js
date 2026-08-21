@@ -7,8 +7,9 @@ import crypto from 'crypto';
 import { VALID_CATEGORIES, MAX_AUTO_SELECT_DRAWS } from '../config.js';
 import { computeDraw, recordRun, applyRun } from '../services/autoSelect.js';
 import { attendanceOnSlots, eventAttendanceCount } from '../attendance.js';
-import { authenticateToken, inTransaction, notifyConfirmedVolunteers } from '../utils.js';
-import { can, requireCap, requireCapAny } from '../authz.js';
+import { authenticateToken, notifyConfirmedVolunteers } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
+import { can, requireCapAny } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
@@ -18,9 +19,7 @@ import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
-import {
-  canManage, canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds,
-} from '../organizations.js';
+import { canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds } from '../organizations.js';
 import { MAIL_DOMAIN } from '../emailIdentity.js';
 
 const router = express.Router();
@@ -55,22 +54,22 @@ const router = express.Router();
  * an application is actually made, and would refuse regardless of what this
  * told the browser.
  */
-function viewerMembershipsFor(userId) {
+async function viewerMembershipsFor(userId) {
   if (!userId) return new Set();
-  return new Set(db.prepare('SELECT organization_id FROM organization_members WHERE user_id = ?')
-    .all(userId).map(r => r.organization_id));
+  return new Set((await db.prepare('SELECT organization_id FROM organization_members WHERE user_id = ?')
+    .all(userId)).map(r => r.organization_id));
 }
 
-function viewerBansFor(userId) {
+async function viewerBansFor(userId) {
   if (!userId) return new Map();
 
-  const bans = db.prepare(`
+  const bans = await db.prepare(`
     SELECT organization_id, reason FROM organization_bans
      WHERE user_id = ? AND lifted_at IS NULL
   `).all(userId);
   if (bans.length === 0) return new Map();
 
-  const appeals = db.prepare(`
+  const appeals = await db.prepare(`
     SELECT subject_ref, id, status, decision FROM appeals
      WHERE subject = 'organization_ban' AND user_id = ?
      ORDER BY created_at ASC
@@ -93,10 +92,10 @@ function viewerBansFor(userId) {
   }]));
 }
 
-function viewerBanFor(organizationId, userId) {
+async function viewerBanFor(organizationId, userId) {
   if (!organizationId || !userId) return null;
 
-  const ban = db.prepare(`
+  const ban = await db.prepare(`
     SELECT reason FROM organization_bans
      WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
   `).get(organizationId, userId);
@@ -104,7 +103,7 @@ function viewerBanFor(organizationId, userId) {
 
   /* The most recent, so a reader who appealed, was refused, and was banned
      again sees the appeal that belongs to the ban they are under. */
-  const appeal = db.prepare(`
+  const appeal = await db.prepare(`
     SELECT id, status, decision FROM appeals
      WHERE subject = 'organization_ban' AND subject_ref = ? AND user_id = ?
      ORDER BY created_at DESC LIMIT 1
@@ -194,7 +193,7 @@ const EVENTS_WARN_THRESHOLD = 400;
  * The previous query had no ORDER BY at all, so pagination could not have been
  * added on top of it correctly.
  */
-router.get('/api/events', authenticateToken, (req, res) => {
+router.get('/api/events', authenticateToken, async (req, res) => {
   try {
     const paginated = req.query.limit !== undefined;
 
@@ -234,8 +233,8 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * derived rather than stored, and both the WHERE and the ORDER BY need to
      * reference them.
      */
-    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments(filters);
-    const { where, params } = buildEventWhere(filters, req.user.id);
+    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db });
+    const { where, params } = buildEventWhere(filters, req.user.id, db);
     const order = buildEventOrder(filters.sort);
 
     const FROM = `
@@ -305,9 +304,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * telling them to do.
      */
     const events = paginated
-      ? db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
+      ? await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
           .all({ ...rowParams, limit, offset })
-      : db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
+      : await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
           .all({ ...rowParams, hardCap: EVENTS_MAX_LIMIT });
 
     /**
@@ -345,8 +344,8 @@ router.get('/api/events', authenticateToken, (req, res) => {
     // other signed-in student. Batch-loaded once so the per-event mapping
     // below stays free of an N+1.
     const acceptedEventIds = new Set(
-      db.prepare("SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'")
-        .all(req.user.id).map(r => r.event_id)
+      (await db.prepare("SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'")
+        .all(req.user.id)).map(r => r.event_id)
     );
 
     /**
@@ -365,7 +364,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
 
     const slotsByEvent = new Map();
     if (placeholders) {
-      for (const s of db.prepare(`SELECT * FROM slots WHERE event_id IN (${placeholders})`).all(...pageIds)) {
+      for (const s of await db.prepare(`SELECT * FROM slots WHERE event_id IN (${placeholders})`).all(...pageIds)) {
         if (!slotsByEvent.has(s.event_id)) slotsByEvent.set(s.event_id, []);
         slotsByEvent.get(s.event_id).push(s);
       }
@@ -373,7 +372,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
 
     const acceptedBySlot = new Map();
     if (placeholders) {
-      for (const r of db.prepare(`
+      for (const r of await db.prepare(`
         SELECT slot_id, COUNT(*) as count FROM applications
         WHERE status = 'accepted' AND event_id IN (${placeholders})
         GROUP BY slot_id
@@ -387,19 +386,19 @@ router.get('/api/events', authenticateToken, (req, res) => {
     // that is always going to fail should not be presented as available.
     const withAttendance = new Set(
       placeholders
-        ? db.prepare(`SELECT DISTINCT event_id FROM attendance WHERE event_id IN (${placeholders})`)
-            .all(...pageIds).map(r => r.event_id)
+        ? (await db.prepare(`SELECT DISTINCT event_id FROM attendance WHERE event_id IN (${placeholders})`)
+            .all(...pageIds)).map(r => r.event_id)
         : []
     );
 
     /* Tags for the whole page in ONE query, beside the other per-page batch
        loads above. Per-event reads here would be an N+1 on the endpoint the
        browse screen calls on every keystroke. */
-    const tagsByEvent = tagsForEvents(db, pageIds);
+    const tagsByEvent = await tagsForEvents(db, pageIds);
 
     /* One lookup for the page rather than two per card — see viewerBansFor. */
-    const viewerBans = viewerBansFor(req.user?.id);
-    const viewerOrgs = viewerMembershipsFor(req.user?.id);
+    const viewerBans = await viewerBansFor(req.user?.id);
+    const viewerOrgs = await viewerMembershipsFor(req.user?.id);
 
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];
@@ -546,11 +545,20 @@ router.get('/api/events', authenticateToken, (req, res) => {
      * client built this list from the full event array it used to hold, so it has
      * to come from somewhere now that the array is a filtered page.
      */
-    const places = db.prepare(`
-      SELECT DISTINCT location FROM events
-      WHERE status IN ('open', 'closed') AND location IS NOT NULL AND location != ''
-      ORDER BY location COLLATE NOCASE
-    `).all().map(r => r.location);
+    /* The DISTINCT is taken first, in a subquery, and the sort applied outside
+       it. PostgreSQL requires every `ORDER BY` expression of a `SELECT DISTINCT`
+       to appear in the select list, and `location COLLATE nocase` is a different
+       expression from `location` — so the flat form is a syntax error there
+       while SQLite accepts it. Nesting keeps the case-insensitive ordering
+       rather than dropping the collation, which would reorder the filter menu
+       for every deployment that has a lower-case place name. */
+    const places = (await db.prepare(`
+      SELECT location FROM (
+        SELECT DISTINCT location FROM events
+        WHERE status IN ('open', 'closed') AND location IS NOT NULL AND location != ''
+      ) AS distinct_locations
+      ORDER BY location COLLATE nocase
+    `).all()).map(r => r.location);
 
     /**
      * The tag vocabulary, computed over everything and NOT over the current page.
@@ -567,7 +575,7 @@ router.get('/api/events', authenticateToken, (req, res) => {
     /* The fifteen most used, not the fifty this defaults to — see
        BROWSE_TAG_LIMIT. Ordered by usage with a deterministic tie-break, so the
        bar does not reshuffle between requests. */
-    const tags = tagVocabulary(db, { limit: BROWSE_TAG_LIMIT });
+    const tags = await tagVocabulary(db, { limit: BROWSE_TAG_LIMIT });
 
     res.json({
       events: formattedEvents,
@@ -615,9 +623,9 @@ router.get('/api/events', authenticateToken, (req, res) => {
  * Declared ABOVE `/api/events/:id`: Express matches in order, so registering it
  * after would make `tags` be read as an event id and answer 404.
  */
-router.get('/api/events/tags', authenticateToken, (req, res) => {
+router.get('/api/events/tags', authenticateToken, async (req, res) => {
   try {
-    res.json({ tags: tagVocabulary(db, { limit: req.query.limit }) });
+    res.json({ tags: await tagVocabulary(db, { limit: req.query.limit }) });
   } catch (err) {
     console.error('Failed to load the tag vocabulary:', err);
     res.status(500).json({ error: 'Could not load tags.' });
@@ -630,9 +638,9 @@ router.get('/api/events/tags', authenticateToken, (req, res) => {
  * Staff-only: it carries the applicant roster, which is not something a
  * student may enumerate for an event they are not running.
  */
-router.get('/api/events/:id', authenticateToken, (req, res) => {
+router.get('/api/events/:id', authenticateToken, async (req, res) => {
   try {
-    const event = db.prepare(`
+    const event = await db.prepare(`
       SELECT e.*, u.name as organizer_name, u.verified as organizer_verified,
              u.school as organizer_school,
              org.name as organization_name, org.slug as organization_slug
@@ -648,7 +656,7 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
        accepted the Student Organizer Agreement is refused here as they are on
        every write route. Membership alone left this one open. */
     const isStaff = EVENT_STAFF_CAPABILITIES.some(c => can(req.principal, c))
-      && canRunEvent(db, event, req.principal.userId, {
+      && await canRunEvent(db, event, req.principal.userId, {
         hasModerate: can(req.principal, 'event.moderate'),
       });
     if (!isStaff) return res.status(403).json({ error: 'Access denied: You do not host this event' });
@@ -658,11 +666,11 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
        here. The field is still emitted for shape parity with the list, computed
        from the one membership row rather than a sweep of the whole table. */
     const viewerOrgs = event.organization_id
-      ? new Set(isMemberOf(event.organization_id, req.user?.id) ? [event.organization_id] : [])
+      ? new Set(await isMemberOf(event.organization_id, req.user?.id) ? [event.organization_id] : [])
       : new Set();
-    const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
+    const slots = await db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
     const acceptedBySlot = new Map();
-    for (const r of db.prepare(`
+    for (const r of await db.prepare(`
       SELECT slot_id, COUNT(*) as count FROM applications
       WHERE event_id = ? AND status = 'accepted' GROUP BY slot_id
     `).all(event.id)) {
@@ -671,13 +679,13 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
 
     const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
 
-    const applications = db.prepare(`
+    const applications = (await db.prepare(`
       SELECT a.id, a.user_id, a.event_id, a.slot_id, a.status, a.applied_at,
              u.name, u.avatar, u.grade, u.school
       FROM applications a JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ?
       ORDER BY u.name
-    `).all(event.id).map(a => ({
+    `).all(event.id)).map(a => ({
       id: a.id,
       userId: a.user_id,
       eventId: a.event_id,
@@ -748,10 +756,10 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
          * absence of a ban and the absence of an organization look the same to
          * a reader, and neither needs explaining.
          */
-        viewerBan: viewerBanFor(event.organization_id, req.user?.id),
+        viewerBan: await viewerBanFor(event.organization_id, req.user?.id),
         /* Same shape as the list response, so a client that renders chips from
            one can render them from the other without a second code path. */
-        tags: tagsForEvent(db, event.id),
+        tags: await tagsForEvent(db, event.id),
         slots: formattedSlots
       },
       applications
@@ -775,9 +783,9 @@ router.get('/api/events/:id', authenticateToken, (req, res) => {
  * handler at all; the block below is what stops a student who helps run nothing
  * from getting any further than the door.
  */
-router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'organization.event.create']), (req, res) => {
+router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'organization.event.create']), async (req, res) => {
   // Check if organizer is verified by Admin
-  const organizer = db.prepare('SELECT verified FROM users WHERE id = ?').get(req.user.id);
+  const organizer = await db.prepare('SELECT verified FROM users WHERE id = ?').get(req.user.id);
   if (!organizer || organizer.verified !== 1) {
     return res.status(403).json({ error: 'Organizer account pending admin approval. You cannot create events yet.' });
   }
@@ -868,14 +876,14 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
 
   let organization = null;
   if (organizationId != null && organizationId !== '') {
-    organization = db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
+    organization = await db.prepare('SELECT * FROM organizations WHERE id = ?').get(organizationId);
     if (!organization || organization.status !== 'active') {
       return res.status(400).json({ error: 'That organization does not exist.', field: 'organizationId' });
     }
     /* `canHelpRun`, not `canManage` — a Student Organizer posting their club's
        shift is the point of the rank. Managers and moderators are included by
        that function, so nobody loses anything they had. */
-    if (!canHelpRun(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
+    if (!await canHelpRun(db, organization.id, req.user.id, { hasModerate: can(req.principal, 'organization.moderate') })) {
       return res.status(403).json({
         error: 'You do not help run that organization.',
         field: 'organizationId', code: 'not_manager',
@@ -914,9 +922,9 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
     const eventId = `event-${crypto.randomUUID()}`;
     const nowStr = new Date().toISOString();
     
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // A. Insert Event
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
                             organizer_id, status, created_at, auto_approve, instructions, attendee_visibility,
                             address, latitude, longitude, organization_id, credits_hours, audience)
@@ -947,7 +955,7 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
       // B. Insert slots
       for (const slot of slots) {
         const slotId = `slot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
@@ -964,7 +972,7 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
       /* C. Tags. Inside the same transaction as the event and its slots: an
          event that saved without the tags the organizer typed is a silent partial
          write, and they would have no way to tell other than reopening it. */
-      replaceEventTags(db, eventId, tagCheck.value);
+      await replaceEventTags(tx, eventId, tagCheck.value);
     });
 
     /**
@@ -988,7 +996,7 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
      */
     if (organization) {
       try {
-        const recipients = memberIds(db, organization.id, { excluding: [req.user.id] });
+        const recipients = await memberIds(db, organization.id, { excluding: [req.user.id] });
         /**
          * One transaction around the whole fan-out.
          *
@@ -1001,9 +1009,9 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
          * try/catch: a fan-out failure must roll back only the notifications,
          * never the event the organizer successfully created.
          */
-        inTransaction(() => {
+        await runInTransaction(db, async (tx) => {
           for (const memberId of recipients) {
-            notificationService.dispatch(
+            await notificationService.dispatch(
               'ORGANIZATION_EVENT_POSTED',
               { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
               memberId,
@@ -1066,9 +1074,9 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
   if (!tagCheck.ok) return res.status(400).json({ error: tagCheck.error, field: tagCheck.field });
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
 
@@ -1114,7 +1122,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
     // destroying hours volunteers had already earned. Credited service is not
     // something an event edit gets to delete as a side effect.
     const payloadIds = slots.filter(s => s.id && !s.id.startsWith('new-')).map(s => s.id);
-    const existingIds = db.prepare('SELECT id FROM slots WHERE event_id = ?').all(eventId).map(s => s.id);
+    const existingIds = (await db.prepare('SELECT id FROM slots WHERE event_id = ?').all(eventId)).map(s => s.id);
     const removedIds = existingIds.filter(id => !payloadIds.includes(id));
     /**
      * Every slot id in the body must belong to THIS event.
@@ -1179,8 +1187,8 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
      */
     const retained = slots.filter(sl => sl.id && existingIds.includes(sl.id));
     const storedById = new Map(
-      db.prepare('SELECT id, name, start_datetime, end_datetime FROM slots WHERE event_id = ?')
-        .all(eventId).map(row => [row.id, row])
+      (await db.prepare('SELECT id, name, start_datetime, end_datetime FROM slots WHERE event_id = ?')
+        .all(eventId)).map(row => [row.id, row])
     );
     const retimed = retained.filter(sl => {
       const stored = storedById.get(sl.id);
@@ -1193,7 +1201,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
       return !(sameStart && sameEnd);
     }).map(sl => sl.id);
 
-    const lockedRows = attendanceOnSlots(db, retimed);
+    const lockedRows = await attendanceOnSlots(db, retimed);
     if (lockedRows.length > 0) {
       const names = [...new Set(lockedRows.map(r => r.user_name).filter(Boolean))];
       return res.status(409).json({
@@ -1208,7 +1216,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
       });
     }
 
-    const protectedRows = attendanceOnSlots(db, removedIds);
+    const protectedRows = await attendanceOnSlots(db, removedIds);
 
     if (protectedRows.length > 0) {
       const names = [...new Set(protectedRows.map(r => r.user_name).filter(Boolean))];
@@ -1221,9 +1229,9 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
       });
     }
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // 1. Update event details
-      db.prepare(`
+      await tx.prepare(`
         UPDATE events
         SET title = ?, description = ?, category = ?, location = ?, application_deadline = ?,
             address = ?, latitude = ?, longitude = ?
@@ -1231,13 +1239,13 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
       `).run(title, description, category, location, applicationDeadline, nextAddress, nextLatitude, nextLongitude, eventId);
 
       if (autoApprove !== undefined) {
-        db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
+        await tx.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
       }
       if (instructions !== undefined) {
-        db.prepare('UPDATE events SET instructions = ? WHERE id = ?').run(instructions || '', eventId);
+        await tx.prepare('UPDATE events SET instructions = ? WHERE id = ?').run(instructions || '', eventId);
       }
       if (attendeeVisibility !== undefined) {
-        db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
+        await tx.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
           .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
       }
 
@@ -1277,7 +1285,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
         if (audience === 'organization' && !event.organization_id) {
           throw Object.assign(new Error('no organization'), { httpStatus: 400, field: 'audience', code: 'organization_required' });
         }
-        db.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
+        await tx.prepare('UPDATE events SET audience = ? WHERE id = ?').run(audience, eventId);
       }
 
       /**
@@ -1290,7 +1298,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
        * tag off an event the moment such a client saved anything else about it.
        */
       if (tags !== undefined) {
-        replaceEventTags(db, eventId, tagCheck.value);
+        await replaceEventTags(tx, eventId, tagCheck.value);
       }
 
       // 2. Differential sync slots.
@@ -1301,9 +1309,9 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
       // branch: an edit that names no slots is a malformed request, not an
       // instruction to erase every sign-up on the event.
       for (const slotId of removedIds) {
-        db.prepare('DELETE FROM attendance_checkin WHERE slot_id = ?').run(slotId);
-        db.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
-        db.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
+        await tx.prepare('DELETE FROM attendance_checkin WHERE slot_id = ?').run(slotId);
+        await tx.prepare('DELETE FROM applications WHERE slot_id = ?').run(slotId);
+        await tx.prepare('DELETE FROM slots WHERE id = ?').run(slotId);
       }
 
       // 3. Insert new or update existing slots
@@ -1314,14 +1322,14 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
              is what still holds if a future edit reorders the handler and moves
              the validation after the transaction, which is exactly the kind of
              refactor that reintroduces this class of bug. */
-          db.prepare(`
+          await tx.prepare(`
             UPDATE slots
             SET name = ?, description = ?, start_datetime = ?, end_datetime = ?, max_spots = ?
             WHERE id = ? AND event_id = ?
           `).run(slot.name, slot.description, slot.startDatetime, slot.endDatetime, Number(slot.maxSpots), slot.id, eventId);
         } else {
           const slotId = `slot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-          db.prepare(`
+          await tx.prepare(`
             INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
             VALUES (?, ?, ?, ?, ?, ?, ?)
           `).run(slotId, eventId, slot.name, slot.description, slot.startDatetime, slot.endDatetime, Number(slot.maxSpots));
@@ -1355,51 +1363,56 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
 });
 
 // 11. Run Equalizer Hour Sorting (Organizer only)
-router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
+router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // Approve slot-by-slot: each slot has its own capacity, and within a slot
     // priority goes to students with the fewest credited hours (tie: earliest applied)
-    const slots = db.prepare('SELECT id, name, max_spots FROM slots WHERE event_id = ?').all(eventId);
-    const approveStmt = db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?");
-    const hoursStmt = db.prepare(`
+    const slots = await db.prepare('SELECT id, name, max_spots FROM slots WHERE event_id = ?').all(eventId);
+    const approveStmt = await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?");
+    const hoursStmt = await db.prepare(`
       SELECT SUM(hours_awarded) as total FROM attendance WHERE user_id = ? AND present = 1
     `);
 
     let approvedCount = 0;
     for (const slot of slots) {
-      const accepted = db.prepare(`
+      const accepted = (await db.prepare(`
         SELECT COUNT(*) as count FROM applications WHERE slot_id = ? AND status = 'accepted'
-      `).get(slot.id).count;
+      `).get(slot.id)).count;
       const remaining = slot.max_spots - accepted;
       if (remaining <= 0) continue;
 
-      const pendingApps = db.prepare(`
+      const pendingApps = await db.prepare(`
         SELECT id, user_id, applied_at FROM applications
         WHERE slot_id = ? AND status = 'pending'
       `).all(slot.id);
       if (pendingApps.length === 0) continue;
 
-      const enriched = pendingApps.map(app => {
-        const hoursRow = hoursStmt.get(app.user_id);
-        return { ...app, totalHours: hoursRow && hoursRow.total ? Number(hoursRow.total) : 0.0 };
-      });
+      /* Built with a loop rather than `.map`: the callback reads each
+         applicant's hours from the database, so an arrow returning a promise
+         would leave `enriched` an array of promises and the sort below would
+         compare wrappers. */
+      const enriched = [];
+      for (const app of pendingApps) {
+        const hoursRow = await hoursStmt.get(app.user_id);
+        enriched.push({ ...app, totalHours: hoursRow && hoursRow.total ? Number(hoursRow.total) : 0.0 });
+      }
       enriched.sort((a, b) => {
         if (a.totalHours !== b.totalHours) return a.totalHours - b.totalHours;
         return new Date(a.applied_at) - new Date(b.applied_at);
       });
 
       for (const app of enriched.slice(0, remaining)) {
-        approveStmt.run(app.id);
+        await approveStmt.run(app.id);
         approvedCount++;
-        notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, app.user_id);
+        await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, app.user_id);
       }
     }
 
@@ -1411,14 +1424,14 @@ router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['e
 });
 
 // 12. Update Event Settings (Organizer only)
-router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), (req, res) => {
+router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   const { autoApprove, attendeeVisibility } = req.body;
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied: You do not host this event' });
     }
     if (event.status === 'completed') {
@@ -1429,14 +1442,14 @@ router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.ow
     }
 
     if (autoApprove !== undefined) {
-      db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
+      await db.prepare('UPDATE events SET auto_approve = ? WHERE id = ?').run(autoApprove ? 1 : 0, eventId);
     }
     if (attendeeVisibility !== undefined) {
-      db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
+      await db.prepare('UPDATE events SET attendee_visibility = ? WHERE id = ?')
         .run(attendeeVisibility === 'private' ? 'private' : 'accepted', eventId);
     }
 
-    const updated = db.prepare('SELECT auto_approve, attendee_visibility FROM events WHERE id = ?').get(eventId);
+    const updated = await db.prepare('SELECT auto_approve, attendee_visibility FROM events WHERE id = ?').get(eventId);
     res.json({
       success: true,
       autoApprove: updated.auto_approve === 1,
@@ -1452,22 +1465,22 @@ router.patch('/api/events/:id', authenticateToken, requireCapAny(['event.edit.ow
 
 // A1. Fetch Pending Organizer accounts
 
-router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), (req, res) => {
+router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.moderate', 'event.edit.own', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
     // Allow Admin OR the organizer who hosted it to delete it
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // An event that produced service hours is part of a student's record, and a
     // record is not something a delete button gets to remove. Cancellation is
     // the way to call an event off; corrections go through attendance.
-    const attendanceRows = eventAttendanceCount(db, eventId);
+    const attendanceRows = await eventAttendanceCount(db, eventId);
     if (attendanceRows > 0) {
       return res.status(409).json({
         error: 'This event has attendance recorded against it and can no longer be deleted, '
@@ -1499,25 +1512,25 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
      * about who is asking, and an administrator named in a report is exactly the
      * case where trusting the administrator is the wrong default.
      */
-    if (eventHasLiveReport(db, eventId)) {
+    if (await eventHasLiveReport(db, eventId)) {
       return res.status(409).json({
         error: EVENT_HELD_MESSAGE,
         code: 'report_evidence_held'
       });
     }
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       // No `DELETE FROM attendance` here on purpose: the guard above means this
       // point is only reachable when the event has none, so the statement could
       // only ever be a no-op — and leaving a destructive statement in the file
       // invites someone to move the guard later.
-      db.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM applications WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM event_comments WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM user_favorites WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM event_announcements WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM slots WHERE event_id = ?').run(eventId);
-      db.prepare('DELETE FROM events WHERE id = ?').run(eventId);
+      await tx.prepare('DELETE FROM attendance_checkin WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM applications WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM event_comments WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM user_favorites WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM event_announcements WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM slots WHERE event_id = ?').run(eventId);
+      await tx.prepare('DELETE FROM events WHERE id = ?').run(eventId);
 
       /**
        * An administrator deleting somebody ELSE's event is recorded.
@@ -1537,7 +1550,7 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
        * a deletion with no row is an unattributable one.
        */
       if (event.organizer_id !== req.principal.userId) {
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.principal.userId,
           action: 'EVENT_DELETED',
           targetUserId: event.organizer_id,
@@ -1563,9 +1576,9 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
   }
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1575,7 +1588,7 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
       });
     }
 
-    db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
+    await db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
 
     // Calling off an event is the one change every confirmed volunteer must
     // hear about immediately — they may have arranged a ride around it.
@@ -1593,11 +1606,11 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
 
 // A6. Export Accepted Roster as CSV (Organizer only)
 
-router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['event.create', 'organization.event.manage.own']), (req, res) => {
+router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['event.create', 'organization.event.manage.own']), async (req, res) => {
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1635,14 +1648,14 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
        this would have published a brand-new open event under a club that had
        been wound up. */
     if (event.organization_id) {
-      const org = db.prepare('SELECT status FROM organizations WHERE id = ?').get(event.organization_id);
+      const org = await db.prepare('SELECT status FROM organizations WHERE id = ?').get(event.organization_id);
       if (!org || org.status !== 'active') {
         return res.status(409).json({
           error: 'That organization is archived.', code: 'organization_archived',
         });
       }
     }
-    if (event.organization_id && !canHelpRun(db, event.organization_id, req.user.id, {
+    if (event.organization_id && !await canHelpRun(db, event.organization_id, req.user.id, {
       hasModerate: can(req.principal, 'organization.moderate'),
     })) {
       return res.status(403).json({
@@ -1660,7 +1673,7 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
       d.setDate(d.getDate() + shiftDays);
       return d.toISOString();
     };
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, application_deadline, organizer_id, status, created_at, auto_approve,
                           organization_id, audience)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
@@ -1682,10 +1695,10 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
     );
 
     // Clone slots
-    const slots = db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
+    const slots = await db.prepare('SELECT * FROM slots WHERE event_id = ?').all(event.id);
     for (const s of slots) {
       const newSlotId = `slot-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(newSlotId, newEventId, s.name, s.description,
@@ -1701,20 +1714,20 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
 
 // 25. Quick stats (admin) — used to enrich the admin panel
 
-router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
+router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
   try {
     /* The whole row, not just `organizer_id`: `canRunEvent` also asks which
        organization the event belongs to, and a projection that omits it makes
        the function throw rather than quietly refuse the club's manager. */
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const runs = db.prepare(`
+    const runs = await db.prepare(`
       SELECT * FROM auto_select_runs
       WHERE event_id = ?
       ORDER BY run_number ASC
@@ -1738,14 +1751,14 @@ router.get('/api/events/:id/auto-select/runs', authenticateToken, requireCapAny(
 });
 
 // A27. Execute Draft Auto Select Draw (Organizer only)
-router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
+router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1764,13 +1777,13 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
     }
 
     // Check if there is already a confirmed selection
-    const confirmedExists = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ? AND is_confirmed = 1').get(eventId).count;
+    const confirmedExists = (await db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ? AND is_confirmed = 1').get(eventId)).count;
     if (confirmedExists > 0) {
       return res.status(400).json({ error: 'Selection has already been confirmed and locked for this event' });
     }
 
     // Determine the next run number
-    const runCount = db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId).count;
+    const runCount = (await db.prepare('SELECT COUNT(*) as count FROM auto_select_runs WHERE event_id = ?').get(eventId)).count;
 
     // A re-drawable "fairness" mechanism with no audit trail can be shopped
     // until the organizer likes the outcome. Cap total draws and require a
@@ -1798,8 +1811,8 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
      * both copies keep producing plausible-looking winners — which is the shape of
      * audit finding F-1. Behaviour here is unchanged; this is a delegation.
      */
-    const { selectedIds, waitlistIds } = computeDraw(db, eventId, { runNumber: nextRunNumber });
-    const { runId, createdAt: nowStr } = recordRun(
+    const { selectedIds, waitlistIds } = await computeDraw(db, eventId, { runNumber: nextRunNumber });
+    const { runId, createdAt: nowStr } = await recordRun(
       db, eventId,
       { selectedIds, waitlistIds },
       { runNumber: nextRunNumber, reason: runCount >= 1 ? cleanReason : null }
@@ -1819,14 +1832,14 @@ router.post('/api/events/:id/auto-select/run', authenticateToken, requireCapAny(
 });
 
 // A28. Confirm and Lock Auto Select Results (Organizer only)
-router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), (req, res) => {
+router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCapAny(['event.moderate', 'applicant.review', 'organization.event.manage.own']), async (req, res) => {
   const eventId = req.params.id;
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
 
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (event.status === 'completed') {
@@ -1837,7 +1850,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCap
     }
 
     // Fetch the latest run
-    const latestRun = db.prepare(`
+    const latestRun = await db.prepare(`
       SELECT * FROM auto_select_runs
       WHERE event_id = ?
       ORDER BY run_number DESC LIMIT 1
@@ -1857,7 +1870,7 @@ router.post('/api/events/:id/auto-select/confirm', authenticateToken, requireCap
      * from itself. `executedBy` records who caused it so a district can tell an
      * organizer's selection from an automatic one.
      */
-    applyRun(db, eventId, latestRun, { executedBy: 'organizer' });
+    await applyRun(db, eventId, latestRun, { executedBy: 'organizer' });
 
     res.json({ success: true });
   } catch (err) {
@@ -1876,14 +1889,14 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
   }
 
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
     if (!event) return res.status(404).json({ error: 'Event not found' });
     
-    if (!canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
+    if (!await canRunEvent(db, event, req.principal.userId, { hasModerate: can(req.principal, 'event.moderate') })) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const confirmedApps = db.prepare(`
+    const confirmedApps = await db.prepare(`
       SELECT DISTINCT u.id, u.email, u.email_opt_out 
       FROM applications a
       JOIN users u ON a.user_id = u.id
@@ -1917,7 +1930,7 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
      * one opt-out rule, and puts every message in the durable outbox.
      */
     for (const u of confirmedApps) {
-      notificationService.dispatch(
+      await notificationService.dispatch(
         'IMPORTANT_ANNOUNCEMENT',
         { eventId: event.id, eventTitle: event.title, body: message },
         u.id
@@ -1935,12 +1948,12 @@ router.post('/api/events/:id/broadcast', authenticateToken, requireCapAny(['even
 
 // 12. ICS Calendar Export (Authenticated)
 // Allows volunteers to download ICS files for slots they've applied to.
-router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, (req, res) => {
+router.get('/api/events/:eventId/slots/:slotId/ics', authenticateToken, async (req, res) => {
   const { eventId, slotId } = req.params;
   
   try {
-    const event = db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
-    const slot = db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    const slot = await db.prepare('SELECT * FROM slots WHERE id = ? AND event_id = ?').get(slotId, eventId);
     
     if (!event || !slot) {
       return res.status(404).send('Event or slot not found');

@@ -16,7 +16,7 @@ let db, backfillCertificates;
  * imported — it no longer exists in server/utils.js) purely so a test can
  * prove a code computed the old way no longer verifies.
  */
-function oldCertificateCode(userId, eventId) {
+async function oldCertificateCode(userId, eventId) {
   const source = `wev::${userId}::${eventId}`;
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;
@@ -27,7 +27,7 @@ function oldCertificateCode(userId, eventId) {
   const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I
   const block = (n) => Array.from({ length: 4 }, (_, i) =>
     alphabet[(n >>> (i * 5)) % alphabet.length]).join('');
-  return `WEV-${block(h1)}-${block(h2)}`;
+  return `WEV-${await block(h1)}-${await block(h2)}`;
 }
 
 const CODE_FORMAT = /^WEV-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/;
@@ -75,7 +75,7 @@ describe('certificates', () => {
   });
 
   it('rejects a code computed by the old deterministic algorithm', async () => {
-    const oldCode = oldCertificateCode('user-student-2', 'event-pantry-past');
+    const oldCode = await oldCertificateCode('user-student-2', 'event-pantry-past');
 
     const res = await srv.call('GET', `/api/certificates/verify/${oldCode}`);
     expect(res.status).toBe(404);
@@ -92,9 +92,9 @@ describe('certificates', () => {
     // Give Ethan (user-student-3) a credited attendance record for the same
     // past event directly via the DB, then backfill so he gets a certificate
     // distinct from Priya's.
-    db.prepare('UPDATE attendance SET present = 1 WHERE event_id = ? AND user_id = ?')
+    await db.prepare('UPDATE attendance SET present = 1 WHERE event_id = ? AND user_id = ?')
       .run('event-pantry-past', 'user-student-3');
-    backfillCertificates(db);
+    await backfillCertificates(db);
 
     const ethanToken = await srv.login('ethan.miller@example.com');
     const ethanCerts = await srv.call('GET', '/api/certificates', undefined, ethanToken);
@@ -108,11 +108,11 @@ describe('certificates', () => {
     expect(ethanCode).not.toBe(priyaCode);
   });
 
-  it('getOrCreateCertificateCode backfill is idempotent — a second run inserts nothing', () => {
-    const first = backfillCertificates(db);
+  it('getOrCreateCertificateCode backfill is idempotent — a second run inserts nothing', async () => {
+    const first = await backfillCertificates(db);
     expect(first.inserted).toBe(0); // already backfilled at boot + by the previous test
 
-    const second = backfillCertificates(db);
+    const second = await backfillCertificates(db);
     expect(second.inserted).toBe(0);
   });
 });

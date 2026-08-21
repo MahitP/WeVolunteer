@@ -49,7 +49,7 @@ if (!hasLedger) {
   process.exit(1);
 }
 
-const parity = verifyLedgerParity(db);
+const parity = await verifyLedgerParity(db);
 
 const totals = db.prepare(`
   SELECT u.name, COALESCE(SUM(CASE WHEN a.present = 1 THEN a.hours_awarded END), 0) AS hours

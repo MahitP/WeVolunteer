@@ -26,7 +26,7 @@
  * the modal while they were downloading.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFileSync, existsSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -65,7 +65,7 @@ async function completedExport(cookie, { expiresInMs = 7 * 24 * 3600 * 1000 } = 
 
   const archive = path.join(tmpdir(), `wev-audit-export-${jobId}.zip`);
   writeFileSync(archive, 'PK-ARCHIVE');
-  db.prepare(`
+  await db.prepare(`
     UPDATE data_export_jobs
        SET status = 'completed', file_location = ?, completed_at = ?, expires_at = ?
      WHERE id = ?
@@ -214,12 +214,12 @@ describe('export download: the provider-only account', () => {
     const { jobId } = await completedExport(cookie);
 
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO oauth_accounts
         (id, user_id, provider, provider_user_id, provider_email, created_at, updated_at, last_used_at)
       VALUES (?, ?, 'google', 'sub-dl-provider-only', ?, ?, ?, ?)
     `).run(`oauth-dl-${user.id}`, user.id, acct.email, now, now, now);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run('!OAUTH_ONLY!', user.id);
+    await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run('!OAUTH_ONLY!', user.id);
 
     // The challenge must not offer a password prompt it cannot answer.
     const opened = await srv.call('POST', '/api/auth/reauth/challenge',
@@ -249,14 +249,14 @@ describe('export download: a refused request must not cost the verification', ()
     expect(expired.status).toBe(410);
 
     // The grant was not burned by a request that delivered nothing.
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 
   it('keeps the grant spendable when the archive file is missing from disk', async () => {
     const { cookie } = await srv.signupConfirmed(account());
     const { jobId } = await completedExport(cookie);
-    db.prepare('UPDATE data_export_jobs SET file_location = ? WHERE id = ?')
+    await db.prepare('UPDATE data_export_jobs SET file_location = ? WHERE id = ?')
       .run(path.join(tmpdir(), 'wev-audit-does-not-exist.zip'), jobId);
 
     const challengeId = await srv.stepUp(cookie, 'data.download', { password: PW, params: { jobId } });
@@ -265,7 +265,7 @@ describe('export download: a refused request must not cost the verification', ()
     );
     expect(gone.status).toBe(404);
 
-    const row = db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
+    const row = await db.prepare('SELECT consumed_at FROM reauth_challenges WHERE id = ?').get(challengeId);
     expect(row.consumed_at).toBeNull();
   });
 });

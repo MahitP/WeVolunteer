@@ -13,19 +13,20 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus,
-  UserPlus2, UserMinus2, Ban,
-} from 'lucide-react';
+import { Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, FileText, Award, UserPlus2, UserMinus2, Ban, /* `Scale` for an appeal — the same glyph the platform-wide appeal surfaces
+     use — and `ShieldCheck` for lifting a ban, which is a protective act rather
+     than a destructive one. Both from lucide, which is the app's only icon set. */
+  Scale } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
-import { avatarColorValue } from '../utils/avatarColors';
+import '../utils/avatarColors';
 import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
 import AppealInbox from '../components/organizations/AppealInbox';
+import BannedMembers from '../components/organizations/BannedMembers';
 import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
 
@@ -231,7 +232,42 @@ export default function OrganizationPage({ addToast, currentUser }) {
                 <Settings2 size={16} aria-hidden="true" /> Manage
               </Link>
             )}
-            {viewer.isMember ? (
+            {/**
+              * Four states, and only one of them is a Join button.
+              *
+              * A banned student used to be shown the ordinary Join control. The
+              * server refused it — that is where a ban is enforced and it has
+              * not moved — so the button was not a hole, it was a lie: it
+              * offered an action and produced an error. What replaces it says
+              * what is actually true and what can actually be done about it.
+              *
+              * `viewer.ban` is absent for everybody who is not banned, so this
+              * cannot be tripped by a missing field.
+              */}
+            {viewer.ban ? (
+              viewer.ban.appeal?.pending ? (
+                /* Already appealed. Disabled rather than hidden: "I sent that"
+                   is the thing somebody comes back to the page to check, and a
+                   control that vanishes answers nothing. Not a route to a
+                   second appeal — the appeals route refuses duplicates, so
+                   offering one would only produce a rejection. */
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled
+                  title={`Appeal sent ${formatDay(viewer.ban.appeal.submittedAt)}`}
+                >
+                  <Clock size={16} aria-hidden="true" /> Appeal sent
+                </button>
+              ) : (
+                <Link
+                  className="btn btn-danger"
+                  to={`/appeals/new?subject=organization_ban&organization=${encodeURIComponent(org.id)}`}
+                >
+                  <Scale size={16} aria-hidden="true" /> Appeal
+                </Link>
+              )
+            ) : viewer.isMember ? (
               <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setLeaving(true)}>
                 <LogOut size={16} aria-hidden="true" /> Leave
               </button>
@@ -257,7 +293,27 @@ export default function OrganizationPage({ addToast, currentUser }) {
             : org.createdBy.name}
         </p>
 
-        {!viewer.isMember && (
+        {/**
+          * Why the button says what it says.
+          *
+          * The reason is the student's to see — it is what any appeal is heard
+          * against, and the schema makes it NOT NULL for that reason. Shown as
+          * a plain notice rather than an error: nothing has just gone wrong, this
+          * is a standing state of the page.
+          */}
+        {viewer.ban && (
+          <div className="org-ban-notice" role="note">
+            <p className="org-ban-title">
+              <Ban size={15} aria-hidden="true" /> You are banned from {org.name}
+            </p>
+            <p className="muted">Reason: {viewer.ban.reason}</p>
+            {viewer.ban.appeal?.pending
+              ? <p className="muted small">Your appeal was sent on {formatDay(viewer.ban.appeal.submittedAt)}. A manager will look at it.</p>
+              : <p className="muted small">You cannot rejoin while this is in place. If you think it is wrong, you can appeal.</p>}
+          </div>
+        )}
+
+        {!viewer.isMember && !viewer.ban && (
           <p className="muted org-joinnote">
             Members are told when this organization posts a new opportunity.
           </p>
@@ -403,6 +459,12 @@ export default function OrganizationPage({ addToast, currentUser }) {
       {/* The bottom of the management area, below the roster — the rarest thing
           a manager does, and the one with the most text. It renders nothing at
           all when there is nothing to review. */}
+      {/* The moderation area. Banned members first — the shorter card, and the
+          one whose emptiness is a real answer — then the appeals against those
+          bans, which is the rarest thing a manager does. */}
+      {viewer?.canManage && (
+        <BannedMembers orgKey={key} organizationName={org.name} addToast={addToast} />
+      )}
       {viewer?.canManage && <AppealInbox orgKey={key} addToast={addToast} />}
 
       {removing && (
@@ -498,16 +560,41 @@ function OrganizationService({ org, viewer, totals }) {
               ))}
             </ul>
 
-            {history.length > SHOWN && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setExpanded(v => !v)}
-                aria-expanded={expanded}
-              >
-                {expanded ? 'Show fewer' : `Show all ${history.length} events`}
-              </button>
-            )}
+            <div className="row row-wrap org-service-actions">
+              {history.length > SHOWN && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setExpanded(v => !v)}
+                  aria-expanded={expanded}
+                >
+                  {expanded ? 'Show fewer' : `Show all ${history.length} events`}
+                </button>
+              )}
+
+              {/**
+                * The organization transcript, and the certificates earned here.
+                *
+                * Both are LINKS into systems that already exist, carrying an
+                * organization filter — not new pages. `/portfolio` is the
+                * printable record of verified service and `/certificates` is the
+                * certificate list; each already knows how to render itself, and a
+                * second copy scoped to one club would be two things to keep in
+                * step about the same student's hours.
+                *
+                * They live at the foot of this block rather than in the
+                * navigation because that is where somebody already is when the
+                * question "what have I done for this club" occurs to them.
+                */}
+              <Link className="btn btn-ghost btn-sm" to={`/portfolio?organization=${encodeURIComponent(org.slug)}`}>
+                <FileText size={15} aria-hidden="true" />
+                Transcript for {org.name}
+              </Link>
+              <Link className="btn btn-ghost btn-sm" to={`/certificates?organization=${encodeURIComponent(org.slug)}`}>
+                <Award size={15} aria-hidden="true" />
+                Certificates
+              </Link>
+            </div>
           </>
         )}
 

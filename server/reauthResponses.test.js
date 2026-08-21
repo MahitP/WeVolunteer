@@ -174,12 +174,22 @@ describe('spendChallenge', () => {
    * result and carry on. `inTransaction` then rolls back the work, which is what
    * keeps the action and the spend atomic in both directions.
    */
-  it('throws ChallengeNotSpent carrying the refusal, so the transaction rolls back', () => {
+  /**
+   * `spendChallenge` is async as of wave 7, so the refusal arrives as a REJECTION
+   * rather than a synchronous throw. The property under test is unchanged and is
+   * the same one that matters: it must not RETURN the refusal, because a returned
+   * value can be ignored while a rejection cannot — an unhandled one is loud, and
+   * an awaited one rolls the caller's transaction back.
+   *
+   * `Guard 7` in `authz.completeness.test.js` is what makes "awaited" true at
+   * every call site; this asserts the throw itself still happens.
+   */
+  it('throws ChallengeNotSpent carrying the refusal, so the transaction rolls back', async () => {
     const db = { prepare: () => ({ run: () => ({ changes: 0 }), get: () => undefined }) };
 
     let thrown;
     try {
-      spendChallenge(db, req(), 'account.delete', {});
+      await spendChallenge(db, req(), 'account.delete', {});
     } catch (err) {
       thrown = err;
     }

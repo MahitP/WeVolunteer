@@ -98,10 +98,10 @@ describe('organizer may only message students who applied to their own event', (
     // routes.messages.lifecycle.test.js: this test is about what the messaging
     // rule does with a withdrawn row, not about how withdrawal is requested.
     const { db } = await import('./db.js');
-    const before = db.prepare('SELECT id FROM applications WHERE event_id = ? AND user_id = ?')
+    const before = await db.prepare('SELECT id FROM applications WHERE event_id = ? AND user_id = ?')
       .get(eventId, 'user-student-1');
     expect(before, 'the application just created should exist').toBeTruthy();
-    db.prepare("UPDATE applications SET status = 'withdrawn' WHERE id = ?").run(before.id);
+    await db.prepare("UPDATE applications SET status = 'withdrawn' WHERE id = ?").run(before.id);
 
     const res = await resolve(eventId, 'user-student-1', orgToken);
     expect(res.status, 'withdrawal must not sever the channel — the organizer may need to confirm it').toBe(200);

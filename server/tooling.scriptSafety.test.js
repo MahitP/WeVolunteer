@@ -89,6 +89,80 @@ describe('destructive CLIs refuse a production environment', () => {
   }
 });
 
+/**
+ * The PostgreSQL case, which every other gate in this file is blind to.
+ *
+ * The three existing gates all reason about a FILE — a path is resolved, the
+ * path is inspected, the path is opened as SQLite and its rows counted. On
+ * PostgreSQL the target is a URL and the path names a file that does not exist,
+ * and a missing file reads as "nothing to protect". So all three passed.
+ *
+ * Measured on 2026-08-19, not reasoned about: with DATABASE_ENGINE=postgres and
+ * a DATABASE_URL exported — the shell state the PostgreSQL runbook tells an
+ * operator to create — `reset-dev-db.mjs --yes` created 65 tables and seeded 15
+ * demo accounts, including an administrator, all sharing the password published
+ * in docs/operations/pilot-credentials.md. NODE_ENV was unset, which is the
+ * ordinary state of an operator's shell, so the production gate never fired.
+ *
+ * Asserted per tool rather than once, because reset-dev-db.mjs composes the gate
+ * out of individual calls instead of using guardDestructive — which is exactly
+ * how the previous content check came to miss it.
+ */
+describe('destructive CLIs refuse a PostgreSQL target', () => {
+  for (const tool of DESTRUCTIVE_TOOLS) {
+    it(`${tool} refuses DATABASE_ENGINE=postgres`, () => {
+      const dir = scratchDir('pgengine');
+      const dbFile = path.join(dir, 'scratch.db');
+      writeFileSync(dbFile, 'sentinel');
+
+      const res = run(tool, {
+        env: {
+          DATABASE_ENGINE: 'postgres',
+          /* Unreachable on purpose. The refusal must happen before anything
+             tries to connect, so a wrong URL must not be what stops it. */
+          DATABASE_URL: 'postgres://nobody@127.0.0.1:1/nonexistent',
+          WEV_DB_PATH: dbFile,
+          JWT_SECRET: 'x'.repeat(48),
+        },
+        args: ['--yes'],
+      });
+
+      const untouched = existsSync(dbFile) && readFileSync(dbFile, 'utf8') === 'sentinel';
+      rmSync(dir, { recursive: true, force: true });
+
+      expect(res.code, `expected a non-zero exit\n${res.combined}`).not.toBe(0);
+      expect(res.combined).toMatch(/REFUS/i);
+      expect(untouched, 'the database was modified despite the refusal').toBe(true);
+      /* The URL carries the password; a refusal must not print it. */
+      expect(res.combined).not.toMatch(/nobody@127\.0\.0\.1/);
+    });
+
+    it(`${tool} refuses a bare DATABASE_URL with no engine set`, () => {
+      /* DATABASE_ENGINE defaults to sqlite, so an operator who exported only the
+         URL still has a shell pointed at a deployment. */
+      const dir = scratchDir('pgurl');
+      const dbFile = path.join(dir, 'scratch.db');
+      writeFileSync(dbFile, 'sentinel');
+
+      const res = run(tool, {
+        env: {
+          DATABASE_URL: 'postgres://nobody@127.0.0.1:1/nonexistent',
+          WEV_DB_PATH: dbFile,
+          JWT_SECRET: 'x'.repeat(48),
+        },
+        args: ['--yes'],
+      });
+
+      const untouched = existsSync(dbFile) && readFileSync(dbFile, 'utf8') === 'sentinel';
+      rmSync(dir, { recursive: true, force: true });
+
+      expect(res.code, `expected a non-zero exit\n${res.combined}`).not.toBe(0);
+      expect(res.combined).toMatch(/REFUS/i);
+      expect(untouched).toBe(true);
+    });
+  }
+});
+
 describe('destructive CLIs refuse a production-looking database path', () => {
   // NODE_ENV is the primary gate, but an operator who exported only WEV_DB_PATH
   // never sets it. This is the second net under that case.
@@ -372,17 +446,64 @@ describe('development usage still works', () => {
 });
 
 describe('the safety gate cannot be skipped by a new tool', () => {
+  /**
+   * A script's code, with comments removed.
+   *
+   * Both checks below decide "does this file delete something" by looking for
+   * `unlinkSync` and friends, and both used to look at the raw source. The
+   * second check already stripped comments before deciding whether the gate was
+   * *called*, for a reason its own note gives: "these files document the gate at
+   * length, and the prose names the very functions being searched for."
+   *
+   * The detection half had the same flaw and it bit. `bin/migration-baseline.mjs`
+   * contains no deletion at all — it restores a dump into `:memory:` precisely so
+   * that nothing has to be deleted — but it *explains* that choice in a comment,
+   * and naming `unlinkSync` there was enough to be reported as an ungated
+   * destructive tool.
+   *
+   * That false positive is not harmless. The obvious way to silence it is to add
+   * a `guardDestructive()` call to a script that destroys nothing, which is a
+   * meaningless gate on a no-op and teaches the next author that the gate is a
+   * formality to be satisfied rather than a check that means something. (It was
+   * also the first fix attempted, and it was wrong.)
+   *
+   * Stripping comments cannot hide a real deletion: a call inside a comment is
+   * not a call.
+   */
+  const codeOf = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  const DELETES = /unlinkSync|rmSync|rimraf|DROP TABLE/i;
+
   // A static guard. The F-1 lesson is that hand-maintained parallel lists drift;
   // this makes the drift a test failure instead of a production incident.
   it('every bin/ script that deletes a file imports the shared gate', () => {
     const offenders = [];
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
       if (!/\.(mjs|js)$/.test(name)) continue;
-      const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
-      const deletes = /unlinkSync|rmSync|rimraf|DROP TABLE/i.test(src);
-      if (deletes && !/db-safety\.mjs/.test(src)) offenders.push(name);
+      const code = codeOf(readFileSync(path.join(ROOT, 'bin', name), 'utf8'));
+      if (DELETES.test(code) && !/db-safety\.mjs/.test(code)) offenders.push(name);
     }
     expect(offenders, 'these delete data without the shared safety gate').toEqual([]);
+  });
+
+  /**
+   * The detection itself still works — asserted, not assumed.
+   *
+   * Loosening what a security guard looks at is the kind of change that can
+   * quietly turn it into a test that passes because it inspects nothing. This
+   * checks both directions on synthetic sources: a real call is still caught
+   * after comment-stripping, and a mention in prose is not.
+   */
+  it('still detects a real deletion, and still ignores one described in a comment', () => {
+    const realCall = "import fs from 'fs';\nfs.unlinkSync(target);\n";
+    const inBlockComment = '/**\n * We deliberately avoid unlinkSync here.\n */\nconst x = 1;\n';
+    const inLineComment = '// no unlinkSync in this file\nconst x = 1;\n';
+
+    expect(DELETES.test(codeOf(realCall)), 'a real unlinkSync call must still be detected').toBe(true);
+    expect(DELETES.test(codeOf(inBlockComment)), 'a block comment must not count').toBe(false);
+    expect(DELETES.test(codeOf(inLineComment)), 'a line comment must not count').toBe(false);
   });
 
   /**
@@ -407,16 +528,15 @@ describe('the safety gate cannot be skipped by a new tool', () => {
 
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
       if (!/\.(mjs|js)$/.test(name)) continue;
-      const src = readFileSync(path.join(ROOT, 'bin', name), 'utf8');
-      if (!/unlinkSync|rmSync|rimraf|DROP TABLE/i.test(src)) continue;
+      /* Comments are stripped before BOTH questions — "does this delete
+         anything" and "does it run the check" — because these files document the
+         gate at length and the prose names the very functions being searched
+         for. Detecting on the raw source reported a script that deletes nothing
+         and merely explains why. */
+      const code = codeOf(readFileSync(path.join(ROOT, 'bin', name), 'utf8'));
+      if (!DELETES.test(code)) continue;
 
       scanned++;
-      // Comments are stripped: these files document the gate at length, and the
-      // prose names the very functions being searched for.
-      const code = src
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^\s*\/\/.*$/gm, '');
-
       const runsCheck = /guardDestructive\s*\(/.test(code)
         || /refuseNonDisposableDatabase\s*\(/.test(code);
       if (!runsCheck) offenders.push(name);

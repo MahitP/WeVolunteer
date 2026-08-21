@@ -48,10 +48,10 @@ describe('CheckInCodeModal', () => {
        string that would be meaningless spoken. The useful facts — whose code,
        when made, how long left — are text beside it. */
     vi.mocked(api.createCheckinCode).mockResolvedValue(code());
-    const { container } = renderIt();
+    const { baseElement } = renderIt();
 
     await screen.findByText('@leo');
-    const img = container.querySelector('img');
+    const img = baseElement.querySelector('img');
     expect(img.getAttribute('alt')).toBe('');
     expect(img.getAttribute('aria-hidden')).toBe('true');
   });
@@ -90,12 +90,12 @@ describe('CheckInCodeModal', () => {
 
   it('stops presenting a code the server would reject', async () => {
     vi.mocked(api.createCheckinCode).mockResolvedValue(expiredCode());
-    const { container } = renderIt();
+    const { baseElement } = renderIt();
 
     await screen.findByText(/QR code expired/i);
     /* Showing a QR the server will refuse would send a volunteer to the front
        of a queue with something that cannot work. */
-    expect(container.querySelector('img')).toBeNull();
+    expect(baseElement.querySelector('img')).toBeNull();
   });
 
   describe('when there is no code to give', () => {
@@ -131,11 +131,11 @@ describe('CheckInCodeModal', () => {
 
   it('carries one live region on the dialog, not inside a branch that unmounts', async () => {
     vi.mocked(api.createCheckinCode).mockResolvedValue(code());
-    const { container } = renderIt();
+    const { baseElement } = renderIt();
     await screen.findByText('@leo');
 
     /* The message that matters most — "this has expired" — is announced by an
        element that must not be the one disappearing as it says it. */
-    expect(container.querySelectorAll('[role="status"][aria-live="polite"]')).toHaveLength(1);
+    expect(baseElement.querySelectorAll('[role="status"][aria-live="polite"]')).toHaveLength(1);
   });
 });

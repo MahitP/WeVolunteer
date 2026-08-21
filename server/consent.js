@@ -145,14 +145,14 @@ export function slugToKey(slug) {
  * other students' contact details that they were never shown. Callers that mean
  * something other than signup pass `documents` explicitly.
  */
-export function recordAcceptances(db, { userId, method, context = null, req = null, documents = null, now = null }) {
+export async function recordAcceptances(db, { userId, method, context = null, req = null, documents = null, now = null }) {
   const at = now ?? new Date().toISOString();
   const targets = documents ?? SIGNUP_DOCUMENTS;
 
   const prefix = req ? ipPrefix(req.ip || req.socket?.remoteAddress || '') : null;
   const family = req ? uaFamily(req.get?.('user-agent') || req.headers?.['user-agent'] || '') : null;
 
-  const insert = db.prepare(`
+  const insert = await db.prepare(`
     INSERT INTO legal_acceptances
       (id, user_id, document_slug, version, content_hash, accepted_at, method, context, ip_prefix, ua_family)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -169,8 +169,8 @@ export function recordAcceptances(db, { userId, method, context = null, req = nu
    * header exists to prevent, and this is the call site it was written for.
    */
   for (const registered of targets) {
-    const doc = resolveDocument(db, registered) ?? registered;
-    insert.run(
+    const doc = await resolveDocument(db, registered) ?? registered;
+    await insert.run(
       `acc-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       userId,
       doc.slug,
@@ -200,13 +200,13 @@ export function recordAcceptances(db, { userId, method, context = null, req = nu
  * pointing at it now describe text nobody agreed to. That is a data-integrity
  * failure, not a merge conflict, so it throws rather than silently updating.
  */
-export function syncLegalDocuments(db, { now = null } = {}) {
+export async function syncLegalDocuments(db, { now = null } = {}) {
   const at = now ?? new Date().toISOString();
 
-  const existing = db.prepare('SELECT slug, version, content_hash FROM legal_documents').all();
+  const existing = await db.prepare('SELECT slug, version, content_hash FROM legal_documents').all();
   const bySlugVersion = new Map(existing.map(r => [`${r.slug}@${r.version}`, r]));
 
-  const insert = db.prepare(`
+  const insert = await db.prepare(`
     INSERT INTO legal_documents
       (slug, version, title, consent_type, content_hash, effective_at, published_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -225,14 +225,14 @@ export function syncLegalDocuments(db, { now = null } = {}) {
    * rewrite today, and a server that refuses to boot the day
    * LEGAL_HASHES_ENFORCED is turned on at launch.
    */
-  for (const doc of effectiveDocuments(db)) {
+  for (const doc of await effectiveDocuments(db)) {
     const key = `${doc.slug}@${doc.version}`;
     const row = bySlugVersion.get(key);
 
     const hash = doc.contentHash;
 
     if (!row) {
-      insert.run(doc.slug, doc.version, doc.title, doc.consentType, hash, at, at);
+      await insert.run(doc.slug, doc.version, doc.title, doc.consentType, hash, at, at);
       continue;
     }
 
@@ -258,7 +258,7 @@ export function syncLegalDocuments(db, { now = null } = {}) {
        * published right now", which is the only claim this table can honestly
        * make while the text is allowed to change.
        */
-      db.prepare(
+      await db.prepare(
         'UPDATE legal_documents SET content_hash = ?, published_at = ? WHERE slug = ? AND version = ?'
       ).run(hash, at, doc.slug, doc.version);
 
@@ -275,13 +275,13 @@ export function syncLegalDocuments(db, { now = null } = {}) {
  * Powers the "Your agreements" view, and is the fastest honest answer to a
  * subject-access request about consent.
  */
-export function acceptancesFor(db, userId) {
-  return db.prepare(`
+export async function acceptancesFor(db, userId) {
+  return (await db.prepare(`
     SELECT document_slug, version, content_hash, accepted_at, method
     FROM legal_acceptances
     WHERE user_id = ?
     ORDER BY accepted_at DESC
-  `).all(userId).map(r => ({
+  `).all(userId)).map(r => ({
     slug: r.document_slug,
     version: r.version,
     title: documentBySlug(r.document_slug)?.title ?? r.document_slug,

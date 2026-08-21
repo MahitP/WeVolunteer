@@ -39,10 +39,10 @@ beforeAll(async () => {
 
 afterAll(async () => { await srv.close(); });
 
-beforeEach(() => {
+beforeEach(async () => {
   /* Undo any tombstoning a previous case did. The seed's own values, restored
      by id so the roster is exercised rather than sidestepped. */
-  db.prepare(`
+  await db.prepare(`
     UPDATE users SET account_status = 'active', email = 'admin@example.gov'
      WHERE id = 'user-admin'
   `).run();
@@ -63,7 +63,7 @@ describe('GET /api/auth/demo-accounts', () => {
     /* Exactly the shape a real deletion leaves behind — see the anonymisation in
        the account-deletion route: status flipped and the address replaced with a
        synthetic one that no mailbox answers. */
-    db.prepare(`
+    await db.prepare(`
       UPDATE users
          SET account_status = 'deleted', email = 'deleted_user-admin@system.local'
        WHERE id = 'user-admin'
@@ -96,7 +96,7 @@ describe('GET /api/auth/demo-accounts', () => {
     const res = await list();
 
     for (const account of res.body.accounts) {
-      const row = db.prepare('SELECT account_status FROM users WHERE id = ?').get(account.id);
+      const row = await db.prepare('SELECT account_status FROM users WHERE id = ?').get(account.id);
       expect(row, `${account.id} does not exist`).toBeTruthy();
       expect(row.account_status, `${account.email} is a tombstone`).not.toBe('deleted');
     }
@@ -142,8 +142,9 @@ describe('outside DEMO_MODE', () => {
       process.env.NODE_ENV = 'test';
       process.env.JWT_SECRET = 'test-secret-not-for-production';
       process.env.WEV_DB_PATH = process.env.PROBE_DB;
-      const { initDatabase } = await import('./server/db.js');
+      const { initDatabase, completeDatabaseInit } = await import('./server/db.js');
       initDatabase();
+      await completeDatabaseInit();
       const { app } = await import('./server/app.js');
       const server = app.listen(0, '127.0.0.1');
       await new Promise(r => server.once('listening', r));

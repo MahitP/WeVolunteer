@@ -101,11 +101,80 @@ function optionalText(value, field) {
  * `datetime('now')` — mixing the two breaks lexicographic comparison, which is
  * how every `ORDER BY created_at` in this repository works (TD-10).
  *
+ * ── Why it is async ──
+ *
+ * On PostgreSQL a statement's `.run()` returns a promise, so the INSERT has to
+ * be awaited or the row is merely *scheduled* — and a transaction that commits
+ * before its audit write lands is the failure this module exists to prevent,
+ * arriving silently. Awaiting a SQLite `.run()` is a no-op, so both engines are
+ * served by one shape.
+ *
+ * Every call site awaits, and `authz.completeness.test.js` fails the build if
+ * one does not. The single synchronous caller is described on `recordAuditSync`
+ * below.
+ *
  * @param {object} db      an open database handle
  * @param {object} entry   `{ adminId, action, targetUserId?, details? }`
+ * @returns {Promise<{id: string, createdAt: string}>} what was written
+ */
+export async function recordAudit(db, entry) {
+  const values = auditValues(db, entry);
+  await db.prepare(INSERT_SQL).run(...values);
+  return { id: values[0], createdAt: values[5] };
+}
+
+/**
+ * The same write, synchronously, for the one caller that cannot await.
+ *
+ * ── The one caller ──
+ *
+ * `dedupeCaseInsensitiveUsernames` in `db.js`, which reconciles usernames that
+ * collide only by case before `CREATE UNIQUE INDEX … COLLATE NOCASE` can be
+ * built over them. It runs inside `initDatabase()`, which is synchronous and
+ * called synchronously from `server.js`, `testServer.js`, four `bin/` scripts
+ * and some forty test files — so it cannot await, and making it able to is a
+ * boot-path change with nothing to do with this table.
+ *
+ * ── Why a sync twin rather than a dropped promise ──
+ *
+ * Calling the async version and not awaiting it would write the row on SQLite
+ * (`.run()` executes before the promise is returned) while converting every
+ * failure — a bad actor id, a constraint violation — from a throw into an
+ * unhandled rejection delivered *after* the enclosing `COMMIT`. The dedupe
+ * would then commit renames whose audit rows had failed, which is precisely the
+ * silent state the module header calls the quietest failure there is.
+ *
+ * ── Why it is not duplicated logic ──
+ *
+ * Validation, the id scheme, the timestamp and the SQL are all shared with
+ * `recordAudit` through `auditValues` and `INSERT_SQL`. This function is the
+ * two lines that differ, and the two cannot drift.
+ *
+ * SQLite-only by construction: a PostgreSQL handle returns a promise from
+ * `.run()` and this would drop it, so the boot path this serves retires with
+ * SQLite. `auditLog.test.js` holds the call site to that one file, by name.
+ *
  * @returns {{id: string, createdAt: string}} what was written
  */
-export function recordAudit(db, entry) {
+export function recordAuditSync(db, entry) {
+  const values = auditValues(db, entry);
+  db.prepare(INSERT_SQL).run(...values);
+  return { id: values[0], createdAt: values[5] };
+}
+
+const INSERT_SQL = `
+  INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+`;
+
+/**
+ * Everything both writers do before the INSERT: the handle check, the field
+ * allowlist, the required/optional text rules, the UUID and the timestamp.
+ *
+ * Returns positional values in column order rather than an object, so the two
+ * writers cannot bind them differently.
+ */
+function auditValues(db, entry) {
   if (!db || typeof db.prepare !== 'function') {
     throw new Error('recordAudit: a database handle is required');
   }
@@ -128,13 +197,12 @@ export function recordAudit(db, entry) {
   const details = optionalText(entry.details, 'details');
   const providedCreatedAt = optionalText(entry.createdAt, 'createdAt');
 
-  const id = `audit-${crypto.randomUUID()}`;
-  const createdAt = providedCreatedAt || new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, details, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, adminId, action, targetUserId, details, createdAt);
-
-  return { id, createdAt };
+  return [
+    `audit-${crypto.randomUUID()}`,
+    adminId,
+    action,
+    targetUserId,
+    details,
+    providedCreatedAt || new Date().toISOString(),
+  ];
 }

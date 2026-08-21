@@ -59,10 +59,10 @@ async function main() {
   }
 
   try {
-    const { db } = openPrivilegedDb('bin/reset-2fa.mjs');
-    assertSystemActor(db);
+    const { db } = await openPrivilegedDb('bin/reset-2fa.mjs');
+    await assertSystemActor(db);
 
-    const user = db.prepare(
+    const user = await db.prepare(
       'SELECT id, role, account_status, tfa_enabled, tfa_email_enabled FROM users WHERE email = ?'
     ).get(email);
 
@@ -101,18 +101,18 @@ async function main() {
      * would leave the weaker credential standing after the stronger one was
      * revoked.
      */
-    db.exec('BEGIN');
+    await db.exec('BEGIN');
     try {
-      db.prepare(`
+      await db.prepare(`
         UPDATE users
            SET tfa_enabled = 0, tfa_secret = NULL, tfa_email_enabled = 0,
                token_version = token_version + 1
          WHERE id = ?
       `).run(user.id);
 
-      db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(user.id);
+      await db.prepare('DELETE FROM recovery_codes WHERE user_id = ?').run(user.id);
 
-      recordCliAudit(db, {
+      await recordCliAudit(db, {
         action: CLI_EVENTS.TFA_RESET_CLI,
         targetUserId: user.id,
         command: 'bin/reset-2fa.mjs',
@@ -120,9 +120,9 @@ async function main() {
         metadata: { subject: email, role: user.role },
       });
 
-      db.exec('COMMIT');
+      await db.exec('COMMIT');
     } catch (err) {
-      db.exec('ROLLBACK');
+      await db.exec('ROLLBACK');
       throw err;
     }
 

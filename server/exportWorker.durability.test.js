@@ -43,6 +43,7 @@ async function freshExportWorker({ exportDir } = {}) {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/exportWorker.js');
   return { db: dbMod.db, worker, root: dir };
 }
@@ -54,16 +55,16 @@ async function freshExportWorker({ exportDir } = {}) {
  * omitted — the resulting "NOT NULL constraint failed: users.grade" surfaced as
  * seven unrelated-looking failures.
  */
-function makeUser(db, id = 'u-export') {
-  db.prepare(`
+async function makeUser(db, id = 'u-export') {
+  await db.prepare(`
     INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
     VALUES (?, ?, ?, 'x', 'Export Tester', '11', 'student', ?)
   `).run(id, id, `${id}@example.org`, new Date().toISOString());
   return id;
 }
 
-function queueExport(db, { id, userId, status = 'pending', createdAt = null }) {
-  db.prepare(`
+async function queueExport(db, { id, userId, status = 'pending', createdAt = null }) {
+  await db.prepare(`
     INSERT INTO data_export_jobs (id, user_id, status, created_at)
     VALUES (?, ?, ?, ?)
   `).run(id, userId, status, createdAt ?? new Date().toISOString());
@@ -116,12 +117,12 @@ describe('exports are written to durable storage, not tmpdir', () => {
 
   it('writes a completed export into that directory and records the path', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-1', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-1', userId });
 
     await worker.processPendingExports();
 
-    const row = db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-1');
+    const row = await db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-1');
     expect(row.status).toBe('completed');
     expect(row.file_location).toContain(path.join(root, 'exports'));
     expect(existsSync(row.file_location), 'export file was not written').toBe(true);
@@ -129,11 +130,11 @@ describe('exports are written to durable storage, not tmpdir', () => {
 
   it('a completed export survives a simulated restart', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-restart', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-restart', userId });
 
     await worker.processPendingExports();
-    const before = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
+    const before = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
 
     // A restart wipes PrivateTmp but not the database directory. The file has to
     // still be there, because the row still promises it for seven days.
@@ -147,7 +148,7 @@ describe('exports are written to durable storage, not tmpdir', () => {
     // module state is rebuilt from scratch and must still find the same file.
     vi.resetModules();
     const reborn = await import('./workers/exportWorker.js');
-    const stillThere = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
+    const stillThere = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-restart');
     expect(reborn.resolveExportDir()).toBe(path.dirname(stillThere.file_location));
     expect(existsSync(stillThere.file_location)).toBe(true);
   });
@@ -156,44 +157,44 @@ describe('exports are written to durable storage, not tmpdir', () => {
 describe('stranded export jobs are reclaimed', () => {
   it('reclaims a job left in processing by a restart', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
+    const userId = await makeUser(db);
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueExport(db, { id: 'exp-stuck', userId, status: 'processing', createdAt: longAgo });
+    await queueExport(db, { id: 'exp-stuck', userId, status: 'processing', createdAt: longAgo });
 
-    const reclaimed = worker.reclaimStaleExports();
+    const reclaimed = await worker.reclaimStaleExports();
 
     expect(reclaimed).toBe(1);
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-stuck');
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-stuck');
     // Back to pending so it runs, rather than blocking the user forever.
     expect(row.status).toBe('pending');
   });
 
   it('leaves a genuinely running export alone', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-now', userId, status: 'processing' });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-now', userId, status: 'processing' });
 
-    expect(worker.reclaimStaleExports()).toBe(0);
-    const row = db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-now');
+    expect(await worker.reclaimStaleExports()).toBe(0);
+    const row = await db.prepare('SELECT status FROM data_export_jobs WHERE id = ?').get('exp-now');
     expect(row.status).toBe('processing');
   });
 
   it('unblocks a user who was permanently 409-ed', async () => {
     const { db, worker } = await freshExportWorker();
-    const userId = makeUser(db);
+    const userId = await makeUser(db);
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueExport(db, { id: 'exp-block', userId, status: 'processing', createdAt: longAgo });
+    await queueExport(db, { id: 'exp-block', userId, status: 'processing', createdAt: longAgo });
 
     // This is the query POST /api/privacy/export uses to refuse a new request.
-    const blockedBefore = db.prepare(
+    const blockedBefore = await db.prepare(
       "SELECT id FROM data_export_jobs WHERE user_id = ? AND status IN ('pending','processing')"
     ).get(userId);
     expect(blockedBefore).toBeTruthy();
 
-    worker.reclaimStaleExports();
+    await worker.reclaimStaleExports();
     await worker.processPendingExports();
 
-    const blockedAfter = db.prepare(
+    const blockedAfter = await db.prepare(
       "SELECT id FROM data_export_jobs WHERE user_id = ? AND status IN ('pending','processing')"
     ).get(userId);
     // The job ran to completion, so the user can request another export.
@@ -204,20 +205,20 @@ describe('stranded export jobs are reclaimed', () => {
 describe('cleanup still happens', () => {
   it('deletes the file and clears the path when an export expires', async () => {
     const { db, worker, root } = await freshExportWorker();
-    const userId = makeUser(db);
-    queueExport(db, { id: 'exp-expire', userId });
+    const userId = await makeUser(db);
+    await queueExport(db, { id: 'exp-expire', userId });
 
     await worker.processPendingExports();
-    const row = db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
+    const row = await db.prepare('SELECT file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
     expect(existsSync(row.file_location)).toBe(true);
 
     // Backdate the expiry rather than waiting seven days.
-    db.prepare("UPDATE data_export_jobs SET expires_at = datetime('now','-1 day') WHERE id = ?")
+    await db.prepare(`UPDATE data_export_jobs SET expires_at = '${new Date(Date.now() - 86400000).toISOString()}' WHERE id = ?`)
       .run('exp-expire');
 
-    worker.cleanupExpiredExports();
+    await worker.cleanupExpiredExports();
 
-    const after = db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
+    const after = await db.prepare('SELECT status, file_location FROM data_export_jobs WHERE id = ?').get('exp-expire');
     expect(after.status).toBe('expired');
     expect(after.file_location).toBeNull();
     expect(existsSync(row.file_location), 'expired export file was left on disk').toBe(false);

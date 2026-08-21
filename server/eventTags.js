@@ -172,12 +172,12 @@ export function validateTags(input) {
  * and the request disagreeing about what is present. The caller owns the
  * transaction so this cannot half-apply.
  */
-export function replaceEventTags(db, eventId, tags) {
-  db.prepare('DELETE FROM event_tags WHERE event_id = ?').run(eventId);
+export async function replaceEventTags(db, eventId, tags) {
+  await db.prepare('DELETE FROM event_tags WHERE event_id = ?').run(eventId);
   if (!tags.length) return;
 
-  const insert = db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?, ?, ?)');
-  for (const { tag, label } of tags) insert.run(eventId, tag, label);
+  const insert = await db.prepare('INSERT INTO event_tags (event_id, tag, label) VALUES (?, ?, ?)');
+  for (const { tag, label } of tags) await insert.run(eventId, tag, label);
 }
 
 /**
@@ -186,9 +186,9 @@ export function replaceEventTags(db, eventId, tags) {
  * Ordered by label so a card's chips do not reshuffle between requests — an
  * unordered read is a list that appears to change every refresh.
  */
-export function tagsForEvent(db, eventId) {
-  return db
-    .prepare('SELECT tag, label FROM event_tags WHERE event_id = ? ORDER BY label COLLATE NOCASE')
+export async function tagsForEvent(db, eventId) {
+  return (await db
+    .prepare('SELECT tag, label FROM event_tags WHERE event_id = ? ORDER BY label COLLATE nocase'))
     .all(eventId);
 }
 
@@ -204,15 +204,15 @@ export function tagsForEvent(db, eventId) {
  * Returns an empty object for an empty id list rather than building `IN ()`,
  * which is a syntax error in SQLite.
  */
-export function tagsForEvents(db, eventIds) {
+export async function tagsForEvents(db, eventIds) {
   if (!eventIds.length) return {};
 
   const placeholders = eventIds.map(() => '?').join(',');
-  const rows = db
+  const rows = await db
     .prepare(
       `SELECT event_id, tag, label FROM event_tags
         WHERE event_id IN (${placeholders})
-        ORDER BY label COLLATE NOCASE`
+        ORDER BY label COLLATE nocase`
     )
     .all(...eventIds);
 
@@ -260,8 +260,8 @@ export function tagsForEvents(db, eventIds) {
  */
 export const BROWSE_TAG_LIMIT = 15;
 
-export function tagVocabulary(db, { limit = 50 } = {}) {
-  return db
+export async function tagVocabulary(db, { limit = 50 } = {}) {
+  return await db
     .prepare(
       `SELECT tag, MAX(label) AS label, COUNT(*) AS uses
          FROM event_tags

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, User, Crown, AlertTriangle, X, Search, CheckCircle } from 'lucide-react';
+import { Shield, Activity, User, Crown, AlertTriangle, X } from 'lucide-react';
 
 import { ROLE } from '../authz';
 import { useStepUp } from '../components/auth/useStepUp';

@@ -1,7 +1,8 @@
 import express from 'express';
 import crypto from 'crypto';
 import { db } from '../db.js';
-import { authenticateToken, inTransaction } from '../utils.js';
+import { authenticateToken } from '../utils.js';
+import { runInTransaction } from '../db/connectionContext.js';
 import { can, requireCap } from '../authz.js';
 import { recordAudit } from '../auditLog.js';
 import { BADGE_CRITERIA_TYPES, isKnownCriteriaType } from '../services/badgeService.js';
@@ -44,9 +45,9 @@ const router = express.Router();
  */
 
 // GET all badges available in the system
-router.get('/api/badges', authenticateToken, (req, res) => {
+router.get('/api/badges', authenticateToken, async (req, res) => {
   try {
-    const badges = db.prepare('SELECT * FROM badges WHERE active = 1 ORDER BY category, criteria_value').all();
+    const badges = await db.prepare('SELECT * FROM badges WHERE active = 1 ORDER BY category, criteria_value').all();
     res.json({ badges });
   } catch (err) {
     console.error('Failed to get badges:', err);
@@ -64,12 +65,12 @@ router.get('/api/badges', authenticateToken, (req, res) => {
  * is an external organization and is deliberately outside the member directory;
  * one student's achievement history is inside it.
  */
-router.get('/api/users/:userId/badges', authenticateToken, (req, res) => {
+router.get('/api/users/:userId/badges', authenticateToken, async (req, res) => {
   if (!can(req.principal, 'directory.read')) {
     return res.status(403).json({ error: 'Access denied' });
   }
   try {
-    const userBadges = db.prepare(`
+    const userBadges = await db.prepare(`
       SELECT b.*, ub.earned_at
       FROM user_badges ub
       JOIN badges b ON ub.badge_id = b.id
@@ -84,9 +85,9 @@ router.get('/api/users/:userId/badges', authenticateToken, (req, res) => {
 });
 
 // Admin: GET all badges including inactive
-router.get('/api/admin/badges', authenticateToken, requireCap('event.moderate'), (req, res) => {
+router.get('/api/admin/badges', authenticateToken, requireCap('event.moderate'), async (req, res) => {
   try {
-    const badges = db.prepare('SELECT * FROM badges ORDER BY created_at DESC').all();
+    const badges = await db.prepare('SELECT * FROM badges ORDER BY created_at DESC').all();
     res.json({ badges });
   } catch (err) {
     console.error('Failed to get admin badges:', err);
@@ -111,7 +112,7 @@ router.get('/api/admin/badges', authenticateToken, requireCap('event.moderate'),
  * would: adding a criteria type is one edit, and the second edit is the one
  * people forget.
  */
-router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate'), (req, res) => {
+router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate'), async (req, res) => {
   const { id, name, description, icon, category, criteria_type, criteria_value, active } = req.body;
   if (!name || !description || !icon || !category || !criteria_type) {
     return res.status(400).json({ error: 'Missing required badge fields.' });
@@ -144,15 +145,15 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
     let badgeId = id;
     let created = false;
 
-    inTransaction(() => {
+    await runInTransaction(db, async (tx) => {
       if (id) {
-        const existing = db.prepare('SELECT id FROM badges WHERE id = ?').get(id);
+        const existing = await tx.prepare('SELECT id FROM badges WHERE id = ?').get(id);
         if (!existing) {
           const err = new Error('badge_not_found');
           err.notFound = true;
           throw err;
         }
-        db.prepare(`
+        await tx.prepare(`
           UPDATE badges SET name = ?, description = ?, icon = ?, category = ?,
                             criteria_type = ?, criteria_value = ?, active = ?
           WHERE id = ?
@@ -160,7 +161,7 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
       } else {
         badgeId = `badge-${crypto.randomUUID()}`;
         created = true;
-        db.prepare(`
+        await tx.prepare(`
           INSERT INTO badges (id, name, description, icon, category, criteria_type, criteria_value, active, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(badgeId, name, description, icon, category, criteria_type, threshold, active ? 1 : 0, new Date().toISOString());
@@ -169,7 +170,7 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
       /* Defining what the platform recognises is an administrative act on every
          student's record at once, so it is audited like one. No targetUserId —
          a definition is about nobody in particular. */
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: created ? 'BADGE_DEFINED' : 'BADGE_DEFINITION_UPDATED',
         details: `"${name}" (${criteria_type} ≥ ${threshold})${active ? '' : ', inactive'}`
@@ -200,18 +201,18 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
  * catches, so an audit row that cannot be written takes the award down with it.
  * Awarded-but-not-recorded is the failure this is here to prevent.
  */
-router.post('/api/admin/badges/award', authenticateToken, requireCap('event.moderate'), (req, res) => {
+router.post('/api/admin/badges/award', authenticateToken, requireCap('event.moderate'), async (req, res) => {
   const { userId, badgeId, reason } = req.body;
   if (!userId || !badgeId) return res.status(400).json({ error: 'User and Badge required.' });
 
   try {
-    const recipient = db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId);
+    const recipient = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId);
     if (!recipient) return res.status(404).json({ error: 'Volunteer not found' });
 
-    const badge = db.prepare('SELECT id, name FROM badges WHERE id = ?').get(badgeId);
+    const badge = await db.prepare('SELECT id, name FROM badges WHERE id = ?').get(badgeId);
     if (!badge) return res.status(404).json({ error: 'Badge not found' });
 
-    const existing = db.prepare('SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?')
+    const existing = await db.prepare('SELECT id FROM user_badges WHERE user_id = ? AND badge_id = ?')
       .get(userId, badgeId);
     if (existing) {
       /* 409, not 400. The request is well-formed; it conflicts with the
@@ -219,13 +220,13 @@ router.post('/api/admin/badges/award', authenticateToken, requireCap('event.mode
       return res.status(409).json({ error: 'This volunteer already holds that badge.' });
     }
 
-    inTransaction(() => {
-      db.prepare(`
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`
         INSERT INTO user_badges (id, user_id, badge_id, earned_at, awarded_by)
         VALUES (?, ?, ?, ?, ?)
       `).run(`ub-${crypto.randomUUID()}`, userId, badgeId, new Date().toISOString(), req.user.id);
 
-      recordAudit(db, {
+      await recordAudit(tx, {
         adminId: req.user.id,
         action: 'BADGE_AWARDED',
         targetUserId: userId,
@@ -261,12 +262,12 @@ router.delete(
   '/api/admin/users/:userId/badges/:badgeId',
   authenticateToken,
   requireCap('event.moderate'),
-  (req, res) => {
+  async (req, res) => {
     const { userId, badgeId } = req.params;
     const reason = req.body?.reason;
 
     try {
-      const held = db.prepare(`
+      const held = await db.prepare(`
         SELECT ub.id, ub.awarded_by, b.name
         FROM user_badges ub
         JOIN badges b ON b.id = ub.badge_id
@@ -280,10 +281,10 @@ router.delete(
          already an administrator. */
       if (!held) return res.status(404).json({ error: 'This volunteer does not hold that badge.' });
 
-      inTransaction(() => {
-        db.prepare('DELETE FROM user_badges WHERE id = ?').run(held.id);
+      await runInTransaction(db, async (tx) => {
+        await tx.prepare('DELETE FROM user_badges WHERE id = ?').run(held.id);
 
-        recordAudit(db, {
+        await recordAudit(tx, {
           adminId: req.user.id,
           action: 'BADGE_REVOKED',
           targetUserId: userId,

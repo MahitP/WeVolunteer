@@ -34,6 +34,7 @@ async function freshApp() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const { app } = await import('./app.js');
   return { app, db: dbMod.db };
 }
@@ -71,11 +72,11 @@ describe('/health on a healthy database', () => {
   it('leaves no trace behind', async () => {
     const { app, db } = await freshApp();
 
-    const tables = () => db.prepare(
+    const tables = async () => (await db.prepare(
       "SELECT COUNT(*) AS c FROM sqlite_master WHERE type = 'table'"
-    ).get().c;
-    const rows = (t) => db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get().c;
-    const before = tables();
+    ).get()).c;
+    const rows = async (t) => (await db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get()).c;
+    const before = await tables();
     /**
      * Compared against the count BEFORE the polls, not against zero.
      *
@@ -86,8 +87,8 @@ describe('/health on a healthy database', () => {
      * "polling /health writes nothing", and a delta says that precisely while
      * surviving every future seed.
      */
-    const usersBefore = rows('users');
-    const notificationsBefore = rows('notifications');
+    const usersBefore = await rows('users');
+    const notificationsBefore = await rows('notifications');
 
     // Several polls, as a load balancer would.
     await request(app).get('/health');
@@ -95,9 +96,9 @@ describe('/health on a healthy database', () => {
     await request(app).get('/health');
 
     // No scratch table left over, and no row growth anywhere that matters.
-    expect(tables()).toBe(before);
-    expect(rows('users')).toBe(usersBefore);
-    expect(rows('notifications')).toBe(notificationsBefore);
+    expect(await tables()).toBe(before);
+    expect(await rows('users')).toBe(usersBefore);
+    expect(await rows('notifications')).toBe(notificationsBefore);
   });
 
   it('stays cheap enough to poll', async () => {

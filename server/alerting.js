@@ -92,6 +92,31 @@ export const BACKUP_ALERT_INTERVAL_MS = 12 * 60 * 60 * 1000;
  */
 export const BACKUP_ALERT_STATES = Object.freeze(['stale', 'none', 'unknown']);
 
+/**
+ * Whether a status is worth waking somebody for.
+ *
+ * `unconfigured` means the backup directory does not exist. On a laptop that is
+ * ordinary and alerting on it would train people to ignore the alert. On a
+ * production host it means the platform has no backups at all, which is the
+ * single worst thing this check could stay quiet about.
+ *
+ * That distinction did not matter while SQLite was production: the backup timer
+ * shipped with the deployment, so the directory existed on every real host and
+ * `unconfigured` really did only occur in development. On Supabase nothing
+ * creates it — `bin/backup.sh` is a `sqlite3 .backup` and does not run against a
+ * PostgreSQL deployment — so the state a production host now lands in by
+ * default is exactly the one that was silent.
+ *
+ * Read from `process.env` rather than importing IS_PRODUCTION because this
+ * module deliberately has no imports: its sender is injected, which is what lets
+ * the alerting tests run without booting config.js and its boot-time throws.
+ */
+export function isBackupAlertable(status, env = process.env) {
+  if (!status) return false;
+  if (BACKUP_ALERT_STATES.includes(status.status)) return true;
+  return status.status === 'unconfigured' && env.NODE_ENV === 'production';
+}
+
 /** Named in one place so the query, the email and the tests cannot disagree. */
 export const ALERTED_SOURCES = Object.freeze(['server', 'worker']);
 
@@ -105,9 +130,9 @@ const MAX_LISTED = 10;
  * generate an alert if it was resolved before the next tick — which is the
  * ordinary case for something noticed and fixed quickly.
  */
-export function pendingAlerts(db) {
+export async function pendingAlerts(db) {
   const placeholders = ALERTED_SOURCES.map(() => '?').join(', ');
-  return db.prepare(`
+  return await db.prepare(`
     SELECT fingerprint, kind, source, occurrences, first_seen_at
       FROM error_groups
      WHERE alerted_at IS NULL
@@ -118,8 +143,8 @@ export function pendingAlerts(db) {
 }
 
 /** The most recent alert we sent, or null if we never have. */
-function lastAlertAt(db) {
-  const row = db.prepare(
+async function lastAlertAt(db) {
+  const row = await db.prepare(
     'SELECT MAX(alerted_at) AS at FROM error_groups WHERE alerted_at IS NOT NULL'
   ).get();
   return row?.at ? Date.parse(row.at) : null;
@@ -210,8 +235,10 @@ export function __resetBackupAlertThrottle() { lastBackupAlertAt = 0; }
  *
  * It does not distinguish "the timer is disabled" from "the timer ran and
  * failed" — `backupStatus` cannot, and the message says so rather than guessing.
- * It also stays quiet on `unconfigured`, which is a development machine with no
- * backup directory, not an incident.
+ * It stays quiet on `unconfigured` OUTSIDE production, where it is a
+ * development machine with no backup directory rather than an incident. In
+ * production the same state means the host has no backups at all — see
+ * `isBackupAlertable`.
  *
  * @param {{send: Function, now?: Date, appUrl?: string}} opts
  */
@@ -220,7 +247,7 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
     const to = recipients();
     if (to.length === 0) return { sent: 0, reason: 'not_configured' };
     if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
-    if (!status || !BACKUP_ALERT_STATES.includes(status.status)) return { sent: 0, reason: 'healthy' };
+    if (!isBackupAlertable(status)) return { sent: 0, reason: 'healthy' };
 
     /* Throttled AFTER establishing there is something to say, matching
        sendErrorAlerts: a quiet week must never start the clock. */
@@ -234,7 +261,12 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
         + `${status.staleAfterHours} hours means at least one nightly run did not produce a file.`
       : status.status === 'none'
         ? 'The backup directory exists but contains no archives at all.'
-        : 'The backup directory could not be read.';
+        : status.status === 'unconfigured'
+          ? 'There is no backup directory on this host, so nothing is being backed '
+            + 'up at all. On Supabase, bin/backup.sh does not apply — it is a '
+            + 'sqlite3 .backup — so this is the expected state until either the '
+            + 'provider\'s managed backups are confirmed or a pg_dump schedule exists.'
+          : 'The backup directory could not be read.';
 
     await send({
       to: to.join(', '),
@@ -283,7 +315,7 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
     if (to.length === 0) return { sent: 0, reason: 'not_configured' };
     if (typeof send !== 'function') return { sent: 0, reason: 'no_sender' };
 
-    const groups = pendingAlerts(db);
+    let groups = await pendingAlerts(db);
     if (groups.length === 0) return { sent: 0, reason: 'nothing_new' };
 
     /**
@@ -292,7 +324,7 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
      * alert that arrives one minute after an unrelated one waits a full hour
      * for no reason.
      */
-    const last = lastAlertAt(db);
+    const last = await lastAlertAt(db);
     if (last !== null && now.getTime() - last < minIntervalMs()) {
       return { sent: 0, reason: 'throttled', pending: groups.length };
     }
@@ -313,8 +345,39 @@ export async function sendErrorAlerts(db, { send, now = new Date(), appUrl } = {
      * A lost notification is recoverable by looking. An alert loop is how a
      * channel gets muted, and a muted channel loses every future alert.
      */
-    const mark = db.prepare('UPDATE error_groups SET alerted_at = ? WHERE fingerprint = ?');
-    for (const g of groups) mark.run(stamp, g.fingerprint);
+    /**
+     * ── The groups are CLAIMED atomically, not marked one by one ──
+     *
+     * The read above and this write used to be separate, which was safe only
+     * because `runNotificationSweep` calls this without awaiting it and the
+     * marking was synchronous — so a second tick could not start before the
+     * first had marked. That reasoning was true on SQLite and is false on
+     * PostgreSQL, where every one of these statements is a round trip and the
+     * caller is not waiting. Two overlapping sweeps would both read
+     * `alerted_at IS NULL`, both mark, and both send the same digest.
+     *
+     * That is the exact failure the comment above refuses: an alert loop is how
+     * a channel gets muted, and a muted channel loses every future alert.
+     *
+     * One conditional UPDATE … RETURNING closes it. `alerted_at IS NULL` in the
+     * WHERE clause means only one caller can ever claim a given row, and the
+     * rows it returns are precisely the ones it won — so a loser sends nothing
+     * rather than sending a duplicate. Understood by both engines (SQLite has
+     * RETURNING since 3.35; this runs 3.51).
+     */
+    const placeholders = ALERTED_SOURCES.map(() => '?').join(', ');
+    const claimed = await db.prepare(`
+      UPDATE error_groups SET alerted_at = ?
+       WHERE alerted_at IS NULL
+         AND status = 'open'
+         AND source IN (${placeholders})
+      RETURNING fingerprint, kind, source, occurrences, first_seen_at
+    `).all(stamp, ...ALERTED_SOURCES);
+
+    if (claimed.length === 0) return { sent: 0, reason: 'nothing_new' };
+    /* Ordered here rather than in SQL: UPDATE … RETURNING has no ORDER BY, and
+       the digest reads oldest-problem-first. */
+    groups = claimed.sort((a, b) => String(a.first_seen_at).localeCompare(String(b.first_seen_at)));
 
     const subject = groups.length === 1
       ? `[WeVolunteer] New ${groups[0].source} error: ${groups[0].kind}`

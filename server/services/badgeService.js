@@ -84,7 +84,7 @@ export function isKnownCriteriaType(type) {
  * Exported on the service so tests — and anybody debugging "why did this not
  * award?" — can see the inputs rather than infer them from the outcome.
  */
-function collectStats(userId) {
+async function collectStats(userId) {
   /**
    * `COUNT(DISTINCT at.event_id)`, not `COUNT(at.id)`.
    *
@@ -95,7 +95,7 @@ function collectStats(userId) {
    * `COUNT(DISTINCT event_id)` two lines away. The profile and the badge
    * disagreed about the same word, and the profile was right.
    */
-  const service = db.prepare(`
+  const service = await db.prepare(`
     SELECT COALESCE(SUM(hours_awarded), 0) AS total_hours,
            COUNT(DISTINCT event_id)        AS events_attended,
            COUNT(*)                        AS shifts_attended
@@ -113,7 +113,7 @@ function collectStats(userId) {
    * finished — which is not what "Created approved opportunities" says, and is
    * not when the recognition is worth anything.
    */
-  const organizing = db.prepare(`
+  const organizing = await db.prepare(`
     SELECT COUNT(*) AS events_created
     FROM events
     WHERE organizer_id = ? AND status != 'cancelled'
@@ -131,7 +131,7 @@ function collectStats(userId) {
    * `reliabilityOf` is now the only derivation, and it adds what neither had:
    * when the misses happened.
    */
-  const reliability = reliabilityOf(db, userId);
+  const reliability = await reliabilityOf(db, userId);
 
   /**
    * How early this account is, as a 1-based rank over registration order.
@@ -158,9 +158,9 @@ function collectStats(userId) {
    * definition that drifts, and the first thing to drift would be whether
    * somebody's streak had ended.
    */
-  const streak = buildStreak(attendanceMonths(db, userId), new Date());
+  const streak = buildStreak(await attendanceMonths(db, userId), new Date());
 
-  const tenure = db.prepare(`
+  const tenure = await db.prepare(`
     SELECT COUNT(*) AS rank
     FROM users
     WHERE created_at < (SELECT created_at FROM users WHERE id = ?)
@@ -274,13 +274,13 @@ function meetsCriteria(badge, stats) {
  *
  * @returns {{awarded: string[], withdrawn: string[]}} badge ids that changed
  */
-function evaluateBadges(userId) {
+async function evaluateBadges(userId) {
   const result = { awarded: [], withdrawn: [] };
 
   try {
-    const stats = collectStats(userId);
+    const stats = await collectStats(userId);
 
-    const candidates = db.prepare(`
+    const candidates = await db.prepare(`
       SELECT b.*, ub.id AS user_badge_id, ub.awarded_by
       FROM badges b
       LEFT JOIN user_badges ub ON ub.badge_id = b.id AND ub.user_id = ?
@@ -292,17 +292,17 @@ function evaluateBadges(userId) {
       if (earned === null) continue;
 
       if (earned && !badge.user_badge_id) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO user_badges (id, user_id, badge_id, earned_at)
           VALUES (?, ?, ?, ?)
         `).run(`ub-${crypto.randomUUID()}`, userId, badge.id, new Date().toISOString());
         result.awarded.push(badge.id);
-        announce(userId, badge);
+        await announce(userId, badge);
         continue;
       }
 
       if (!earned && badge.user_badge_id && badge.awarded_by === null) {
-        db.prepare('DELETE FROM user_badges WHERE id = ?').run(badge.user_badge_id);
+        await db.prepare('DELETE FROM user_badges WHERE id = ?').run(badge.user_badge_id);
         result.withdrawn.push(badge.id);
       }
     }
@@ -334,9 +334,9 @@ function evaluateBadges(userId) {
  * whether or not we managed to say so, and `dispatch` already rethrows for the
  * mandatory-notice class, which a badge is emphatically not.
  */
-function announce(userId, badge) {
+async function announce(userId, badge) {
   try {
-    notificationService.dispatch(
+    await notificationService.dispatch(
       'BADGE_EARNED',
       { badgeId: badge.id, badgeName: badge.name, badgeIcon: badge.icon },
       userId,

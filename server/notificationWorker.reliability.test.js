@@ -51,13 +51,14 @@ async function freshWorker() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/notificationWorker.js');
   return { db: dbMod.db, worker };
 }
 
 /** Inserts a job row directly, bypassing notificationService's preference checks. */
-function queueJob(db, { id, status = 'pending', attempts = 0, nextAttemptAt = null, payload = null }) {
-  db.prepare(`
+async function queueJob(db, { id, status = 'pending', attempts = 0, nextAttemptAt = null, payload = null }) {
+  await db.prepare(`
     INSERT INTO notification_jobs (id, channel, payload, status, attempts, next_attempt_at, created_at)
     VALUES (?, 'email', ?, ?, ?, ?, ?)
   `).run(
@@ -103,7 +104,7 @@ describe('the worker loop cannot take the process down', () => {
 
   it('survives a failure while recording a failed attempt', async () => {
     const { db, worker } = await freshWorker();
-    queueJob(db, { id: 'job-bookkeeping' });
+    await queueJob(db, { id: 'job-bookkeeping' });
 
     // The bookkeeping UPDATE in the catch block was itself unprotected, so a
     // database that is unhappy for the send is unhappy for the write-back too.
@@ -127,14 +128,14 @@ describe('stale processing jobs are reclaimed', () => {
 
     // A job left mid-send by a restart: status processing, claimed long ago.
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-stranded', status: 'processing' });
-    db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
+    await queueJob(db, { id: 'job-stranded', status: 'processing' });
+    await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-stranded');
 
-    const reclaimed = worker.reclaimStaleJobs();
+    const reclaimed = await worker.reclaimStaleJobs();
 
     expect(reclaimed).toBe(1);
-    const row = db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-stranded');
+    const row = await db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-stranded');
     expect(row.status).toBe('pending');
   });
 
@@ -143,14 +144,14 @@ describe('stale processing jobs are reclaimed', () => {
 
     // Claimed just now — a concurrent send, not an orphan. Reclaiming this would
     // deliver the same notification twice.
-    queueJob(db, { id: 'job-inflight', status: 'processing' });
-    db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
+    await queueJob(db, { id: 'job-inflight', status: 'processing' });
+    await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(new Date().toISOString(), 'job-inflight');
 
-    const reclaimed = worker.reclaimStaleJobs();
+    const reclaimed = await worker.reclaimStaleJobs();
 
     expect(reclaimed).toBe(0);
-    const row = db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-inflight');
+    const row = await db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-inflight');
     expect(row.status).toBe('processing');
   });
 
@@ -158,14 +159,14 @@ describe('stale processing jobs are reclaimed', () => {
     const { db, worker } = await freshWorker();
 
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-exhausted', status: 'processing', attempts: 5 });
-    db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
+    await queueJob(db, { id: 'job-exhausted', status: 'processing', attempts: 5 });
+    await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-exhausted');
 
-    worker.reclaimStaleJobs();
+    await worker.reclaimStaleJobs();
 
     // Retrying past the cap would loop forever against a permanently bad address.
-    const row = db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-exhausted');
+    const row = await db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-exhausted');
     expect(row.status).toBe('failed');
   });
 
@@ -173,15 +174,15 @@ describe('stale processing jobs are reclaimed', () => {
     const { db, worker } = await freshWorker();
 
     const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    queueJob(db, { id: 'job-orphan', status: 'processing' });
-    db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
+    await queueJob(db, { id: 'job-orphan', status: 'processing' });
+    await db.prepare('UPDATE notification_jobs SET next_attempt_at = ? WHERE id = ?')
       .run(longAgo, 'job-orphan');
 
     // This is the deploy case: the process that claimed the job is gone.
-    worker.startNotificationWorker();
+    await worker.startNotificationWorker();
     worker.stopNotificationWorker();
 
-    const row = db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-orphan');
+    const row = await db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-orphan');
     expect(row.status).toBe('pending');
   });
 });
@@ -192,16 +193,16 @@ describe('failed jobs are visible', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     // attempts=4 so this run is the fifth and final one.
-    queueJob(db, { id: 'job-final', attempts: 4 });
+    await queueJob(db, { id: 'job-final', attempts: 4 });
     // No such user, so handleEmailJob throws.
-    db.prepare('UPDATE notification_jobs SET payload = ? WHERE id = ?').run(
+    await db.prepare('UPDATE notification_jobs SET payload = ? WHERE id = ?').run(
       JSON.stringify({ event: 'APPLICATION_ACCEPTED', payload: {}, userId: 'nobody' }),
       'job-final'
     );
 
     await worker.processNotificationJobs();
 
-    const row = db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-final');
+    const row = await db.prepare('SELECT status FROM notification_jobs WHERE id = ?').get('job-final');
     expect(row.status).toBe('failed');
 
     const logged = spy.mock.calls.flat().map(String).join(' ');
@@ -211,11 +212,11 @@ describe('failed jobs are visible', () => {
   it('exposes a queue health summary for the admin surface', async () => {
     const { db, worker } = await freshWorker();
 
-    queueJob(db, { id: 'p1' });
-    queueJob(db, { id: 'f1', status: 'failed', attempts: 5 });
-    queueJob(db, { id: 'f2', status: 'failed', attempts: 5 });
+    await queueJob(db, { id: 'p1' });
+    await queueJob(db, { id: 'f1', status: 'failed', attempts: 5 });
+    await queueJob(db, { id: 'f2', status: 'failed', attempts: 5 });
 
-    const health = worker.getQueueHealth();
+    const health = await worker.getQueueHealth();
 
     expect(health.pending).toBe(1);
     expect(health.failed).toBe(2);
@@ -228,7 +229,7 @@ describe('the worker stops cleanly', () => {
   it('stopNotificationWorker clears the interval so the process can exit', async () => {
     const { worker } = await freshWorker();
 
-    worker.startNotificationWorker();
+    await worker.startNotificationWorker();
     expect(worker.isRunning()).toBe(true);
 
     worker.stopNotificationWorker();
@@ -238,8 +239,8 @@ describe('the worker stops cleanly', () => {
   it('start is idempotent, so a double call cannot double-send', async () => {
     const { worker } = await freshWorker();
 
-    worker.startNotificationWorker();
-    worker.startNotificationWorker();
+    await worker.startNotificationWorker();
+    await worker.startNotificationWorker();
     worker.stopNotificationWorker();
 
     expect(worker.isRunning()).toBe(false);

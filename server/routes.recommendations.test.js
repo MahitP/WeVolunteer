@@ -28,16 +28,16 @@ const STUDENT = 'leo.chen@example.com';
 /** Inserts an event directly, so it can be placed in the past. */
 async function insertEvent({ id, title, deadlineDaysAgo, shiftEndedDaysAgo, status = 'open', maxSpots = 10, category = 'Other', description = 'Litter cleanup work.' }) {
   const { db } = await import('./db.js');
-  const org = db.prepare("SELECT id FROM users WHERE role='organizer' LIMIT 1").get().id;
+  const org = (await db.prepare("SELECT id FROM users WHERE role='organizer' LIMIT 1").get()).id;
   const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
   const ahead = (d) => new Date(Date.now() + d * 864e5).toISOString();
-  db.prepare(`INSERT INTO events (id,title,description,category,location,application_deadline,organizer_id,status,created_at)
+  await db.prepare(`INSERT INTO events (id,title,description,category,location,application_deadline,organizer_id,status,created_at)
               VALUES (?,?,?,?,'Hall',?,?,?,?)`).run(
     id, title, description, category,
     deadlineDaysAgo > 0 ? ago(deadlineDaysAgo) : ahead(-deadlineDaysAgo),
     org, status, ago(60)
   );
-  db.prepare(`INSERT INTO slots (id,event_id,name,description,start_datetime,end_datetime,max_spots)
+  await db.prepare(`INSERT INTO slots (id,event_id,name,description,start_datetime,end_datetime,max_spots)
               VALUES (?,?,'Shift','work',?,?,?)`).run(
     `slot-${id}`, id,
     shiftEndedDaysAgo > 0 ? ago(shiftEndedDaysAgo) : ahead(-shiftEndedDaysAgo),
@@ -90,8 +90,8 @@ describe('recommendations exclude events that can no longer be applied to', () =
     const { db } = await import('./db.js');
     await insertEvent({ id: 'rec-full', title: 'Full Litter Cleanup', deadlineDaysAgo: -10, shiftEndedDaysAgo: -12, maxSpots: 1 });
     // Fill its only spot with somebody else.
-    const other = db.prepare("SELECT id FROM users WHERE role='student' AND id != (SELECT id FROM users WHERE email = ?) LIMIT 1").get(STUDENT).id;
-    db.prepare(`INSERT INTO applications (id,user_id,event_id,slot_id,status,applied_at)
+    const other = (await db.prepare("SELECT id FROM users WHERE role='student' AND id != (SELECT id FROM users WHERE email = ?) LIMIT 1").get(STUDENT)).id;
+    await db.prepare(`INSERT INTO applications (id,user_id,event_id,slot_id,status,applied_at)
                 VALUES ('app-rec-full',?,'rec-full','slot-rec-full','accepted',?)`).run(other, new Date().toISOString());
     const res = await srv.call('GET', '/api/recommendations', undefined, student);
     expect(ids(res.body)).not.toContain('rec-full');

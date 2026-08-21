@@ -38,7 +38,7 @@ describe('administrative deletions are recorded', () => {
 
   afterAll(async () => { await srv?.close(); });
 
-  const auditRows = (action) => db.prepare(
+  const auditRows = async (action) => await db.prepare(
     'SELECT * FROM admin_audit_logs WHERE action = ? ORDER BY created_at DESC'
   ).all(action);
 
@@ -56,18 +56,18 @@ describe('administrative deletions are recorded', () => {
 
   it('records a moderator deleting somebody else\'s comment', async () => {
     const id = await postComment(student);
-    const before = auditRows('COMMENT_DELETED').length;
+    const before = (await auditRows('COMMENT_DELETED')).length;
 
     const res = await srv.call('DELETE', `/api/comments/${id}`, undefined, admin);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const rows = auditRows('COMMENT_DELETED');
+    const rows = await auditRows('COMMENT_DELETED');
     expect(rows.length, 'no audit row for a moderated deletion').toBe(before + 1);
 
     /* Against the AUTHOR, not the moderator — the trail answers "what was done to
        this person", and the subject is who was affected. */
-    const studentId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('leo.chen@example.com').id;
+    const studentId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('leo.chen@example.com')).id;
     expect(rows[0].target_user_id).toBe(studentId);
     expect(rows[0].admin_id).toBe('user-admin');
 
@@ -79,20 +79,20 @@ describe('administrative deletions are recorded', () => {
 
   it('records nothing when an author deletes their own comment', async () => {
     const id = await postComment(student);
-    const before = auditRows('COMMENT_DELETED').length;
+    const before = (await auditRows('COMMENT_DELETED')).length;
 
     const res = await srv.call('DELETE', `/api/comments/${id}`, undefined, student);
     expect(res.status).toBe(200);
 
-    expect(auditRows('COMMENT_DELETED').length,
+    expect((await auditRows('COMMENT_DELETED')).length,
       'self-service deletion was written to the administrative trail').toBe(before);
   });
 
   /* ── Events ────────────────────────────────────────────────────────────── */
 
-  const makeEvent = (id, organizerId) => {
+  const makeEvent = async (id, organizerId) => {
     const now = new Date().toISOString();
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO events (id, title, description, category, location, organizer_id,
                           application_deadline, status, created_at)
       VALUES (?, ?, 'x', 'Other', 'Somewhere', ?, ?, 'open', ?)
@@ -101,30 +101,30 @@ describe('administrative deletions are recorded', () => {
   };
 
   it('records an administrator deleting another organizer\'s event', async () => {
-    const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
-    const id = makeEvent('event-audit-probe-1', organizerId);
-    const before = auditRows('EVENT_DELETED').length;
+    const organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
+    const id = await makeEvent('event-audit-probe-1', organizerId);
+    const before = (await auditRows('EVENT_DELETED')).length;
 
     const res = await srv.call('DELETE', `/api/events/${id}`, undefined, admin);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    const rows = auditRows('EVENT_DELETED');
+    const rows = await auditRows('EVENT_DELETED');
     expect(rows.length, 'no audit row for an administrative event deletion').toBe(before + 1);
     expect(rows[0].target_user_id, 'the row does not name the organizer affected')
       .toBe(organizerId);
   });
 
   it('records nothing when an organizer deletes their own event', async () => {
-    const organizerId = db.prepare('SELECT id FROM users WHERE email = ?')
-      .get('jordan.whitfield@example.org').id;
-    const id = makeEvent('event-audit-probe-2', organizerId);
-    const before = auditRows('EVENT_DELETED').length;
+    const organizerId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+      .get('jordan.whitfield@example.org')).id;
+    const id = await makeEvent('event-audit-probe-2', organizerId);
+    const before = (await auditRows('EVENT_DELETED')).length;
 
     const res = await srv.call('DELETE', `/api/events/${id}`, undefined, organizer);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
 
-    expect(auditRows('EVENT_DELETED').length,
+    expect((await auditRows('EVENT_DELETED')).length,
       'an organizer withdrawing their own listing was logged as an administrative act')
       .toBe(before);
   });

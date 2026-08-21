@@ -62,6 +62,7 @@ async function freshRetention() {
   vi.resetModules();
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/retentionWorker.js');
   // Audit rows go through the helper, never a raw INSERT — `auditLog.test.js`
   // enforces that it is the only writer of this table, because it owns the UUID
@@ -82,11 +83,11 @@ describe('the retention worker sweeps at startup', () => {
   it('enforces retention immediately, not one interval later', async () => {
     const { db, worker, recordAudit } = await freshRetention();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, password_hash, name, role, grade, username,
                          email_verified, account_status, created_at)
       VALUES ('ret-admin', 'ret-admin@example.gov', 'h', 'Ret Admin', 'admin', 'N/A',
-              'ret_admin', 1, 'active', datetime('now'))
+              'ret_admin', 1, 'active', '${new Date().toISOString()}')
     `).run();
 
     /**
@@ -99,25 +100,25 @@ describe('the retention worker sweeps at startup', () => {
      * sweep RAN.
      */
     const stale = new Date(Date.now() - (worker.RETENTION.auditDays + 30) * 86400000).toISOString();
-    const seeded = recordAudit(db, {
+    const seeded = await recordAudit(db, {
       adminId: 'ret-admin',
       action: 'RETENTION_SCHEDULER_FIXTURE',
       details: 'past its window',
       createdAt: stale
     });
 
-    const countStale = () => db.prepare(
+    const countStale = async () => (await db.prepare(
       'SELECT COUNT(*) c FROM admin_audit_logs WHERE id = ?'
-    ).get(seeded.id).c;
-    expect(countStale()).toBe(1);
+    ).get(seeded.id)).c;
+    expect(await countStale()).toBe(1);
 
     try {
-      worker.startRetentionWorker(db);
+      await worker.startRetentionWorker(db);
 
       // No timer advanced, no waiting. If retention only happens on the interval,
       // this row is still here — which is the state a server restarted daily was
       // permanently in.
-      expect(countStale()).toBe(0);
+      expect(await countStale()).toBe(0);
     } finally {
       worker.stopRetentionWorker();
     }
@@ -127,7 +128,7 @@ describe('the retention worker sweeps at startup', () => {
     const { db, worker } = await freshRetention();
     const spy = vi.spyOn(globalThis, 'setInterval');
     try {
-      worker.startRetentionWorker(db);
+      await worker.startRetentionWorker(db);
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy.mock.calls[0][1]).toBe(24 * 60 * 60 * 1000);
     } finally {
@@ -138,9 +139,9 @@ describe('the retention worker sweeps at startup', () => {
   it('does not start a second sweep when called twice', async () => {
     const { db, worker } = await freshRetention();
     try {
-      worker.startRetentionWorker(db);
+      await worker.startRetentionWorker(db);
       const spy = vi.spyOn(globalThis, 'setInterval');
-      worker.startRetentionWorker(db);
+      await worker.startRetentionWorker(db);
       expect(spy).not.toHaveBeenCalled();
     } finally {
       worker.stopRetentionWorker();
@@ -175,14 +176,14 @@ describe('a failing retention sweep reaches the error dashboard', () => {
     const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      worker.startRetentionWorker(dbFailingOnMessageCount(db));
+      await worker.startRetentionWorker(dbFailingOnMessageCount(db));
 
       // The log line was the entire previous behaviour, and it is kept.
       expect(consoleErr).toHaveBeenCalled();
 
       // What was missing: a row on the dashboard, which is also what makes the
       // failure eligible for the alert email.
-      const groups = db.prepare(
+      const groups = await db.prepare(
         "SELECT kind, source FROM error_groups WHERE source = 'worker'"
       ).all();
       expect(groups.length).toBeGreaterThan(0);
@@ -197,9 +198,9 @@ describe('a failing retention sweep reaches the error dashboard', () => {
     const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
-      worker.startRetentionWorker(dbFailingOnMessageCount(db));
+      await worker.startRetentionWorker(dbFailingOnMessageCount(db));
 
-      const event = db.prepare(`
+      const event = await db.prepare(`
         SELECT e.context FROM error_events e
         JOIN error_groups g ON g.fingerprint = e.fingerprint
         WHERE g.source = 'worker' LIMIT 1
@@ -219,10 +220,20 @@ describe('a failing retention sweep reaches the error dashboard', () => {
     const { db, worker } = await freshRetention();
     const consoleErr = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      // A timer callback that throws takes the process down for a housekeeping
-      // task. The startup sweep runs on the caller's stack, so this is the one
-      // place that would surface synchronously.
-      expect(() => worker.startRetentionWorker(dbFailingOnMessageCount(db))).not.toThrow();
+      /**
+       * A timer callback that throws takes the process down for a housekeeping
+       * task, so a failing sweep must escape neither way.
+       *
+       * Both halves are asserted because the sweep became async: it no longer
+       * runs on the caller's stack, so a synchronous `not.toThrow()` alone would
+       * pass while the returned promise rejected — and an unhandled rejection is
+       * exactly the process death this test exists to prevent. `server.js` drops
+       * this promise deliberately, which is only safe if it cannot reject.
+       */
+      let startup;
+      expect(() => { startup = worker.startRetentionWorker(dbFailingOnMessageCount(db)); })
+        .not.toThrow();
+      await expect(startup, 'the startup sweep rejected instead of catching internally').resolves.toBeUndefined();
     } finally {
       worker.stopRetentionWorker();
       consoleErr.mockRestore();

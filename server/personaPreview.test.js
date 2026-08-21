@@ -40,24 +40,24 @@ let srv, db, authz, ownerToken;
 const OWNER = 'derek.sorensen@example.com';
 const STUDENT = 'leo.chen@example.com';
 
-const idFor = (email) => db.prepare('SELECT id FROM users WHERE email = ?').get(email)?.id;
+const idFor = async (email) => (await db.prepare('SELECT id FROM users WHERE email = ?').get(email))?.id;
 
 /** Writes preview columns straight onto a row — no route, no validation. */
-function forcePreview(email, persona, { expiresInMs = 30 * 60 * 1000 } = {}) {
-  db.prepare('UPDATE users SET preview_persona = ?, preview_expires_at = ? WHERE email = ?')
+async function forcePreview(email, persona, { expiresInMs = 30 * 60 * 1000 } = {}) {
+  await db.prepare('UPDATE users SET preview_persona = ?, preview_expires_at = ? WHERE email = ?')
     .run(persona, new Date(Date.now() + expiresInMs).toISOString(), email);
 }
 
-function clearPreview(email) {
-  db.prepare('UPDATE users SET preview_persona = NULL, preview_expires_at = NULL WHERE email = ?')
+async function clearPreview(email) {
+  await db.prepare('UPDATE users SET preview_persona = NULL, preview_expires_at = NULL WHERE email = ?')
     .run(email);
 }
 
 /** The principal the application would build for this row, right now. */
 async function principalOf(email) {
   const utils = await import('./utils.js');
-  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  return utils.buildPrincipal(row);
+  const row = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  return await utils.buildPrincipal(row);
 }
 
 beforeAll(async () => {
@@ -86,7 +86,7 @@ describe('a preview can never add a capability', () => {
    * narrowing rule intersects the two.
    */
   it('gives a student nothing when their row claims to be previewing as the owner', async () => {
-    forcePreview(STUDENT, 'super_admin');
+    await forcePreview(STUDENT, 'super_admin');
     try {
       const principal = await principalOf(STUDENT);
 
@@ -94,13 +94,13 @@ describe('a preview can never add a capability', () => {
         'user.suspend', 'report.resolve', 'persona.preview']) {
         expect(authz.can(principal, cap), `a forged preview granted ${cap}`).toBe(false);
       }
-    } finally { clearPreview(STUDENT); }
+    } finally { await clearPreview(STUDENT); }
   });
 
   /** And the same for every role a forged preview could name. */
   it.each(['super_admin', 'admin', 'organizer', 'partner'])(
     'gives a student nothing when their row claims the %s persona', async (persona) => {
-      forcePreview(STUDENT, persona);
+      await forcePreview(STUDENT, persona);
       try {
         const principal = await principalOf(STUDENT);
         const student = { effectiveRole: 'student', actualRole: null, grants: [], withheld: [] };
@@ -110,7 +110,7 @@ describe('a preview can never add a capability', () => {
             expect(authz.can(student, cap), `${persona} preview added ${cap} to a student`).toBe(true);
           }
         }
-      } finally { clearPreview(STUDENT); }
+      } finally { await clearPreview(STUDENT); }
     });
 
   /**
@@ -120,7 +120,7 @@ describe('a preview can never add a capability', () => {
    * you for free.
    */
   it('holds nothing beyond what a plain member of the persona holds', async () => {
-    forcePreview(OWNER, 'student');
+    await forcePreview(OWNER, 'student');
     try {
       const principal = await principalOf(OWNER);
       const student = { effectiveRole: 'student', actualRole: null, grants: [], withheld: [] };
@@ -136,7 +136,7 @@ describe('a preview can never add a capability', () => {
       expect(authz.can(principal, 'audit.read')).toBe(false);
       expect(authz.can(principal, 'admin.create')).toBe(false);
       expect(authz.can(principal, 'event.apply')).toBe(true);
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
   });
 
   /**
@@ -164,12 +164,12 @@ describe('a preview can never add a capability', () => {
 
 describe('when a preview is in force', () => {
   it('is ignored once expired', async () => {
-    forcePreview(OWNER, 'student', { expiresInMs: -1000 });
+    await forcePreview(OWNER, 'student', { expiresInMs: -1000 });
     try {
       const principal = await principalOf(OWNER);
       expect(authz.can(principal, 'audit.read'), 'an expired preview still narrowed').toBe(true);
       expect(authz.previewPersonaOf(principal)).toBe(null);
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
   });
 
   /**
@@ -178,17 +178,17 @@ describe('when a preview is in force', () => {
    * is to take capabilities away.
    */
   it('is ignored when only one of the two columns is set', async () => {
-    db.prepare("UPDATE users SET preview_persona = 'student', preview_expires_at = NULL WHERE email = ?")
+    await db.prepare("UPDATE users SET preview_persona = 'student', preview_expires_at = NULL WHERE email = ?")
       .run(OWNER);
     try {
       expect(authz.can(await principalOf(OWNER), 'audit.read')).toBe(true);
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
 
-    db.prepare("UPDATE users SET preview_persona = NULL, preview_expires_at = ? WHERE email = ?")
+    await db.prepare("UPDATE users SET preview_persona = NULL, preview_expires_at = ? WHERE email = ?")
       .run(new Date(Date.now() + 60000).toISOString(), OWNER);
     try {
       expect(authz.can(await principalOf(OWNER), 'audit.read')).toBe(true);
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
   });
 
   /**
@@ -202,20 +202,20 @@ describe('when a preview is in force', () => {
    */
   it.each(['', 'root', 'SUPER_ADMIN', 'admin ', '*', 'undefined'])(
     'treats %s as no preview at all', async (junk) => {
-      forcePreview(OWNER, junk);
+      await forcePreview(OWNER, junk);
       try {
         const principal = await principalOf(OWNER);
         expect(authz.can(principal, 'audit.read'), `'${junk}' was honoured as a persona`).toBe(true);
         expect(authz.can(principal, 'persona.preview.exit')).toBe(true);
-      } finally { clearPreview(OWNER); }
+      } finally { await clearPreview(OWNER); }
     });
 
   /** Previewing as your own role is not a preview, and does not report as one. */
   it('reports nothing when the persona equals the real role', async () => {
-    forcePreview(STUDENT, 'student');
+    await forcePreview(STUDENT, 'student');
     try {
       expect(authz.previewPersonaOf(await principalOf(STUDENT))).toBe(null);
-    } finally { clearPreview(STUDENT); }
+    } finally { await clearPreview(STUDENT); }
   });
 });
 
@@ -235,11 +235,11 @@ describe('a preview cannot trap the account that started it', () => {
 
   it('leaves the exit reachable from inside every previewable persona', async () => {
     for (const persona of ['student', 'organizer', 'admin', 'partner']) {
-      forcePreview(OWNER, persona);
+      await forcePreview(OWNER, persona);
       try {
         expect(authz.can(await principalOf(OWNER), 'persona.preview.exit'),
           `an owner previewing as ${persona} could not leave`).toBe(true);
-      } finally { clearPreview(OWNER); }
+      } finally { await clearPreview(OWNER); }
     }
   });
 
@@ -295,7 +295,7 @@ describe('the persona preview endpoints', () => {
     const token = await srv.login(STUDENT);
     const res = await start('student', token);
     expect(res.status).toBe(403);
-    expect(db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(STUDENT)
+    expect((await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(STUDENT))
       .preview_persona).toBeNull();
   });
 
@@ -310,7 +310,7 @@ describe('the persona preview endpoints', () => {
       const me = await srv.call('GET', '/api/auth/me', undefined, ownerToken);
       expect(me.body.preview).toEqual({ persona: 'student', expiresAt: expect.any(String) });
       expect(me.body.role, 'the real role stopped being reported').toBe('super_admin');
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
   });
 
   it('refuses a persona that is not a role', async () => {
@@ -318,7 +318,7 @@ describe('the persona preview endpoints', () => {
       const res = await start(junk, ownerToken);
       expect(res.status, `'${junk}' was accepted as a persona`).toBe(400);
     }
-    expect(db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER)
+    expect((await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER))
       .preview_persona).toBeNull();
   });
 
@@ -329,7 +329,7 @@ describe('the persona preview endpoints', () => {
    * endpoint every student could aim at the owner.
    */
   it('ends only the caller\'s own preview', async () => {
-    forcePreview(OWNER, 'student');
+    await forcePreview(OWNER, 'student');
     const studentToken = await srv.login(STUDENT);
 
     try {
@@ -337,10 +337,10 @@ describe('the persona preview endpoints', () => {
       expect(res.status).toBe(200);
 
       expect(
-        db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER).preview_persona,
+        (await db.prepare('SELECT preview_persona FROM users WHERE email = ?').get(OWNER)).preview_persona,
         "a student's exit call cleared the owner's preview"
       ).toBe('student');
-    } finally { clearPreview(OWNER); }
+    } finally { await clearPreview(OWNER); }
   });
 
   it('is a no-op for an account with no preview', async () => {

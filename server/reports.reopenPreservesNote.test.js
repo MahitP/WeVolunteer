@@ -44,7 +44,7 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
 
     const now = new Date().toISOString();
     reportId = 'rep-reopen-note';
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO reports (id, reporter_id, target_type, target_id, target_author_id,
                            category, description, status, priority, created_at, updated_at)
       VALUES (?, 'user-student-1', 'comment', 'c-reopen', 'user-student-2',
@@ -61,7 +61,7 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
     }, admin);
     expect(closed.status, JSON.stringify(closed.body)).toBe(200);
 
-    expect(db.prepare('SELECT resolution_note FROM reports WHERE id = ?').get(reportId)
+    expect((await db.prepare('SELECT resolution_note FROM reports WHERE id = ?').get(reportId))
       .resolution_note).toBe(NOTE);
 
     /* Reopen it. */
@@ -71,7 +71,7 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
     expect(reopened.status, JSON.stringify(reopened.body)).toBe(200);
 
     /* Cleared from the report — the reopen's whole purpose. */
-    const row = db.prepare(
+    const row = await db.prepare(
       'SELECT resolution, resolution_note, resolved_by, resolved_at FROM reports WHERE id = ?'
     ).get(reportId);
     expect(row.resolution).toBeNull();
@@ -81,7 +81,7 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
 
     /* And kept on the row that withdrew it, which is what an appeal is reviewed
        against a year later. */
-    const withdrawal = db.prepare(
+    const withdrawal = await db.prepare(
       "SELECT note FROM moderation_actions WHERE report_id = ? AND action = 'reopened'"
     ).get(reportId);
     expect(withdrawal, 'no `reopened` history row was written').toBeTruthy();
@@ -94,8 +94,8 @@ describe('reopening a report keeps the withdrawn reasoning', () => {
    * The column exists to carry a withdrawn decision, not to become a general
    * free-text field that later readers have to guess the meaning of.
    */
-  it('writes no note on actions that withdraw nothing', () => {
-    const others = db.prepare(
+  it('writes no note on actions that withdraw nothing', async () => {
+    const others = await db.prepare(
       "SELECT action, note FROM moderation_actions WHERE report_id = ? AND action != 'reopened'"
     ).all(reportId);
 

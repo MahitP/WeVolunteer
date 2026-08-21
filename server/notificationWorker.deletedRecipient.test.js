@@ -67,21 +67,22 @@ async function freshWorker() {
 
   const dbMod = await import('./db.js');
   dbMod.initDatabase();
+  await dbMod.completeDatabaseInit();
   const worker = await import('./workers/notificationWorker.js');
   return { db: dbMod.db, worker };
 }
 
-function makeUser(db, { id, status = 'active', email = null }) {
-  db.prepare(`
+async function makeUser(db, { id, status = 'active', email = null }) {
+  await db.prepare(`
     INSERT INTO users (id, email, password_hash, name, role, grade, username,
                        email_verified, account_status, created_at)
-    VALUES (?, ?, 'h', 'Test Person', 'student', '9', ?, 1, ?, datetime('now'))
+    VALUES (?, ?, 'h', 'Test Person', 'student', '9', ?, 1, ?, '${new Date().toISOString()}')
   `).run(id, email ?? `${id}@example.com`, id.replace(/-/g, '_'), status);
   return id;
 }
 
-function queueJob(db, { id, userId }) {
-  db.prepare(`
+async function queueJob(db, { id, userId }) {
+  await db.prepare(`
     INSERT INTO notification_jobs (id, channel, payload, status, attempts, next_attempt_at, created_at)
     VALUES (?, 'email', ?, 'pending', 0, ?, ?)
   `).run(
@@ -92,8 +93,8 @@ function queueJob(db, { id, userId }) {
   );
 }
 
-const jobRow = (db, id) =>
-  db.prepare('SELECT status, attempts FROM notification_jobs WHERE id = ?').get(id);
+const jobRow = async (db, id) =>
+  await db.prepare('SELECT status, attempts FROM notification_jobs WHERE id = ?').get(id);
 
 beforeEach(() => { vi.useRealTimers(); });
 afterEach(() => {
@@ -106,8 +107,8 @@ afterEach(() => {
 describe('a notification queued for a deleted account', () => {
   it('is never posted to the placeholder address', async () => {
     const { db, worker } = await freshWorker();
-    makeUser(db, { id: 'gone-1', status: 'deleted', email: 'deleted_gone-1@system.local' });
-    queueJob(db, { id: 'job-gone-1', userId: 'gone-1' });
+    await makeUser(db, { id: 'gone-1', status: 'deleted', email: 'deleted_gone-1@system.local' });
+    await queueJob(db, { id: 'job-gone-1', userId: 'gone-1' });
 
     await worker.processNotificationJobs();
 
@@ -116,29 +117,29 @@ describe('a notification queued for a deleted account', () => {
 
   it('is dropped, not left to exhaust five attempts and raise an alert', async () => {
     const { db, worker } = await freshWorker();
-    makeUser(db, { id: 'gone-2', status: 'deleted', email: 'deleted_gone-2@system.local' });
-    queueJob(db, { id: 'job-gone-2', userId: 'gone-2' });
+    await makeUser(db, { id: 'gone-2', status: 'deleted', email: 'deleted_gone-2@system.local' });
+    await queueJob(db, { id: 'job-gone-2', userId: 'gone-2' });
 
     await worker.processNotificationJobs();
 
     // Gone entirely — the same disposition as a successful send, because there is
     // nothing here to retry and nothing to investigate.
-    expect(jobRow(db, 'job-gone-2')).toBeUndefined();
+    expect(await jobRow(db, 'job-gone-2')).toBeUndefined();
 
     // And no dashboard row, which is the whole point: a deleted recipient is not
     // a defect in this application.
-    expect(db.prepare("SELECT COUNT(*) c FROM error_groups WHERE source = 'worker'").get().c).toBe(0);
+    expect((await db.prepare("SELECT COUNT(*) c FROM error_groups WHERE source = 'worker'").get()).c).toBe(0);
   });
 
   it('still delivers to an active account', async () => {
     const { db, worker } = await freshWorker();
-    makeUser(db, { id: 'here-1' });
-    queueJob(db, { id: 'job-here-1', userId: 'here-1' });
+    await makeUser(db, { id: 'here-1' });
+    await queueJob(db, { id: 'job-here-1', userId: 'here-1' });
 
     await worker.processNotificationJobs();
 
     expect(sent).toEqual(['here-1@example.com']);
-    expect(jobRow(db, 'job-here-1')).toBeUndefined();
+    expect(await jobRow(db, 'job-here-1')).toBeUndefined();
   });
 
   /**
@@ -151,8 +152,8 @@ describe('a notification queued for a deleted account', () => {
    */
   it('still delivers to a suspended account, which is how appeals reach anyone', async () => {
     const { db, worker } = await freshWorker();
-    makeUser(db, { id: 'susp-1', status: 'suspended' });
-    queueJob(db, { id: 'job-susp-1', userId: 'susp-1' });
+    await makeUser(db, { id: 'susp-1', status: 'suspended' });
+    await queueJob(db, { id: 'job-susp-1', userId: 'susp-1' });
 
     await worker.processNotificationJobs();
 
@@ -167,11 +168,11 @@ describe('a notification queued for a deleted account', () => {
    */
   it('leaves a job for a row that no longer exists to fail as before', async () => {
     const { db, worker } = await freshWorker();
-    queueJob(db, { id: 'job-nobody', userId: 'never-existed' });
+    await queueJob(db, { id: 'job-nobody', userId: 'never-existed' });
 
     await worker.processNotificationJobs();
 
-    const row = jobRow(db, 'job-nobody');
+    const row = await jobRow(db, 'job-nobody');
     expect(row.status).toBe('pending');   // retrying, not dropped
     expect(row.attempts).toBe(1);
   });

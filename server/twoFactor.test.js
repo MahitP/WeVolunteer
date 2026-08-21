@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
-import { startTestServer, TEST_SIGNUP_DEFAULTS } from './testServer.js';
+import { startTestServer } from './testServer.js';
 
 let srv;
 beforeAll(async () => {
@@ -23,9 +22,8 @@ describe('2FA features', () => {
     });
 
     // Manually enable 2FA
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE id = ?').run('fake_secret', user.id);
-    db.close();
+    const { db } = await import('./db.js');
+    await db.prepare('UPDATE users SET tfa_enabled = 1, tfa_secret = ? WHERE id = ?').run('fake_secret', user.id);
 
     // Login to get preauth cookie
     const loginRes = await srv.call('POST', '/api/auth/login', {
@@ -93,9 +91,8 @@ describe('2FA features', () => {
     expect(res.status).toBe(200);
 
     // Verify in DB
-    const db = new DatabaseSync(process.env.WEV_DB_PATH);
-    const updatedUser = db.prepare('SELECT tfa_email_enabled FROM users WHERE id = ?').get(user.id);
-    db.close();
+    const { db } = await import('./db.js');
+    const updatedUser = await db.prepare('SELECT tfa_email_enabled FROM users WHERE id = ?').get(user.id);
 
     expect(updatedUser.tfa_email_enabled).toBe(1);
   });
