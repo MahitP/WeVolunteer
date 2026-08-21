@@ -361,7 +361,9 @@ export function isUsableReply(text) {
   if (hasRepetitiveLoop(raw)) return false;
 
   /**
-   * A reply that is mostly punctuation or a stray fragment, rather than words.
+   * A reply that is punctuation or a stray fragment, rather than an answer.
+   *
+   * ── Letters, in any alphabet ──
    *
    * `\p{L}`, not `[a-z]`. The ASCII class asked "are there three consecutive
    * English letters", which is a proxy for "are there words" that fails on
@@ -371,10 +373,26 @@ export function isUsableReply(text) {
    * answers in the language it is addressed in, and a student writing Spanish
    * or Korean should not silently lose the reply.
    *
-   * The class of output this was written to catch — punctuation, digits, a
-   * stray fragment with no letters in it — is caught identically.
+   * ── Or numbers, because some answers are numbers ──
+   *
+   * The original comment listed "digits" among the things this catches, which
+   * was a mistake rather than a decision. Measured against Qwen2.5-1.5B:
+   *
+   *     student  "Count to 10"
+   *     model    "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+   *     shown    "I can't help with that one. I can look up opportunities, …"
+   *
+   * The model answered, correctly, and the answer contained no run of three
+   * letters, so it was discarded and the reader was told Welly did not
+   * understand the question. That reads as the model being stupid when the
+   * model was right and this line was wrong.
+   *
+   * Two digits rather than one, so a lone stray character is still caught. A
+   * reply that is genuinely just a number — "42" — is a real answer and is now
+   * allowed to be one.
    */
-  if (!/\p{L}{3}/u.test(raw)) return false;
+  const digits = raw.match(/\p{N}/gu);
+  if (!/\p{L}{3}/u.test(raw) && (digits?.length ?? 0) < 2) return false;
 
   return true;
 }

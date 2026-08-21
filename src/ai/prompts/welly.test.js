@@ -197,6 +197,36 @@ describe('instruction echo', () => {
     }
   });
 
+  it('does not reject an answer that is numbers', () => {
+    /**
+     * Measured against Qwen2.5-1.5B, reported as the assistant being stupid:
+     *
+     *     student  "Count to 10"
+     *     model    "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+     *     shown    "I can't help with that one. I can look up opportunities, …"
+     *
+     * The reply had no run of three letters, so the "is this words or is it
+     * punctuation" check discarded it and the reader was told the question was
+     * not understood. The model was right; the check was wrong.
+     */
+    for (const good of [
+      '1, 2, 3, 4, 5, 6, 7, 8, 9, 10',
+      '1\n2\n3\n4\n5\n6\n7\n8\n9\n10',
+      '42',
+      '3.14159',
+    ]) {
+      expect(isUsableReply(good), good).toBe(true);
+    }
+  });
+
+  it('still rejects a reply that is neither words nor a number', () => {
+    /* The other half of the bargain. Widening the rule must not turn a stray
+       character into an answer — two digits, not one, for exactly that. */
+    for (const bad of ['...', '?!', '—', '. . .', '5', '·']) {
+      expect(isUsableReply(bad), bad).toBe(false);
+    }
+  });
+
   it('does not reject a normal answer', () => {
     /**
      * The cost of a false positive is a plainer sentence, so the bias is toward
@@ -231,8 +261,9 @@ describe('other unusable replies', () => {
 });
 
 /**
- * The usability gate is about whether a reply contains words, not about which
- * alphabet they are written in.
+ * The usability gate is about whether a reply contains an ANSWER, not about
+ * which alphabet it is written in — and not, as it turned out, about whether
+ * it contains words at all.
  */
 describe('isUsableReply and the alphabet', () => {
   it('accepts a reply with no Latin letters in it', () => {
@@ -244,9 +275,27 @@ describe('isUsableReply and the alphabet', () => {
     expect(isUsableReply('Ståle, 日本語, Привет.')).toBe(true);
   });
 
-  it('still rejects a reply with no words in it', () => {
+  it('still rejects a reply with nothing in it', () => {
+    /**
+     * ── "12 34 56" used to be here, and was wrong ──
+     *
+     * This case asserted that a reply of digits is unusable, on the reasoning
+     * that a reply with no words in it is not an answer. Measured against
+     * Qwen2.5-1.5B, that reasoning fails on the most ordinary request there is:
+     *
+     *     student  "Count to 10"
+     *     model    "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+     *     shown    "I can't help with that one. …"
+     *
+     * A reply can be entirely numbers and be exactly right. What this is
+     * actually for is punctuation and stray characters, and those are still
+     * caught — see the numeric cases in the echo suite above for the other
+     * side of it.
+     */
     expect(isUsableReply('!!! ??? ...')).toBe(false);
-    expect(isUsableReply('12 34 56')).toBe(false);
     expect(isUsableReply('-')).toBe(false);
+    expect(isUsableReply('·')).toBe(false);
+    /* One digit is still a stray character; two is a number. */
+    expect(isUsableReply('7')).toBe(false);
   });
 });
