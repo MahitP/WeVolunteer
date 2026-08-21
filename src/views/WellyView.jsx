@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Send, Square, Trash2, Plus, MessageSquare, Clock, X,
   ChevronRight, AlertCircle, Pencil, Check
@@ -76,6 +76,30 @@ function getRoleSuggestions(user) {
     { label: 'What is my next shift?', prompt: 'What is my next shift?' },
     { label: 'How does Auto Select work?', prompt: 'How does Auto Select work?' },
   ];
+}
+
+/**
+ * One line saying how long these conversations last.
+ *
+ * Two states and no third: either they survive the tab closing or they do not,
+ * and the reader is told which. The link goes to the switch that changes it
+ * rather than offering a second copy of it here.
+ */
+function HistoryNote({ saving }) {
+  if (saving) {
+    return (
+      <p className="welly-history-note dim small">
+        Saved in this browser. Nothing is sent to WeVolunteer.
+      </p>
+    );
+  }
+  return (
+    <p className="welly-history-note dim small">
+      Kept for this visit only.{' '}
+      <Link to="/settings?section=privacy#welly-ai">Save conversations</Link> to keep them
+      in this browser.
+    </p>
+  );
 }
 
 /**
@@ -619,8 +643,20 @@ export default function WellyView({ currentUser = null, location = null, onViewD
           )}
         </div>
 
-        {conversations.length > 0 && (
-          <div className="welly-sidebar-foot">
+        {/**
+          * What happens to these conversations when the tab closes.
+          *
+          * `saveConversations` is off by default and deliberately so — a
+          * transcript names the things a student volunteers for and asks
+          * about, and keeping it is a choice with a cost. But nothing said so,
+          * and the result was worse than either policy: the sidebar filled up
+          * during a visit, the reader learned that Welly remembers, and then
+          * everything was gone the next morning with no explanation and no clue
+          * that a setting existed.
+          */}
+        <div className="welly-sidebar-foot">
+          <HistoryNote saving={prefs.saveConversations} />
+          {conversations.length > 0 && (
             <button
               type="button"
               className="btn btn-ghost btn-sm welly-clear-all-btn dim"
@@ -629,8 +665,8 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               <Trash2 size={13} aria-hidden="true" />
               <span>Clear history</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </aside>
 
       {/* ── Mobile History Slide-over Drawer ────────────────────────────────── */}
@@ -746,19 +782,20 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               )}
             </div>
 
-            {conversations.length > 0 && (
-              <div className="welly-drawer-foot">
+            <div className="welly-drawer-foot">
+              <HistoryNote saving={prefs.saveConversations} />
+              {conversations.length > 0 && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm dim"
                   style={{ width: '100%' }}
                   onClick={handleClearAll}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={14} aria-hidden="true" />
                   <span>Clear all history</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

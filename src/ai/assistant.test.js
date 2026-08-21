@@ -347,6 +347,18 @@ describe('free conversation, beside the grounded answers', () => {
     expect(res.phrasedByModel).toBe(false);
   });
 
+  /**
+   * Both of these asserted `/Verified Platform Hours/`, which is a phrase from
+   * `INFORMATIONAL_KNOWLEDGE.info_hours` — the fixed two-paragraph explanation
+   * of verified versus external hours. That is what the router used to return
+   * for "why?" and "dang it" regardless of what had just been said, so the
+   * tests were named for context and pinned the context-free answer.
+   *
+   * They now assert the answer that actually follows from the previous turn.
+   * It is the narrower assertion of the two: the old phrase appears in a
+   * canned block returned to everyone, and these sentences only appear after
+   * an answer about hours.
+   */
   it('answers follow-up reactions empathetically based on recent context', async () => {
     const res = await ask('dang it', {
       runtime: null,
@@ -356,7 +368,7 @@ describe('free conversation, beside the grounded answers', () => {
       ],
     });
 
-    expect(res.answer).toMatch(/Verified Platform Hours/i);
+    expect(res.answer).toMatch(/credited once you attend a volunteer shift/i);
     expect(res.card).toBeNull();
   });
 
@@ -369,8 +381,23 @@ describe('free conversation, beside the grounded answers', () => {
       ],
     });
 
-    expect(res.answer).toMatch(/Verified Platform Hours/i);
+    expect(res.answer).toMatch(/organizer marks your attendance/i);
     expect(res.card).toBeNull();
+  });
+
+  it('does not give the hours explanation to a follow-up about something else', async () => {
+    /* The regression the two tests above could not see: the same canned block
+       came back whatever the previous turn had been about. */
+    const res = await ask('why?', {
+      runtime: null,
+      history: [
+        { role: 'user', text: 'Show my certificates' },
+        { role: 'assistant', text: 'You do not have any certificates yet.' },
+      ],
+    });
+
+    expect(res.answer).toMatch(/certificate/i);
+    expect(res.answer).not.toMatch(/External Service Hours/i);
   });
 
   it('greets inquiries about chatting ability warmly', async () => {

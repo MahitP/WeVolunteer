@@ -11421,7 +11421,20 @@ input:disabled + .premium-slider {
   }
 }
 
+.welly-history-note {
+  margin: 0;
+  padding: 0 var(--s1);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.welly-history-note a { text-decoration: underline; text-underline-offset: 2px; }
+
 .welly-sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
   padding: var(--s2) var(--s3);
   border-top: 1px solid var(--rule);
 }
@@ -11480,6 +11493,9 @@ input:disabled + .premium-slider {
 }
 
 .welly-drawer-foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
   padding: var(--s3);
   border-top: 1px solid var(--rule);
 }

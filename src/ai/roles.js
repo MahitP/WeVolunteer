@@ -80,6 +80,20 @@ export const INTENT_CAPABILITY = Object.freeze({
   recent_audit: 'audit.read',
 
   /* Conversation and confirmations */
+  /**
+   * `followup_why`, `reaction` and `talk_check` answer from what was said a
+   * moment ago rather than from a lookup, so they carry no capability.
+   *
+   * They were missing from this table while `assistant.js` already listed all
+   * three as conversational and `getConversationalReply` already handled them.
+   * An intent absent here is not merely unrouted — `checkRole` returns
+   * `unknownIntent` and the turn is REFUSED — so routing anything to them
+   * before now would have answered "that is not something your account can ask
+   * me for" to somebody typing "why?".
+   */
+  followup_why: null,
+  reaction: null,
+  talk_check: null,
   confirm_action: null,
   cancel_action: null,
   greeting: null,

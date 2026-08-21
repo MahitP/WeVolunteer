@@ -167,6 +167,71 @@ const INFORMATIONAL_MATCHERS = [
       || /\b(what do organizers do|what do admins do|what does an admin do|what can an admin do)\b/i.test(text),
     slots: () => ({}),
   },
+  /**
+   * A question about the turn that just happened, rather than about hours.
+   *
+   * "why?", "how come?", "why do I have zero?" used to match the `info_hours`
+   * rule below, which meant a bare "why?" produced the two-paragraph
+   * explanation of verified and external hours NO MATTER what the previous
+   * answer had been about — ask about certificates, say "why?", and read about
+   * hours. The rule was right about the commonest case and had no way to be
+   * right about any other.
+   *
+   * `followup_why` is answered by `getConversationalReply`, which reads the
+   * previous assistant turn and explains hours, applications, certificates or
+   * opportunities accordingly — and falls back to the hours explanation when
+   * the previous turn was about hours, so the common case is unchanged.
+   *
+   * Bounded to SHORT questions on purpose. "Why do volunteers need training
+   * before a shift?" is a question in its own right, not a follow-up, and
+   * belongs in conversation where the model or the fixed answer can take it.
+   */
+  {
+    intent: 'followup_why',
+    tool: null,
+    test: text => {
+      const t = String(text).trim();
+      if (!/^(why|how come)\b/i.test(t)) return false;
+      /**
+       * A follow-up refers to the previous turn, so it names nothing itself.
+       * "Why do I have verified hours?" names its own subject and is a question
+       * about how hours work; "Why do I have zero?" names nothing and only
+       * makes sense after an answer. Testing for a subject is what separates
+       * them — a word count alone put both in the same bucket.
+       */
+      if (/\b(hours?|certificates?|applications?|events?|shifts?|opportunit(y|ies)|organi[sz]ations?|badges?|clubs?|volunteers?)\b/i.test(t)) {
+        return false;
+      }
+      /* And short: past about six words it is a question in its own right even
+         without naming one of ours. */
+      return t.split(/\s+/).length <= 6;
+    },
+    slots: () => ({}),
+  },
+  /**
+   * An interjection, which is a turn even though it asks nothing.
+   *
+   * These matched `info_hours` too — "oof" returned the hours explanation.
+   * `getConversationalReply` answers them from the previous turn, and returns
+   * null when there is nothing to react to, which falls through to the ordinary
+   * conversational path.
+   */
+  {
+    intent: 'reaction',
+    tool: null,
+    /**
+     * Unambiguous interjections only.
+     *
+     * "bruh", "sad" and "sigh" are in `getConversationalReply`'s own list but
+     * deliberately not here: `router.test.js` pins "Bruh" as noise, on the
+     * grounds that inventing an intent for it is the guessing this router
+     * exists to avoid, and that reasoning holds. Nothing is lost by leaving
+     * them out — the reaction branch returns null without matching context
+     * anyway, so both paths end at the same sentence.
+     */
+    test: text => /^(dang( it)?|darn( it)?|damn( it)?|aww?|aw man|bummer|oh no|oof|yay|woohoo|awesome|cool|nice|sweet|great)[\s!.,?]*$/i.test(String(text).trim()),
+    slots: () => ({}),
+  },
   {
     intent: 'info_hours',
     tool: null,
@@ -174,7 +239,6 @@ const INFORMATIONAL_MATCHERS = [
       !/\b(how many hours|check my hours|what are my (?:verified )?hours|show my hours)\b/i.test(text)
       && ((/\b(how (do|does|are)|explain|why (do|are|is)|what are)\b/i.test(text)
         && /\b(volunteer hours|hours work|hours verified|verified hours|getting hours|logging hours|0 hours|no hours)\b/i.test(text))
-      || /^(why\??|why not\??|how come\??|why though\??|dang it|darn it|bummer|oof)$/i.test(text)
       || /\b(why do i have (?:0|zero|no|verified) hours|what are verified hours|how do hours work)\b/i.test(text)),
     slots: () => ({}),
   },

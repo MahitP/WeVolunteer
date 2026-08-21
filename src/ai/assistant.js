@@ -365,7 +365,8 @@ function getConversationalReply(intent, message, { history = [], user = null } =
   }
 
   // Reactions when there is prior conversational context
-  if (/^(dang( it)?|darn( it)?|damn( it)?|aww?|aw man|bummer|oh no|oof|sad|bruh?|sigh|yay|woohoo|awesome|cool|nice|sweet|great)[\s!.,?]*$/i.test(raw)) {
+  if (intent === 'reaction'
+    || /^(dang( it)?|darn( it)?|damn( it)?|aww?|aw man|bummer|oh no|oof|sad|bruh?|sigh|yay|woohoo|awesome|cool|nice|sweet|great)[\s!.,?]*$/i.test(raw)) {
     if (lastText.includes('verified hours') || lastText.includes('do not have any verified hours') || lastText.includes('0 verified')) {
       return "Don't worry! Verified hours are credited once you attend a volunteer shift and the event organizer signs off on attendance. Would you like me to help you find an upcoming event to get started?";
     }
@@ -378,8 +379,23 @@ function getConversationalReply(intent, message, { history = [], user = null } =
     return null;
   }
 
-  // Follow-up 'why' queries
-  if (/^(why\??|why not\??|how come\??|why though\??|why\s*(?:do i have\s*)?(?:0|zero|no)\s*hours\??)$/i.test(raw)) {
+  /**
+   * A follow-up about the turn before it.
+   *
+   * Keyed on the INTENT rather than on the exact wording. The pattern that used
+   * to gate this branch listed the phrasings somebody had thought of — "why?",
+   * "how come?", "why do I have 0 hours?" — and "Why do I have zero?" was not
+   * one of them, so a perfectly ordinary follow-up fell past every branch below
+   * and got the generic "I can't help with that one". The router now decides
+   * what counts as a short follow-up (see `followup_why` there); this decides
+   * what to say about it, from what was said last.
+   */
+  if (intent === 'followup_why'
+    || /^(why\??|why not\??|how come\??|why though\??|why\s*(?:do i have\s*)?(?:0|zero|no)\s*hours\??)$/i.test(raw)) {
+    if (/\b(select|selected|lottery|auto ?select|chosen|picked)\b/i.test(raw)
+      || lastText.includes('auto select') || lastText.includes('waitlist')) {
+      return "Events with more applicants than spots use Auto Select: after the application deadline a weighted draw runs, which gives a little more weight to people who have had fewer opportunities so far. Everyone not drawn goes onto the waitlist in draw order, and moves up if someone withdraws.";
+    }
     if (lastText.includes('verified hours') || lastText.includes('do not have any verified hours') || lastText.includes('0 verified') || /hours/i.test(raw)) {
       return "Hours only appear as verified once you complete a volunteer shift and the organizer marks your attendance on the event roster. If you recently attended an event, it may still be pending organizer verification.";
     }
