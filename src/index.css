@@ -11588,18 +11588,48 @@ input:disabled + .premium-slider {
   color: var(--ink-3);
 }
 
+/* A button since the panel became a way to switch rather than a way to read.
+   The reset is explicit — a <button> brings a UA background, a centred text
+   alignment and an inherited-font opt-out, all three of which would otherwise
+   show up as the two options no longer matching the panel around them. */
 .welly-mode-option {
   display: flex;
   gap: var(--s2);
   align-items: flex-start;
+  width: 100%;
   padding: var(--s2);
   border-radius: var(--r-md);
   border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.welly-mode-option:hover:not(:disabled) { background: var(--surface-2); }
+
+.welly-mode-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .welly-mode-option.is-current {
   border-color: var(--rule);
   background: var(--surface-2);
+}
+
+/* "Needs a one-time download", beside the name rather than buried in the
+   sentence under it: it is the one thing that changes what the click does. */
+.welly-mode-option-tag {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 1px var(--s1);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .welly-mode-option-glyph { flex: none; margin-top: 2px; color: var(--ink-3); }

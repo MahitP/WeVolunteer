@@ -34,10 +34,31 @@ const UNSUPPORTED = {
 };
 const INSTALLED = { enabled: true, modelId: 'qwen2.5-0.5b-instruct-q4km' };
 const NOT_INSTALLED = { enabled: false, modelId: null };
+/* Downloaded, then switched off. `modelId` survives the switch — it records
+   what is on the device, and `enabled` records whether it is being used. That
+   distinction is the whole difference between switching on and downloading. */
+const INSTALLED_OFF = { enabled: false, modelId: 'qwen2.5-0.5b-instruct-q4km' };
 
 const show = props => render(
   <MemoryRouter><WellyModeControl capability={SUPPORTED} prefs={NOT_INSTALLED} status={AIStatus.IDLE} {...props} /></MemoryRouter>,
 );
+
+/* Open the panel. The trigger's name carries the current mode, which is the
+   thing under test in half these cases, so it is matched loosely here. */
+const openPanel = async () => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Answering with Welly/i }));
+  });
+};
+
+/**
+ * An option inside the panel, by the name it starts with.
+ *
+ * Anchored, because the trigger's accessible name also contains both product
+ * names — "Answering with Welly Chat. …" — and an unanchored /Welly AI/ matches
+ * the control that opened the panel as well as the option inside it.
+ */
+const option = name => screen.getByRole('button', { name: new RegExp(`^${name}`) });
 
 describe('what the control reports, per configuration', () => {
   const CASES = [
@@ -153,5 +174,99 @@ describe('what the panel offers', () => {
     expect(screen.getByText(/needs more memory than this device/i)).toBeInTheDocument();
     /* And no offer to set up something this device cannot run. */
     expect(screen.queryByRole('link', { name: /Set up Welly AI/i })).toBeNull();
+  });
+});
+
+describe('switching between the two', () => {
+  /**
+   * ── Why the options are buttons ──
+   *
+   * They were captioned paragraphs with a tick beside whichever was in use.
+   * Reported: "the mode dropdown should let you click between On-Device/Local
+   * AI to switch seamlessly". A panel that lists two options, marks one, and
+   * cannot be used to pick the other reads as broken rather than as
+   * informative.
+   *
+   * The control does not switch anything itself. It reports the choice; the
+   * page owns the preference and the runtime, which is what keeps this from
+   * becoming a second copy of the model-management flow.
+   * `WellyView.mode.test.jsx` covers what the page then does — including the
+   * first-time case, where there is nothing installed to switch on and the
+   * click has to reach the download instead.
+   */
+  it('reports a switch to Welly AI when a model is installed', async () => {
+    const onSelectMode = vi.fn();
+    /* Downloaded and switched off, which is the state a switch back on starts
+       from — and is distinct from never having downloaded it. */
+    show({ capability: SUPPORTED, prefs: INSTALLED_OFF, status: AIStatus.IDLE, onSelectMode });
+    await openPanel();
+
+    await act(async () => { fireEvent.click(option('Welly AI')); });
+    expect(onSelectMode).toHaveBeenCalledWith('ai');
+  });
+
+  it('reports a switch back to Welly Chat while Welly AI is running', async () => {
+    const onSelectMode = vi.fn();
+    show({ capability: SUPPORTED, prefs: INSTALLED, status: AIStatus.READY, onSelectMode });
+    await openPanel();
+
+    await act(async () => { fireEvent.click(option('Welly Chat')); });
+    expect(onSelectMode).toHaveBeenCalledWith('chat');
+  });
+
+  it('does nothing when the option already in use is clicked', async () => {
+    const onSelectMode = vi.fn();
+    show({ capability: SUPPORTED, prefs: INSTALLED, status: AIStatus.READY, onSelectMode });
+    await openPanel();
+
+    await act(async () => { fireEvent.click(option('Welly AI')); });
+    expect(onSelectMode).not.toHaveBeenCalled();
+    /* Still closes — a panel left open over an unchanged state is a dead end. */
+    expect(screen.queryByText(/How Welly answers/)).toBeNull();
+  });
+
+  it('says a download is needed, and still lets the option be picked', async () => {
+    /* The click that has nothing to switch on is the one that has to work:
+       it is the way in to installing it. Disabling it would leave the panel
+       naming a mode with no route to it. */
+    const onSelectMode = vi.fn();
+    show({ capability: SUPPORTED, prefs: NOT_INSTALLED, status: AIStatus.IDLE, onSelectMode });
+    await openPanel();
+
+    expect(screen.getByText(/Needs a one-time download/i)).toBeInTheDocument();
+    const aiOption = option('Welly AI');
+    expect(aiOption).toBeEnabled();
+    await act(async () => { fireEvent.click(aiOption); });
+    expect(onSelectMode).toHaveBeenCalledWith('ai');
+  });
+
+  it('does not offer Welly AI on a device that cannot run it', async () => {
+    const onSelectMode = vi.fn();
+    show({ capability: UNSUPPORTED, prefs: NOT_INSTALLED, status: AIStatus.IDLE, onSelectMode });
+    await openPanel();
+
+    expect(option('Welly AI')).toBeDisabled();
+    /* And no download tag on something that could not run once downloaded. */
+    expect(screen.queryByText(/Needs a one-time download/i)).toBeNull();
+  });
+
+  it('takes both options away while a runtime is loading', async () => {
+    /* Switching mid-load races the load: `loadRuntime` unloads and reloads from
+       the preference it reads at the start, so a second call overlapping the
+       first can leave the runtime and the caption disagreeing. */
+    show({ capability: SUPPORTED, prefs: INSTALLED, status: AIStatus.LOADING, onSelectMode: vi.fn() });
+    await openPanel();
+
+    expect(option('Welly Chat')).toBeDisabled();
+    expect(option('Welly AI')).toBeDisabled();
+  });
+
+  it('is inert rather than broken with no handler', async () => {
+    /* Rendered without `onSelectMode` in several tests and, historically, in
+       Storybook. A click must not throw. */
+    show({ capability: SUPPORTED, prefs: INSTALLED_OFF, status: AIStatus.IDLE });
+    await openPanel();
+    await act(async () => { fireEvent.click(option('Welly AI')); });
+    expect(screen.queryByText(/How Welly answers/)).toBeNull();
   });
 });

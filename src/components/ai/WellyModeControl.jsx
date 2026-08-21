@@ -36,6 +36,23 @@ import { isLocalAIEnabled } from '../../ai';
  * in: it says which engine is answering, explains the other one, and links to
  * the flow that already exists. What it adds over hunting through Settings is
  * that it is here, next to Welly's name, at the moment somebody wonders about it.
+ *
+ * ── Why the two options became buttons ──
+ *
+ * They were captioned paragraphs with a tick beside whichever was in use, and a
+ * link underneath to Settings. Reported: "the mode dropdown should let you
+ * click between On-Device/Local AI to switch seamlessly". That is right, and
+ * the read-only version was a worse thing than it looked — a panel that lists
+ * two options, marks one, and cannot be used to pick the other reads as broken
+ * rather than as informative.
+ *
+ * Switching is not model management, which is the distinction that keeps this
+ * from becoming the second download flow the paragraphs above are about. Off
+ * and on is one boolean in `preferences.js` plus a runtime load, both of which
+ * the page already does on mount and on a `storage` event from another tab.
+ * Downloading is not: the first time somebody picks Welly AI there is nothing
+ * to switch on, so that click goes to Settings, where the download, the digest
+ * check, the storage accounting and the remove button already live.
  */
 
 /** Everything the control needs to know, derived in one place. */
@@ -66,6 +83,7 @@ export default function WellyModeControl({
   prefs,
   status,
   onRetry = null,
+  onSelectMode = null,
   compact = false,
 }) {
   const [open, setOpen] = useState(false);
@@ -115,6 +133,26 @@ export default function WellyModeControl({
   if (!isLocalAIEnabled()) return null;
 
   const Icon = mode.id === 'chat' ? Cloud : Sparkles;
+  const onChat = mode.id === 'chat';
+  /* A model has been downloaded on this device. `preferences.js` only records a
+     `modelId` once a download has finished and verified, which is what makes it
+     the right question to ask here rather than "is it switched on". */
+  const installed = Boolean(prefs?.modelId);
+  const switching = status === AIStatus.LOADING || status === AIStatus.DOWNLOADING;
+
+  /**
+   * Picking a mode.
+   *
+   * The panel closes first in every branch. Leaving it open over a runtime that
+   * is loading gives a disabled pair of options and a caption that is about to
+   * be wrong, and leaving it open across a navigation to Settings leaves a
+   * disclosure hanging over a different page.
+   */
+  const choose = id => {
+    setOpen(false);
+    if (id === (onChat ? 'chat' : 'ai')) return;
+    onSelectMode?.(id);
+  };
 
   return (
     <div className="welly-mode" ref={wrapRef}>
@@ -140,33 +178,51 @@ export default function WellyModeControl({
         <div className="welly-mode-panel" id={panelId}>
           <p className="welly-mode-panel-title">How Welly answers</p>
 
-          <div className={`welly-mode-option${mode.id === 'chat' ? ' is-current' : ''}`}>
+          <button
+            type="button"
+            className={`welly-mode-option${onChat ? ' is-current' : ''}`}
+            onClick={() => choose('chat')}
+            disabled={switching}
+            aria-current={onChat ? 'true' : undefined}
+          >
             <Cloud size={15} className="welly-mode-option-glyph" aria-hidden="true" />
             <div>
               <span className="welly-mode-option-name">
                 Welly Chat
-                {mode.id === 'chat' && <Check size={13} aria-label="in use" />}
+                {onChat && <Check size={13} aria-label="in use" />}
               </span>
               <span className="welly-mode-option-body dim">
                 Answers from your WeVolunteer records — your hours, applications and
                 the opportunities you can see. Always available.
               </span>
             </div>
-          </div>
+          </button>
 
-          <div className={`welly-mode-option${mode.id !== 'chat' ? ' is-current' : ''}`}>
+          <button
+            type="button"
+            className={`welly-mode-option${onChat ? '' : ' is-current'}`}
+            onClick={() => choose('ai')}
+            /* Not disabled when there is nothing installed — that click is the
+               way in to installing it. Only an unsupported device and a switch
+               already in progress take the option away. */
+            disabled={!capability?.supported || switching}
+            aria-current={onChat ? undefined : 'true'}
+          >
             <Sparkles size={15} className="welly-mode-option-glyph" aria-hidden="true" />
             <div>
               <span className="welly-mode-option-name">
                 Welly AI
-                {mode.id !== 'chat' && <Check size={13} aria-label="in use" />}
+                {!onChat && <Check size={13} aria-label="in use" />}
+                {capability?.supported && !installed && (
+                  <span className="welly-mode-option-tag">Needs a one-time download</span>
+                )}
               </span>
               <span className="welly-mode-option-body dim">
                 Adds a language model that runs on your own device, so Welly can hold
                 a conversation. Nothing you type leaves this browser.
               </span>
             </div>
-          </div>
+          </button>
 
           {mode.reason && (
             <p className="welly-mode-note">

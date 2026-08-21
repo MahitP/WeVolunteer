@@ -15,7 +15,7 @@ import {
   isAbort,
   detectCapability,
 } from '../ai';
-import { readPreferences } from '../ai/preferences';
+import { readPreferences, writePreferences } from '../ai/preferences';
 import WellyModeControl from '../components/ai/WellyModeControl';
 import {
   getConversations,
@@ -262,6 +262,39 @@ export default function WellyView({ currentUser = null, location = null, onViewD
       if (aliveRef.current) setStatus(AIStatus.ERROR);
     }
   }, []);
+
+  /**
+   * Switching between Welly Chat and Welly AI from the mode control.
+   *
+   * ── Why this is here and not in the control ──
+   *
+   * Only two things happen: a boolean is written to `preferences.js`, and
+   * `loadRuntime` is run again. Both already exist on this page — the same pair
+   * runs on mount, and again when Settings changes the preference in another
+   * tab. Putting the switch here reuses them instead of giving the control its
+   * own copy of the runtime lifecycle.
+   *
+   * ── The first time, there is nothing to switch on ──
+   *
+   * `modelId` is written by `AISettingsCard` only after a download has finished
+   * and verified, so its absence means the model is not on this device. Turning
+   * the preference on in that state would set `enabled: true` with nothing to
+   * load, `loadRuntime` would fall straight through to IDLE, and the control
+   * would go on saying Welly Chat with no explanation.
+   *
+   * So that click goes to the download instead. Settings owns it — the
+   * progress, the digest check, the storage accounting and the remove button
+   * are all there, and duplicating any of it here is the thing WellyModeControl
+   * exists to avoid.
+   */
+  const selectMode = useCallback(async id => {
+    if (id === 'ai' && !readPreferences().modelId) {
+      navigate('/settings?section=privacy#welly-ai');
+      return;
+    }
+    writePreferences({ enabled: id === 'ai' });
+    await loadRuntime();
+  }, [navigate, loadRuntime]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -936,6 +969,7 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               prefs={prefs}
               status={status}
               onRetry={loadRuntime}
+              onSelectMode={selectMode}
               compact
             />
             <button
@@ -969,6 +1003,7 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               prefs={prefs}
               status={status}
               onRetry={loadRuntime}
+              onSelectMode={selectMode}
             />
           </div>
 
