@@ -75,17 +75,6 @@ export default function WellyModeControl({
 
   const mode = modeFor({ capability, prefs, status });
 
-  /**
-   * A build that opted out of on-device AI has one mode, so it needs no control.
-   *
-   * Rendering one here would be worse than useless: it would name Welly AI,
-   * describe it, and link to a Settings card that renders nothing in this
-   * build — `AISettingsCard` gates on the same flag. Every surface gates on
-   * `isLocalAIEnabled()`; this is one of them, and `disabledPath.test.jsx` is
-   * what holds that.
-   */
-  if (!isLocalAIEnabled()) return null;
-
   /* Escape closes and returns focus to the control that opened it; a click
      outside just closes. Both are what `useModal` gives a dialog, and this is
      deliberately not a dialog — it is a disclosure beside its trigger, so it
@@ -108,6 +97,22 @@ export default function WellyModeControl({
       document.removeEventListener('mousedown', onPointer);
     };
   }, [open]);
+
+  /**
+   * A build that opted out of on-device AI has one mode, so it needs no control.
+   *
+   * Rendering one would be worse than useless: it would name Welly AI, describe
+   * it, and link to a Settings card that renders nothing in this build —
+   * `AISettingsCard` gates on the same flag. Every surface gates on
+   * `isLocalAIEnabled()`; this is one of them, and `disabledPath.test.jsx` is
+   * what holds that.
+   *
+   * AFTER every hook, not before. `hookOrder.test.jsx` states the rule for the
+   * repository and oxlint's `rules-of-hooks` caught this one: an early return
+   * above `useEffect` changes how many hooks run between one render and the
+   * next, which is a crash rather than a missing control.
+   */
+  if (!isLocalAIEnabled()) return null;
 
   const Icon = mode.id === 'chat' ? Cloud : Sparkles;
 
