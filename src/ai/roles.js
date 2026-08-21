@@ -106,6 +106,11 @@ export const INTENT_CAPABILITY = Object.freeze({
   greeting: null,
   affirmation: null,
   capabilities: null,
+  /* Who Welly is, what this place is, and who the reader is. Everyone may ask;
+     `my_name` reads the session's own user and nobody else's. */
+  identity_self: null,
+  identity_platform: null,
+  my_name: null,
   chat: null,
   unknown: null,
   empty: null,

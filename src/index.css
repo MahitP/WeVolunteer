@@ -11995,6 +11995,27 @@ input:disabled + .premium-slider {
   margin-top: var(--s3);
 }
 
+/* ── "Near me", without a location ─────────────────────────────────────────
+   The browser only opens its permission dialog for a gesture, so the offer is
+   a button rather than a sentence. It is deliberately quiet — secondary, not
+   primary — because the answer above it is a real answer, and this is an offer
+   to make the next one better rather than a warning that this one failed. */
+.welly-location-offer {
+  max-width: min(100%, 68ch);
+  margin-top: var(--s3);
+  padding: var(--s3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+}
+
+.welly-location-offer .btn {
+  gap: var(--s1);
+}
+
 /* ── Waiting ──────────────────────────────────────────────────────────────
    Three dots rather than the word "Thinking…" alone, because the word is
    static and the wait is not — an animated cue is what tells a reader the page

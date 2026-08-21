@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMe
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Send, Square, Trash2, Plus, MessageSquare, Clock, X,
-  ChevronRight, AlertCircle, Pencil, Check
+  ChevronRight, AlertCircle, Pencil, Check, MapPin
 } from 'lucide-react';
 import WellyMark from '../components/ai/WellyMark';
 import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
@@ -30,6 +30,7 @@ import {
 } from '../ai/conversation';
 import { can } from '../authz';
 import { useModal } from '../utils/useModal';
+import { useLocationContext } from '../contexts/LocationContext';
 
 
 /**
@@ -182,6 +183,14 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const position = location
     ? { lat: location.latitude, lng: location.longitude }
     : null;
+
+  /**
+   * Read directly rather than threaded through props, because the only thing
+   * wanted from it is the gesture handler — the coordinates already arrive as
+   * `location` from the shell. Null outside a provider, which is why every use
+   * below is guarded: the view is mounted bare in several tests.
+   */
+  const locationCtx = useLocationContext();
 
   /* State and ref together, always. Every place that changes which conversation
      is on screen goes through here, so the guard in `send()` cannot be looking
@@ -567,6 +576,11 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                  sentence ending mid-air reads as a limit rather than a bug —
                  the text itself is untouched. See `truncated` in assistant.js. */
               truncated: Boolean(res?.truncated),
+              /* A "near me" search that ran without coordinates. The offer to
+                 fix it is a button, because a browser only opens the permission
+                 dialog for a gesture — and because Welly must never ask for an
+                 address in words. See `needsLocation` in assistant.js. */
+              needsLocation: Boolean(res?.needsLocation),
               streaming: false,
             }
           : m
@@ -1055,6 +1069,30 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                       <p className="welly-truncated dim small">
                         Welly ran out of room here. Ask it to carry on if you want more.
                       </p>
+                    )}
+
+                    {m.needsLocation && locationCtx && (
+                      <div className="welly-location-offer">
+                        <p className="dim small">
+                          Sorting by distance needs your location. It stays on your device,
+                          and nothing is saved.
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => locationCtx.requestLocation()}
+                          disabled={locationCtx.loading}
+                        >
+                          <MapPin size={15} aria-hidden="true" />
+                          {locationCtx.loading ? 'Asking your browser…' : 'Use my location'}
+                        </button>
+                        {locationCtx.permissionDenied && (
+                          <p className="dim small">
+                            Your browser is blocking it. Turn location back on for this site in
+                            the address bar, then ask again.
+                          </p>
+                        )}
+                      </div>
                     )}
 
                     {m.card && (

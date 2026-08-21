@@ -195,6 +195,59 @@ const CAPABILITY_CLAIMS = [
   /\blet me (create|make|set ?up|schedule|approve|sign)\b/i,
 ];
 
+/**
+ * A reply that asks the reader to type personal information.
+ *
+ * ── Why this is rejected rather than instructed against ──
+ *
+ * Asked for opportunities near them by a student whose browser had not granted
+ * location, the model asked for an address. It is a reasonable thing for a
+ * general assistant to do and completely wrong here, for three reasons that
+ * compound:
+ *
+ *   - The lookup does not need it. `LocationContext` already has a way to get
+ *     coordinates, keeps them in memory, and sends the server a centre rounded
+ *     to about a kilometre. Typing a street address is strictly worse data,
+ *     obtained in a strictly worse way.
+ *   - The people typing are minors, and the box is on a page that also holds
+ *     their volunteering record.
+ *   - It reads like phishing. A chat window asking a student for their address
+ *     is the shape of the thing they are told to be suspicious of, and it does
+ *     not stop being that shape because the model happens to be running on
+ *     their own device — nobody can see that from the outside.
+ *
+ * A prompt line was not the fix, for the reason this file records twice
+ * already: negative instructions do not hold at 0.5B. So a reply of this shape
+ * is rejected on the way out and the deterministic answer is shown instead,
+ * exactly as `claimsAnAction` works — and the search path now says plainly that
+ * it has no location and offers the browser's own permission button.
+ *
+ * Matches the ASK, not the subject. "Your address is not shown to organizers"
+ * is a true, useful sentence and stays.
+ */
+const PERSONAL_INFO_REQUESTS = [
+  /* Direct: "what is your address", "may I have your zip code". */
+  /\b(what(?:'?s| is| are)?|may i (?:have|know)|can i (?:have|get)|tell me|give me|provide|share|enter|type|send me)\b[^.?!]{0,30}\byour\b[^.?!]{0,20}\b(address|zip ?code|postal ?code|postcode|phone number|email address|date of birth|birthday|full name|home|street)\b/i,
+  /* Where the reader is, in the forms a model actually reaches for. */
+  /\bwhere\s+(do|are)\s+you\s+(live|located|based|from)\b/i,
+  /\bwhat\s+(city|town|area|neighou?rhood|state|region|zip)\b[^.?!]{0,20}\byou\b/i,
+  /\bcould you (?:please )?(?:tell|let) me know (?:your|where you)\b/i,
+  /* The imperative form, which has no "your" in it. */
+  /\b(enter|type|paste) (?:in )?(?:your )?(address|zip|postal code|location|phone|email)\b/i,
+];
+
+/**
+ * True when a reply asks the reader for personal information.
+ *
+ * Never a security control — a rejected reply is replaced by a written answer,
+ * and nothing about the model's access changes. It is a display rule: this
+ * assistant does not collect anything by asking.
+ */
+export function asksForPersonalInfo(text) {
+  const raw = String(text || '');
+  return PERSONAL_INFO_REQUESTS.some(pattern => pattern.test(raw));
+}
+
 /** True when a reply promises an action this assistant cannot perform. */
 export function claimsAnAction(text) {
   const raw = String(text || '');
@@ -301,6 +354,9 @@ export function isUsableReply(text) {
   if (looksLikeInstructionEcho(raw)) return false;
   /* An offer to do something no tool here can do. See claimsAnAction. */
   if (claimsAnAction(raw)) return false;
+  /* A request for something a student should never type here. See
+     asksForPersonalInfo. */
+  if (asksForPersonalInfo(raw)) return false;
   /* Repetitive generation loops from small models. */
   if (hasRepetitiveLoop(raw)) return false;
 

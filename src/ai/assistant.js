@@ -69,6 +69,29 @@ const FIXED = {
     + 'organizations, show what you have applied to, and check a certificate code. '
     + 'I can suggest things, but I never decide them.',
 
+  /**
+   * Identity, written down rather than generated.
+   *
+   * Asked "who trained you", the on-device model answered "I was trained in
+   * WeVolunteer and are volunteers" — a sentence with no true reading. Asked
+   * what this place was, it answered "Welly, a place where students can
+   * volunteer", having taken its own name for the platform's.
+   *
+   * Both have one correct answer, so neither is a generation. See the rules in
+   * `router.js` for the third of the set.
+   */
+  identity_self:
+    'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
+    + 'I am software, not a person. When Welly AI is switched on I run a small open '
+    + 'language model called Qwen2.5 0.5B, entirely on your own device — nothing you '
+    + 'type here is sent anywhere. Otherwise I answer straight from your WeVolunteer '
+    + 'records.',
+
+  identity_platform:
+    'This is WeVolunteer — the app schools use to post volunteer events, sign students '
+    + 'up for shifts, and credit the hours afterwards. Welly is just me, the assistant '
+    + 'inside it.',
+
   verify_certificate_missing_code:
     'Send me the code from the certificate and I will check it. They look like WEV-XXXX-XXXX.',
 
@@ -847,6 +870,24 @@ export async function ask(
       };
     }
 
+    if (intent === 'my_name') {
+      /**
+       * Asked "what's my name", the model replied "Your name is Welly" — it had
+       * no way to know and answered anyway. The session does know, so this
+       * reads it, and says so plainly when the record has no name on it rather
+       * than inventing one.
+       */
+      const known = String(user?.name || '').trim();
+      return {
+        intent,
+        answer: known
+          ? `You are signed in as ${known}.`
+          : 'Your account does not have a name on it yet — you can add one in Settings, under Profile.',
+        card: null,
+        phrasedByModel: false,
+      };
+    }
+
     return {
       intent,
       answer: FIXED[intent] || FIXED.unknown,
@@ -865,6 +906,26 @@ export async function ask(
     args.lat = position.lat;
     args.lng = position.lng;
   }
+  /**
+   * ── "Near me" with nothing to be near ──
+   *
+   * Asked for opportunities near them, a student whose browser had never been
+   * granted location got an ordinary unsorted list, presented as though it had
+   * been filtered by distance. Nothing said otherwise. The model, filling the
+   * gap in free conversation, asked them to type an address instead — which is
+   * the one thing this must never do: an address typed into a chat box is
+   * personal information a lookup did not need, from a minor, and it teaches
+   * that giving it up here is normal.
+   *
+   * WeVolunteer already knows how to ask properly. `LocationContext` holds the
+   * coordinates in memory only, computes distance in the browser, and sends the
+   * server nothing but a centre rounded to about a kilometre — and it asks with
+   * a button, because a browser only shows the permission dialog for a gesture.
+   *
+   * So the flag travels up to the view, which offers that same button. Welly
+   * says what it does not have and stops there; it never asks for it in words.
+   */
+  const needsLocation = Boolean(slots.wantsNearby) && !position;
   delete args.wantsNearby;
 
   const result = await runTool(tool, args, { user });
@@ -911,10 +972,15 @@ export async function ask(
    * path stops spending a generation on rephrasing a sentence that was already
    * correct — which also makes every lookup faster.
    */
+  const summary = summarise(result.kind, result.data);
+
   return {
     intent,
-    answer: summarise(result.kind, result.data),
+    answer: needsLocation
+      ? `${summary} I don${'\u2019'}t have your location, so these aren${'\u2019'}t sorted by distance.`
+      : summary,
     card: { kind: result.kind, data: result.data },
     phrasedByModel: false,
+    ...(needsLocation ? { needsLocation: true } : {}),
   };
 }

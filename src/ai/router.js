@@ -226,6 +226,60 @@ const INFORMATIONAL_MATCHERS = [
       || /\b(how does (?:withdrawing|withdrawal) work|how do i withdraw|what happens if i withdraw)\b/i.test(text),
     slots: () => ({}),
   },
+  /**
+   * Who Welly is, what it runs on, and where "here" is.
+   *
+   * ── Three answers a 0.5B model cannot be trusted to give ──
+   *
+   * Measured against Qwen2.5-0.5B, none of these reached a rule, so all three
+   * fell through to free conversation:
+   *
+   *   "who trained you"      -> "I was trained in WeVolunteer and are
+   *                             volunteers."
+   *   "what is this place"   -> "Welly, a place where students can volunteer."
+   *   "what's my name"       -> "Your name is Welly."
+   *
+   * The second takes Welly's own name for the platform's. The third is the
+   * same confusion pointed at the reader, and it is the one that matters: a
+   * student asking whether the assistant knows who they are is told, with
+   * total confidence, that they are the assistant.
+   *
+   * A prompt line cannot fix this — the model has no access to the answer for
+   * the third one and no reliable grip on the first two. Each has exactly one
+   * correct response, so each gets a rule.
+   */
+  {
+    intent: 'identity_self',
+    tool: null,
+    test: text =>
+      /\b(who|what)\s+(made|built|created|trained|wrote|designed|owns?)\s+(you|welly)\b/i.test(text)
+      /* Not a bare "what version" — that is as likely to be about the app. */
+      || /\b(what|which)\s+(ai|model|llm|engine|context window)\b/i.test(text)
+      || /\b(are|r)\s+(you|u)\s+(chatgpt|gpt|claude|gemini|llama|siri|alexa|an? (llm|language model))\b/i.test(text)
+      || /\bwhat\s+(are|r)\s+(you|u)\b/i.test(text)
+      || /\bhow\s+(do|does)\s+(you|welly)\s+work\b/i.test(text)
+      || /\bwhat('?s| is)\s+your\s+(context window|token limit|model)\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'identity_platform',
+    tool: null,
+    test: text =>
+      /\bwhat('?s| is)\s+(this|the)\s+(app|site|website|platform|place|thing|program)\b/i.test(text)
+      || /\b(this|the)\s+(app|site|website|platform|place)\s+(is\s+)?called\b/i.test(text)
+      || /\bwhat\s+is\s+wevolunteer\b/i.test(text)
+      || /\bwhere\s+am\s+i\b/i.test(text),
+    slots: () => ({}),
+  },
+  {
+    intent: 'my_name',
+    tool: null,
+    test: text =>
+      /\bwhat('?s| is)\s+my\s+name\b/i.test(text)
+      || /\b(do you|you)\s+know\s+(my name|who i am)\b/i.test(text)
+      || /^who\s+am\s+i[\s!.,?]*$/i.test(text),
+    slots: () => ({}),
+  },
   {
     intent: 'info_role_capabilities',
     tool: null,
@@ -620,7 +674,7 @@ const MATCHERS = [
     intent: 'capabilities',
     tool: null,
     test: text =>
-      /\b(what can you|what do you|help me with|what are you)\b/i.test(text),
+      /\b(what can you|what do you|help me with)\b/i.test(text),
     slots: () => ({}),
   },
   {
