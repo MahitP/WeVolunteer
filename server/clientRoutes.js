@@ -115,6 +115,9 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
 
   // src/routes/index.jsx — PUBLIC_ROUTES
   '/verify/:code',
+  /* The code-entry form. A literal path with no parameter, so a report from
+     here carries nothing at all. */
+  '/verify',
   /* Allowed. A literal path with no parameter, so it can carry nothing about
      anybody — and it is read by people who have no account yet, which makes a
      crash here one that costs a signup rather than an inconvenience. */

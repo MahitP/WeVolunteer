@@ -450,6 +450,11 @@ export const LEGAL_SLUG_ALIASES = Object.freeze({
 
 export const PUBLIC_ROUTES = [
   { path: '/verify/:code', element: <CertificateVerification /> },
+  /* The same page with nothing to verify yet, so somebody holding a paper
+     certificate has a box to type the code into. It was reachable only by
+     already knowing a code, which is the one situation where you do not need
+     a verification page. */
+  { path: '/verify', element: <CertificateVerification /> },
   /**
    * `/privacy` redirects to the registry document rather than rendering its own page.
    *

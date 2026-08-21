@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../utils/api';
-import { ShieldCheck, ShieldAlert, Loader2, Calendar } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Loader2, Calendar, Search } from 'lucide-react';
 import { formatDay, formatHours } from '../utils/helpers';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import BrandMark from '../components/common/BrandMark';
@@ -19,10 +19,79 @@ import BrandMark from '../components/common/BrandMark';
  */
 const CODE_SHAPE = /^WEV-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 
+/**
+ * Arriving with no code at all.
+ *
+ * `/verify/:code` is the link printed on a certificate, and for most of this
+ * page's life it was the only way in — "there's no way to go to /verify unless u
+ * go to the specific link". Somebody holding a paper certificate, or reading a
+ * code off a screen, had nowhere to type it.
+ *
+ * The bare `/verify` is that place, and it is the same page rather than a new
+ * one: everything after a code is entered — the shape check, the rate-limit
+ * handling, the careful separation of "forged" from "we could not reach the
+ * server" — is already here and must not be written twice.
+ *
+ * NOT the same as an invalid code. "The code undefined could not be found in
+ * our records" is what the old missing-code branch produced, which accuses
+ * somebody of forgery for having typed a URL.
+ */
+function CodeEntry() {
+  const navigate = useNavigate();
+  const [value, setValue] = useState('');
+  const clean = value.toUpperCase().trim();
+  const ready = CODE_SHAPE.test(clean);
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ color: 'var(--ink-3)', marginBottom: 'var(--s4)' }}>
+        <ShieldCheck size={48} />
+      </div>
+      <h1 style={{ fontSize: '1.5rem', marginBottom: 'var(--s2)' }}>Check a certificate</h1>
+      <p className="lead" style={{ marginBottom: 'var(--s5)' }}>
+        Enter the code printed on a {APP_NAME} certificate to see whether it is genuine.
+      </p>
+
+      <form
+        className="stack-sm"
+        style={{ textAlign: 'left' }}
+        onSubmit={e => {
+          e.preventDefault();
+          if (ready) navigate(`/verify/${clean}`);
+        }}
+      >
+        <label className="label" htmlFor="certificate-code">Certificate code</label>
+        <input
+          id="certificate-code"
+          className="input"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          placeholder="WEV-XXXX-XXXX"
+          autoComplete="off"
+          spellCheck="false"
+          style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+        />
+        {/* Shape only, and only once there is something to be wrong about. The
+            server is what decides whether a well-formed code is real; this just
+            avoids spending one of its twenty requests per fifteen minutes on
+            something that cannot match anything. */}
+        <p className="small dim">
+          {clean && !ready
+            ? 'Codes look like WEV-XXXX-XXXX.'
+            : 'Codes never contain the letters I or O, or the digits 0 or 1.'}
+        </p>
+        <button type="submit" className="btn btn-primary" disabled={!ready}>
+          <Search size={16} aria-hidden="true" /> Check this code
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export default function CertificateVerification() {
   const { code } = useParams();
-  // loading · valid · invalid · ratelimited · error
-  const [status, setStatus] = useState('loading');
+  // entry · loading · valid · invalid · ratelimited · error
+  const [status, setStatus] = useState(code ? 'loading' : 'entry');
   const [certData, setCertData] = useState(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -30,10 +99,17 @@ export default function CertificateVerification() {
     let cancelled = false;
     const cleanCode = String(code || '').toUpperCase().trim();
 
-    // A missing or malformed code cannot match anything. Answer immediately
-    // rather than spending one of the verify endpoint's 20 requests per 15
-    // minutes on input we already know is not a code.
-    if (!cleanCode || !CODE_SHAPE.test(cleanCode)) {
+    /* No code in the URL is a visit to `/verify`, not a failed verification.
+       See CodeEntry. */
+    if (!cleanCode) {
+      setStatus('entry');
+      return;
+    }
+
+    // A malformed code cannot match anything. Answer immediately rather than
+    // spending one of the verify endpoint's 20 requests per 15 minutes on input
+    // we already know is not a code.
+    if (!CODE_SHAPE.test(cleanCode)) {
       setStatus('invalid');
       return;
     }
@@ -89,6 +165,8 @@ export default function CertificateVerification() {
 
       <main style={{ flex: 1, display: 'grid', placeItems: 'center', padding: 'var(--s4)' }}>
         <div className="card" style={{ maxWidth: 500, width: '100%', padding: 'var(--s6)' }}>
+          {status === 'entry' && <CodeEntry />}
+
           {status === 'loading' && (
             <div className="stack-sm" style={{ alignItems: 'center', textAlign: 'center', padding: 'var(--s6) 0' }}>
               <Loader2 size={32} className="spin" style={{ color: 'var(--ink-3)' }} />

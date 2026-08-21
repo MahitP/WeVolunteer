@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMe
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Send, Square, Trash2, Plus, MessageSquare, Clock, X,
-  ChevronRight, AlertCircle, Pencil, Check, MapPin
+  ChevronRight, AlertCircle, Pencil, Check, MapPin, ShieldCheck
 } from 'lucide-react';
 import WellyMark from '../components/ai/WellyMark';
 import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
@@ -1204,8 +1204,35 @@ export default function WellyView({ currentUser = null, location = null, onViewD
             </div>
           </div>
 
+          {/**
+            * The composer footer, and the one link on it.
+            *
+            * ── Why certificate verification is here ──
+            *
+            * `/verify/:code` is public and is the link printed on a certificate,
+            * so the page has always existed and has never been reachable from
+            * inside the app: "there's no way to go to /verify unless u go to the
+            * specific link."
+            *
+            * Of the four destinations it belongs to this one. Verifying a code
+            * is a lookup, Welly is where lookups happen, and Welly already has
+            * `verify_certificate` as a tool — this is a second door to a
+            * capability that is here rather than a feature borrowed from another
+            * page. The composer footer specifically, and not the empty state or
+            * the sidebar: the empty state disappears at the first message, and
+            * the sidebar is a drawer on a phone. This line is on screen for
+            * every role at every width, and it is already the quiet row.
+            *
+            * Deliberately not in the nav rail. It is a thing somebody does once,
+            * usually holding a piece of paper, and a rail item would price it
+            * like Discover.
+            */}
           <div className="welly-composer-footer dim small">
-            Grounded in your records. Nothing changes without your confirmation.
+            <span>Grounded in your records. Nothing changes without your confirmation.</span>
+            <Link to="/verify" className="welly-verify-link">
+              <ShieldCheck size={13} aria-hidden="true" />
+              <span>Check a certificate</span>
+            </Link>
           </div>
         </div>
       </main>
