@@ -1054,6 +1054,51 @@ function AppShell({ toasts, addToast, removeToast }) {
     scroller.scrollTo({ left: scrollLeft, behavior: 'smooth' });
   }, [activeTab]);
 
+  /**
+   * Whether the strip has anything hidden, and on which side.
+   *
+   * The fade that signals "there is more this way" used to be a media query at
+   * 360px, which is a guess about when overflow happens rather than a
+   * measurement of it. The guess is now wrong in both directions: Welly made
+   * five primary destinations the normal case for every role and six for an
+   * owner, so a 390px phone can overflow and get no cue, while a 340px phone
+   * showing four entries gets a fade over nothing.
+   *
+   * Measuring is cheap and exact. `data-overflow` says which edge has content
+   * beyond it, and the CSS masks that edge only — so the cue appears when there
+   * is genuinely something to scroll to, disappears once you reach it, and
+   * never dims the last item on a bar that fits.
+   */
+  useEffect(() => {
+    const scroller = mobileNavScrollRef.current;
+    if (!scroller) return;
+
+    const measure = () => {
+      /* 2px of slack: sub-pixel layout rounding otherwise reports a permanent
+         one-pixel overflow on a bar that visibly fits. */
+      const hiddenStart = scroller.scrollLeft > 2;
+      const hiddenEnd = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2;
+      scroller.dataset.overflow = hiddenStart && hiddenEnd ? 'both'
+        : hiddenEnd ? 'end'
+        : hiddenStart ? 'start'
+        : 'none';
+    };
+
+    measure();
+    scroller.addEventListener('scroll', measure, { passive: true });
+    /* Covers rotation, a keyboard opening, and the entry list changing when the
+       reader's capabilities do — none of which fire a scroll event. */
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => {
+      scroller.removeEventListener('scroll', measure);
+      observer.disconnect();
+    };
+    /* `currentUser` rather than the item list: the entries are a pure function
+       of who is signed in, and the list itself is built after the early returns
+       further down, where a hook cannot go. */
+  }, [currentUser]);
+
   useEffect(() => {
     if (!userMenuOpen) return;
     const onClick = (e) => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import WellyView from './WellyView';
@@ -35,6 +35,20 @@ const adminUser = {
   withheld: [],
   avatar: '🛡️',
 };
+
+/**
+ * Queries scoped to the visible transcript.
+ *
+ * The page also carries an `sr-only` `role="status"` region holding the final
+ * answer, so a screen reader hears a reply that finished streaming — the
+ * transcript itself is deliberately not a live region, because announcing it
+ * would re-announce on every token. A bare `getByText` therefore matches the
+ * answer twice, which is correct markup and an ambiguous query; these tests ask
+ * about what is on screen.
+ */
+function transcript(container) {
+  return within(container.querySelector('.welly-transcript'));
+}
 
 describe('WellyView full-page workspace', () => {
   beforeEach(() => {
@@ -90,7 +104,7 @@ describe('WellyView full-page workspace', () => {
   });
 
   it('sends user message and renders assistant reply with card', async () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <WellyView currentUser={studentUser} />
       </MemoryRouter>
@@ -110,8 +124,8 @@ describe('WellyView full-page workspace', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/You currently have 28 verified volunteer hours\./i)).toBeInTheDocument();
-      expect(screen.getByText('28')).toBeInTheDocument();
+      expect(transcript(container).getByText(/You currently have 28 verified volunteer hours\./i)).toBeInTheDocument();
+      expect(transcript(container).getByText('28')).toBeInTheDocument();
     });
   });
 
@@ -136,7 +150,7 @@ describe('WellyView full-page workspace', () => {
   });
 
   it('starts a new conversation on New conversation button click', async () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <WellyView currentUser={studentUser} />
       </MemoryRouter>
@@ -149,7 +163,7 @@ describe('WellyView full-page workspace', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/You currently have 28 verified volunteer hours\./i)).toBeInTheDocument();
+      expect(transcript(container).getByText(/You currently have 28 verified volunteer hours\./i)).toBeInTheDocument();
     });
 
     // Click New conversation button
@@ -302,7 +316,7 @@ describe('WellyView full-page workspace', () => {
     });
     assistant.ask.mockReturnValue(askPromise);
 
-    render(
+    const { container } = render(
       <MemoryRouter>
         <WellyView currentUser={studentUser} />
       </MemoryRouter>
@@ -329,7 +343,7 @@ describe('WellyView full-page workspace', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Stopped.')).toBeInTheDocument();
+      expect(transcript(container).getByText('Stopped.')).toBeInTheDocument();
     });
   });
 

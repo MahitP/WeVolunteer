@@ -176,14 +176,51 @@ export class WllamaRuntime {
       messages,
       abortSignal: signal,
       max_tokens: maxTokens,
-      temperature: schema ? 0.2 : 0.65,
-      temp: schema ? 0.2 : 0.65,
+      /**
+       * ── `temp`, not `temperature` ──
+       *
+       * wllama's `SamplingParams` names it `temp`; `temperature` is the
+       * OAI-compatibility alias on `ChatCompletionParams`, and both are
+       * forwarded verbatim to llama.cpp, where `temp` wins. Setting one and
+       * meaning the other is how a sampler ends up at a value nobody chose, so
+       * only the name the sampler reads is set here.
+       *
+       * Grammar-constrained work (certificate extraction, tag suggestion) wants
+       * the likeliest token; conversation wants a little room. 0.45 is that
+       * room. It was briefly 0.65, which at this model size mostly buys
+       * invented detail — the failure CHAT_PROMPT's grounding line exists to
+       * limit — and 0.3 before that.
+       */
+      temp: schema ? 0.2 : 0.45,
       top_p: 0.9,
       top_k: 40,
-      penalty_repeat: 1.18,
-      penalty_last_n: 64,
-      penalty_freq: 0.1,
-      penalty_present: 0.1,
+      /**
+       * ── Why the repetition penalties are off ──
+       *
+       * They were on: `penalty_repeat: 1.18` over a 64-token window, plus
+       * frequency and presence penalties of 0.1 each. All three were added to
+       * stop a small model looping, which it does.
+       *
+       * llama.cpp applies them to EVERY token in the window, and the tokens a
+       * fluent English sentence repeats most are `.`, `,`, `the`, `to`, `you`.
+       * A penalty stack tuned to discourage repetition therefore discourages
+       * punctuation and function words first, and the observable result is
+       * exactly what was reported: replies that trail off without a full stop,
+       * commas that go missing, sentences that read as if a word were dropped.
+       * The repairs in `assistant.js` were then written against that damage.
+       *
+       * llama.cpp's own defaults are 1.0 / 0.0 / 0.0 — the penalty sampler
+       * disabled — and that is what these values restore.
+       *
+       * Looping is still caught, after the fact and without touching grammar:
+       * `hasRepetitiveLoop` in prompts/welly.js rejects a reply that repeats a
+       * phrase, and the deterministic sentence is shown instead. That check
+       * costs nothing when the model behaves and cannot corrupt a reply that is
+       * fine, which is the difference between the two approaches.
+       */
+      penalty_repeat: 1.0,
+      penalty_freq: 0,
+      penalty_present: 0,
     };
 
     if (schema) {

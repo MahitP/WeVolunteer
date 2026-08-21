@@ -206,48 +206,79 @@ function refusedForRole(user, intent, permission) {
 const CHAT_HISTORY_TURNS = 6;
 
 /**
- * Normalizes model response text to fix tokenization/subword artifacts without
- * destroying intentional paragraph formatting, newlines, or list structures.
+ * The only thing done to a model reply before it is shown.
+ *
+ * ── Why this is three whitespace rules and not a repair kit ──
+ *
+ * This function used to do rather more: strip leading punctuation, rejoin
+ * "can 't" into "can't", pull spaces off the front of a comma, collapse runs of
+ * horizontal whitespace, and rewrite a list of customer-service phrases into
+ * friendlier ones. Every one of those was written to fix output that looked
+ * like this in the transcript:
+ *
+ *     "Hello, how are you"
+ *     "?I'm sorry, but I can't assist with"
+ *
+ * That output was never the model's. It is the signature of the StrictMode
+ * placeholder bug fixed in 6f37388 — an impure state updater captured an index
+ * from a discarded invocation, so tokens landed in the previous bubble and each
+ * reply began with the tail of the one before it. The repairs were added
+ * against the symptom; the cause had already been fixed at the right layer, and
+ * `WellyView` addresses its placeholder by id for exactly that reason.
+ *
+ * Left in place, the repairs cost more than they bought:
+ *
+ *   - collapsing `[ \t]+` and stripping indentation flattens fenced code and
+ *     every nested list level,
+ *   - the contraction rule rewrites `said 'yes' quickly` into `said'yes' quickly`
+ *     because a quoted word is indistinguishable from a split contraction,
+ *   - stripping a leading `?` silently deletes a legitimate one-character reply,
+ *   - and the phrase rewrites change what the model said, which is the one thing
+ *     a presentation layer must never do.
+ *
+ * What remains is meaning-preserving by construction. CRLF is a transport
+ * artefact; a byte-order mark and zero-width joiners at the very start are
+ * tokenizer noise with no visual form; trailing whitespace on the whole string
+ * is invisible. Nothing here can move a character, so a reply that streamed as
+ * one thing cannot commit as another — which is the property
+ * `responseQuality.test.js` pins.
  */
 export function formatResponseText(text) {
   if (!text || typeof text !== 'string') return '';
 
-  let res = text;
-
-  // 1. Remove leading punctuation noise/artifacts (e.g. "?I'm happy", "!Sure", "...You have")
-  res = res.replace(/^[.?!,;:\s]+/, '');
-
-
-  // 2. Fix separated contractions: "I 'm" -> "I'm", "can 't" -> "can't", "don 't" -> "don't", etc.
-  res = res.replace(/\b([A-Za-z]+)\s+(['’])\s*([A-Za-z]+)\b/g, '$1$2$3');
-
-  // 3. Fix spaces before punctuation: "Hello , how are you ?" -> "Hello, how are you?"
-  res = res.replace(/(\w|\))\s+([.,;:!?])/g, '$1$2');
-
-  // 4. Fix spaces inside parentheses: "( something )" -> "(something)"
-  res = res.replace(/\(\s+([^)]+?)\s+\)/g, '($1)');
-
-  // 5. Clean up multiple horizontal spaces while preserving newlines
-  res = res.replace(/[ \t\r\f\v]+/g, ' ');
-  res = res.replace(/[ ]*\n[ ]*/g, '\n');
-  res = res.replace(/\n{3,}/g, '\n\n');
-
-  // 6. Soften robotic customer-service cliches
-  res = res
-    .replace(/\bHow may I assist you today\??/gi, "What would you like to explore?")
-    .replace(/\bHow can I assist you today\??/gi, "What's on your mind?")
-    .replace(/\bHow can I assist you\??/gi, "What would you like to check out?")
-    .replace(/\bHow may I help you today\??/gi, "What would you like to explore?")
-    .replace(/\bHow can I help you today\??/gi, "What's on your mind?")
-    .replace(/\bI'm sorry to hear that\.?\s*/gi, '');
-
-  return res.trim();
+  return text
+    /* Transport, not content: a model that emits CRLF means one line break. */
+    .replace(/\r\n?/g, '\n')
+    /* A BOM or zero-width character leading the very first token renders as
+       nothing and breaks a `startsWith` check somewhere downstream. Only at the
+       start, and only zero-width: a zero-width joiner inside the string is
+       holding an emoji sequence together. */
+    .replace(/^[\uFEFF\u200B-\u200D]+/, '')
+    .trim();
 }
 
 /**
- * Sanitizes prior turns passed in history to the on-device model.
- * If a prior assistant turn ended with an incomplete fragment or dangling preposition,
- * ensure it is cleanly terminated so the model does not attempt to complete it on the next turn.
+ * The recent turns handed back to the model.
+ *
+ * ── Why this no longer edits what Welly said ──
+ *
+ * It used to. An assistant turn that did not end in `.`, `!` or `?` had any
+ * trailing preposition or conjunction cut off and a full stop appended, so
+ *
+ *     "I'm sorry, but I can't assist with"
+ *
+ * went back into the next prompt as
+ *
+ *     "I'm sorry, but I can't assist."
+ *
+ * — a different sentence, asserting the opposite of what the transcript on
+ * screen says, and now permanently disagreeing with it. The student reads one
+ * thing and the model is told another.
+ *
+ * The fragments that motivated it came from the bubble bug above rather than
+ * from truncation, and a genuinely truncated turn is better handled by the
+ * model seeing what actually happened. So history is now filtered and bounded
+ * and nothing else: the turn that goes back is the turn that was shown.
  */
 export function sanitizeHistory(history, maxTurns = CHAT_HISTORY_TURNS) {
   if (!Array.isArray(history)) return [];
@@ -255,20 +286,7 @@ export function sanitizeHistory(history, maxTurns = CHAT_HISTORY_TURNS) {
   return history
     .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim())
     .slice(-maxTurns)
-    .map(m => {
-      let content = formatResponseText(m.text);
-      if (m.role === 'assistant') {
-        // If an assistant turn ended without terminal punctuation, ensure clean punctuation
-        if (content && !/[.!?]$/.test(content)) {
-          // If ends with a dangling preposition/conjunction like "with", "and", "to", "or", trim it
-          content = content.replace(/\s+(with|and|to|or|the|a|an|for|of|in|on|at|that|this|as|but)$/i, '');
-          if (!/[.!?]$/.test(content)) {
-            content += '.';
-          }
-        }
-      }
-      return { role: m.role, content };
-    });
+    .map(m => ({ role: m.role, content: formatResponseText(m.text) }));
 }
 
 /**

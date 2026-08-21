@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import WellyMark from '../components/ai/WellyMark';
 import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
+import WellyMessage from '../components/ai/WellyMessage';
 import { ask } from '../ai/assistant';
 import {
   AIStatus,
@@ -97,6 +98,18 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const [editingConvId, setEditingConvId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
+  /**
+   * What a screen reader is told, separately from the transcript.
+   *
+   * The transcript itself must NOT be a live region. It was one — `aria-live`
+   * sat on the scrolling container — which means every token appended during a
+   * stream re-announced the changed subtree, so a reply arriving in forty
+   * fragments was read out forty times, each time from wherever the assistive
+   * technology decided the change began. This holds one short string that
+   * changes twice per turn: when the request starts, and when the answer is
+   * final.
+   */
+  const [liveStatus, setLiveStatus] = useState('');
 
   // Welly AI On-Device configuration & download state
   const [capability] = useState(() => detectCapability());
@@ -108,6 +121,9 @@ export default function WellyView({ currentUser = null, location = null, onViewD
 
   const runtimeRef = useRef(null);
   const abortRef = useRef(null);
+  /* Read inside `onToken`, where the state value would be the one captured when
+     the request was made rather than the one on screen now. */
+  const activeConvIdRef = useRef(activeConvId);
   const aliveRef = useRef(true);
   const transcriptRef = useRef(null);
   const textareaRef = useRef(null);
@@ -126,6 +142,15 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     return () => document.removeEventListener('keydown', onKey);
   }, [showMobileHistory]);
 
+  /* State and ref together, always. Every place that changes which conversation
+     is on screen goes through here, so the guard in `send()` cannot be looking
+     at a stale id. */
+  const selectConversation = useCallback((id, nextMessages) => {
+    activeConvIdRef.current = id;
+    setActiveConvId(id);
+    setMessages(nextMessages);
+  }, []);
+
   // Refresh conversation list for the active user
   const refreshConversations = useCallback(() => {
     const list = getConversations({ user: currentUser });
@@ -139,15 +164,13 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     if (list.length > 0) {
       const latest = getConversation(list[0].id, { user: currentUser });
       if (latest && latest.messages?.length) {
-        setActiveConvId(latest.id);
-        setMessages(latest.messages);
+        selectConversation(latest.id, latest.messages);
         return;
       }
     }
     // New empty conversation
-    setActiveConvId(`conv-${Date.now()}`);
-    setMessages([]);
-  }, [currentUser?.id, refreshConversations]);
+    selectConversation(`conv-${Date.now()}`, []);
+  }, [currentUser?.id, refreshConversations, selectConversation]);
 
   // Load the on-device AI runtime in the background
   const loadRuntime = useCallback(async () => {
@@ -226,15 +249,28 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   }, [loadRuntime]);
 
 
-  // Save current conversation record when messages update
+  /**
+   * Persist the conversation — once a turn is finished, not once per token.
+   *
+   * This effect used to run on every `messages` change, and `onToken` changes
+   * `messages` for each fragment the model emits. A 300-token reply therefore
+   * performed 300 writes, each one `JSON.stringify` over up to thirty stored
+   * conversations, immediately followed by `refreshConversations()` reading and
+   * re-parsing and re-sorting the same list. On a phone that is the whole
+   * budget for the frame, spent on a record that is about to be overwritten by
+   * the next token anyway.
+   *
+   * Waiting for the stream to finish costs nothing: the only state that would
+   * be lost by not writing mid-stream is a partial reply, and a partial reply
+   * is not worth restoring. `streaming` on the last message is the signal, and
+   * the `send()` path always clears it — on success, on error and on abort.
+   */
+  const streamingNow = messages.length > 0 && messages[messages.length - 1].streaming;
   useEffect(() => {
-    if (!messages.length) return;
-    saveConversationRecord({
-      id: activeConvId,
-      messages,
-    }, { user: currentUser });
+    if (!messages.length || streamingNow) return;
+    saveConversationRecord({ id: activeConvId, messages }, { user: currentUser });
     refreshConversations();
-  }, [messages, activeConvId, currentUser, refreshConversations]);
+  }, [messages, streamingNow, activeConvId, currentUser, refreshConversations]);
 
   // Scroll transcript to bottom on message append / stream
   useEffect(() => {
@@ -257,23 +293,20 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const switchConversation = useCallback((id) => {
     if (busy) abortRef.current?.abort();
     const conv = getConversation(id, { user: currentUser });
-    if (conv) {
-      setActiveConvId(conv.id);
-      setMessages(conv.messages || []);
-    }
+    if (conv) selectConversation(conv.id, conv.messages || []);
     setShowMobileHistory(false);
-  }, [busy, currentUser]);
+    setLiveStatus('');
+  }, [busy, currentUser, selectConversation]);
 
   // Start a new conversation
   const startNewConversation = useCallback(() => {
     if (busy) abortRef.current?.abort();
-    const newId = `conv-${Date.now()}`;
-    setActiveConvId(newId);
-    setMessages([]);
+    selectConversation(`conv-${Date.now()}`, []);
     setInput('');
     setShowMobileHistory(false);
+    setLiveStatus('');
     if (textareaRef.current) textareaRef.current.focus();
-  }, [busy]);
+  }, [busy, selectConversation]);
 
   // Delete a conversation
   const handleDeleteConversation = useCallback((e, id) => {
@@ -283,13 +316,12 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     if (activeConvId === id) {
       if (remaining.length > 0) {
         const next = getConversation(remaining[0].id, { user: currentUser });
-        setActiveConvId(next.id);
-        setMessages(next.messages || []);
+        selectConversation(next.id, next.messages || []);
       } else {
         startNewConversation();
       }
     }
-  }, [currentUser, activeConvId, refreshConversations, startNewConversation]);
+  }, [currentUser, activeConvId, refreshConversations, startNewConversation, selectConversation]);
 
   // Rename conversation
   const startRenaming = useCallback((e, conv) => {
@@ -321,7 +353,35 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     }
   }, [currentUser, refreshConversations, startNewConversation]);
 
-  // Send a message turn
+  /**
+   * One turn: the question, the placeholder, the stream, the committed reply.
+   *
+   * ── Chunks are not messages ──
+   *
+   * The reply is ONE message from the moment it is created. `replyId` is
+   * generated before the placeholder is appended and every subsequent update —
+   * each token, the final commit, the error path — addresses that id. Nothing
+   * downstream ever appends a second assistant entry, so a reply that arrives
+   * as forty fragments is forty updates to one bubble and commits as one string.
+   *
+   * `replyId` is computed OUTSIDE the state updater on purpose. Reading it from
+   * inside — `setMessages(prev => { index = prev.length; ... })` — is what broke
+   * this before (6f37388): React double-invokes updaters under StrictMode, the
+   * captured index came from the invocation whose result was thrown away, and
+   * tokens landed in the previous reply's bubble. That produced transcripts
+   * where one answer stopped mid-sentence and the next began with its missing
+   * tail, which reads as a broken model and is a broken updater.
+   *
+   * ── And they belong to the conversation they were asked in ──
+   *
+   * `convId` is captured here and re-checked before every write. Switching
+   * conversations aborts the request, but an abort is not instant and the tool
+   * path is not always cancellable, so a late token could otherwise be applied
+   * to whichever transcript happens to be on screen — an answer appearing under
+   * a question nobody asked. Matching on id alone is not enough for that,
+   * because ids are unique per reply but the guard has to reject a reply that
+   * is merely late rather than merely unmatched.
+   */
   const send = useCallback(async (text) => {
     const question = (text || '').trim();
     if (!question || busy) return;
@@ -329,15 +389,26 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setBusy(true);
+    setLiveStatus('Welly is thinking');
 
     const priorTurns = messages;
-    setMessages(prev => [...prev, { role: 'user', text: question }]);
+    const convId = activeConvIdRef.current;
+    const turn = Date.now();
+    const replyId = `welly-${turn}-${Math.random().toString(36).slice(2, 8)}`;
+
+    /* Both entries in one update. Appended separately they are still batched by
+       React 19, but one updater cannot interleave with anything. */
+    setMessages(prev => [
+      ...prev,
+      { id: `you-${turn}`, role: 'user', text: question },
+      { id: replyId, role: 'assistant', text: '', streaming: true },
+    ]);
 
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const replyId = `welly-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setMessages(prev => [...prev, { id: replyId, role: 'assistant', text: '', streaming: true }]);
+    /** Still the conversation this question was asked in, and still mounted. */
+    const current = () => aliveRef.current && activeConvIdRef.current === convId;
 
     try {
       const res = await ask(question, {
@@ -347,45 +418,57 @@ export default function WellyView({ currentUser = null, location = null, onViewD
         user: currentUser,
         signal: controller.signal,
         onToken: token => {
-          if (!aliveRef.current) return;
+          if (!current()) return;
           setMessages(prev => prev.map(m => (
             m.id === replyId ? { ...m, text: m.text + token } : m
           )));
         },
       });
 
-      if (!aliveRef.current) return;
+      if (!current()) return;
+
+      /**
+       * The committed text is `res.answer`, and in the model path that string
+       * is the exact concatenation of the tokens just streamed — `assistant.js`
+       * returns what the runtime accumulated, and the only thing done to it is
+       * whitespace trimming. So the bubble does not change under the reader at
+       * the end of a stream.
+       *
+       * It changes in one case, deliberately: a reply rejected by
+       * `isUsableReply` is replaced with the deterministic sentence, which is
+       * the point of that check.
+       */
       setMessages(prev => prev.map(m => (
         m.id === replyId
           ? {
               id: replyId,
               role: 'assistant',
-              text: res?.cancelled ? 'Stopped.' : (res.answer || ''),
-              card: res.card,
-              kind: res.card?.kind,
+              text: res?.cancelled ? 'Stopped.' : (res?.answer || ''),
+              card: res?.card ?? null,
+              kind: res?.card?.kind,
               streaming: false,
             }
           : m
       )));
+      setLiveStatus(res?.cancelled ? 'Stopped.' : (res?.answer || ''));
+
+      if (res?.navigate) navigate(res.navigate);
     } catch (err) {
-      if (!aliveRef.current) return;
+      if (!current()) return;
+      const message = isAbort(err)
+        ? 'Stopped.'
+        : "Something went wrong answering that. Please try again.";
       setMessages(prev => prev.map(m => (
         m.id === replyId
-          ? {
-              id: replyId,
-              role: 'assistant',
-              text: isAbort(err)
-                ? 'Stopped.'
-                : "Something went wrong answering that. Please try again.",
-              streaming: false,
-            }
+          ? { id: replyId, role: 'assistant', text: message, streaming: false, failed: !isAbort(err) }
           : m
       )));
+      setLiveStatus(message);
     } finally {
       if (aliveRef.current) setBusy(false);
       abortRef.current = null;
     }
-  }, [busy, messages, position, currentUser]);
+  }, [busy, messages, position, currentUser, navigate]);
 
 
   // Group conversations by time category
@@ -795,8 +878,19 @@ export default function WellyView({ currentUser = null, location = null, onViewD
         </header>
 
 
+        {/**
+          * What assistive technology is told about the turn in progress.
+          *
+          * Outside the transcript and holding one short string, for the reason
+          * given where `liveStatus` is declared: a live region wrapped around a
+          * streaming transcript re-announces on every token.
+          */}
+        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {liveStatus}
+        </div>
+
         {/* Conversation Transcript */}
-        <div className="welly-transcript" ref={transcriptRef} aria-live="polite">
+        <div className="welly-transcript" ref={transcriptRef}>
           {messages.length === 0 ? (
             <div className="welly-empty-state">
               <div className="welly-empty-mark-wrap">
@@ -830,7 +924,7 @@ export default function WellyView({ currentUser = null, location = null, onViewD
           ) : (
             <div className="welly-messages-list">
               {messages.map((m, i) => (
-                <div key={m.id || i} className={`welly-turn welly-turn-${m.role}`}>
+                <div key={m.id || `turn-${i}`} className={`welly-turn welly-turn-${m.role}`}>
                   <div className="welly-turn-avatar">
                     {m.role === 'user' ? (
                       <span className="welly-user-avatar">{currentUser?.avatar || '👤'}</span>
@@ -845,12 +939,16 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                     </span>
 
                     {m.text ? (
-                      <div className="welly-bubble">
-                        <p>{m.text}</p>
+                      <div className={`welly-bubble${m.failed ? ' welly-bubble-failed' : ''}`}>
+                        {m.failed && <AlertCircle size={15} className="welly-bubble-failed-icon" aria-hidden="true" />}
+                        <WellyMessage text={m.text} streaming={m.streaming} />
                       </div>
                     ) : m.streaming ? (
                       <div className="welly-bubble welly-thinking">
-                        <span className="dim">Thinking...</span>
+                        <span className="welly-thinking-dots" aria-hidden="true">
+                          <i /><i /><i />
+                        </span>
+                        <span className="dim">Thinking</span>
                       </div>
                     ) : null}
 
