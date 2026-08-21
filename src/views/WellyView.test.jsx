@@ -167,7 +167,9 @@ describe('WellyView full-page workspace', () => {
     });
 
     // Click New conversation button
-    const newChatBtn = screen.getByRole('button', { name: /New conversation/i });
+    /* Several controls legitimately start a new conversation — the sidebar
+       button, the mobile bar and the drawer. The first is the sidebar's. */
+    const newChatBtn = screen.getAllByRole('button', { name: /new conversation/i })[0];
     await act(async () => {
       fireEvent.click(newChatBtn);
     });
@@ -441,22 +443,62 @@ describe('WellyView full-page workspace', () => {
     expect(screen.queryByText('Delete this chat')).not.toBeInTheDocument();
   });
 
-  it('renders Welly Chat badge by default and opens Welly AI setup on button click', async () => {
+  /**
+   * The mode control replaced a pair of buttons that opened a second copy of
+   * the model-download flow. Settings owns that flow; this is the way in.
+   */
+  it('names the engine that is answering, and explains the other one', async () => {
     render(
       <MemoryRouter>
         <WellyView currentUser={studentUser} />
       </MemoryRouter>
     );
 
-    expect(screen.getByText('Welly Chat')).toBeInTheDocument();
-    const getAiBtn = screen.getByRole('button', { name: /Get Welly AI/i });
-    expect(getAiBtn).toBeInTheDocument();
+    const control = screen.getAllByRole('button', { name: /Answering with Welly Chat/i })[0];
+    expect(control).toBeInTheDocument();
+    expect(control).toHaveAttribute('aria-expanded', 'false');
+
+    await act(async () => { fireEvent.click(control); });
+
+    expect(control).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/How Welly answers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Answers from your WeVolunteer records/i)).toBeInTheDocument();
+    expect(screen.getByText(/runs on your own device/i)).toBeInTheDocument();
+  });
+
+  it('sends on-device setup to Settings rather than carrying its own copy of it', async () => {
+    render(
+      <MemoryRouter>
+        <WellyView currentUser={studentUser} />
+      </MemoryRouter>
+    );
 
     await act(async () => {
-      fireEvent.click(getAiBtn);
+      fireEvent.click(screen.getAllByRole('button', { name: /Answering with Welly Chat/i })[0]);
     });
 
-    expect(screen.getByRole('dialog', { name: /Set up Welly AI/i })).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: /Set up Welly AI/i });
+    /* The section matters as much as the fragment: Settings reads its section
+       from the query, and without it this opened on Appearance, where the card
+       being linked to is not mounted at all. */
+    expect(link).toHaveAttribute('href', '/settings?section=privacy#welly-ai');
+  });
+
+  it('closes the mode panel on Escape and returns focus to its control', async () => {
+    render(
+      <MemoryRouter>
+        <WellyView currentUser={studentUser} />
+      </MemoryRouter>
+    );
+
+    const control = screen.getAllByRole('button', { name: /Answering with Welly Chat/i })[0];
+    await act(async () => { fireEvent.click(control); });
+    expect(screen.getByText(/How Welly answers/i)).toBeInTheDocument();
+
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+
+    expect(screen.queryByText(/How Welly answers/i)).toBeNull();
+    expect(control).toHaveFocus();
   });
 });
 

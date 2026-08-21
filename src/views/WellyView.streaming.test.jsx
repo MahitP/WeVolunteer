@@ -97,7 +97,9 @@ function setup() {
  * deterministic answer — correct behaviour, and not what these tests are about.
  */
 async function waitForReady() {
-  await waitFor(() => expect(screen.getByText(/Welly AI · Ready/i)).toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.getAllByRole('button', { name: /Answering with Welly AI/i }).length)
+      .toBeGreaterThan(0));
 }
 
 async function askWelly(text) {
@@ -230,7 +232,7 @@ describe('a stream belongs to the conversation it was asked in', () => {
 
     /* Switch away while it is still generating. */
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /New conversation/i }));
+      fireEvent.click(screen.getAllByRole('button', { name: /new conversation/i })[0]);
     });
     expect(screen.getByText(/Hi, Maya!/i)).toBeInTheDocument();
 

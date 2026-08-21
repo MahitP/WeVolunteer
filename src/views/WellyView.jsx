@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Send, Square, Trash2, Plus, MessageSquare, Clock, X,
-  Compass, Calendar, ShieldCheck, Sparkles, ChevronRight, AlertCircle, RefreshCw,
-  Pencil, Check
+  ChevronRight, AlertCircle, Pencil, Check
 } from 'lucide-react';
 import WellyMark from '../components/ai/WellyMark';
 import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
@@ -14,13 +13,10 @@ import {
   createRuntime,
   modelById,
   isAbort,
-  isLocalAIEnabled,
   detectCapability,
-  offerableModels,
-  aiStorage,
 } from '../ai';
-import { readPreferences, writePreferences } from '../ai/preferences';
-import AIEnableModal from '../components/account/AIEnableModal';
+import { readPreferences } from '../ai/preferences';
+import WellyModeControl from '../components/ai/WellyModeControl';
 import {
   getConversations,
   getConversation,
@@ -111,13 +107,11 @@ export default function WellyView({ currentUser = null, location = null, onViewD
    */
   const [liveStatus, setLiveStatus] = useState('');
 
-  // Welly AI On-Device configuration & download state
+  /* What this device can run, and what the reader has chosen. Model management
+     itself lives in Settings — see WellyModeControl for why this page links to
+     it rather than carrying a second copy of the download flow. */
   const [capability] = useState(() => detectCapability());
   const [prefs, setPrefs] = useState(() => readPreferences());
-  const [showSetupModal, setShowSetupModal] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(null);
-  const [downloadError, setDownloadError] = useState(null);
-  const downloadAbortRef = useRef(null);
 
   const runtimeRef = useRef(null);
   const abortRef = useRef(null);
@@ -127,6 +121,7 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const aliveRef = useRef(true);
   const transcriptRef = useRef(null);
   const textareaRef = useRef(null);
+  const workspaceRef = useRef(null);
 
   const position = location
     ? { lat: location.latitude, lng: location.longitude }
@@ -209,44 +204,34 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     aliveRef.current = true;
     loadRuntime();
 
+
     return () => {
       aliveRef.current = false;
       abortRef.current?.abort();
-      downloadAbortRef.current?.abort();
       runtimeRef.current?.unload();
       runtimeRef.current = null;
     };
   }, [loadRuntime]);
 
-  const handleDownload = useCallback(async (model) => {
-    setShowSetupModal(false);
-    setDownloadError(null);
-    setDownloadProgress({ loaded: 0, total: model.bytes });
-
-    const controller = new AbortController();
-    downloadAbortRef.current = controller;
-
-    try {
-      const storage = await aiStorage();
-      await storage.downloadModel(model, {
-        signal: controller.signal,
-        onProgress: p => { if (aliveRef.current) setDownloadProgress(p); },
-      });
-
-      if (!aliveRef.current) return;
-      const updated = writePreferences({ enabled: true, modelId: model.id });
-      setPrefs(updated);
-      await loadRuntime();
-    } catch (err) {
-      if (!aliveRef.current) return;
-      if (!isAbort(err)) {
-        setDownloadError(err.userMessage || 'The model could not be downloaded. Please try again.');
-      }
-    } finally {
-      if (aliveRef.current) setDownloadProgress(null);
-      downloadAbortRef.current = null;
-    }
+  /**
+   * Settings is the other place these preferences change, and it may be open in
+   * another tab.
+   *
+   * `storage` fires only in the OTHER tabs, which is exactly right: the tab that
+   * made the change already knows. Without this, turning Welly AI on in Settings
+   * left this page answering as Welly Chat until it was reloaded, with the mode
+   * control confidently naming the wrong engine.
+   */
+  useEffect(() => {
+    const onStorage = e => {
+      if (e.key && e.key !== 'wev-ai-prefs') return;
+      setPrefs(readPreferences());
+      loadRuntime();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, [loadRuntime]);
+
 
 
   /**
@@ -272,13 +257,56 @@ export default function WellyView({ currentUser = null, location = null, onViewD
     refreshConversations();
   }, [messages, streamingNow, activeConvId, currentUser, refreshConversations]);
 
-  // Scroll transcript to bottom on message append / stream
+  /**
+   * Keep the newest turn in view.
+   *
+   * Guarded on there being a turn at all. Without the guard it also ran for the
+   * empty state, which is a centred column taller than the transcript on a
+   * phone — so scrolling it to the bottom put the greeting and the Welly mark
+   * above the top edge, and the first thing a student saw was the tail of a
+   * suggestion list with no explanation above it.
+   */
   useEffect(() => {
+    if (!messages.length) return;
     const el = transcriptRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, busy]);
+
+  /**
+   * Fit the workspace to whatever room is actually left.
+   *
+   * The height was `calc(100dvh - 140px)`, where 140 was the topbar plus the
+   * page padding on the day it was written. It is not the height of the chrome
+   * on any real screen: the demo bar adds one row, the location prompt adds a
+   * banner, the persona-preview and legal notices add more, and each of them
+   * pushed the composer below the fold — on a chat page, where the composer is
+   * the one control that must always be reachable without scrolling.
+   *
+   * Measuring the element's own top edge is exact and needs to know nothing
+   * about what is above it. Re-measured on resize and whenever anything in the
+   * content column changes size, which is what a banner appearing or being
+   * dismissed looks like from here.
+   */
+  useLayoutEffect(() => {
+    const el = workspaceRef.current;
+    if (!el) return;
+
+    const fit = () => {
+      const top = el.getBoundingClientRect().top + window.scrollY - (document.scrollingElement?.scrollTop || 0);
+      el.style.setProperty('--welly-top', `${Math.max(0, Math.round(top))}px`);
+    };
+
+    fit();
+    window.addEventListener('resize', fit);
+    const observer = new ResizeObserver(fit);
+    /* The content column, not the workspace: observing the element whose height
+       this sets would feed its own output back in. */
+    if (el.parentElement) observer.observe(el.parentElement);
+    return () => {
+      window.removeEventListener('resize', fit);
+      observer.disconnect();
+    };
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -489,15 +517,9 @@ export default function WellyView({ currentUser = null, location = null, onViewD
 
   const suggestions = useMemo(() => getRoleSuggestions(currentUser), [currentUser]);
 
-  const roleSubtitle = useMemo(() => {
-    if (can(currentUser, 'admin.create')) return 'Platform Owner Assistant • Grounded in WeVolunteer Records';
-    if (can(currentUser, 'report.resolve')) return 'Administrative Assistant • Moderation & Records';
-    if (can(currentUser, 'event.create')) return 'Organizer Assistant • Events & Volunteers';
-    return 'Your WeVolunteer Assistant • Hours, Applications & Discovery';
-  }, [currentUser]);
 
   return (
-    <div className="welly-workspace" data-replay-block>
+    <div className="welly-workspace" data-replay-block ref={workspaceRef}>
       {/* ── Desktop / Tablet Sidebar ────────────────────────────────────────── */}
       <aside className="welly-sidebar" aria-label="Conversation history">
         <div className="welly-sidebar-head">
@@ -743,7 +765,14 @@ export default function WellyView({ currentUser = null, location = null, onViewD
 
       {/* ── Main Chat Workspace ─────────────────────────────────────────────── */}
       <main className="welly-chat-main" aria-label="Welly conversation">
-        {/* Mobile Top Bar */}
+        {/**
+          * The mobile bar.
+          *
+          * Three zones, fixed: history on the left, identity in the middle,
+          * actions on the right. The identity does not move when the mode
+          * changes, because a title that shifts sideways as a model finishes
+          * loading is the kind of small instability that reads as unfinished.
+          */}
         <div className="welly-mobile-bar">
           <button
             type="button"
@@ -751,132 +780,73 @@ export default function WellyView({ currentUser = null, location = null, onViewD
             onClick={() => setShowMobileHistory(true)}
             aria-label="Open conversation history"
           >
-            <Clock size={19} />
+            <Clock size={19} aria-hidden="true" />
           </button>
+
+          {/* The mark only. The app topbar directly above already reads
+              "Welly", and repeating the word 60px below it is the same
+              duplication the desktop header had. The mark is not a duplicate:
+              it is the spark, next to the mode. */}
           <div className="welly-mobile-bar-center">
             <WellyMark size="sm" />
-            <span className="welly-mobile-bar-title">Welly</span>
-            <span className="badge badge-subtle welly-mobile-status-badge">
-              {status === AIStatus.READY ? 'AI' : 'Chat'}
-            </span>
           </div>
+
           <div className="welly-mobile-bar-actions">
-            {capability.supported ? (
-              downloadProgress ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm welly-mobile-ai-btn"
-                  onClick={() => downloadAbortRef.current?.abort()}
-                  title="Cancel download"
-                >
-                  <span>{Math.round((downloadProgress.loaded / (downloadProgress.total || 1)) * 100)}%</span>
-                </button>
-              ) : status === AIStatus.READY ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm welly-mobile-ai-btn welly-ai-ready-btn"
-                  onClick={() => setShowSetupModal(true)}
-                  title="Welly AI is ready on this device"
-                >
-                  <Sparkles size={14} className="welly-spark-active" />
-                  <span>AI Ready</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm welly-mobile-ai-btn"
-                  onClick={() => setShowSetupModal(true)}
-                  title="Get Welly AI"
-                >
-                  <Sparkles size={14} />
-                  <span>Get AI</span>
-                </button>
-              )
-            ) : null}
+            <WellyModeControl
+              capability={capability}
+              prefs={prefs}
+              status={status}
+              onRetry={loadRuntime}
+              compact
+            />
             <button
               type="button"
-              className="btn btn-ghost btn-sm welly-mobile-new-btn"
+              className="btn btn-ghost btn-icon welly-mobile-new-btn"
               onClick={startNewConversation}
-              title="Start a new conversation"
+              aria-label="Start a new conversation"
+              title="New conversation"
             >
-              <Plus size={16} />
-              <span>New</span>
+              <Plus size={19} aria-hidden="true" />
             </button>
           </div>
         </div>
 
-        {/* Desktop Header */}
+        {/**
+          * The desktop header — a toolbar, not a second product header.
+          *
+          * It carried a Welly wordmark and a subtitle directly beneath the app
+          * topbar's `Welly` and ITS subtitle: the same two lines, twice, sixty
+          * pixels apart. The topbar already names the destination, so what is
+          * left here is what belongs to the conversation rather than to the
+          * page — which engine is answering, and the way out of the current
+          * thread. The mark stays because it is the one place the spark sits
+          * beside the mode, and it costs a single glyph.
+          */}
         <header className="welly-desktop-header">
           <div className="welly-header-info">
-            <WellyMark size="lg" />
-            <div>
-              <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
-                <h2 className="welly-header-title page-title">Welly</h2>
-                <span className="badge badge-subtle welly-status-badge">
-                  {status === AIStatus.READY ? 'Welly AI' : 'Welly Chat'}
-                </span>
-              </div>
-              <p className="welly-header-subtitle dim small">
-                {status === AIStatus.READY
-                  ? 'Private AI that runs directly on your device'
-                  : (roleSubtitle || 'Your everyday WeVolunteer assistant')}
-              </p>
-            </div>
+            <WellyMark />
+            <WellyModeControl
+              capability={capability}
+              prefs={prefs}
+              status={status}
+              onRetry={loadRuntime}
+            />
           </div>
 
           <div className="welly-header-actions">
-            {capability.supported ? (
-              downloadProgress ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm welly-ai-ctrl-btn"
-                  onClick={() => downloadAbortRef.current?.abort()}
-                  title="Click to cancel download"
-                >
-                  <RefreshCw size={14} className="spin" style={{ marginRight: 'var(--s1)' }} />
-                  <span>Welly AI · {Math.round((downloadProgress.loaded / (downloadProgress.total || 1)) * 100)}%</span>
-                </button>
-              ) : status === AIStatus.READY ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm welly-ai-ctrl-btn welly-ai-ready-btn"
-                  onClick={() => setShowSetupModal(true)}
-                  title="Welly AI is running locally on your device. Click to manage model."
-                >
-                  <Sparkles size={14} className="welly-spark-active" />
-                  <span>Welly AI · Ready</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm welly-ai-ctrl-btn"
-                  onClick={() => setShowSetupModal(true)}
-                  title="Set up Welly AI to run private AI directly on your device."
-                >
-                  <Sparkles size={14} />
-                  <span>Get Welly AI</span>
-                </button>
-              )
-            ) : (
-              <span className="badge badge-subtle dim" title={capability.reason}>
-                Welly AI · Unsupported
-              </span>
-            )}
-
             {messages.length > 0 && (
               <button
                 type="button"
-                className="btn btn-ghost btn-sm dim"
+                className="btn btn-ghost btn-sm"
                 onClick={startNewConversation}
                 title="Start a new conversation"
               >
-                <Plus size={15} />
+                <Plus size={15} aria-hidden="true" />
                 <span>New chat</span>
               </button>
             )}
           </div>
         </header>
-
 
         {/**
           * What assistive technology is told about the turn in progress.
@@ -899,12 +869,17 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               <h2 className="welly-empty-title">
                 Hi, {currentUser?.name ? currentUser.name.split(' ')[0] : 'there'}!
               </h2>
+              {/* One sentence. It had a second — "I can suggest what to do
+                  next, but I never decide anything for you" — which is the same
+                  promise the composer footer makes a few inches below, and on a
+                  phone the pair pushed the suggestions off the screen. */}
               <p className="welly-empty-subtitle dim">
-                Ask me anything about volunteering, your hours, applications, or WeVolunteer.
+                I can look things up in your WeVolunteer record and explain how
+                the platform works.
               </p>
 
               <div className="welly-suggestions-container">
-                <div className="welly-suggestions-label dim small">Suggested inquiries</div>
+                <p className="welly-suggestions-label dim small">Try asking</p>
                 <div className="welly-suggestions-grid">
                   {suggestions.map(({ label, prompt }) => (
                     <button
@@ -913,7 +888,6 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                       className="welly-suggestion-card"
                       onClick={() => send(prompt)}
                     >
-                      <Sparkles size={14} className="welly-suggestion-spark" aria-hidden="true" />
                       <span>{label}</span>
                       <ChevronRight size={14} className="welly-suggestion-arrow" aria-hidden="true" />
                     </button>
@@ -968,25 +942,17 @@ export default function WellyView({ currentUser = null, location = null, onViewD
           )}
         </div>
 
-        {/* Composer Area */}
+        {/**
+          * The composer.
+          *
+          * A row of suggestion chips used to sit above it once a conversation
+          * had started — the same three prompts as the empty state, unchanged
+          * for the rest of the thread. They answered a question the reader had
+          * already stopped asking, and on a phone they took a line of height
+          * directly above the control that most needs the room. The empty state
+          * is where suggestions belong.
+          */}
         <div className="welly-composer-container">
-          {messages.length > 0 && (
-            <div className="welly-quick-chips">
-              {suggestions.slice(0, 3).map(({ label, prompt }) => (
-                <button
-                  key={label}
-                  type="button"
-                  className="welly-quick-chip"
-                  onClick={() => send(prompt)}
-                  disabled={busy}
-                >
-                  <Sparkles size={11} aria-hidden="true" />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
           <div className="welly-composer-box">
             <label className="sr-only" htmlFor="welly-prompt-input">
               Ask Welly a question
@@ -1035,20 +1001,11 @@ export default function WellyView({ currentUser = null, location = null, onViewD
           </div>
 
           <div className="welly-composer-footer dim small">
-            Welly provides guidance grounded in your records. Actions require your explicit confirmation.
+            Grounded in your records. Nothing changes without your confirmation.
           </div>
         </div>
       </main>
 
-      {showSetupModal && (
-        <AIEnableModal
-          capability={capability}
-          models={offerableModels(capability)}
-          initialModelId={prefs.modelId}
-          onConfirm={handleDownload}
-          onClose={() => setShowSetupModal(false)}
-        />
-      )}
     </div>
   );
 }

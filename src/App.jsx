@@ -627,7 +627,7 @@ export const PAGE_META = {
        old line was the page-header twin of the recipient picker's sentence, and
        it went stale for the same reason — see recipientCopy.js. */
     messages: { title: 'Messages', sub: 'Talk to your friends and the organizers of shifts you applied for' },
-    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
+    welly: { title: 'Welly', sub: 'Ask about your hours, your applications, and what is coming up' },
     notifications: { title: 'Notifications', sub: 'Replies, reminders, and event updates' },
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
@@ -650,7 +650,7 @@ export const PAGE_META = {
     browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
-    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
+    welly: { title: 'Welly', sub: 'Ask about your events, your applicants, and shifts still short of volunteers' },
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'Profile', sub: 'Your public track record and organizer status' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
@@ -666,7 +666,7 @@ export const PAGE_META = {
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
-    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
+    welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
@@ -707,7 +707,10 @@ export const PAGE_META = {
   partner: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
-    welly: { title: 'Welly', sub: 'Your WeVolunteer assistant' },
+    /* No `welly` entry, deliberately. Welly answers from the reader's own
+       record and every one of its tools is scoped to `self.read`, which a
+       partner does not hold — so both the rail entry and the route gate refuse
+       it, and a title here would describe a page nobody can open. */
     /* `/organizer-agreement` is the one route declared with NO capability, on
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */

@@ -11163,9 +11163,26 @@ input:disabled + .premium-slider {
    ══════════════════════════════════════════════════════════════════════════════ */
 
 .welly-workspace {
+  /**
+   * The element's measured distance from the top of the viewport, written here
+   * as the value to use before the first measurement and overwritten inline by
+   * WellyView.jsx on mount, on resize, and whenever a banner above changes the
+   * layout. 140px is the topbar plus the page's top padding with no banners —
+   * correct often enough to avoid a visible jump on the first frame, and never
+   * relied on after it.
+   */
+  --welly-top: 140px;
   display: flex;
-  height: calc(100dvh - 140px);
-  min-height: 500px;
+  /**
+   * `--welly-top` is the element's measured distance from the top of the
+   * viewport, set in WellyView.jsx — see the note there. The fallback is only
+   * for the frame before the first measurement lands.
+   *
+   * The bottom margin is the page's own padding, so the workspace sits inside
+   * the same gutter as every other page rather than running to the edge.
+   */
+  height: calc(100dvh - var(--welly-top) - var(--s8));
+  min-height: 24rem;
   max-height: 920px;
   width: 100%;
   overflow: hidden;
@@ -11178,14 +11195,53 @@ input:disabled + .premium-slider {
 
 @media (max-width: 768px) {
   .welly-workspace {
-    height: calc(100dvh - 135px);
+    /**
+     * Edge to edge, and stopping above the navigation bar.
+     *
+     * The bottom reserve is the bar itself — `.page` already pads
+     * `72px + --s5` for it, and the negative margins below cancel the padding
+     * on the other three sides but not that one. Getting this wrong is not
+     * cosmetic: the composer is the last thing in the column, so any overshoot
+     * puts the one control the reader needs underneath the navigation.
+     *
+     * `min-height` rather than letting it collapse: when a banner above pushes
+     * `--welly-top` down far enough, a purely computed height leaves a chat
+     * window a few centimetres tall. Below that floor the page scrolls instead,
+     * which is the better of the two failures.
+     */
+    height: calc(100dvh - var(--welly-top) - var(--s5));
     max-height: none;
-    min-height: 0;
+    /**
+     * A floor, but never one taller than the viewport can give.
+     *
+     * A flat `26rem` overshot on a 568px phone — the workspace ran under the
+     * navigation bar and clipped the composer's footnote. The `min()` caps the
+     * floor at the space below the sticky chrome, so it can raise a workspace
+     * squeezed by a banner without ever pushing one off the bottom.
+     */
+    min-height: min(26rem, calc(100dvh - var(--s5) - 7rem));
     border: none;
     border-radius: 0;
     box-shadow: none;
     margin: calc(-1 * var(--s5)) calc(-1 * var(--s4)) 0;
     width: auto;
+  }
+}
+
+/**
+ * Below 700px the shell swaps the rail for the fixed bottom navigation, and
+ * `.page` starts reserving `72px` at the foot for it.
+ *
+ * That breakpoint is 700, not the 768 the rest of Welly's mobile layout uses —
+ * the two answer different questions ("is there a bottom bar" versus "is there
+ * room for a conversation list beside the chat"), and conflating them reserved
+ * 72px for a bar that is not drawn anywhere between 701px and 768px, leaving a
+ * strip of dead space under the composer on a small tablet.
+ */
+@media (max-width: 700px) {
+  .welly-workspace {
+    height: calc(100dvh - var(--welly-top) - 72px - var(--s5));
+    min-height: min(26rem, calc(100dvh - 72px - var(--s5) - 7rem));
   }
 }
 
@@ -11459,21 +11515,149 @@ input:disabled + .premium-slider {
   gap: var(--s3);
 }
 
-.welly-header-title {
+
+
+
+/* ── Mode control ─────────────────────────────────────────────────────────
+   A disclosure, not a dialog: it sits beside its trigger, does not trap focus
+   and does not lock scrolling. See WellyModeControl.jsx. */
+.welly-mode {
+  position: relative;
+}
+
+.welly-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 34px;
+  padding: 0 var(--s2) 0 var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 9999px;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.welly-mode-btn:hover { border-color: var(--ink-3); color: var(--ink); }
+
+.welly-mode-label { font-weight: 650; color: var(--ink); }
+
+.welly-mode-detail {
+  color: var(--ink-3);
+  /* A separator that is drawn rather than typed, so the label and the state do
+     not run together when the detail is hidden at narrow widths. */
+  border-left: 1px solid var(--rule);
+  padding-left: var(--s2);
+}
+
+.welly-mode-caret { color: var(--ink-3); flex: none; }
+.welly-mode-glyph { flex: none; }
+
+/* Ready: the spark carries the brand green. This is the ONE place on the page
+   that uses it decoratively, which is what makes it read as a state. */
+.welly-mode-active .welly-mode-glyph { color: var(--brand); }
+.welly-mode-active { border-color: color-mix(in srgb, var(--brand) 35%, var(--rule)); }
+.welly-mode-warn .welly-mode-glyph { color: var(--danger); }
+.welly-mode-busy .welly-mode-glyph { color: var(--ink-3); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .welly-mode-busy .welly-mode-glyph { animation: welly-pulse 1.4s ease-in-out infinite; }
+}
+
+.welly-mode-panel {
+  position: absolute;
+  top: calc(100% + var(--s2));
+  right: 0;
+  z-index: 60;
+  width: min(21rem, calc(100vw - var(--s5)));
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  text-align: left;
+}
+
+.welly-mode-panel-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: 0.6875rem;
   font-weight: 700;
-  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
 }
 
-.welly-header-subtitle {
+.welly-mode-option {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+  padding: var(--s2);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+}
+
+.welly-mode-option.is-current {
+  border-color: var(--rule);
+  background: var(--surface-2);
+}
+
+.welly-mode-option-glyph { flex: none; margin-top: 2px; color: var(--ink-3); }
+.welly-mode-option.is-current .welly-mode-option-glyph { color: var(--brand); }
+
+.welly-mode-option-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.welly-mode-option-body {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.welly-mode-note {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
   margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--ink-2);
 }
 
-.welly-status-badge {
-  font-size: 0.75rem;
-  padding: 2px 8px;
+.welly-mode-note svg { flex: none; margin-top: 2px; color: var(--ink-3); }
+
+.welly-mode-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  flex-wrap: wrap;
 }
+
+/* On a phone the detail text is dropped (the control is `compact`), and the
+   panel is anchored to the viewport rather than to a button near its edge. */
+@media (max-width: 768px) {
+  .welly-mode-btn { min-height: 36px; padding: 0 var(--s1) 0 var(--s2); }
+  .welly-mode-panel {
+    position: fixed;
+    top: auto;
+    right: var(--s3);
+    left: var(--s3);
+    width: auto;
+  }
+}
+
 
 .welly-header-actions {
   display: flex;
@@ -11481,30 +11665,9 @@ input:disabled + .premium-slider {
   gap: var(--s2);
 }
 
-.welly-ai-ctrl-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-  font-weight: 600;
-  font-size: 0.8125rem;
-  padding: 0.3125rem 0.75rem;
-  border-radius: var(--r-full, 9999px);
-  transition: all 0.15s ease;
-}
 
-.welly-ai-ready-btn {
-  color: var(--brand);
-  background: var(--surface-2);
-  border: 1px solid var(--rule);
-}
 
-.welly-ai-ready-btn:hover {
-  background: var(--surface-3, var(--surface-2));
-}
 
-.welly-spark-active {
-  color: var(--brand);
-}
 
 .welly-mobile-bar {
   display: none;
@@ -11529,24 +11692,17 @@ input:disabled + .premium-slider {
   justify-content: center;
 }
 
+/* Grouped with the history control on the left rather than centred. Centring a
+   lone glyph between two unequal groups puts it visibly off-centre and gives it
+   an importance it does not have — the identity here is a mark beside the mode,
+   not a title. */
 .welly-mobile-bar-center {
   display: flex;
   align-items: center;
-  gap: var(--s2);
+  margin-right: auto;
 }
 
-.welly-mobile-bar-title {
-  font-weight: 700;
-  font-size: 1.0625rem;
-}
 
-.welly-mobile-status-badge {
-  font-size: 0.6875rem;
-  padding: 1px 6px;
-  border-radius: var(--r-full, 9999px);
-  background: var(--surface-2);
-  font-weight: 600;
-}
 
 
 .welly-mobile-bar-actions {
@@ -11555,15 +11711,6 @@ input:disabled + .premium-slider {
   gap: var(--s1);
 }
 
-.welly-mobile-ai-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 0.75rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--r-full, 9999px);
-  font-weight: 600;
-}
 
 .welly-mobile-new-btn {
   display: inline-flex;
@@ -11592,8 +11739,12 @@ input:disabled + .premium-slider {
   align-items: center;
   justify-content: center;
   text-align: center;
+  /* `min-height`, not `height`: on a short viewport the content is taller than
+     the transcript and has to be able to scroll. `height: 100%` with centred
+     content clips it at BOTH ends, which put the Welly mark half off the top of
+     a 900px window as soon as the greeting gained a third line. */
   min-height: 100%;
-  padding: var(--s4) var(--s3);
+  padding: var(--s6) var(--s3);
 }
 
 .welly-empty-mark-wrap {
@@ -11607,9 +11758,12 @@ input:disabled + .premium-slider {
 }
 
 .welly-empty-subtitle {
-  margin: 0 0 var(--s5);
-  max-width: 480px;
+  margin: 0 0 var(--s6);
+  /* 46 characters narrower than the reply measure: this is a standfirst, and it
+     should break into two or three short lines rather than one long one. */
+  max-width: 44ch;
   font-size: 0.9375rem;
+  line-height: 1.55;
 }
 
 .welly-suggestions-container {
@@ -11619,10 +11773,11 @@ input:disabled + .premium-slider {
 
 .welly-suggestions-label {
   text-align: left;
-  margin-bottom: var(--s2);
-  font-weight: 600;
+  margin: 0 0 var(--s2);
+  font-weight: 700;
+  font-size: 0.6875rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
 }
 
 .welly-suggestions-grid {
@@ -11632,9 +11787,19 @@ input:disabled + .premium-slider {
   width: 100%;
 }
 
+/**
+ * A starter question.
+ *
+ * The spark that used to sit on every one of these is gone. The spark is
+ * Welly's mark; putting it on five cards at once spends the one glyph that
+ * identifies the assistant on decorating a list, and it stops meaning anything.
+ * The arrow stays but only appears on hover or focus, so the resting state is
+ * five quiet questions rather than five buttons competing with each other.
+ */
 .welly-suggestion-card {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--s2);
   padding: var(--s3) var(--s4);
   background: var(--surface);
@@ -11644,28 +11809,45 @@ input:disabled + .premium-slider {
   font-size: 0.875rem;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.welly-suggestion-card:hover {
-  border-color: var(--brand);
+.welly-suggestion-card:hover,
+.welly-suggestion-card:focus-visible {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--rule));
   background: var(--surface-2);
-  transform: translateY(-1px);
 }
 
-.welly-suggestion-spark {
-  color: var(--brand);
-  flex: none;
-}
 
-.welly-suggestion-card span {
-  flex: 1;
-}
+.welly-suggestion-card span { min-width: 0; }
 
 .welly-suggestion-arrow {
-  color: var(--ink-3);
+  color: var(--brand);
   flex: none;
-  opacity: 0.5;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.welly-suggestion-card:hover .welly-suggestion-arrow,
+.welly-suggestion-card:focus-visible .welly-suggestion-arrow { opacity: 1; }
+
+@media (max-width: 768px) {
+  /**
+   * Anchored to the top rather than centred.
+   *
+   * A phone's transcript is short — shorter still with a banner above it — and
+   * a centred column taller than its container hides its own ends. Starting at
+   * the top means the greeting is always the first thing visible and the
+   * suggestions are one ordinary scroll away, instead of the reader landing
+   * mid-list with no idea what they are looking at.
+   */
+  .welly-empty-state {
+    justify-content: flex-start;
+    padding: var(--s5) var(--s2) var(--s4);
+  }
+  .welly-empty-mark-wrap { margin-bottom: var(--s2); }
+  .welly-empty-title { font-size: 1.375rem; }
+  .welly-empty-subtitle { margin-bottom: var(--s4); }
 }
 
 @media (max-width: 480px) {
@@ -11883,7 +12065,7 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 }
 
 .welly-md code {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 0.875em;
   background: var(--surface-2);
   border: 1px solid var(--rule);
@@ -11894,7 +12076,7 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 .welly-md-pre {
   background: var(--surface-2);
   border: 1px solid var(--rule);
-  border-radius: var(--r-md, var(--r-sm));
+  border-radius: var(--r-md);
   padding: var(--s3);
   /* The one thing in a reply that must not wrap, so it scrolls on its own
      instead of widening the page. */
@@ -11954,40 +12136,9 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   }
 }
 
-.welly-quick-chips {
-  display: flex;
-  gap: var(--s2);
-  overflow-x: auto;
-  padding-bottom: var(--s2);
-  margin-bottom: var(--s2);
-  scrollbar-width: none;
-}
 
-.welly-quick-chips::-webkit-scrollbar {
-  display: none;
-}
 
-.welly-quick-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-  padding: var(--s1) var(--s3);
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  color: var(--ink-2);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex: none;
-}
 
-.welly-quick-chip:hover {
-  background: var(--surface-2);
-  border-color: var(--brand);
-  color: var(--brand);
-}
 
 .welly-composer-box {
   display: flex;
@@ -12041,9 +12192,20 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   opacity: 0.7;
 }
 
+/**
+ * A short viewport — a phone in landscape, or a small window.
+ *
+ * Everything here is a density adjustment, not a new layout. The one thing that
+ * is NOT re-declared is the height: the measured `--welly-top` calculation
+ * above is correct at every viewport, and the flat `calc(100dvh - 85px)` that
+ * used to sit here overrode it with a number that ignored the demo bar, the
+ * banners and the navigation, which is exactly how the composer ended up under
+ * the bar in landscape.
+ */
 @media (max-height: 520px) {
   .welly-workspace {
-    height: calc(100dvh - 85px);
+    /* No floor: there is genuinely no room for one, and a floor here is what
+       pushes the composer off the bottom. */
     min-height: 0;
   }
   .welly-desktop-header {
@@ -12072,7 +12234,7 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 
 @media (prefers-reduced-motion: reduce) {
   .welly-suggestion-card,
-  .welly-quick-chip,
+  .welly-mode-btn,
   .welly-composer-box,
   .welly-drawer-sheet,
   .welly-history-action-btn {

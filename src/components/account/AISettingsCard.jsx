@@ -45,6 +45,7 @@ export default function AISettingsCard({ addToast }) {
   const [error, setError] = useState(null);
   const [usedBytes, setUsedBytes] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const cardRef = useRef(null);
 
   const abortRef = useRef(null);
   /* Downloads outlive a fast navigation away from Settings; without this the
@@ -90,6 +91,20 @@ export default function AISettingsCard({ addToast }) {
   }, [capability.supported]);
 
   useEffect(() => { refreshUsage(); }, [refreshUsage]);
+
+  /**
+   * Arriving here from Welly's mode control, which links to `/settings#welly-ai`.
+   *
+   * A bare fragment does not work with client-side routing: the browser resolves
+   * it when the document loads, and this card is mounted afterwards by the
+   * router, by which time nothing is looking for it. Scrolling once on mount is
+   * the whole fix, and it is scoped to the one hash so an ordinary visit to
+   * Settings still opens at the top.
+   */
+  useEffect(() => {
+    if (window.location.hash !== '#welly-ai') return;
+    cardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, []);
 
   const download = useCallback(async (model) => {
     setPicking(false);
@@ -143,7 +158,7 @@ export default function AISettingsCard({ addToast }) {
   if (!isLocalAIEnabled()) return null;
 
   return (
-    <div className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
+    <div id="welly-ai" ref={cardRef} className="card card-pad" style={{ marginTop: 'var(--s4)' }}>
       <h3 style={{ marginBottom: 'var(--s4)' }}>Welly Assistant</h3>
 
       <div className="stack-md">
