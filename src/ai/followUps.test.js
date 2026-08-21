@@ -32,13 +32,31 @@ function after(assistantSaid, userAsked = 'a question') {
 }
 
 describe('the intents that answer from context are reachable at all', () => {
-  for (const intent of ['followup_why', 'reaction', 'talk_check']) {
+  for (const intent of ['followup_why', 'reaction']) {
     it(`${intent} is a known intent, so the turn is not refused`, () => {
       const decision = checkRole(student, intent);
       expect(decision.unknownIntent).toBeUndefined();
       expect(decision.allowed).toBe(true);
     });
   }
+
+  /**
+   * `talk_check` was added to the capability table alongside the other two, on
+   * the assumption that it was the third of a set. It is not: the router has
+   * never emitted it, and smalltalk is folded into `greeting` by SMALLTALK and
+   * answered from there. The entry was removed rather than made reachable, and
+   * this is the assertion that it stays gone — a capability entry for an intent
+   * nothing produces says a path exists when it does not.
+   */
+  it('does not carry an entry for talk_check, which nothing produces', () => {
+    expect(checkRole(student, 'talk_check').unknownIntent).toBe(true);
+  });
+
+  it('answers smalltalk anyway, through greeting', async () => {
+    const res = await ask('can you talk?', { user: student, history: [] });
+    expect(res.intent).toBe('greeting');
+    expect(res.answer).toMatch(/chat|talk/i);
+  });
 });
 
 describe('routing a short follow-up', () => {

@@ -148,3 +148,155 @@ describe('WellyMessage never alters the reply', () => {
     expect(screen.getByText(/I can help you with/)).toBeInTheDocument();
   });
 });
+
+/**
+ * The cases that were altering the model's text, and the ones that could.
+ *
+ * Every entry here was found by rendering it and comparing the result with the
+ * source, not by reasoning about the regexes.
+ */
+describe('WellyMessage does not eat characters it does not understand', () => {
+  it('leaves asterisks alone when they are not emphasis', () => {
+    /* Measured before the inner-edge rule: "3 * 4 * 5 = 60" rendered as
+       "3  4  5 = 60" — the parser deleted two characters the model wrote. */
+    expect(html('3 * 4 * 5 = 60').textContent).toBe('3 * 4 * 5 = 60');
+    expect(html('3 * 4 * 5 = 60').querySelector('em')).toBeNull();
+  });
+
+  it('leaves dunder identifiers alone', () => {
+    /**
+     * CommonMark would make this a bold "init", and that reading is defensible
+     * in general and wrong here: `__` around a bare word is an identifier in
+     * any technical string, and nothing Welly writes uses `__` for emphasis.
+     * Rendering it as bold deletes four characters the model wrote. See the
+     * note above INLINE in WellyMessage.jsx.
+     */
+    expect(html('Override __init__ in the subclass.').textContent)
+      .toBe('Override __init__ in the subclass.');
+    expect(html('Override __init__ in the subclass.').querySelector('strong')).toBeNull();
+  });
+
+  it('still renders real emphasis either side of those', () => {
+    const el = html('A **bold** and an *italic* and _also italic_.');
+    expect([...el.querySelectorAll('strong')].map(n => n.textContent)).toEqual(['bold']);
+    expect([...el.querySelectorAll('em')].map(n => n.textContent)).toEqual(['italic', 'also italic']);
+  });
+
+  it('nests a list by its indentation instead of flattening it', () => {
+    const el = html('- Shifts\n  - Morning\n  - Afternoon\n- Hours');
+    const top = el.querySelector('ul');
+    expect([...top.children]).toHaveLength(2);
+    const nested = top.children[0].querySelector('ul');
+    expect(nested).not.toBeNull();
+    expect([...nested.children].map(li => li.textContent)).toEqual(['Morning', 'Afternoon']);
+    expect(top.children[1].textContent).toBe('Hours');
+  });
+
+  it('nests a numbered list under a numbered parent', () => {
+    const el = html('1. Apply\n   1. Pick a shift\n   2. Submit\n2. Attend');
+    const top = el.querySelector('ol');
+    expect([...top.children]).toHaveLength(2);
+    expect([...top.children[0].querySelectorAll('ol > li')].map(li => li.textContent))
+      .toEqual(['Pick a shift', 'Submit']);
+  });
+
+  it('leaves a flat list flat', () => {
+    const el = html('- one\n- two\n- three');
+    expect(el.querySelectorAll('ul')).toHaveLength(1);
+    expect(el.querySelectorAll('li')).toHaveLength(3);
+  });
+
+  const VERBATIM = [
+    ['a URL with parentheses', 'See https://en.wikipedia.org/wiki/Volunteering_(disambiguation) now'],
+    ['a snake_case field', 'The field is event_id on every row.'],
+    ['inline HTML as text', 'Use <b>bold</b> here'],
+    ['a pipe table', '| a | b |'],
+    ['a horizontal rule', 'Above\n\n---\n\nBelow'],
+    ['a blockquote marker', '> Volunteering is the rent we pay.'],
+    ['curly and straight apostrophes', "It's Leo’s shift, isn't it?"],
+    ['double quotes', 'She said "yes" and left.'],
+    ['parentheses', 'Hours (verified) count.'],
+    ['semicolons and colons', 'One; two: three.'],
+    ['a compound emoji', 'Family 👨‍👩‍👧‍👦 and flag 🏳️‍🌈 ok'],
+    ['a Windows path', 'C:\\Users\\a_b\\file_name.txt'],
+    ['maths with underscores', 'x_1 + x_2 = y'],
+  ];
+
+  for (const [name, text] of VERBATIM) {
+    it(`passes ${name} through unchanged`, () => {
+      /* Newlines become element boundaries, so compare on the visible run of
+         characters rather than on the literal string. */
+      const expected = text.split('\n').filter(l => l.trim()).join('');
+      expect(html(text).textContent).toBe(expected);
+    });
+  }
+});
+
+/**
+ * Shapes taken from what Qwen2.5-0.5B actually produced when asked, through the
+ * real download, rather than from what a well-formed markdown sample looks like.
+ */
+describe('WellyMessage against real model output', () => {
+  it('keeps a numbered list whose items are separated by blank lines as one list', () => {
+    /* Verbatim shape from "Give me a short numbered list of three tips".
+       Every blank line used to flush the list, so this rendered as three
+       separate <ol> elements and the reader saw "1." three times. */
+    const reply = [
+      'Certainly! Here are three tips for being a good teammate:',
+      '',
+      '1. **Be Respectful**: Treat others with kindness.',
+      '',
+      '2. **Be Helpful**: Offer help when possible.',
+      '',
+      '3. **Be Open-minded**: Listen to other viewpoints.',
+    ].join('\n');
+
+    const el = html(reply);
+    expect(el.querySelectorAll('ol')).toHaveLength(1);
+    expect([...el.querySelectorAll('ol > li')]).toHaveLength(3);
+    expect([...el.querySelectorAll('ol > li strong')].map(n => n.textContent))
+      .toEqual(['Be Respectful', 'Be Helpful', 'Be Open-minded']);
+  });
+
+  it('does the same for a bulleted loose list', () => {
+    const el = html('Options:\n\n- Food bank\n\n- Library\n\n- Park');
+    expect(el.querySelectorAll('ul')).toHaveLength(1);
+    expect([...el.querySelectorAll('li')].map(li => li.textContent))
+      .toEqual(['Food bank', 'Library', 'Park']);
+  });
+
+  it('still ends the list when ordinary prose follows the blank line', () => {
+    const el = html('- one\n- two\n\nThat is everything.');
+    expect(el.querySelectorAll('ul')).toHaveLength(1);
+    expect(el.querySelectorAll('li')).toHaveLength(2);
+    expect([...el.children].pop().tagName).toBe('P');
+    expect([...el.children].pop().textContent).toBe('That is everything.');
+  });
+
+  it('renders the multi-paragraph shape the model uses for a plain answer', () => {
+    const reply = 'The capital of France is Paris.\n\nFirstly, it hosts the Eiffel Tower.\n\nOverall, it is important.';
+    const el = html(reply);
+    expect([...el.children].map(c => c.tagName)).toEqual(['P', 'P', 'P']);
+  });
+});
+
+describe('WellyMessage numbering', () => {
+  it('starts an ordered list at 1 without saying so', () => {
+    expect(html('1. one\n2. two').querySelector('ol').getAttribute('start')).toBeNull();
+  });
+
+  it('keeps the numbers the model wrote when a list does not start at 1', () => {
+    /* Observed with the real model: a stray character before the first item
+       stops it parsing as one, and the rest used to renumber from the top —
+       so "2." and "3." appeared on screen as "1." and "2.". */
+    const el = html('.1. First tip here.\n\n2. Second tip.\n\n3. Third tip.');
+    const ol = el.querySelector('ol');
+    expect(ol.getAttribute('start')).toBe('2');
+    expect([...ol.children]).toHaveLength(2);
+  });
+
+  it('numbers a nested ordered list from its own first number', () => {
+    const el = html('1. Apply\n   3. Pick a shift\n   4. Submit\n2. Attend');
+    expect(el.querySelector('ol ol').getAttribute('start')).toBe('3');
+  });
+});

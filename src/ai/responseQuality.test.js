@@ -165,9 +165,74 @@ You can review your confirmed shifts and application status in the Calendar or A
   });
 
   it('rejects runaway responses that exceed safety thresholds', () => {
-    const runaway = 'This is an excessively long runaway generation without useful content. '.repeat(40);
-    expect(runaway.length).toBeGreaterThan(2000);
+    const runaway = 'This is an excessively long runaway generation without useful content. '.repeat(70);
+    expect(runaway.length).toBeGreaterThan(4000);
     expect(isUsableReply(runaway)).toBe(false);
+  });
+
+  /**
+   * A reply that used its whole token budget must still be shown.
+   *
+   * Generation stops at 512 tokens, which is roughly 2000–3000 characters of
+   * English, and the display ceiling used to be 2000 — below what the sampler
+   * permits. Measured against the real model: 2203 characters of coherent prose
+   * were generated, streamed to the screen, and then replaced by "I can't help
+   * with that one." See MAX_REPLY_CHARS in prompts/welly.js.
+   */
+  it('accepts a reply the length a full 512-token generation actually produces', () => {
+    /* Ordinary long-form prose on one subject: the topic noun recurs, as it
+       does in any essay, and nothing else does. */
+    const long = [
+      'Public libraries began as subscription collections open only to paying members.',
+      'A rate-supported alternative was proposed repeatedly before anywhere adopted one.',
+      'Birmingham argued the question through three separate council sessions.',
+      'Manchester moved faster, and its reading room opened above a market hall.',
+      'Norwich kept its shelves behind a grille, so borrowers asked for each volume.',
+      'Leeds admitted apprentices on Saturday evenings and nobody else after dark.',
+      'Bristol charged a penny for a ticket and abolished it within a decade.',
+      'Hull recorded every loan by hand in ledgers that survive today.',
+      'Derby appointed its first paid librarian at a salary below a clerk.',
+      'Exeter built a separate entrance so women need not pass the news room.',
+      'Cataloguing was a craft before it was a standard, done differently everywhere.',
+      'Fines were meaningful money, and defaulters were named in the annual report.',
+      'Opening hours became the next argument, because working people could not attend by day.',
+      'Gas lighting settled that, at considerable expense and some risk.',
+      'Children were excluded from most reading rooms until surprisingly late.',
+      'Fiction was treated with suspicion, and several committees tried to limit it.',
+      'The idea that reading was infrastructure rather than charity took a generation.',
+      'By the end of the century the argument had been won almost everywhere.',
+      'What replaced it was a quieter question about who the buildings were for.',
+      'That question has never entirely gone away, and it is a reasonable one.',
+    ].join(' ');
+
+    expect(long.length).toBeGreaterThan(1000);
+    expect(long.length).toBeLessThan(4000);
+    /* The subject noun recurs; that is a topic, not a loop. */
+    expect(hasRepetitiveLoop(long)).toBe(false);
+    expect(isUsableReply(long)).toBe(true);
+  });
+
+  /**
+   * The loop detector still catches a loop, and now says so proportionally.
+   *
+   * The old rule fired on any 4-word phrase appearing three times anywhere,
+   * whatever the length of the reply — so an essay was rejected for naming its
+   * own subject. Measured against the real model: 2823 characters of coherent
+   * prose about the history of public libraries, rejected, with "I can't help
+   * with that one" shown instead.
+   */
+  it('still catches a reply that is mostly one repeated phrase', () => {
+    expect(hasRepetitiveLoop('You have hours. You have hours. You have hours. You have hours.')).toBe(true);
+    expect(hasRepetitiveLoop('I can look that up for you. I can look that up for you. I can look that up for you.')).toBe(true);
+  });
+
+  it('does not call a recurring subject a loop', () => {
+    const essay = 'The history of public libraries is long. Early public libraries charged a '
+      + 'subscription. Rate-supported public libraries came later, and the history of public '
+      + 'libraries turns on that change. Nothing about the history of public libraries was '
+      + 'inevitable, and the buildings that survive were argued over for years by councils '
+      + 'that did not agree about who should pay or who should be allowed inside them.';
+    expect(hasRepetitiveLoop(essay)).toBe(false);
   });
 
   it('rejects repetitive loops regardless of length', () => {
@@ -191,18 +256,19 @@ You can review your confirmed shifts and application status in the Calendar or A
  * the runtime emitted, what the caller collected, and what came back.
  */
 describe('a streamed reply arrives whole', () => {
+  /**
+   * The content matrix.
+   *
+   * One entry per thing a reply can contain that a naive pipeline gets wrong:
+   * each terminal punctuation mark, the separators, the possessives, the
+   * structures, and the character classes that are more than one byte. The
+   * assertion is the same for all of them — what the runtime emitted is what
+   * comes back — so the value is in the breadth rather than in any one case.
+   */
   const REPLIES = [
-    'How are you?',
-    "That's a great idea!",
-    'I can help you with volunteering.',
-    'Sure — here are three options:\n\n1. Food bank\n2. Library\n3. Park cleanup',
-    'You can read more at https://example.org/hours (it explains crediting).',
-    'Nice work! 🎉 That puts you at the top of your grade — ¡felicidades!',
-    'Use `checkIn()` on the roster screen:\n\n```js\nawait checkIn(eventId);\n```\n\nThat marks attendance.',
-    /* A long answer with no repeated phrase in it. Length, repetition and the
-       runaway ceiling are three separate properties; the other two are covered
-       above, and this case is here only to show that a long reply survives the
-       journey intact. */
+    /* Length */
+    'Yes.',
+    'You have four verified hours so far this year.',
     [
       'Service hours reach your record in a few steps.',
       'You apply to a shift, the organizer accepts you, and the shift happens.',
@@ -214,6 +280,37 @@ describe('a streamed reply arrives whole', () => {
       'Anything logged outside the platform goes through the external hours form instead,',
       'where an administrator reviews the evidence before anything is counted.',
     ].join(' '),
+
+    /* Every terminal mark */
+    'That is credited already.',
+    'How are you?',
+    "That's a great idea!",
+
+    /* Separators */
+    'Shifts: 3, spots: 12; deadline Friday.',
+    'One — two – three... and so on.',
+
+    /* Possessives, contractions and quotation */
+    "It's the organizer's call, and they haven't decided yet.",
+    'She said "yes" and the roster closed.',
+    "The status is 'pending' until somebody reviews it.",
+    'Hours (verified) are the ones that count.',
+
+    /* Structure */
+    'Sure — here are three options:\n\n1. Food bank\n2. Library\n3. Park cleanup',
+    'Two things:\n\n- Apply first\n- Then check in',
+    'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.',
+    'That is **important** and this is *worth a look*.',
+    'Use `checkIn()` on the roster screen:\n\n```js\nawait checkIn(eventId);\n```\n\nThat marks attendance.',
+    '- Shifts\n  - Morning\n  - Afternoon\n- Hours',
+
+    /* Characters that are more than one byte */
+    'Nice work! 🎉 That puts you at the top of your grade — ¡felicidades!',
+    'Ståle, 日本語, Привет, and a family 👨‍👩‍👧‍👦.',
+
+    /* Links */
+    'You can read more at https://example.org/hours (it explains crediting).',
+    'See [the guide](https://example.org/guide) when you get a moment.',
   ];
 
   for (const reply of REPLIES) {
@@ -227,8 +324,17 @@ describe('a streamed reply arrives whole', () => {
         onToken: t => streamed.push(t),
       });
 
-      /* More than one fragment arrived — otherwise this proves nothing. */
-      expect(streamed.length).toBeGreaterThan(1);
+      /**
+       * A multi-word reply must arrive in more than one fragment, or the
+       * reassembly assertion below proves nothing. A single word legitimately
+       * arrives whole — "Yes." is one fragment and still has to survive the
+       * trip, which is the case this branch keeps in the matrix.
+       */
+      if (/\s/.test(reply.trim())) {
+        expect(streamed.length).toBeGreaterThan(1);
+      } else {
+        expect(streamed.length).toBe(1);
+      }
       /* The fragments concatenate to the reply, with nothing lost or reordered. */
       expect(streamed.join('')).toBe(reply);
       /* And the committed answer is that same string. Not a repaired version of

@@ -213,3 +213,24 @@ describe('other unusable replies', () => {
     expect(isUsableReply('word '.repeat(200))).toBe(false);
   });
 });
+
+/**
+ * The usability gate is about whether a reply contains words, not about which
+ * alphabet they are written in.
+ */
+describe('isUsableReply and the alphabet', () => {
+  it('accepts a reply with no Latin letters in it', () => {
+    /* `[a-z]{3}` rejected all three of these. A reply the model wrote in the
+       language it was addressed in was thrown away and the English fallback
+       shown instead. */
+    expect(isUsableReply('日本語で答えます。')).toBe(true);
+    expect(isUsableReply('Привет, у вас четыре часа.')).toBe(true);
+    expect(isUsableReply('Ståle, 日本語, Привет.')).toBe(true);
+  });
+
+  it('still rejects a reply with no words in it', () => {
+    expect(isUsableReply('!!! ??? ...')).toBe(false);
+    expect(isUsableReply('12 34 56')).toBe(false);
+    expect(isUsableReply('-')).toBe(false);
+  });
+});

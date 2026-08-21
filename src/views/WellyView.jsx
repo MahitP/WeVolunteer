@@ -171,6 +171,9 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   /* Read inside `onToken`, where the state value would be the one captured when
      the request was made rather than the one on screen now. */
   const activeConvIdRef = useRef(activeConvId);
+  /* The transcript as last written to storage, so an unchanged one is not
+     written again. Declared here because `selectConversation` seeds it. */
+  const persistedRef = useRef({ id: null, signature: null });
   const aliveRef = useRef(true);
   const transcriptRef = useRef(null);
   const textareaRef = useRef(null);
@@ -185,6 +188,14 @@ export default function WellyView({ currentUser = null, location = null, onViewD
      at a stale id. */
   const selectConversation = useCallback((id, nextMessages) => {
     activeConvIdRef.current = id;
+    /* Seeded so the persistence effect below recognises this content as already
+       stored. Without it, opening a conversation writes it back and stamps
+       `updatedAt`, which reorders the history list by reading it. */
+    persistedRef.current = {
+      id,
+      signature: `${nextMessages.length}:${nextMessages.map(m => m.id || m.role).join(',')}:`
+        + nextMessages.reduce((n, m) => n + (m.text?.length || 0), 0),
+    };
     setActiveConvId(id);
     setMessages(nextMessages);
   }, []);
@@ -278,27 +289,53 @@ export default function WellyView({ currentUser = null, location = null, onViewD
 
 
   /**
-   * Persist the conversation — once a turn is finished, not once per token.
+   * Persist the conversation when its DURABLE content changes — not per token,
+   * and not merely because it was opened.
    *
-   * This effect used to run on every `messages` change, and `onToken` changes
-   * `messages` for each fragment the model emits. A 300-token reply therefore
-   * performed 300 writes, each one `JSON.stringify` over up to thirty stored
-   * conversations, immediately followed by `refreshConversations()` reading and
-   * re-parsing and re-sorting the same list. On a phone that is the whole
-   * budget for the frame, spent on a record that is about to be overwritten by
-   * the next token anyway.
+   * ── Three failures, one effect ──
    *
-   * Waiting for the stream to finish costs nothing: the only state that would
-   * be lost by not writing mid-stream is a partial reply, and a partial reply
-   * is not worth restoring. `streaming` on the last message is the signal, and
-   * the `send()` path always clears it — on success, on error and on abort.
+   * Originally this ran on every `messages` change, and `onToken` changes
+   * `messages` once per fragment: a 300-token reply performed 300 writes, each
+   * a `JSON.stringify` over up to thirty stored conversations followed by a
+   * re-read and re-sort of the same list.
+   *
+   * Skipping the write while a reply streamed fixed that and broke something
+   * worse. The user's own message is appended in the same update as the
+   * streaming placeholder, so it was not written either — and if the reply
+   * never completed (the reader switched conversations, or left Welly), the
+   * turn ended with the guard in `send()` dropping the commit. The question was
+   * then written nowhere at all: coming back to the conversation showed a
+   * transcript that had never heard of it.
+   *
+   * And a write on any change meant OPENING a conversation re-saved it, which
+   * stamps `updatedAt` — so reading an old conversation moved it to the top of
+   * the history list. Browsing reordered the thing being browsed.
+   *
+   * ── What it does now ──
+   *
+   * The durable form of the transcript is everything except a reply still
+   * arriving. That value is identical for every token of a stream, so the
+   * signature below is unchanged across all of them and one write happens when
+   * the question is appended rather than none. It changes again when the reply
+   * lands, which is the second and last write of the turn. Loading a
+   * conversation seeds the signature, so opening one writes nothing.
    */
-  const streamingNow = messages.length > 0 && messages[messages.length - 1].streaming;
+  const durable = useMemo(() => messages.filter(m => !m.streaming), [messages]);
+
   useEffect(() => {
-    if (!messages.length || streamingNow) return;
-    saveConversationRecord({ id: activeConvId, messages }, { user: currentUser });
+    if (!durable.length) return;
+    /* Length, ids and total text: enough to notice an append, an edit or a
+       replacement, and cheap enough to compute on every render. */
+    const signature = `${durable.length}:${durable.map(m => m.id || m.role).join(',')}:`
+      + durable.reduce((n, m) => n + (m.text?.length || 0), 0);
+
+    const seen = persistedRef.current;
+    if (seen.id === activeConvId && seen.signature === signature) return;
+
+    persistedRef.current = { id: activeConvId, signature };
+    saveConversationRecord({ id: activeConvId, messages: durable }, { user: currentUser });
     refreshConversations();
-  }, [messages, streamingNow, activeConvId, currentUser, refreshConversations]);
+  }, [durable, activeConvId, currentUser, refreshConversations]);
 
   /**
    * Keep the newest turn in view.

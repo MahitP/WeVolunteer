@@ -215,13 +215,44 @@ export function hasRepetitiveLoop(text) {
     }
   }
 
-  // 2. Check for 3+ occurrences of a longer phrase (4+ words) anywhere in text
+  /**
+   * 2. A phrase repeated often enough to BE the reply, rather than merely to
+   *    recur in it.
+   *
+   * ── Why this is proportional and used not to be ──
+   *
+   * The rule was "any 4-to-8-word phrase occurring three or more times", with
+   * no reference to how long the reply is. That is a sound description of a
+   * degenerate loop in a short answer and a description of ordinary prose in a
+   * long one: an essay about the history of public libraries says "the history
+   * of public libraries" several times because that is its subject.
+   *
+   * Measured against Qwen2.5-0.5B on 2026-08-21, asked for the history of
+   * public libraries: 2823 characters of coherent, correctly punctuated prose,
+   * rejected here, and the reader shown "I can't help with that one" instead.
+   * The longer and more on-topic the answer, the likelier the rejection — which
+   * is precisely backwards.
+   *
+   * Measuring the SHARE of the reply the repetition accounts for separates the
+   * two. "You have hours." five times over is essentially all of its reply;
+   * "the history of public libraries" four times in four hundred words is four
+   * per cent of it. A quarter is comfortably above any real subject noun and
+   * far below anything that reads as stuck.
+   *
+   * Rule 1 above is untouched and is the stronger signal anyway: a phrase
+   * repeated IMMEDIATELY is a loop at any length.
+   */
+  const REPEAT_SHARE = 0.25;
+
   for (let len = 4; len <= 8; len++) {
     for (let i = 0; i <= words.length - 3 * len; i++) {
       const phrase = words.slice(i, i + len).join(' ');
       const rest = words.slice(i + len).join(' ');
       const occurrences = rest.split(phrase).length - 1;
-      if (occurrences >= 2) return true;
+      if (occurrences < 2) continue;
+      /* +1 for the occurrence at `i` itself, which `rest` excludes. */
+      const share = ((occurrences + 1) * len) / words.length;
+      if (share >= REPEAT_SHARE) return true;
     }
   }
 
@@ -229,19 +260,63 @@ export function hasRepetitiveLoop(text) {
 }
 
 
+/**
+ * The ceiling on a reply that will be SHOWN, derived from the one on a reply
+ * that can be GENERATED.
+ *
+ * ── Why it is 4000 and not 2000 ──
+ *
+ * Generation is bounded at the sampler: `MAX_REPLY_TOKENS` in assistant.js and
+ * `DEFAULT_MAX_TOKENS` in WllamaRuntime.js are both 512, and llama.cpp stops
+ * there whatever the model intends. English runs about 4 characters to the
+ * token, so a generation that uses its whole budget lands somewhere around
+ * 2000–3000 characters.
+ *
+ * The ceiling here was 2000 — below what the token budget permits — so a reply
+ * that used its full allowance was guaranteed to be rejected. Measured against
+ * Qwen2.5-0.5B on 2026-08-21, asked for "several long paragraphs about the
+ * history of public libraries": the model returned 2203 characters of coherent,
+ * correctly punctuated prose ending in a complete sentence, the reader watched
+ * it stream in, and then it was replaced by
+ *
+ *     "I can't help with that one. I can look up opportunities, your volunteer
+ *      hours, your certificates, …"
+ *
+ * — the answer for a question Welly did not understand, to a question it had
+ * just answered well. The ceiling was 600 before the assistant grew its current
+ * tools, which made the same thing happen far more often.
+ *
+ * 4000 is above anything 512 tokens can produce at any plausible ratio, so this
+ * is once again what it was meant to be: a backstop against output that is
+ * anomalous rather than merely long. The real bound on length is `max_tokens`,
+ * enforced at the sampler where it cannot discard work already done.
+ */
+const MAX_REPLY_CHARS = 4000;
+
 export function isUsableReply(text) {
   const raw = String(text || '').trim();
-  if (raw.length < 2 || raw.length > 2000) return false;
+  if (raw.length < 2 || raw.length > MAX_REPLY_CHARS) return false;
   if (looksLikeInstructionEcho(raw)) return false;
   /* An offer to do something no tool here can do. See claimsAnAction. */
   if (claimsAnAction(raw)) return false;
   /* Repetitive generation loops from small models. */
   if (hasRepetitiveLoop(raw)) return false;
 
-  /* A reply that is mostly punctuation or a stray fragment. The 135M model
-     produced "inYou have 0 hours of work." — the leading artefact is the shape
-     this catches. */
-  if (!/[a-z]{3}/i.test(raw)) return false;
+  /**
+   * A reply that is mostly punctuation or a stray fragment, rather than words.
+   *
+   * `\p{L}`, not `[a-z]`. The ASCII class asked "are there three consecutive
+   * English letters", which is a proxy for "are there words" that fails on
+   * every reply not written in the Latin alphabet: "Ståle, 日本語, Привет."
+   * contains no run of three `a-z` characters and was discarded and replaced
+   * by the deterministic fallback. Welly's interface is English, but the model
+   * answers in the language it is addressed in, and a student writing Spanish
+   * or Korean should not silently lose the reply.
+   *
+   * The class of output this was written to catch — punctuation, digits, a
+   * stray fragment with no letters in it — is caught identically.
+   */
+  if (!/\p{L}{3}/u.test(raw)) return false;
 
   return true;
 }

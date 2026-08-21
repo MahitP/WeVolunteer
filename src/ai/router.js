@@ -429,10 +429,27 @@ const MATCHERS = [
   {
     intent: 'organizer_summary',
     tool: 'organizer_summary',
+    /**
+     * Two shapes, because organizers ask for this two ways.
+     *
+     * The three-part conjunction below describes the question — "how many
+     * volunteers do I have across all my events" — and it is the one somebody
+     * types when they are thinking about volunteers. The named alternative
+     * above it is what they type when they are thinking about the FEATURE, and
+     * it is what Welly's own organizer suggestion offers: "Show my organizer
+     * statistics" matched none of the three parts and fell through to
+     * `unknown`, so pressing Welly's own chip answered "I can't help with that
+     * one."
+     *
+     * Deliberately anchored on "organizer". A bare "show my stats" from a
+     * student would land here and be refused for lacking `event.create`, which
+     * is a worse answer than the hours they were asking about.
+     */
     test: text =>
-      /\b(volunteers?|applicants?|sign-?ups?|pending)\b/i.test(text)
+      /\borgani[sz]er\s+(stats?|statistics|summary|overview|numbers)\b/i.test(text)
+      || (/\b(volunteers?|applicants?|sign-?ups?|pending)\b/i.test(text)
       && /\b(how many|total|summary|across|all)\b/i.test(text)
-      && /\b(my|i)\b/i.test(text),
+      && /\b(my|i)\b/i.test(text)),
     slots: () => ({}),
   },
   {

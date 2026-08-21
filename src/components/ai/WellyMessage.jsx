@@ -46,16 +46,44 @@ import React, { useMemo } from 'react';
 /** Fenced blocks are split off first so nothing inside one is parsed further. */
 const FENCE = /```([^\n`]*)\n?([\s\S]*?)```/g;
 
-/* Ordered so the longest delimiter is tried first: `**` before `*`, or every
-   bold marker is read as two italics wrapped around nothing. */
+/**
+ * Ordered so the longest delimiter is tried first: `**` before `*`, or every
+ * bold marker is read as two italics wrapped around nothing. Ties on position
+ * go to the earlier entry, which is what makes that ordering work.
+ *
+ * ── Why every delimiter requires a non-space on its inner edge ──
+ *
+ * Without it, `*` and `_` are emphasis wherever they appear in pairs, and the
+ * characters between them are consumed. Measured before this rule:
+ *
+ *     "3 * 4 * 5 = 60"   rendered as   "3  4  5 = 60"
+ *     "__init__"          rendered as   "init"
+ *
+ * Both are the parser deleting characters the model wrote, which is the one
+ * thing this file exists not to do. CommonMark's rule is the same and for the
+ * same reason: a delimiter followed by whitespace opens nothing, and `_`
+ * between word characters is not emphasis at all — otherwise no identifier
+ * survives.
+ *
+ * ── And why `__strong__` is not supported at all ──
+ *
+ * CommonMark says `__init__` is bold "init", and by the letter of the spec that
+ * is correct. It is also the wrong call here: nothing Welly writes uses `__` for
+ * emphasis — the fixed answers and the prompts contain none — while `__` around
+ * a bare word is, in any technical string, an identifier. Rendering it as bold
+ * deletes four characters from what the model said in exchange for a style
+ * nobody asked for. `**` remains, and is what a model reaches for anyway.
+ *
+ * `_italic_` stays, because the word-boundary guard already protects `event_id`
+ * and `x_1`. It also refuses a doubled delimiter on either side — without that,
+ * removing the `__` rule simply handed `__init__` to the single-underscore one,
+ * which ate one pair instead of two.
+ */
 const INLINE = [
   { name: 'code', re: /`([^`\n]+)`/ },
-  { name: 'strong', re: /\*\*([^*\n]+)\*\*/ },
-  { name: 'strong', re: /__([^_\n]+)__/ },
-  { name: 'em', re: /\*([^*\n]+)\*/ },
-  /* `_` only between word boundaries: snake_case_names are not emphasis, and a
-     model writing `event_id` should not lose the underscores. */
-  { name: 'em', re: /(?<![\w\\])_([^_\n]+)_(?!\w)/ },
+  { name: 'strong', re: /\*\*(\S(?:[^*\n]*\S)?)\*\*/ },
+  { name: 'em', re: /\*(\S(?:[^*\n]*\S)?)\*/ },
+  { name: 'em', re: /(?<![\w\\_])_(?!_)(\S(?:[^_\n]*\S)?)_(?!_|\w)/ },
   { name: 'link', re: /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/ },
   { name: 'url', re: /(?<![("[])\b(https?:\/\/[^\s<>)\]]+)/ },
 ];
@@ -126,8 +154,8 @@ function paragraphNodes(lines, keyPrefix) {
   return out;
 }
 
-const BULLET = /^\s*([-*•])\s+(.*)$/;
-const NUMBERED = /^\s*(\d{1,2})[.)]\s+(.*)$/;
+const BULLET = /^(\s*)([-*•])\s+(.*)$/;
+const NUMBERED = /^(\s*)(\d{1,2})[.)]\s+(.*)$/;
 const HEADING = /^\s{0,3}(#{1,4})\s+(.*)$/;
 
 /**
@@ -150,24 +178,88 @@ function parseBlocks(text, keyPrefix) {
     paragraph = [];
   };
 
+  /**
+   * A gathered list into elements, nesting by the indentation each line carried.
+   *
+   * Flattening was the previous behaviour, and it is a structural edit: a reply
+   * written as
+   *
+   *     - Shifts
+   *       - Morning
+   *       - Afternoon
+   *     - Hours
+   *
+   * arrived as four siblings, which says something different from what the
+   * model wrote. Depth is taken from the leading whitespace, and a level only
+   * opens where one genuinely appears — a list with no indentation produces
+   * exactly the flat `<ul>` it did before.
+   */
+  const renderItems = (items, key) => {
+    const nodes = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      /* Everything more deeply indented than this item belongs inside it. */
+      const children = [];
+      while (i + 1 < items.length && items[i + 1].depth > item.depth) {
+        children.push(items[i + 1]);
+        i += 1;
+      }
+      const Tag = children.length && children[0].ordered ? 'ol' : 'ul';
+      const childStart = children.length && children[0].ordered ? children[0].number : null;
+      nodes.push(
+        <li key={`${key}-${i}`}>
+          {parseInline(item.text, `${key}-${i}`)}
+          {children.length > 0 && (
+            <Tag className="welly-md-list" {...(childStart > 1 ? { start: childStart } : {})}>
+              {renderItems(children, `${key}-${i}-n`)}
+            </Tag>
+          )}
+        </li>,
+      );
+    }
+    return nodes;
+  };
+
   const flushList = () => {
     if (!list) return;
     const key = `${keyPrefix}-list${blocks.length}`;
     const Tag = list.ordered ? 'ol' : 'ul';
+    /**
+     * A list that does not begin at 1 says so.
+     *
+     * `<ol>` always counts from 1, so a reply whose first numbered line is "2."
+     * rendered as "1." — the numbers on screen disagreeing with the numbers the
+     * model wrote. That happens for real: the model occasionally emits a stray
+     * character before the first item, which stops it parsing as one, and the
+     * remaining items then formed a list silently renumbered from the top.
+     */
+    const start = list.ordered ? list.items[0]?.number : null;
     blocks.push(
-      <Tag key={key} className="welly-md-list">
-        {list.items.map((item, i) => (
-          <li key={`${key}-${i}`}>{parseInline(item, `${key}-${i}`)}</li>
-        ))}
+      <Tag key={key} className="welly-md-list" {...(start > 1 ? { start } : {})}>
+        {renderItems(list.items, key)}
       </Tag>,
     );
     list = null;
   };
 
+  /**
+   * A blank line inside a list does not end it.
+   *
+   * It used to. Qwen2.5-0.5B — the model a student actually gets — writes a
+   * numbered list with a blank line between the items, and every blank line
+   * flushed the list, so three items became three separate `<ol>` elements and
+   * the reader saw "1." three times instead of "1. 2. 3.".
+   *
+   * Markdown calls this a loose list and treats it as one list, which is also
+   * the only reading that matches what the model meant. The blank line is
+   * remembered rather than acted on, and only ends the list if what follows is
+   * not another item of the same kind.
+   */
+  let blankPending = false;
+
   for (const line of lines) {
     if (!line.trim()) {
-      flushList();
-      flushParagraph();
+      if (list) { blankPending = true; } else { flushParagraph(); }
       continue;
     }
 
@@ -189,19 +281,33 @@ function parseBlocks(text, keyPrefix) {
 
     if (bullet || numbered) {
       flushParagraph();
+      const match = bullet || numbered;
       const ordered = Boolean(numbered);
-      if (!list || list.ordered !== ordered) {
+      const depth = match[1].replace(/\t/g, '  ').length;
+
+      /* A change of list TYPE at the top level starts a new list; the same
+         change one level in is just a nested list of the other kind, which
+         `renderItems` decides from the children it is given. */
+      if (!list || (depth === 0 && list.ordered !== ordered)) {
         flushList();
         list = { ordered, items: [] };
       }
-      list.items.push((bullet || numbered)[2]);
+      blankPending = false;
+      list.items.push({ depth, ordered, text: match[3], number: ordered ? Number(match[2]) : null });
       continue;
+    }
+
+    /* Not a list item, and a blank line came before it — the list is over. */
+    if (blankPending) {
+      blankPending = false;
+      flushList();
     }
 
     flushList();
     paragraph.push(line);
   }
 
+  blankPending = false;
   flushList();
   flushParagraph();
   return blocks;

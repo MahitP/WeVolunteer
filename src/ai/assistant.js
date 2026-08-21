@@ -130,6 +130,69 @@ function summarise(kind, data) {
     case 'admin_appeals':
       if (!data.total) return 'There are no pending suspension appeals.';
       return `There are ${data.total} pending suspension ${data.total === 1 ? 'appeal' : 'appeals'}.`;
+
+    /**
+     * ── The seven that used to fall through ──
+     *
+     * Every kind below reached `default` and answered "Here is what I found."
+     * None of them has a card renderer either (see AssistantCard's switch), so
+     * the lookup succeeded, the data came back, and the reader was shown one
+     * sentence containing none of it. Three of Welly's own suggestion
+     * chips land here — "What is my next shift?" for a student, "Show my
+     * events" and "Show my organizer statistics" for an organizer — so pressing
+     * what Welly offers produced an answer with nothing in it.
+     *
+     * This has been true since before the assistant grew these tools: the same
+     * seven were unsummarised at 42768bf, when there were thirteen kinds rather
+     * than twenty-four. It is not a regression, and the sentence is the cheap
+     * half of the fix — the cards are still missing and are worth building.
+     */
+    case 'next_shift': {
+      if (!data.next) return 'You have nothing coming up that has been accepted yet.';
+      const { eventTitle, slotName, startsAt, hours } = data.next;
+      const where = [eventTitle, slotName].filter(Boolean).join(' — ');
+      const length = hours ? ` It is ${hours} ${hours === 1 ? 'hour' : 'hours'}.` : '';
+      return `Your next shift is ${where || 'a shift'}${startsAt ? `, ${startsAt}` : ''}.${length}`;
+    }
+
+    case 'waitlists': {
+      if (!data.total) return 'You are not on any waitlists at the moment.';
+      const first = data.items?.[0];
+      const place = first?.position
+        ? ` You are number ${first.position} for ${first.eventTitle || 'the first one'}.`
+        : '';
+      return `You are waitlisted for ${data.total} ${data.total === 1 ? 'shift' : 'shifts'}.${place}`;
+    }
+
+    case 'my_events': {
+      if (!data.total) return 'You are not running any events at the moment.';
+      return `You are running ${data.total} ${data.total === 1 ? 'event' : 'events'}.`;
+    }
+
+    case 'organizer_summary':
+      if (!data.events) return 'You are not running any events yet, so there is nothing to total up.';
+      return `Across your ${data.events} ${data.events === 1 ? 'event' : 'events'}: `
+        + `${data.volunteers} ${data.volunteers === 1 ? 'volunteer' : 'volunteers'}, `
+        + `${data.hours} ${data.hours === 1 ? 'hour' : 'hours'} credited, and `
+        + `${data.pending} ${data.pending === 1 ? 'application' : 'applications'} still to review.`;
+
+    case 'platform_stats':
+      return `The platform has ${data.users} ${data.users === 1 ? 'member' : 'members'}, `
+        + `${data.events} ${data.events === 1 ? 'event' : 'events'}, and `
+        + `${data.hours} ${data.hours === 1 ? 'hour' : 'hours'} of credited service. `
+        + `${data.openReports === 0 ? 'No reports are open.' : `${data.openReports} ${data.openReports === 1 ? 'report is' : 'reports are'} open.`}`;
+
+    case 'system_health':
+      if (!data.openGroups && !data.last24h) return 'Nothing is failing right now.';
+      return `${data.openGroups} open ${data.openGroups === 1 ? 'error group' : 'error groups'}, `
+        + `and ${data.last24h} ${data.last24h === 1 ? 'error' : 'errors'} in the last 24 hours.`;
+
+    case 'recent_audit': {
+      if (!data.total) return 'There is nothing in the audit trail yet.';
+      const latest = data.items?.[0];
+      const tail = latest?.action ? ` The most recent is "${latest.action}"${latest.at ? `, ${latest.at}` : ''}.` : '';
+      return `The audit trail has ${data.total} recent ${data.total === 1 ? 'entry' : 'entries'}.${tail}`;
+    }
     case 'application_withdrawn':
       return 'Your application has been withdrawn.';
     case 'profile_updated':
@@ -748,7 +811,11 @@ export async function ask(
 
   /* ── 7. Tool-less Responses & Conversational Fallback ────────────────────── */
   if (!tool) {
-    const isConversational = ['unknown', 'chat', 'talk_check', 'reaction', 'followup_why', 'affirmation'].includes(intent);
+    /* `talk_check` was in this list too, for an intent the router has never
+       emitted — smalltalk is folded into `greeting`. Removed rather than made
+       reachable: `greeting` already answers it well, from
+       `getConversationalReply`. */
+    const isConversational = ['unknown', 'chat', 'reaction', 'followup_why', 'affirmation'].includes(intent);
     if (isConversational && runtime && runtime.status === AIStatus.READY) {
       const chatted = await chat(message, { runtime, onToken, signal, history });
       if (chatted) return chatted;

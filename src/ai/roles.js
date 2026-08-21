@@ -81,19 +81,26 @@ export const INTENT_CAPABILITY = Object.freeze({
 
   /* Conversation and confirmations */
   /**
-   * `followup_why`, `reaction` and `talk_check` answer from what was said a
-   * moment ago rather than from a lookup, so they carry no capability.
+   * `followup_why` and `reaction` answer from what was said a moment ago rather
+   * than from a lookup, so they carry no capability.
    *
-   * They were missing from this table while `assistant.js` already listed all
-   * three as conversational and `getConversationalReply` already handled them.
-   * An intent absent here is not merely unrouted — `checkRole` returns
+   * They were missing from this table while `assistant.js` already listed them
+   * as conversational and `getConversationalReply` already handled them. An
+   * intent absent here is not merely unrouted — `checkRole` returns
    * `unknownIntent` and the turn is REFUSED — so routing anything to them
    * before now would have answered "that is not something your account can ask
    * me for" to somebody typing "why?".
+   *
+   * `talk_check` is deliberately NOT here. It was, briefly, added alongside
+   * these two on the assumption that it was the third of a set — but the router
+   * has never emitted it and does not now: smalltalk ("can you talk?", "are you
+   * a bot?") is folded into `greeting` by SMALLTALK, and answered by
+   * `getConversationalReply` from there. An entry for an intent nothing produces
+   * says a path exists when it does not, which is how the mistake propagates.
+   * `intentCoverage.test.js` holds both directions of this now.
    */
   followup_why: null,
   reaction: null,
-  talk_check: null,
   confirm_action: null,
   cancel_action: null,
   greeting: null,
