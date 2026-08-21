@@ -1902,6 +1902,45 @@ time { font-variant-numeric: tabular-nums; }
    Stats
    ========================================================================== */
 
+/* ── The dashboard's heading row ─────────────────────────────────────────────
+   Two of the three dashboards open with a greeting that had the full width to
+   itself; the third opens straight onto its first section. Making this a
+   row-between gives all of them the page-action slot that a page title
+   normally has, which is where "Verify a certificate" lives — see
+   VerifyCertificateAction for why it is there and why it is quiet.
+
+   `align-items: center` and not `baseline`: the greeting is 1.75rem and the
+   action is a small button, and baseline alignment on that pair drops the
+   button's text onto the heading's baseline and its box below the row. */
+.dashboard-greeting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+}
+
+/* The admin dashboard has no greeting to sit beside, so the row holds the
+   action alone and pushes it to the same edge. */
+.dashboard-greeting-bare {
+  justify-content: flex-end;
+  margin-bottom: calc(var(--s3) * -1);
+}
+
+.verify-cert-action .btn {
+  gap: var(--s1);
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  /* Under the greeting rather than squeezed beside it. `flex-wrap` already
+     moves it; this stops it sitting flush right on its own line, which reads
+     as belonging to whatever comes next. */
+  .dashboard-greeting .verify-cert-action {
+    margin-left: calc(var(--s1) * -1);
+  }
+}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

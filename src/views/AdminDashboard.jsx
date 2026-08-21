@@ -22,6 +22,7 @@ import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
 import ResolutionModal from '../components/ResolutionModal';
 import ReportDetail from '../components/moderation/ReportDetail';
+import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
 import { categoryLabel } from '../moderation';
 
 /**
@@ -249,6 +250,20 @@ export default function AdminDashboard({ addToast, user }) {
          approval queue; the analytics that describe how the programme is
          going follow, because they are read deliberately rather than
          urgently. */}
+      {/**
+        * The same action the other two dashboards carry, in the same place on
+        * screen.
+        *
+        * This page has no greeting row to put it in — it opens straight onto
+        * Reports — so the row is the action alone, right aligned, which lands
+        * it at the same point in the content column as the volunteer and
+        * organizer dashboards. See VerifyCertificateAction for why all three
+        * mount one component rather than keeping a copy each.
+        */}
+      <div className="dashboard-greeting dashboard-greeting-bare">
+        <VerifyCertificateAction />
+      </div>
+
       {/* ── Reports ──
           Titled "Reports" rather than "Moderation queue": the page itself is the
           Admin hub, and a section repeating that name inside it

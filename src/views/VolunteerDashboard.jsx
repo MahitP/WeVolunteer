@@ -14,6 +14,7 @@ import PreviewList from '../components/common/PreviewList';
 import { useLocationContext } from '../contexts/LocationContext';
 import LocationLink from '../components/location/LocationLink';
 import WeatherSummary from '../components/location/WeatherSummary';
+import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
 
 export default function VolunteerDashboard({
   currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
@@ -201,10 +202,14 @@ export default function VolunteerDashboard({
           </span>
         </a>
       )}
+      {/* The greeting row is also the page-action row. It was a heading with
+          the whole width to itself; the action sits in the space that was
+          already there rather than adding a band above it. */}
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
         <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
         </h2>
+        <VerifyCertificateAction />
       </div>
       {/* ── What's next: the single most useful thing on the page ── */}
       {nextShift ? (

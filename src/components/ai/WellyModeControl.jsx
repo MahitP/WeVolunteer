@@ -84,6 +84,7 @@ export default function WellyModeControl({
   status,
   onRetry = null,
   onSelectMode = null,
+  startupError = null,
   compact = false,
 }) {
   const [open, setOpen] = useState(false);
@@ -232,9 +233,23 @@ export default function WellyModeControl({
           )}
 
           {mode.tone === 'warn' && (
+            /**
+             * The reason, when there is one.
+             *
+             * "Welly AI didn't start" on its own is a dead end — it names the
+             * symptom the reader can already see. The runtime distinguishes
+             * out-of-memory from a failed download and writes a sentence for
+             * each; both have a different next step, and neither is "try
+             * again". Falling back to the generic line only when nothing more
+             * specific reached here.
+             */
             <p className="welly-mode-note">
               <AlertCircle size={13} aria-hidden="true" />
-              <span>Welly AI couldn’t start on this device, so Welly Chat is answering.</span>
+              <span>
+                {startupError?.message
+                  || 'Welly AI couldn’t start on this device, so Welly Chat is answering.'}
+                {startupError?.model && ` (${startupError.model} model.)`}
+              </span>
             </p>
           )}
 

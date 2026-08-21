@@ -165,6 +165,22 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
      itself lives in Settings — see WellyModeControl for why this page links to
      it rather than carrying a second copy of the download flow. */
   const [capability] = useState(() => detectCapability());
+  /**
+   * Why Welly AI did not start, when it did not.
+   *
+   * The runtime already works this out — `asRuntimeError` in WllamaRuntime
+   * separates out-of-memory and network failures and writes a `userMessage`
+   * for each, because those are the two with a useful next step. That message
+   * was then thrown away here by a bare `catch {}`, and the reader was shown
+   * "Welly AI didn't start" and nothing else.
+   *
+   * Reported as exactly that: "the Advanced Model isnt starting up it says
+   * Model couldnt start up using Chat". The Advanced model is 986 MB against
+   * the Balanced model's 469, so out-of-memory is the likely answer and is one
+   * the reader can act on — the diagnosis existed the whole time and had no
+   * route to the screen.
+   */
+  const [startupError, setStartupError] = useState(null);
   const [prefs, setPrefs] = useState(() => readPreferences());
 
   const runtimeRef = useRef(null);
@@ -258,6 +274,7 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
 
     try {
       setStatus(AIStatus.LOADING);
+      setStartupError(null);
       if (runtimeRef.current) {
         await runtimeRef.current.unload();
         runtimeRef.current = null;
@@ -270,8 +287,17 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
       }
       runtimeRef.current = runtime;
       setStatus(AIStatus.READY);
-    } catch {
-      if (aliveRef.current) setStatus(AIStatus.ERROR);
+    } catch (err) {
+      if (!aliveRef.current) return;
+      /* The technical text goes to the console and nowhere near the page;
+         `userMessage` is the half written to be read. See AIRuntimeError. */
+      console.error('[Welly] the on-device model did not start', err);
+      setStartupError({
+        message: err?.userMessage
+          || 'Welly AI could not start on this device. You can try again from Settings.',
+        model: model?.label || null,
+      });
+      setStatus(AIStatus.ERROR);
     }
   }, []);
 
@@ -982,6 +1008,7 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
               status={status}
               onRetry={loadRuntime}
               onSelectMode={selectMode}
+              startupError={startupError}
               compact
             />
             <button
@@ -1016,6 +1043,7 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
               status={status}
               onRetry={loadRuntime}
               onSelectMode={selectMode}
+              startupError={startupError}
             />
           </div>
 

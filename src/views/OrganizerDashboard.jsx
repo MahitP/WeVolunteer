@@ -6,6 +6,7 @@ import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
+import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
 const TABS = [{
   id: 'active',
   label: 'Active'
@@ -340,10 +341,14 @@ export default function OrganizerDashboard({
         </div>
       )}
 
+      {/* The greeting row is also the page-action row. It was a heading with
+          the whole width to itself; the action sits in the space that was
+          already there rather than adding a band above it. */}
       <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
         <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
         </h2>
+        <VerifyCertificateAction />
       </div>
       {/* ── What needs a decision ── */}
       {needsReview.length > 0 && <section className="card" style={{
