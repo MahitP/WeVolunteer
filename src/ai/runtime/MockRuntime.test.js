@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { MockRuntime } from './MockRuntime.js';
 import { AIStatus, AIRuntimeError, AIAbortError, isAbort } from './types.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const MODEL = { id: 'test', version: 1, bytes: 1000 };
 
@@ -163,5 +165,54 @@ describe('isAbort', () => {
     expect(isAbort(new AIAbortError())).toBe(true);
     expect(isAbort(Object.assign(new Error('x'), { name: 'AbortError' }))).toBe(true);
     expect(isAbort(new AIRuntimeError('real failure'))).toBe(false);
+  });
+});
+
+/**
+ * The sampler and cache settings the real runtime sends, asserted against the
+ * source because a MockRuntime cannot exercise llama.cpp.
+ *
+ * These are not style preferences. Each was set in response to a measured
+ * failure with the real model, and each is the kind of line somebody
+ * reasonably "tidies up" later without knowing what it was for.
+ */
+describe('WllamaRuntime generation parameters', () => {
+  const src = readFileSync(
+    path.join(process.cwd(), 'src/ai/runtime/WllamaRuntime.js'),
+    'utf8',
+  );
+
+  it('records the streamed-chunk defect where somebody will find it', () => {
+    /* Intermittently the final chunk of a generation is delivered at the start
+       of the next one, so a reply loses its last characters and the following
+       one opens with them. Four fixes were tried and measured; none worked, and
+       the residue is inside wllama's worker. The note is the deliverable — the
+       next person to see a stray leading character should find the four dead
+       ends rather than repeat them, or reach for the text-stripping rule that
+       damaged correct replies last time. */
+    expect(src).toMatch(/known defect in streamed generation/i);
+    expect(src).toMatch(/cache_prompt: false/);
+    expect(src).toMatch(/11\.5 seconds/);
+  });
+
+  it('leaves the repetition penalties at llama.cpp defaults', () => {
+    /* They apply to every token in the window, and the tokens English repeats
+       most are the punctuation and function words. Tuned against repetition,
+       they remove punctuation first. */
+    expect(src).toMatch(/penalty_repeat:\s*1(\.0)?\b/);
+    expect(src).toMatch(/penalty_freq:\s*0\b/);
+    expect(src).toMatch(/penalty_present:\s*0\b/);
+  });
+
+  it('sets the temperature under the name the sampler reads', () => {
+    /* `temp`, not `temperature`: the latter is the OAI-compatibility alias and
+       setting only it means the sampler runs at a value nobody chose. */
+    expect(src).toMatch(/\btemp:\s*schema \? 0\.2 : 0\.45/);
+  });
+
+  it('reports why a generation ended', () => {
+    /* So a reply cut off by the token budget can be labelled as cut off
+       instead of looking like a bug. */
+    expect(src).toMatch(/lastFinishReason/);
   });
 });

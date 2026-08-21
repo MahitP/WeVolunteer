@@ -62,6 +62,17 @@ export class WllamaRuntime {
     this.status = AIStatus.IDLE;
     this.model = null;
     this.lastError = null;
+    /**
+     * Why the last generation ended: `'stop'` when the model finished, or
+     * `'length'` when it hit `max_tokens` and was cut off mid-sentence.
+     *
+     * A property rather than a return value because every caller wants the
+     * text and only one wants this, and because `generate()` refuses to run
+     * while the status is GENERATING — so two generations cannot interleave and
+     * overwrite each other's answer. It is read in the same continuation as the
+     * `await` that set it.
+     */
+    this.lastFinishReason = null;
     this._wllama = null;
   }
 
@@ -164,6 +175,42 @@ export class WllamaRuntime {
     }
   }
 
+  /**
+   * ── A known defect in streamed generation, and what was tried ──
+   *
+   * Intermittently — roughly half the time, measured against Qwen2.5-0.5B on
+   * 2026-08-21 — the FINAL chunk of a generation is not delivered before this
+   * method resolves. It arrives at the start of the NEXT one instead, so one
+   * reply loses its last characters and the following reply opens with them:
+   *
+   *   "The capital of Spain is Madrid"     ← no full stop
+   *   ".The capital of Kenya is"           ← there it is
+   *
+   * and after a long answer, "France is Paris.The capital of…". This is the
+   * source of the stray leading characters that a rule in `formatResponseText`
+   * used to strip — the rule was removed because it damaged correct replies,
+   * and this is what it was covering for.
+   *
+   * Four fixes were tried and measured. None changed the behaviour:
+   *
+   *   `cache_prompt: false`          prompt-prefix reuse is not the mechanism
+   *   consuming the async-iterator   the loop still ends a chunk early
+   *   `break` (iterator `return()`)  the generator discards nothing
+   *   draining after cancellation    the stream had already ended — nothing
+   *                                  was queued on the JavaScript side
+   *
+   * That last one is the informative negative: the residue is not a pending
+   * message this code can collect. It is inside wllama's worker, and the
+   * library exposes no way to reach it. The only reset available is tearing the
+   * instance down and loading the model again, measured at 11.5 seconds from
+   * cold — an eleven-second stall after every reply, to avoid a few stray
+   * characters at the start of the next one.
+   *
+   * So it is left visible rather than papered over, and it is worth reporting
+   * upstream. Repairing it here would mean guessing which leading characters
+   * belong to the previous answer, which is the class of text surgery that
+   * broke correct replies the last time it was attempted.
+   */
   async generate(messages, { onToken, signal, schema, maxTokens = DEFAULT_MAX_TOKENS } = {}) {
     if (this.status !== AIStatus.READY || !this._wllama) {
       throw new AIRuntimeError(`generate() called while status is "${this.status}"`);
@@ -232,6 +279,8 @@ export class WllamaRuntime {
       };
     }
 
+    this.lastFinishReason = null;
+
     try {
       if (onToken) {
         let out = '';
@@ -241,6 +290,10 @@ export class WllamaRuntime {
           onData: chunk => {
             const piece = chunk?.choices?.[0]?.delta?.content;
             if (piece) { out += piece; onToken(piece); }
+            /* The reason arrives on the final chunk, where `delta.content` is
+               usually empty — so it is read outside the `if` above. */
+            const reason = chunk?.choices?.[0]?.finish_reason;
+            if (reason) this.lastFinishReason = reason;
           },
         });
         this.status = AIStatus.READY;
@@ -248,6 +301,7 @@ export class WllamaRuntime {
       }
 
       const res = await this._wllama.createChatCompletion(params);
+      this.lastFinishReason = res?.choices?.[0]?.finish_reason ?? null;
       this.status = AIStatus.READY;
       return res?.choices?.[0]?.message?.content ?? '';
     } catch (err) {

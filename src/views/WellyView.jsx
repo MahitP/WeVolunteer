@@ -554,6 +554,19 @@ export default function WellyView({ currentUser = null, location = null, onViewD
               text: res?.cancelled ? 'Stopped.' : (res?.answer || ''),
               card: res?.card ?? null,
               kind: res?.card?.kind,
+              /**
+               * The interface speaking about a failure, rather than Welly
+               * answering. Carried on the message so it stays out of the
+               * history the model is given — a small model reads the
+               * transcript as a record of how the assistant talks, and will
+               * reproduce a refusal it finds there as its own answer. See
+               * `sanitizeHistory`.
+               */
+              systemNotice: Boolean(res?.systemNotice) || Boolean(res?.cancelled),
+              /* The model ran out of room rather than finishing. Reported so a
+                 sentence ending mid-air reads as a limit rather than a bug —
+                 the text itself is untouched. See `truncated` in assistant.js. */
+              truncated: Boolean(res?.truncated),
               streaming: false,
             }
           : m
@@ -568,7 +581,16 @@ export default function WellyView({ currentUser = null, location = null, onViewD
         : "Something went wrong answering that. Please try again.";
       setMessages(prev => prev.map(m => (
         m.id === replyId
-          ? { id: replyId, role: 'assistant', text: message, streaming: false, failed: !isAbort(err) }
+          ? {
+              id: replyId,
+              role: 'assistant',
+              text: message,
+              streaming: false,
+              failed: !isAbort(err),
+              /* "Stopped." and "Something went wrong" are both the interface,
+                 not an answer. */
+              systemNotice: true,
+            }
           : m
       )));
       setLiveStatus(message);
@@ -1028,6 +1050,12 @@ export default function WellyView({ currentUser = null, location = null, onViewD
                         <span className="dim">Thinking</span>
                       </div>
                     ) : null}
+
+                    {m.truncated && (
+                      <p className="welly-truncated dim small">
+                        Welly ran out of room here. Ask it to carry on if you want more.
+                      </p>
+                    )}
 
                     {m.card && (
                       <div className="welly-card-wrapper">

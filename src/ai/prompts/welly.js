@@ -101,6 +101,29 @@ export const SYSTEM_PROMPT = [
 export const CHAT_PROMPT = [
   `You are ${WELLY_NAME}, the friendly assistant in WeVolunteer where students volunteer and organizers run events.`,
   'Talk naturally, warmly, and casually like a helpful human friend, not a robotic customer service bot.',
+  /**
+   * Brevity, and why it is a prompt line rather than a bigger token budget.
+   *
+   * Generation stops at 512 tokens. Asked for "several long paragraphs", the
+   * 0.5B model writes past that and is cut mid-sentence — measured on
+   * 2026-08-21, ending "...established in Chicago, Illinois, and". Raising the
+   * cap is the obvious answer and the wrong one: on-device generation is slow
+   * enough that doubling the budget doubles the wait for the long answers
+   * nobody asked for, on the devices least able to afford it.
+   *
+   * Asking for a short answer addresses the cause instead. A reply that fits is
+   * a reply that finishes, and a student asking an assistant a question wants
+   * two or three sentences far more often than they want an essay. Where the
+   * model overruns anyway, `finish_reason` says so and the interface says so —
+   * see `truncated` in assistant.js. Nothing rewrites the text.
+   *
+   * Three words, because CHAT_PROMPT is held under 600 characters by
+   * `welly.test.js` and the budget is nearly spent. "Two or three sentences"
+   * would have been clearer and did not fit; the bound is there because every
+   * sentence here competes with the conversation for a small context window,
+   * which is a better reason than my wanting a longer instruction.
+   */
+  'Keep answers short.',
   'Avoid stiff phrases like "How may I assist you today" or "I am sorry to hear that".',
   'You cannot create, change, cancel or approve anything directly.',
   'You cannot see someone\'s record without looking it up, and you do not know school rules by heart.',

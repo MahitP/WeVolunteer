@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ask } from './assistant';
+import { ask, sanitizeHistory } from './assistant';
 import { routeIntent } from './router';
 import { checkRole } from './roles';
 
@@ -147,5 +147,70 @@ describe('a follow-up with nothing to follow up on', () => {
     expect(typeof res.answer).toBe('string');
     expect(res.answer.length).toBeGreaterThan(10);
     expect(res.answer).not.toMatch(/not something your account can ask/i);
+  });
+});
+
+/**
+ * What the model is allowed to read back.
+ *
+ * ── The defect ──
+ *
+ * Some assistant turns are the interface speaking about a failure rather than
+ * Welly answering: "I can't help with that one", "That is not something your
+ * account can ask me for", "Something went wrong", "Stopped." They reach the
+ * transcript through the same `role: 'assistant'` door as a real reply.
+ *
+ * A small model reads the history as a record of how the assistant talks, and
+ * imitates it. Measured against Qwen2.5-0.5B on 2026-08-21: in a conversation
+ * where an earlier turn had fallen back, a fresh question was answered with the
+ * fallback reproduced word for word — a refusal the application had written,
+ * handed back as though the model had decided it.
+ */
+describe('application notices do not become things the model imitates', () => {
+  it('marks the fallback for an unrecognised request as a notice', async () => {
+    const res = await ask('qwertyuiop asdfghjkl zxcvbnm', { user: student });
+    expect(res.answer).toMatch(/I can't help with that one/i);
+    expect(res.systemNotice).toBe(true);
+  });
+
+  it('marks a role refusal as a notice', async () => {
+    const res = await ask('show the recent audit log', { user: student });
+    expect(res.intent).toBe('not_permitted');
+    expect(res.systemNotice).toBe(true);
+  });
+
+  it('does NOT mark a real answer as a notice', async () => {
+    /* The deterministic answers carry facts the next turn depends on. */
+    for (const q of ['hello', 'what can you do?', 'how do hours work?', 'thanks']) {
+      const res = await ask(q, { user: student });
+      expect(res.systemNotice, q).toBeFalsy();
+    }
+  });
+
+  it('keeps notices out of the history handed to the model', () => {
+    const history = [
+      { role: 'user', text: 'how many hours do I have?' },
+      { role: 'assistant', text: 'You do not have any verified hours yet.' },
+      { role: 'user', text: 'something it did not understand' },
+      { role: 'assistant', text: "I can't help with that one. I can look up opportunities…", systemNotice: true },
+    ];
+    const sent = sanitizeHistory(history);
+    const assistantTurns = sent.filter(m => m.role === 'assistant').map(m => m.content);
+
+    /* The refusal is gone… */
+    expect(assistantTurns).not.toContain("I can't help with that one. I can look up opportunities…");
+    /* …the real answer is not, because "why?" next turn depends on it… */
+    expect(assistantTurns).toContain('You do not have any verified hours yet.');
+    /* …and both of the reader's own messages survive, so it still reads as a
+       conversation rather than a monologue. */
+    expect(sent.filter(m => m.role === 'user')).toHaveLength(2);
+  });
+
+  it('keeps a cancelled turn out too', () => {
+    const history = [
+      { role: 'user', text: 'tell me something long' },
+      { role: 'assistant', text: 'Stopped.', systemNotice: true },
+    ];
+    expect(sanitizeHistory(history).some(m => m.content === 'Stopped.')).toBe(false);
   });
 });

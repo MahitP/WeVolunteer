@@ -91,13 +91,80 @@ const ACTION_REQUEST = new RegExp([
 const ELIGIBILITY = /\b(counts?|allowed|eligible|qualif(y|ies)|permitted|supposed to|rules?|policy|okay to|ok to|fine to)\b/i;
 const QUESTION_SHAPE = /^\s*(does|do|is|are|am|can|could|may|should|would|will|what|why|if)\b/i;
 
-/** Intent to search for opportunities. */
+/**
+ * Intent to search for opportunities.
+ *
+ * `any` used to be in the first group on its own, which made "Any advice?" and
+ * "Any tips for a first time volunteer?" search requests — the word says
+ * nothing by itself. It now has to reach the thing being asked for, within one
+ * sentence: `[^.?!]` cannot cross a full stop, so "Any advice? … opportunities"
+ * two sentences later does not match, while "any #environment or #gardening
+ * opportunities" does. The window is 40 characters because that real query
+ * needs 26 of them.
+ */
 const SEARCH_INTENT = new RegExp([
-  /\b(find|show|search|browse|list|any|available|open|upcoming|recommend|suggest)\b/,
+  /\b(find|show|search|browse|list|available|upcoming|recommend|suggest)\b/,
+  /\bany\b[^.?!]{0,40}\b(opportunit(y|ies)|events?|shifts?|slots?|openings?)\b/,
+  /\bopen\b[^.?!]{0,40}\b(opportunit(y|ies)|events?|shifts?|slots?|spots?)\b/,
   /\b(looking for|sign ?up for|what'?s on)\b/,
   /\b(near|nearby|around|close (by|to)|this (week|weekend|month))\b/,
   /\bcan i\b.{0,15}\b(do|join|participate|attend|help|sign ?up|volunteer)\b/,
 ].map(r => r.source).join('|'), 'i');
+
+/**
+ * The message is talking ABOUT the domain rather than asking Welly to look
+ * something up in it.
+ *
+ * ── Why this is one guard and not six tightened rules ──
+ *
+ * Several tool rules fire on a domain noun plus a very weak second signal:
+ * `my_applications` on the word "application" alone, `my_organizations` on
+ * "organization" plus the word "in", `my_next_shift` on "next" plus "I".
+ * Those are cheap and mostly right, because most sentences containing
+ * "application" ARE about the reader's applications.
+ *
+ * They are wrong in one recognisable class, and it is a class a student hits
+ * immediately:
+ *
+ *   "I am nervous about my first volunteering shift. Any advice?"
+ *      → an opportunity search, answered "I couldn't find any opportunities"
+ *   "Do you think volunteering looks good on a college application?"
+ *      → their applications list
+ *   "Our organization is planning something big and I am excited."
+ *      → their organizations list
+ *
+ * What those have in common is not a keyword. It is that they ask for advice,
+ * or narrate an experience, rather than requesting a record. Tightening each
+ * rule separately would mean encoding that same judgement six times and
+ * missing it on the seventh; stating it once, before any tool matches, keeps
+ * the rules as simple as they should be.
+ *
+ * Deliberately narrow. It suppresses TOOLS only — refusals, informational
+ * answers, confirmations and navigation are matched before it — and it looks
+ * for explicit advice-seeking or explicit first-person feeling, not for the
+ * absence of a request. "Show my applications" contains neither and is
+ * untouched, which `router.test.js` and `intentCoverage.test.js` both hold.
+ */
+const ADVICE_SOUGHT = new RegExp([
+  /\bany\s+(other\s+)?(advice|tips?|suggestions?|pointers?|ideas?)\b/,
+  /\b(advice|tips?)\s+(for|on|about)\b/,
+  /\b(do|what do) you think\b/,
+  /\bshould i\b/,
+  /\bis it (normal|okay|ok|weird|bad|fine|worth it)\b/,
+  /\bhow do i (stay|get better|cope|deal|handle|prepare|make friends|feel less)\b/,
+  /\bwhat (should|do) i (wear|bring|say|expect|do first)\b/,
+].map(r => r.source).join('|'), 'i');
+
+const EXPERIENCE_TOLD = new RegExp([
+  /\bi(?:'m| am|'ve been| have been| was| felt| feel| get| got)\s+(so |really |a bit |kind of |quite |very |pretty )?(nervous|worried|anxious|scared|excited|happy|sad|tired|exhausted|stressed|overwhelmed|proud|glad|upset|terrible|awful|nervous|unsure|confused|lost|embarrassed)\b/,
+  /\bi(?:'m| am)\s+(thinking|planning|hoping|wondering|considering)\b/,
+  /\bit (was|is|felt)\s+(so |really |very |pretty )?(fun|great|good|hard|tough|exhausting|tiring|boring|amazing|nice|awful|terrible|worth it)\b/,
+  /\bi (loved|hated|enjoyed|miss|missed|regret)\b/,
+  /\bmade me (feel|so)\b/,
+].map(r => r.source).join('|'), 'i');
+
+/** True when the message is conversation about the domain, not a lookup in it. */
+const isTalkingAbout = text => ADVICE_SOUGHT.test(text) || EXPERIENCE_TOLD.test(text);
 
 /** Terse search queries (<= 3 words). */
 const isTerse = text => String(text).trim().split(/\s+/).length <= 3;
@@ -600,11 +667,29 @@ export function routeIntent(message) {
     return { intent: 'eligibility_question', tool: null, slots: {} };
   }
 
-  /* 4. Matchers */
+  /**
+   * 4. Matchers — unless the message is talking about the domain rather than
+   *    asking Welly to look something up in it.
+   *
+   * The guard sits here rather than inside each rule, and after everything
+   * above it, so a refusal, an informational question, an action request and a
+   * confirmation are all still matched from a sentence that also happens to
+   * seek advice. What it suppresses is the tool lookup — see `isTalkingAbout`.
+   *
+   * Suppression falls through to `unknown`, which is a CONVERSATIONAL intent:
+   * `assistant.js` sends it to the model when one is loaded and to
+   * `getConversationalReply` when one is not. So the reader gets an answer to
+   * what they asked rather than an empty search result.
+   */
+  const talking = isTalkingAbout(text);
+
   for (const matcher of MATCHERS) {
-    if (matcher.test(text)) {
-      return { intent: matcher.intent, tool: matcher.tool, slots: matcher.slots(text) };
-    }
+    if (!matcher.test(text)) continue;
+    /* Confirmations, cancellations and navigation are decisions about the
+       conversation itself and are never incidental keyword matches. */
+    const alwaysHonoured = ['confirm_action', 'cancel_action', 'navigate'].includes(matcher.intent);
+    if (talking && !alwaysHonoured) break;
+    return { intent: matcher.intent, tool: matcher.tool, slots: matcher.slots(text) };
   }
 
   return { intent: 'unknown', tool: null, slots: {} };

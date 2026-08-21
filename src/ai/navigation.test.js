@@ -46,3 +46,31 @@ describe('navigation resolution and role gating', () => {
     expect(res.card).toBeNull();
   });
 });
+
+/**
+ * The dashboard, added after an audit found "take me to my dashboard"
+ * resolving to nothing and falling through to `unknown`.
+ */
+describe('the dashboard destination', () => {
+  const student = { id: 's1', role: 'student', withheld: [] };
+  const partner = { id: 'p1', role: 'partner', withheld: [] };
+
+  it('resolves the phrasings people actually use', () => {
+    for (const text of ['take me to my dashboard', 'go to the dashboard', 'open my dashboard', 'take me to the home page']) {
+      const nav = resolveNavigation(text, student);
+      expect(nav, text).not.toBeNull();
+      expect(nav.path).toBe('/');
+      expect(nav.allowed).toBe(true);
+    }
+  });
+
+  it('refuses the reader who has no dashboard', () => {
+    /* A partner gets an explicit no-dashboard state in the shell; sending them
+       to `/` would be sending them nowhere. */
+    expect(resolveNavigation('take me to my dashboard', partner).allowed).toBe(false);
+  });
+
+  it('does not fire on a sentence that merely mentions being at home', () => {
+    expect(resolveNavigation('I volunteered near my home last week', student)).toBeNull();
+  });
+});

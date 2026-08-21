@@ -46,10 +46,15 @@ export function generateConversationTitle(messages = []) {
  * Strip volatile card data / live tokens before persisting.
  */
 function forStorage(messages) {
-  return (messages || []).slice(-MAX_TURNS).map(({ role, text, kind }) => ({
+  return (messages || []).slice(-MAX_TURNS).map(({ role, text, kind, systemNotice }) => ({
     role,
     text: typeof text === 'string' ? text : '',
     ...(kind ? { kind } : {}),
+    /* Kept, because it decides whether the turn is given back to the model
+       when the conversation is reopened. Without it, reloading a conversation
+       that contains a refusal reintroduces exactly the text `sanitizeHistory`
+       exists to hold back. */
+    ...(systemNotice ? { systemNotice: true } : {}),
   }));
 }
 
@@ -122,6 +127,7 @@ export function getConversation(id, { user } = {}) {
       role: m.role,
       text: m.text,
       ...(m.kind ? { kind: m.kind } : {}),
+      ...(m.systemNotice ? { systemNotice: true } : {}),
     })),
   };
 }

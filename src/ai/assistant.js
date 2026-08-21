@@ -348,6 +348,32 @@ export function sanitizeHistory(history, maxTurns = CHAT_HISTORY_TURNS) {
 
   return history
     .filter(m => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim())
+    /**
+     * ── Why the application's own notices are held back ──
+     *
+     * Some assistant turns are not answers. "I can't help with that one",
+     * "That is not something your account can ask me for", "Something went
+     * wrong", "Stopped." — those are the interface speaking about a failure,
+     * and they reach the transcript through the same `role: 'assistant'` door
+     * as a real reply.
+     *
+     * A small model reads the history as a record of how the assistant talks
+     * and imitates it. Measured against Qwen2.5-0.5B on 2026-08-21, in a
+     * conversation where an earlier turn had fallen back: asked a fresh
+     * question, the model reproduced
+     *
+     *     "I can't help with that one. I can look up opportunities, your
+     *      volunteer hours, your certificates, …"
+     *
+     * word for word as its own answer — a refusal the application had written,
+     * handed back as though the model had decided it.
+     *
+     * Only the notices go. The deterministic ANSWERS stay, because they carry
+     * the facts a follow-up depends on: "You do not have any verified hours
+     * yet" is what makes the next turn's "why?" mean anything. The user's own
+     * message stays either way, so the thread still reads as a conversation.
+     */
+    .filter(m => !(m.role === 'assistant' && m.systemNotice))
     .slice(-maxTurns)
     .map(m => ({ role: m.role, content: formatResponseText(m.text) }));
 }
@@ -381,7 +407,19 @@ async function chat(message, { runtime, onToken, signal, history = [] }) {
     const normModel = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (normUser.length > 0 && normModel === normUser) return null;
 
-    return { intent: 'chat', answer: cleaned, card: null, phrasedByModel: true };
+    /**
+     * `truncated` when the model was cut off by the token budget rather than
+     * finishing. Reported, never repaired: the interface shows a short note so
+     * a sentence ending mid-air is explained instead of looking like a bug, and
+     * the text itself is exactly what was generated.
+     */
+    return {
+      intent: 'chat',
+      answer: cleaned,
+      card: null,
+      phrasedByModel: true,
+      truncated: runtime.lastFinishReason === 'length',
+    };
   } catch (err) {
     if (isAbort(err)) return { intent: 'chat', answer: '', card: null, cancelled: true, phrasedByModel: false };
     return null;
@@ -520,6 +558,7 @@ export async function ask(
       answer: refusedForRole(user, intent, permission),
       card: null,
       phrasedByModel: false,
+      systemNotice: true,
     };
   }
 
@@ -555,6 +594,7 @@ export async function ask(
         card: null,
         toolFailed: true,
         phrasedByModel: false,
+        systemNotice: true,
       };
     }
 
@@ -607,6 +647,7 @@ export async function ask(
         answer: refusedForRole(user, 'navigate', { reason: 'role_not_permitted' }),
         card: null,
         phrasedByModel: false,
+        systemNotice: true,
       };
     }
   }
@@ -836,6 +877,10 @@ export async function ask(
       answer: FIXED[intent] || FIXED.unknown,
       card: null,
       phrasedByModel: false,
+      /* Only the two that mean "the application did not understand". The rest
+         of FIXED — the greeting, the capability list, the eligibility answer —
+         are real answers and belong in the history like any other. */
+      systemNotice: intent === 'unknown' || intent === 'empty',
     };
   }
 
@@ -856,6 +901,7 @@ export async function ask(
       card: null,
       toolFailed: true,
       phrasedByModel: false,
+      systemNotice: true,
     };
   }
 

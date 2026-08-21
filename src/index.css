@@ -11979,6 +11979,17 @@ input:disabled + .premium-slider {
   margin-top: 2px;
 }
 
+/* A reply the model was cut off partway through. Quiet: the answer above it is
+   still the answer, and this only explains why it stops where it does. */
+.welly-truncated {
+  margin: var(--s2) 0 0;
+  padding-left: var(--s2);
+  border-left: 2px solid var(--rule);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  max-width: 68ch;
+}
+
 .welly-card-wrapper {
   max-width: min(100%, 68ch);
   margin-top: var(--s3);

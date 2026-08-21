@@ -286,6 +286,82 @@ describe('every intent answers somebody', () => {
   });
 });
 
+/**
+ * Every tool kind ends in something a reader can use.
+ *
+ * ── The rule ──
+ *
+ * A successful lookup must produce either a sentence that carries the answer or
+ * a card that shows it, and preferably both. What it must never produce is the
+ * placeholder — `summarise()` ends in a `default` returning "Here is what I
+ * found.", and seven kinds reached it with no card either, so the data was
+ * fetched and then discarded in front of the reader.
+ *
+ * Five kinds deliberately have no card, and they are named rather than merely
+ * absent: four are confirmations of something that just happened, where the
+ * sentence says it completely, and one is two numbers already in the sentence.
+ * Naming them is what makes the list below a decision rather than an oversight.
+ */
+describe('every tool kind produces something to read', () => {
+  const toolsSrc = readFileSync(path.join(SRC, 'tools.js'), 'utf8');
+  const cardSrc = readFileSync(path.join(SRC, '..', 'components', 'ai', 'AssistantCard.jsx'), 'utf8');
+  const assistantSrc = readFileSync(path.join(SRC, 'assistant.js'), 'utf8');
+
+  const kinds = [...new Set([...toolsSrc.matchAll(/\bok\(\s*'([a-z_]+)'/g)].map(m => m[1]))];
+  const summarised = new Set(
+    [...assistantSrc.slice(
+      assistantSrc.indexOf('function summarise('),
+      assistantSrc.indexOf('function failureMessage('),
+    ).matchAll(/case '([a-z_]+)'/g)].map(m => m[1]),
+  );
+  const carded = new Set([...cardSrc.matchAll(/case '([a-z_]+)':/g)].map(m => m[1]));
+
+  /** Kinds that are complete as a sentence and would gain nothing from a card. */
+  const SENTENCE_IS_ENOUGH = new Set([
+    'application_withdrawn',  // "Your application has been withdrawn."
+    'preferences_updated',    // "Your notification preferences have been updated."
+    'profile_updated',        // "Your profile has been updated (bio, name)."
+    'event_created',          // "Event X has been created successfully."
+    'system_health',          // two numbers, both already in the sentence
+  ]);
+
+  it('found the kinds, so the checks below are checking something', () => {
+    expect(kinds.length).toBeGreaterThan(20);
+  });
+
+  it('gives every kind a summary sentence of its own', () => {
+    const missing = kinds.filter(k => !summarised.has(k));
+    expect(
+      missing,
+      'these fall through to "Here is what I found." — the data is fetched and discarded',
+    ).toEqual([]);
+  });
+
+  it('gives every kind either a card or a documented reason not to', () => {
+    const missing = kinds.filter(k => !carded.has(k) && !SENTENCE_IS_ENOUGH.has(k));
+    expect(
+      missing,
+      'add a renderer, or add the kind to SENTENCE_IS_ENOUGH with the reason',
+    ).toEqual([]);
+  });
+
+  it('does not list a kind as sentence-only that has a card anyway', () => {
+    /* Keeps the list honest as renderers are added. */
+    const stale = [...SENTENCE_IS_ENOUGH].filter(k => carded.has(k));
+    expect(stale, 'these have cards now and should come off the list').toEqual([]);
+  });
+
+  it('attributes every carded kind to a source', () => {
+    /* A card carries figures somebody acts on, so it says where they came
+       from — see AssistantSource. */
+    const sources = cardSrc.slice(cardSrc.indexOf('const SOURCES = {'));
+    const unattributed = kinds
+      .filter(k => carded.has(k))
+      .filter(k => !new RegExp(`\\b${k}:`).test(sources));
+    expect(unattributed).toEqual([]);
+  });
+});
+
 describe('the role gate still refuses what it should', () => {
   /**
    * Intents that carry a capability, and the roles that must NOT reach them.

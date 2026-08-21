@@ -34,6 +34,10 @@ export class MockRuntime {
     this.status = AIStatus.IDLE;
     this.model = null;
     this.lastError = null;
+    /* Mirrors WllamaRuntime, so a caller reading it is exercised in tests.
+       `queueTruncated()` is how a test scripts the cut-off case. */
+    this.lastFinishReason = null;
+    this._truncateNext = false;
 
     /* Call records, so tests can assert on what was asked rather than only on
        what came back — the schema a caller passed is often the thing worth
@@ -46,6 +50,13 @@ export class MockRuntime {
   /** Script the next reply. Returns `this` so setup reads as one expression. */
   queue(...responses) {
     this._responses.push(...responses);
+    return this;
+  }
+
+  /** Script a reply that ended because it ran out of room, not because it finished. */
+  queueTruncated(response) {
+    this._responses.push(response);
+    this._truncateNext = true;
     return this;
   }
 
@@ -106,6 +117,8 @@ export class MockRuntime {
         onToken?.(token);
       }
 
+      this.lastFinishReason = this._truncateNext ? 'length' : 'stop';
+      this._truncateNext = false;
       this.status = AIStatus.READY;
       return out;
     } catch (err) {

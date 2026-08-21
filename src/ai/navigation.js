@@ -8,6 +8,29 @@
 import { can } from '../authz.js';
 
 export const DESTINATIONS = Object.freeze({
+  /**
+   * The one destination that was missing, and the reasoning for the one that
+   * still is.
+   *
+   * "Take me to my dashboard" is the most ordinary navigation request in the
+   * product — Dashboard is the first entry in the rail — and it resolved to
+   * nothing, so the router's `navigate` rule failed and the sentence fell
+   * through to `unknown`.
+   *
+   * `self.read` rather than no capability: a partner has no dashboard at all
+   * (see `DASHBOARD_NAV` and the explicit no-dashboard state in App.jsx), and
+   * `self.read` is precisely the capability partners lack.
+   *
+   * There is deliberately no `welly` destination. Welly is a destination now,
+   * but the only place to ask Welly to open Welly is the page itself, so the
+   * entry would resolve to where the reader already is.
+   */
+  dashboard: {
+    path: '/',
+    label: 'Your Dashboard',
+    capability: 'self.read',
+    patterns: [/\bdashboard\b/i, /\bhome (page|screen)\b/i],
+  },
   applications: {
     path: '/discover?find=applications',
     label: 'Your Applications',

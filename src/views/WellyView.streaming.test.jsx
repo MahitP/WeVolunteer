@@ -507,3 +507,41 @@ describe('the cost of a turn', () => {
     setItem.mockRestore();
   });
 });
+
+/**
+ * A reply the model was cut off partway through.
+ *
+ * Generation stops at 512 tokens, and the 0.5B model writes past that when
+ * asked for something long — measured ending "...established in Chicago,
+ * Illinois, and". The prompt now asks for short answers, which is the real fix,
+ * but where the model overruns anyway the interface says so rather than leaving
+ * a sentence hanging with no explanation.
+ *
+ * What it must NOT do is repair the text. The reply shown is exactly the reply
+ * generated, cut where the model was cut.
+ */
+describe('when the model runs out of room', () => {
+  it('says so, without altering a character of what was generated', async () => {
+    const cut = 'The first public library opened in 1871, and the idea spread from there to';
+    runtime.queueTruncated(cut);
+
+    const t = setup();
+    await waitForReady();
+    await askWelly(CHATTY);
+
+    await waitFor(() => expect(t.bubbles()).toHaveLength(1));
+    expect(t.bubbles()[0].textContent).toBe(cut);
+    expect(t.transcript().getByText(/ran out of room/i)).toBeInTheDocument();
+  });
+
+  it('says nothing of the kind when the model finished on its own', async () => {
+    runtime.queue('Short and complete.');
+
+    const t = setup();
+    await waitForReady();
+    await askWelly(CHATTY);
+
+    await waitFor(() => expect(t.bubbles()).toHaveLength(1));
+    expect(t.transcript().queryByText(/ran out of room/i)).toBeNull();
+  });
+});

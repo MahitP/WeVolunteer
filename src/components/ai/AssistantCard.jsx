@@ -246,6 +246,146 @@ export default function AssistantCard({ card, onAction }) {
         </div>
       );
 
+    /**
+     * ── The kinds that had no card ──
+     *
+     * Twelve of twenty-four tool kinds reached `default` and rendered nothing.
+     * Seven of those also had no summary sentence, so a successful lookup
+     * answered "Here is what I found." with nothing under it — three of Welly's
+     * own suggestion chips among them.
+     *
+     * The sentences were added first, because a sentence is the answer and a
+     * card is the evidence. These are the kinds where the evidence is worth
+     * showing: a list somebody scans, a set of figures somebody compares, a
+     * record somebody clicks through to.
+     *
+     * Five kinds still have no card and should not have one. `application_
+     * withdrawn`, `preferences_updated`, `profile_updated` and `event_created`
+     * are confirmations of something that just happened — the sentence says it
+     * completely, and a card repeating it in a box adds furniture rather than
+     * information. `system_health` is two numbers already in the sentence.
+     */
+    case 'next_shift':
+      if (!data.next) return null;
+      return (
+        <dl className="ai-card">
+          <dt className="dim small">Next shift</dt>
+          <dd className="strong">{data.next.eventTitle || 'Shift'}</dd>
+          {data.next.startsAt && (
+            <>
+              <dt className="dim small">When</dt>
+              <dd className="strong">{data.next.startsAt}</dd>
+            </>
+          )}
+          {data.next.slotName && (
+            <>
+              <dt className="dim small">Role</dt>
+              <dd className="strong">{data.next.slotName}</dd>
+            </>
+          )}
+        </dl>
+      );
+
+    case 'waitlists':
+      if (!data.items?.length) return null;
+      return (
+        <ul className="ai-card stack-xs" aria-label="Shifts you are waitlisted for">
+          {data.items.map((w, i) => (
+            <li key={i}>
+              <span className="strong">{w.eventTitle || 'Shift'}</span>
+              <span className="dim small ai-card-meta">
+                {w.slotName ? `${w.slotName} · ` : ''}
+                {w.position ? `Number ${w.position} in the queue` : 'On the waitlist'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+
+    case 'my_events':
+      if (!data.items?.length) return null;
+      return (
+        <ul className="ai-card stack-xs" aria-label="Events you run">
+          {data.items.map(e => (
+            <li key={e.id}>
+              <Link to={`/discover?event=${encodeURIComponent(e.id)}`} className="strong">
+                {e.title}
+              </Link>
+              <span className="dim small ai-card-meta">
+                {e.status}
+                {e.spotsRemaining != null ? ` · ${e.spotsRemaining} spots left` : ''}
+                {e.deadline ? ` · Closes ${e.deadline}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+
+    case 'event_details':
+      return (
+        <div className="ai-card stack-xs">
+          <Link to={`/discover?event=${encodeURIComponent(data.id)}`} className="strong">
+            {data.title}
+          </Link>
+          <span className="dim small">
+            {[data.category, data.location].filter(Boolean).join(' · ')}
+            {data.deadline ? ` · Closes ${data.deadline}` : ''}
+          </span>
+          {data.slots?.length > 0 && (
+            <ul className="stack-xs" aria-label="Shifts">
+              {data.slots.map((slot, i) => (
+                <li key={i} className="dim small">
+                  {slot.name}
+                  {slot.startsAt ? ` · ${slot.startsAt}` : ''}
+                  {slot.maxSpots ? ` · ${slot.maxSpots} spots` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
+
+    case 'organizer_summary':
+      return (
+        <dl className="ai-card">
+          <dt className="dim small">Events</dt>
+          <dd className="strong">{data.events}</dd>
+          <dt className="dim small">Volunteers</dt>
+          <dd className="strong">{data.volunteers}</dd>
+          <dt className="dim small">Hours credited</dt>
+          <dd className="strong">{data.hours}</dd>
+          <dt className="dim small">Awaiting review</dt>
+          <dd className="strong">{data.pending}</dd>
+        </dl>
+      );
+
+    case 'platform_stats':
+      return (
+        <dl className="ai-card">
+          <dt className="dim small">Members</dt>
+          <dd className="strong">{data.users}</dd>
+          <dt className="dim small">Events</dt>
+          <dd className="strong">{data.events}</dd>
+          <dt className="dim small">Hours credited</dt>
+          <dd className="strong">{data.hours}</dd>
+          <dt className="dim small">Open reports</dt>
+          <dd className="strong">{data.openReports}</dd>
+        </dl>
+      );
+
+    case 'recent_audit':
+      if (!data.items?.length) return null;
+      return (
+        <ul className="ai-card stack-xs" aria-label="Recent audit entries">
+          {data.items.map((entry, i) => (
+            <li key={i}>
+              <span className="strong">{entry.action}</span>
+              {entry.at && <span className="dim small ai-card-meta">{entry.at}</span>}
+            </li>
+          ))}
+        </ul>
+      );
+
     default:
       return null;
   }
@@ -266,6 +406,14 @@ export function AssistantSource({ kind }) {
     event_roster: 'Event roster',
     admin_reports: 'Platform moderation',
     admin_appeals: 'Platform appeals',
+    next_shift: 'Your applications',
+    waitlists: 'Your applications',
+    my_events: 'Your events',
+    event_details: 'WeVolunteer opportunities',
+    organizer_summary: 'Your events',
+    platform_stats: 'Platform analytics',
+    recent_audit: 'The audit trail',
+    system_health: 'Platform error reporting',
   };
   const label = SOURCES[kind];
   if (!label) return null;
