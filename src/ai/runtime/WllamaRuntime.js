@@ -200,8 +200,25 @@ export class WllamaRuntime {
    *                                  was queued on the JavaScript side
    *
    * That last one is the informative negative: the residue is not a pending
-   * message this code can collect. It is inside wllama's worker, and the
-   * library exposes no way to reach it. The only reset available is tearing the
+   * message this code can collect.
+   *
+   * ── Where it actually is, established by upgrading ──
+   *
+   * wllama 3.6.0 rewrote exactly the machinery that would explain a JavaScript
+   * cause. `getResponse` gained a `req_id` on every `get_result` call, so a
+   * result can no longer be handed to whichever request asks next, and a
+   * `finally` block calling `cancelRequest(reqId)` — commented "any exit before
+   * the final chunk (abort, decode error, onData throw) must free the slot" —
+   * addresses the cancellation case by name.
+   *
+   * Installed and run against the same model on 2026-08-21, the behaviour was
+   * unchanged: "The capital of Spain is Madrid" / ".The capital of Kenya is" /
+   * "Nairobi.The capital of Peru". The upgrade was reverted, because it costs
+   * 870 KB more WebAssembly for every student and fixes nothing here.
+   *
+   * That is the conclusive result: the residue is not in the JavaScript request
+   * layer at all, it is in the llama.cpp context inside the worker, and no
+   * change on this side of the boundary will reach it. The only reset available is tearing the
    * instance down and loading the model again, measured at 11.5 seconds from
    * cold — an eleven-second stall after every reply, to avoid a few stray
    * characters at the start of the next one.
