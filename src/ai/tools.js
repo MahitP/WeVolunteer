@@ -217,13 +217,39 @@ export const TOOLS = {
     capability: null,
     privacy: PRIVACY.USER_PRIVATE,
     resourceScope: 'own',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    async run() {
+    inputSchema: {
+      type: 'object',
+      properties: {
+        /**
+         * Which ones, when the question narrowed it.
+         *
+         * There was no filter here at all, so "Rejected Applications?" returned
+         * every application and the answer named accepted ones. The server has
+         * no per-status endpoint and the list is already bounded by the
+         * reader's own record, so this filters what came back rather than
+         * asking for less.
+         *
+         * `waitlisted` is not offered: `my_waitlists` is a separate tool with a
+         * card that shows the place in the queue, and the router reaches it
+         * first.
+         */
+        status: { type: 'string', enum: ['pending', 'accepted', 'rejected', 'withdrawn'] },
+      },
+      additionalProperties: false,
+    },
+    async run({ status = null } = {}) {
       try {
         const rows = await api.fetchApplications();
-        const list = Array.isArray(rows) ? rows : [];
+        const all = Array.isArray(rows) ? rows : [];
+        const list = status
+          ? all.filter(a => String(a.status || '').toLowerCase() === status)
+          : all;
         return ok('applications', {
           total: list.length,
+          /* Echoed back so the sentence can name what was asked for. Without it
+             a filtered empty result reads as "you have not applied to anything
+             yet", which is a different and wrong statement. */
+          status,
           items: list.slice(0, MAX_ROWS).map(a => ({
             id: a.id,
             eventTitle: a.event?.title || a.eventTitle || a.event_title,

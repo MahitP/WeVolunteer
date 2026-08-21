@@ -125,9 +125,23 @@ function summarise(kind, data) {
     case 'organizations':
       if (!data.total) return 'You are not part of any organizations yet.';
       return `You are part of ${data.total} ${data.total === 1 ? 'organization' : 'organizations'}.`;
-    case 'applications':
-      if (!data.total) return 'You have not applied to anything yet.';
-      return `You have applied to ${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}.`;
+    case 'applications': {
+      /* The status has to reach the sentence. A filtered empty result phrased
+         as "you have not applied to anything yet" answers a different question
+         than the one asked, and answers it wrongly. */
+      if (!data.total) {
+        return data.status
+          ? `You have no ${data.status} applications.`
+          : 'You have not applied to anything yet.';
+      }
+      /* The unfiltered wording is unchanged — it was right, and "you have 3
+         applications" is a flatter sentence than "you have applied to 3
+         opportunities" for no gain. */
+      if (!data.status) {
+        return `You have applied to ${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}.`;
+      }
+      return `You have ${data.total} ${data.status} ${data.total === 1 ? 'application' : 'applications'}.`;
+    }
     case 'opportunities':
       if (!data.total) return "I couldn't find any opportunities matching that.";
       return `I found ${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}.`;
@@ -546,7 +560,11 @@ export async function ask(
   message,
   { runtime = null, position = null, onToken, signal, history = [], user = null } = {},
 ) {
-  const { intent, tool, slots } = routeIntent(message);
+  const routed = routeIntent(message);
+  const { tool, slots } = routed;
+  /* Reassigned in exactly one place — a "yes" with nothing pending behind it is
+     agreement, not a confirmation. See section 2. */
+  let intent = routed.intent;
 
   /* ── 1. Role Gate ────────────────────────────────────────────────────────── */
   const permission = checkRole(user, intent);
@@ -563,46 +581,60 @@ export async function ask(
   /* ── 2. Draft Lifecycle Confirmations & Cancellations ─────────────────────── */
   if (intent === 'confirm_action') {
     const pending = getPendingDraft(null, { user });
+    /**
+     * ── "sure" is not always a confirmation ──
+     *
+     * `confirm_action` matches "yes", "sure", "go ahead" and the rest, which is
+     * right when a draft is waiting and wrong the rest of the time — and the
+     * rest of the time is most of the time, because those are also the ordinary
+     * words for agreeing with something that was just said.
+     *
+     * Reported: Welly said "You have no verified hours. I can help find them
+     * for you." A student replied "sure" and was told "There is no pending
+     * action to confirm." Two faults in one exchange. The offer was a
+     * hallucination from the model paraphrasing a tool result, which is fixed
+     * at the source; this is the other half — the reply to it read as an error
+     * report about a mechanism the student had no idea existed.
+     *
+     * With nothing pending, this is an affirmation and is answered as one, by
+     * the conversational path below. The intent is reassigned rather than
+     * answered here so there is one implementation of what "sure" means.
+     */
     if (!pending) {
+      intent = 'affirmation';
+    } else {
+      const { ok: confirmed, draft, reason } = confirmDraft(pending.id, { user });
+      if (!confirmed || !draft) {
+        return {
+          intent,
+          answer: reason === 'user_mismatch'
+            ? "This action was prepared by a different user session."
+            : "The pending action has expired or was already processed.",
+          card: null,
+          phrasedByModel: false,
+        };
+      }
+
+      const result = await runTool(draft.tool, draft.args, { user });
+      if (!result.ok) {
+        return {
+          intent,
+          answer: failureMessage(result.reason),
+          card: null,
+          toolFailed: true,
+          phrasedByModel: false,
+          systemNotice: true,
+        };
+      }
+
+      const summary = summarise(result.kind, result.data);
       return {
         intent,
-        answer: "There is no pending action to confirm. What would you like help with?",
-        card: null,
+        answer: summary,
+        card: { kind: result.kind, data: result.data },
         phrasedByModel: false,
       };
     }
-
-    const { ok: confirmed, draft, reason } = confirmDraft(pending.id, { user });
-    if (!confirmed || !draft) {
-      return {
-        intent,
-        answer: reason === 'user_mismatch'
-          ? "This action was prepared by a different user session."
-          : "The pending action has expired or was already processed.",
-        card: null,
-        phrasedByModel: false,
-      };
-    }
-
-    const result = await runTool(draft.tool, draft.args, { user });
-    if (!result.ok) {
-      return {
-        intent,
-        answer: failureMessage(result.reason),
-        card: null,
-        toolFailed: true,
-        phrasedByModel: false,
-        systemNotice: true,
-      };
-    }
-
-    const summary = summarise(result.kind, result.data);
-    return {
-      intent,
-      answer: summary,
-      card: { kind: result.kind, data: result.data },
-      phrasedByModel: false,
-    };
   }
 
   if (intent === 'cancel_action') {

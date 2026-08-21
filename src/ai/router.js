@@ -173,6 +173,42 @@ const isTerse = text => String(text).trim().split(/\s+/).length <= 3;
 const GREETING = /^(hi+|hey+|hello+|hullo|yo|hiya|howdy|sup|greetings|good (morning|afternoon|evening|day))([\s,]+(there|welly))?[\s!.,?]*$/i;
 const SMALLTALK = /^((can|can'?t|why can'?t)\s+(you|u)\s+(talk|chat|speak)|(u|you)\s+(can'?t|cannot)\s+(talk|chat|speak)|what happened to (free )?chat|(are|r)\s+(you|u)\s+(there|real|a bot|human|an ai)|how are (you|u)|how'?s it going|what'?s up|sup|who are you|what is your name)[\s!.,?]*$/i;
 
+/**
+ * Which applications, when the question narrows it.
+ *
+ * ── The defect ──
+ *
+ * "Rejected Applications?" matched `my_applications` on the word "applications"
+ * and produced no slots at all, so the tool returned every application and the
+ * sentence over it said "You have applied to 3 opportunities." The reported
+ * answer named accepted ones in reply to a question about rejected ones — and
+ * it was not the model doing it, the tool genuinely returned them.
+ *
+ * ── Rejected before accepted ──
+ *
+ * The order of these tests is load-bearing. "not accepted" and "wasn't
+ * accepted" both contain "accepted", so an accepted-first list answers the
+ * opposite of what was asked. Every negation lives in the rejected pattern for
+ * that reason rather than as a separate guard.
+ *
+ * Waitlisted is absent on purpose: `my_waitlists` is matched earlier and has a
+ * card that shows the place in the queue, which is the thing somebody asking is
+ * actually after.
+ */
+const APPLICATION_STATUS_WORDS = [
+  ['rejected', /\b(rejected|declined|denied|turned down|unsuccessful|not (accepted|selected|chosen|picked)|wasn'?t (accepted|selected|chosen|picked)|did ?n(?:'|o)?t get (in|picked|selected|chosen))\b/i],
+  ['accepted', /\b(accepted|approved|selected|chosen|got in|successful|confirmed)\b/i],
+  ['pending', /\b(pending|waiting|undecided|not (yet )?(decided|answered)|still (open|out|waiting))\b/i],
+  ['withdrawn', /\b(withdrawn|withdrew|cancell?ed|pulled out|backed out)\b/i],
+];
+
+function applicationStatusAsked(text) {
+  for (const [status, pattern] of APPLICATION_STATUS_WORDS) {
+    if (pattern.test(text)) return status;
+  }
+  return null;
+}
+
 /** Affirmations, gratitude and conversational wrap-ups. */
 const AFFIRMATION = /^(thanks?|thank you|ty|thx|cool|awesome|great|perfect|ok|okay|k|alright|got it|understood|sounds good|will do|nice)[\s!.,?]*$/i;
 
@@ -508,7 +544,10 @@ const MATCHERS = [
       || /\b(participated|attended|took part|been to|went to)\b/i.test(text)
       || /\bdid i\b.{0,20}\b(participate|attend|go|volunteer|do)\b/i.test(text)
       || /\bhave i\b.{0,20}\b(participated|attended|been|volunteered)\b/i.test(text),
-    slots: () => ({}),
+    slots: text => {
+      const status = applicationStatusAsked(text);
+      return status ? { status } : {};
+    },
   },
   {
     intent: 'my_notifications',

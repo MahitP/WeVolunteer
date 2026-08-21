@@ -73,15 +73,50 @@ describe('student actions and draft-and-confirm lifecycle', () => {
 
     // Stale "yes" after cancellation does nothing
     const staleRes = await ask('yes', { user: student });
-    expect(staleRes.answer).toMatch(/no pending action/i);
+    expect(staleRes.intent).not.toBe('confirm_action');
     expect(api.withdrawApplication).not.toHaveBeenCalled();
   });
 
   it('does not execute actions on bare "yes" without a pending draft', async () => {
+    /**
+     * ── The assertion that changed, and the one that did not ──
+     *
+     * This used to require the answer to say "There is no pending action to
+     * confirm." The safety property — a bare "yes" executes nothing — is
+     * unchanged and is what the calls below assert. The wording is not.
+     *
+     * Reported: Welly said "You have no verified hours. I can help find them
+     * for you." The student replied "sure" and got "There is no pending action
+     * to confirm." That is an error report about a mechanism they have no idea
+     * exists, in reply to a word that in every other context means "go on".
+     * `confirm_action` matches "yes", "sure" and "go ahead", which is right when
+     * a draft is waiting and wrong the rest of the time — and the rest of the
+     * time is most of the time.
+     *
+     * So with nothing pending it is an affirmation, answered as one. The draft
+     * machinery is untouched: `allows cancelling a pending draft` above still
+     * proves a stale yes cannot resurrect a cancelled draft, and the two calls
+     * below still prove nothing runs.
+     */
     const res = await ask('yes', { user: student });
-    expect(res.answer).toMatch(/no pending action to confirm/i);
+
+    expect(res.intent).toBe('affirmation');
+    expect(res.answer).not.toMatch(/pending action|confirm/i);
     expect(api.withdrawApplication).not.toHaveBeenCalled();
     expect(api.createEvent).not.toHaveBeenCalled();
+  });
+
+  it('still says so when a draft is genuinely gone rather than never made', async () => {
+    /* The wording above went; this case keeps a real one. A draft that expired
+       or was already run is a different situation from never having had one,
+       and the reader was in the middle of it. */
+    await ask('withdraw my application for app-999', { user: student });
+    const first = await ask('yes', { user: student });
+    expect(first.intent).toBe('confirm_action');
+
+    const second = await ask('yes', { user: student });
+    expect(second.intent).toBe('affirmation');
+    expect(api.withdrawApplication).toHaveBeenCalledTimes(1);
   });
 
   it('creates a draft for profile update and applies on confirmation', async () => {
