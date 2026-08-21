@@ -136,7 +136,17 @@ describe('a proximity search with no location', () => {
 
 describe('when the app already has coordinates', () => {
   it('says nothing about location at all', async () => {
-    show({ location: { latitude: 34.42, longitude: -119.7 } });
+    /**
+     * From the context, not a prop.
+     *
+     * The prop was `location`, supplied by App.jsx from `useLocation()` —
+     * react-router's, which has a `pathname` and no coordinates. Both were
+     * always undefined while the object was truthy, so every "near me" search
+     * went out unlocated and looked located to the code that checked. The name
+     * is the bug, so the prop is gone.
+     */
+    ctx.location = { latitude: 34.42, longitude: -119.7 };
+    show();
     askNearby();
 
     await inTranscript(/I found 1 opportunity/);

@@ -135,7 +135,7 @@ function HistoryNote({ saving }) {
 /**
  * Dedicated Welly View.
  */
-export default function WellyView({ currentUser = null, location = null, onViewDetails = null }) {
+export default function WellyView({ currentUser = null, onViewDetails = null }) {
   const navigate = useNavigate();
 
   // Active conversation state
@@ -180,17 +180,29 @@ export default function WellyView({ currentUser = null, location = null, onViewD
   const textareaRef = useRef(null);
   const workspaceRef = useRef(null);
 
-  const position = location
-    ? { lat: location.latitude, lng: location.longitude }
-    : null;
-
   /**
-   * Read directly rather than threaded through props, because the only thing
-   * wanted from it is the gesture handler — the coordinates already arrive as
-   * `location` from the shell. Null outside a provider, which is why every use
-   * below is guarded: the view is mounted bare in several tests.
+   * Where the reader is, and the prop that never carried it.
+   *
+   * This page took a `location` prop and derived `position` from
+   * `location.latitude` / `location.longitude`. App.jsx supplied it from
+   * `const location = useLocation()` — react-router's, which is
+   * `{pathname, search, hash, state, key}`. So both coordinates were always
+   * `undefined` while the object itself was truthy, and every "near me" search
+   * Welly has ever run went out unlocated while looking located to the code
+   * that checked.
+   *
+   * The name is the whole bug: two different `location`s, one of them the most
+   * common hook name in a router-based app. So the prop is gone rather than
+   * corrected, and the coordinates come from the context that owns them —
+   * which this component already reads for the permission gesture.
+   *
+   * Null outside a provider, which is why every use below is guarded: the view
+   * is mounted bare in several tests.
    */
   const locationCtx = useLocationContext();
+  const position = locationCtx?.location
+    ? { lat: locationCtx.location.latitude, lng: locationCtx.location.longitude }
+    : null;
 
   /* State and ref together, always. Every place that changes which conversation
      is on screen goes through here, so the guard in `send()` cannot be looking

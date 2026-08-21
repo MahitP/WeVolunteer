@@ -1524,7 +1524,10 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/users/:handle/certificates': { currentUser },
     '/users/:handle/hours': { currentUser },
     '/certificates': { currentUser, addToast },
-    '/welly': { currentUser, location, onViewDetails: openEventById },
+    /* No `location`: this scope's `location` is react-router's, and Welly reads
+       coordinates from LocationContext itself. Passing it here is what made
+       every "near me" search silently unlocated. */
+    '/welly': { currentUser, onViewDetails: openEventById },
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },

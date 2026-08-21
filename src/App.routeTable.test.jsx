@@ -151,7 +151,11 @@ describe('authenticated route table', () => {
       ['/calendar', 'calendar', 'applications,currentUser,events,onViewEvent'],
       ['/messages', 'messages', ''],
       ['/portfolio', 'portfolio', 'currentUser'],
-      ['/welly', 'welly', 'currentUser,location,onViewDetails'],
+      /* `location` is gone deliberately. It was react-router's location object
+         — the shell's `const location = useLocation()` — and Welly read
+         `.latitude` / `.longitude` off it, which are not fields it has. The
+         coordinates come from LocationContext now. */
+      ['/welly', 'welly', 'currentUser,onViewDetails'],
       ['/settings', 'settings', 'addToast,currentUser,onProfileChange'],
       ['/notifications', 'notifications', 'onCountChange,onViewEvent']
     ]) {
