@@ -4,12 +4,24 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 /**
- * The panel driven end to end against a mocked API and no model at all.
+ * Welly driven end to end against a mocked API and no model at all.
  *
  * That combination is deliberate: it is exactly the state a student is in
  * during the seconds before the model finishes loading, and — for anyone whose
  * device or browser cannot run one — permanently. The assistant has to be
  * useful and correct there, so that is what these tests exercise.
+ *
+ * ── Why these moved off AssistantPanel ──
+ *
+ * They were written against `AssistantPanel`, the popover Welly used to open
+ * from the topbar. Welly is a destination now and nothing renders that panel
+ * any more, so it was deleted rather than left as a second chat implementation
+ * to drift out of step with this one. Every guarantee it held is here, against
+ * the surface a student actually sees: the answer comes from the tool, the card
+ * comes from data, a failed lookup is not reported as an empty one, somebody
+ * else's record is refused before anything is fetched, the transcript is kept
+ * out of session replay, and nothing is written to the device unless the
+ * preference says so.
  */
 
 const apiMock = {
@@ -21,18 +33,38 @@ const apiMock = {
   verifyCertificate: vi.fn(),
 };
 
-vi.mock('../../utils/api', () => ({ api: apiMock }));
+vi.mock('../utils/api', () => ({ api: apiMock }));
 
-const { default: AssistantPanel } = await import('./AssistantPanel.jsx');
+const { default: WellyView } = await import('./WellyView.jsx');
+
+/** A student, because every question below is about a student's own record. */
+const student = { id: 'stu-behaviour-1', name: 'Maya Lin', role: 'student', verified: true, withheld: [] };
+
+/** Where a saved conversation lands, for this user. See ai/conversation.js. */
+const STORE_KEY = `wev-ai-conversations-${student.id}`;
 
 const renderPanel = () => render(
-  <MemoryRouter><AssistantPanel onClose={vi.fn()} position={null} /></MemoryRouter>,
+  <MemoryRouter><WellyView currentUser={student} /></MemoryRouter>,
 );
 
 const askQuestion = text => {
-  fireEvent.change(screen.getByLabelText(/ask welly/i), { target: { value: text } });
-  fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+  fireEvent.change(screen.getByLabelText(/ask welly a question/i), { target: { value: text } });
+  fireEvent.click(screen.getByRole('button', { name: /send question to welly/i }));
 };
+
+/**
+ * Text in the visible transcript.
+ *
+ * The page also carries an `sr-only` status region holding the finished answer,
+ * so a screen reader hears a reply that streamed in — the transcript itself is
+ * deliberately not a live region. A bare `findByText` therefore matches twice.
+ */
+const inTranscript = matcher =>
+  screen.findAllByText(matcher).then(found => {
+    const visible = found.filter(el => !el.closest('.sr-only'));
+    expect(visible.length).toBeGreaterThan(0);
+    return visible[0];
+  });
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -62,7 +94,7 @@ describe('asking a question with no model loaded', () => {
     renderPanel();
     askQuestion('how many hours do I have');
 
-    expect(await screen.findByText('You have 35.5 verified hours.')).toBeInTheDocument();
+    expect(await inTranscript('You have 35.5 verified hours.')).toBeInTheDocument();
 
     /* The card is rendered from data, not from the reply text, and carries the
        number a student would act on. */
@@ -74,13 +106,15 @@ describe('asking a question with no model loaded', () => {
   it('attributes the answer to where it came from', async () => {
     renderPanel();
     askQuestion('how many hours do I have');
-    expect(await screen.findByText(/Source: Your volunteer record/i)).toBeInTheDocument();
+    expect(await inTranscript(/Source: Your volunteer record/i)).toBeInTheDocument();
   });
 
   it('runs a suggestion when it is pressed', async () => {
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: /how many hours do i have/i }));
-    expect(await screen.findByText(/35\.5 verified hours/)).toBeInTheDocument();
+    /* The suggestion card, not the send button that inherits the same text
+       once the question is in the composer. */
+    fireEvent.click(screen.getAllByRole('button', { name: /how many hours do i have/i })[0]);
+    expect(await inTranscript(/35\.5 verified hours/)).toBeInTheDocument();
   });
 });
 
@@ -93,7 +127,7 @@ describe('telling the truth about failures', () => {
     renderPanel();
     askQuestion('find volunteering opportunities');
 
-    expect(await screen.findByText(/couldn't reach WeVolunteer/i)).toBeInTheDocument();
+    expect(await inTranscript(/couldn't reach WeVolunteer/i)).toBeInTheDocument();
     expect(screen.queryByText(/couldn't find any/i)).toBeNull();
   });
 
@@ -101,7 +135,7 @@ describe('telling the truth about failures', () => {
     renderPanel();
     askQuestion("show me someone else's hours");
 
-    expect(await screen.findByText(/only look at your own record/i)).toBeInTheDocument();
+    expect(await inTranscript(/only look at your own record/i)).toBeInTheDocument();
     expect(apiMock.fetchVolunteerStats).not.toHaveBeenCalled();
   });
 });
@@ -120,10 +154,12 @@ describe('privacy of the transcript', () => {
   it('keeps nothing on the device unless the preference is on', async () => {
     renderPanel();
     askQuestion('how many hours do I have');
-    await screen.findByText(/35\.5 verified hours/);
+    await inTranscript(/35\.5 verified hours/);
 
     /* Off by default, so there is nothing written rather than something
-       written and hidden. */
+       written and hidden. Both keys: the user-scoped store this page writes,
+       and the single-conversation key that predates it. */
+    expect(window.localStorage.getItem(STORE_KEY)).toBeNull();
     expect(window.localStorage.getItem('wev-ai-conversation')).toBeNull();
   });
 
@@ -135,11 +171,11 @@ describe('privacy of the transcript', () => {
 
     renderPanel();
     askQuestion('how many hours do I have');
-    await screen.findByText(/35\.5 verified hours/);
+    await inTranscript(/35\.5 verified hours/);
 
     await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem('wev-ai-conversation'));
-      expect(stored.some(m => m.role === 'user')).toBe(true);
+      const stored = JSON.parse(window.localStorage.getItem(STORE_KEY));
+      expect(stored[0].messages.some(m => m.role === 'user')).toBe(true);
     });
   });
 
@@ -153,11 +189,11 @@ describe('privacy of the transcript', () => {
 
     renderPanel();
     askQuestion('how many hours do I have');
-    await screen.findByText(/35\.5 verified hours/);
+    await inTranscript(/35\.5 verified hours/);
 
     await waitFor(() => {
-      const stored = JSON.parse(window.localStorage.getItem('wev-ai-conversation'));
-      expect(stored.every(m => !('card' in m))).toBe(true);
+      const stored = JSON.parse(window.localStorage.getItem(STORE_KEY));
+      expect(stored[0].messages.every(m => !('card' in m))).toBe(true);
     });
   });
 });
@@ -171,13 +207,38 @@ describe('clearing', () => {
 
     renderPanel();
     askQuestion('how many hours do I have');
-    await screen.findByText(/35\.5 verified hours/);
+    await inTranscript(/35\.5 verified hours/);
 
-    fireEvent.click(screen.getByRole('button', { name: /clear conversation/i }));
+    /* Clearing every conversation is destructive and asks first. The control
+       appears once there is a conversation in the list to clear, which is one
+       render after the answer lands. */
+    const clear = await screen.findAllByRole('button', { name: /clear (all )?history/i });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(clear[0]);
+    expect(confirm).toHaveBeenCalled();
+    confirm.mockRestore();
 
     await waitFor(() => {
-      expect(screen.queryByText(/35\.5 verified hours/)).toBeNull();
+      expect(screen.queryAllByText(/35\.5 verified hours/).filter(el => !el.closest('.sr-only'))).toHaveLength(0);
     });
-    expect(window.localStorage.getItem('wev-ai-conversation')).toBeNull();
+    expect(window.localStorage.getItem(STORE_KEY)).toBeNull();
+  });
+
+  it('does not clear anything when the confirmation is declined', async () => {
+    window.localStorage.setItem(
+      'wev-ai-prefs',
+      JSON.stringify({ enabled: true, modelId: null, saveConversations: true }),
+    );
+
+    renderPanel();
+    askQuestion('how many hours do I have');
+    await inTranscript(/35\.5 verified hours/);
+
+    const clear = await screen.findAllByRole('button', { name: /clear (all )?history/i });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    fireEvent.click(clear[0]);
+    confirm.mockRestore();
+
+    expect(screen.getAllByText(/35\.5 verified hours/).filter(el => !el.closest('.sr-only')).length).toBeGreaterThan(0);
   });
 });

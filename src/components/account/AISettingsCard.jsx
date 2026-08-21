@@ -67,7 +67,7 @@ export default function AISettingsCard({ addToast }) {
      * bar sits at "0 MB of 940 MB", the completion handler returns before
      * writing preferences so the 940 MB that just landed is never recognised,
      * and `finally` never clears the progress state so it says "Downloading"
-     * forever. AssistantPanel.jsx already does this correctly.
+     * forever. WellyView.jsx already does this correctly.
      */
     aliveRef.current = true;
     return () => {

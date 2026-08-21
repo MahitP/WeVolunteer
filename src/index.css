@@ -3447,7 +3447,6 @@ time { font-variant-numeric: tabular-nums; }
 
   @media (max-width: 339px) {
     .mobilenav-item { min-width: 3.25rem; padding-left: 0; padding-right: 0; }
-    .mobilenav-more { min-width: 2.75rem; }
   }
 
   /* Pinned, and visibly a different control from the destinations beside it. */
@@ -3455,6 +3454,13 @@ time { font-variant-numeric: tabular-nums; }
     flex: 0 0 auto;
     min-width: 3.25rem;
     border-left: 1px solid var(--rule);
+  }
+
+  /* AFTER the rule it narrows, not with the item step-down above it. A media
+     query adds no specificity, so an override written earlier in the file loses
+     to the base declaration and does nothing at all. */
+  @media (max-width: 339px) {
+    .mobilenav-more { min-width: 2.75rem; }
   }
 
   /**
@@ -11062,40 +11068,10 @@ input:disabled + .premium-slider {
   display: block;
 }
 
-/* The launcher is an ordinary topbar icon button. It was a fixed-position
-   circle in the corner — the shape every support widget on the web uses — and
-   needed a z-index and a media query to avoid the mobile bottom navigation.
-   Sitting in the action row it needs neither. */
-.welly-launcher {
-  flex: none;
-}
 
-.ai-transcript {
-  max-height: 46vh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
 
-.ai-turn p {
-  margin: 0;
-  white-space: pre-wrap;
-}
 
-/* The person's own words are set apart from the reply by alignment and a
-   surface, never by colour alone. */
-.ai-turn-user {
-  padding: var(--s2) var(--s3);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  margin-left: auto;
-  max-width: 85%;
-  width: fit-content;
-}
 
-.ai-turn-assistant {
-  max-width: 100%;
-}
 
 /* The half of an answer that is rendered from data rather than written by the
    model. Bordered so it reads as a record rather than as more prose. */
@@ -11135,22 +11111,8 @@ input:disabled + .premium-slider {
   margin-top: var(--s2);
 }
 
-.ai-suggestions {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
 
-.ai-composer {
-  display: flex;
-  gap: var(--s2);
-  align-items: center;
-}
 
-.ai-composer .input {
-  flex: 1;
-  min-width: 0;
-}
 
 /* Why a suggestion is being shown. Sits under the card's meta line, so it
    reads as an aside rather than as more of the card's own detail. */

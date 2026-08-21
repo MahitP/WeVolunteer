@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles, Cloud, Check, ChevronDown, AlertCircle } from 'lucide-react';
 import { AIStatus } from '../../ai/runtime/types.js';
+import { isLocalAIEnabled } from '../../ai';
 
 /**
  * Which Welly is answering, and how to change it.
@@ -73,6 +74,17 @@ export default function WellyModeControl({
   const panelId = useId();
 
   const mode = modeFor({ capability, prefs, status });
+
+  /**
+   * A build that opted out of on-device AI has one mode, so it needs no control.
+   *
+   * Rendering one here would be worse than useless: it would name Welly AI,
+   * describe it, and link to a Settings card that renders nothing in this
+   * build — `AISettingsCard` gates on the same flag. Every surface gates on
+   * `isLocalAIEnabled()`; this is one of them, and `disabledPath.test.jsx` is
+   * what holds that.
+   */
+  if (!isLocalAIEnabled()) return null;
 
   /* Escape closes and returns focus to the control that opened it; a click
      outside just closes. Both are what `useModal` gives a dialog, and this is

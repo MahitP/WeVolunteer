@@ -48,7 +48,8 @@ vi.mock('../../ai', async () => {
   return { ...real, isLocalAIEnabled: () => false };
 });
 
-const AssistantLauncher = (await import('../components/ai/AssistantLauncher.jsx')).default;
+const WellyModeControl = (await import('../components/ai/WellyModeControl.jsx')).default;
+const WellyView = (await import('../views/WellyView.jsx')).default;
 const AISettingsCard = (await import('../components/account/AISettingsCard.jsx')).default;
 const CertificateImport = (await import('../components/account/CertificateImport.jsx')).default;
 const TagSuggestions = (await import('../components/common/TagSuggestions.jsx')).default;
@@ -59,11 +60,33 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+const student = { id: 'stu-disabled-1', name: 'Maya Lin', role: 'student', verified: true, withheld: [] };
+
 describe('a build that opted out of on-device AI', () => {
-  it('renders no launcher in the topbar', () => {
-    const { container } = render(<MemoryRouter><AssistantLauncher /></MemoryRouter>);
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByRole('button', { name: /welly/i })).toBeNull();
+  /**
+   * Welly the DESTINATION still works — it answers from the reader's records
+   * and needs no model to do it. What must not appear is any offer of the
+   * on-device engine, because there is nothing behind the offer: `AISettingsCard`
+   * gates on the same flag and renders nothing, so the link would lead to an
+   * empty page.
+   */
+  it('offers no way to turn on an engine this build does not ship', () => {
+    render(
+      <MemoryRouter>
+        <WellyModeControl capability={{ supported: true }} prefs={{}} status="idle" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('button', { name: /welly ai/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /welly ai/i })).toBeNull();
+  });
+
+  it('still lets a student ask Welly a question', () => {
+    render(<MemoryRouter><WellyView currentUser={student} /></MemoryRouter>);
+
+    expect(screen.getByLabelText(/ask welly a question/i)).toBeInTheDocument();
+    expect(screen.getByText(/Hi, Maya!/)).toBeInTheDocument();
+    /* And nowhere on the page is the on-device engine named. */
+    expect(screen.queryByText(/Welly AI/i)).toBeNull();
   });
 
   it('renders no settings panel', () => {
@@ -94,8 +117,12 @@ describe('a build that opted out of on-device AI', () => {
       JSON.stringify({ enabled: true, modelId: 'qwen2.5-0.5b-instruct-q4km' }),
     );
 
-    const { container } = render(<MemoryRouter><AssistantLauncher /></MemoryRouter>);
-    expect(container).toBeEmptyDOMElement();
+    render(
+      <MemoryRouter>
+        <WellyModeControl capability={{ supported: true }} prefs={{ enabled: true, modelId: 'qwen2.5-0.5b-instruct-q4km' }} status="idle" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/Welly AI/i)).toBeNull();
   });
 });
 

@@ -9,6 +9,20 @@ import * as prefs from '../ai/preferences';
 
 vi.mock('../ai/assistant');
 
+/**
+ * The build flag, on.
+ *
+ * `LOCAL_AI` is folded to a literal at transform time (see src/ai/index.js), so
+ * under vitest it resolves to false and the mode control — which gates on it,
+ * like every other Welly AI surface — renders nothing. The enabled-path suites
+ * mock the seam rather than the env for exactly this reason; see the note in
+ * `disabledPath.test.jsx`, which asserts the other direction.
+ */
+vi.mock('../ai', async importOriginal => ({
+  ...(await importOriginal()),
+  isLocalAIEnabled: () => true,
+}));
+
 const studentUser = {
   id: 'student-1',
   name: 'Maya Lin',
