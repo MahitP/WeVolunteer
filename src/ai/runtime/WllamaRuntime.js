@@ -74,6 +74,20 @@ export class WllamaRuntime {
      */
     this.lastFinishReason = null;
     this._wllama = null;
+    /**
+     * The generation currently in flight worker-side, if any.
+     *
+     * Cancelling rejects our promise but does not stop the worker, which keeps
+     * decoding the abandoned reply. Asking the next question before it finishes
+     * lands on a busy worker, and the request comes back as an abort that was
+     * never ours — so the reader pressed Stop once and saw "Stopped." twice,
+     * the second time in answer to a new question.
+     *
+     * Awaiting this before starting serialises the two, which is what the
+     * worker requires anyway. The cost lands only on somebody who cancels and
+     * immediately asks again.
+     */
+    this._inFlight = null;
   }
 
   async load(model, { onProgress, signal } = {}) {
@@ -176,63 +190,71 @@ export class WllamaRuntime {
   }
 
   /**
-   * ── A known defect in streamed generation, and what was tried ──
+   * ── Why this does not stream, and how that was established ──
    *
-   * Intermittently — roughly half the time, measured against Qwen2.5-0.5B on
-   * 2026-08-21 — the FINAL chunk of a generation is not delivered before this
-   * method resolves. It arrives at the start of the NEXT one instead, so one
-   * reply loses its last characters and the following reply opens with them:
+   * wllama's streaming delivery intermittently withholds the final chunk of a
+   * generation and hands it to the NEXT request. Roughly half of all replies
+   * lost their last characters and the reply after them opened with the
+   * remains:
    *
-   *   "The capital of Spain is Madrid"     ← no full stop
-   *   ".The capital of Kenya is"           ← there it is
+   *     "The capital of Spain is Madrid"     no full stop
+   *     ".The capital of Kenya is"           there it is
+   *     "Nairobi.The capital of Peru"        and again
    *
-   * and after a long answer, "France is Paris.The capital of…". This is the
-   * source of the stray leading characters that a rule in `formatResponseText`
-   * used to strip — the rule was removed because it damaged correct replies,
-   * and this is what it was covering for.
+   * This is the true source of the stray leading characters, and of short
+   * replies missing their terminal punctuation. Two generations of "cleanup"
+   * code were written against the symptom — `formatResponseText` stripping
+   * leading punctuation, `sanitizeHistory` appending a full stop — and both
+   * damaged correct replies to hide it.
    *
-   * Four fixes were tried and measured. None changed the behaviour:
+   * Six fixes were tried on the streaming path and measured. None worked:
    *
-   *   `cache_prompt: false`          prompt-prefix reuse is not the mechanism
-   *   consuming the async-iterator   the loop still ends a chunk early
-   *   `break` (iterator `return()`)  the generator discards nothing
-   *   draining after cancellation    the stream had already ended — nothing
-   *                                  was queued on the JavaScript side
+   *   `cache_prompt: false`         prompt-prefix reuse is not the mechanism
+   *   a six-second pause            not a queued message waiting to be read
+   *   the async-iterator form       the loop still ends a chunk early
+   *   `break` (iterator `return()`) the generator discards nothing
+   *   draining after cancellation   the stream had already ended
+   *   upgrading to wllama 3.6.0     which added a `req_id` per `get_result`
+   *                                 and a `cancelRequest` on early exit —
+   *                                 precisely the machinery a JavaScript cause
+   *                                 would live in, and it changed nothing
    *
-   * That last one is the informative negative: the residue is not a pending
-   * message this code can collect.
+   * The seventh attempt is the one that worked, and it is not a fix so much as
+   * a route around: the SAME four questions through the non-streaming call came
+   * back complete, every time. So the model, its context and the prompt were
+   * never at fault; the streaming delivery path alone is, and not using it is
+   * the remedy. Verified through the interface, six consecutive questions, all
+   * six ending in a full stop with no leading fragment.
    *
-   * ── Where it actually is, established by upgrading ──
+   * ── What it costs, measured ──
    *
-   * wllama 3.6.0 rewrote exactly the machinery that would explain a JavaScript
-   * cause. `getResponse` gained a `req_id` on every `get_result` call, so a
-   * result can no longer be handed to whichever request asks next, and a
-   * `finally` block calling `cancelRequest(reqId)` — commented "any exit before
-   * the final chunk (abort, decode error, onData throw) must free the slot" —
-   * addresses the cancellation case by name.
+   * Progressive display, in exchange for text that is right and for a
+   * `finish_reason` that actually arrives — under streaming it never did,
+   * because the chunk carrying it is the one being dropped, so the "ran out of
+   * room" notice could not fire at all.
    *
-   * Installed and run against the same model on 2026-08-21, the behaviour was
-   * unchanged: "The capital of Spain is Madrid" / ".The capital of Kenya is" /
-   * "Nairobi.The capital of Peru". The upgrade was reverted, because it costs
-   * 870 KB more WebAssembly for every student and fixes nothing here.
+   * The cost is small because CHAT_PROMPT asks for short answers. On the 0.5B
+   * model: a one-sentence reply 280–530 ms, two paragraphs 2.2 s. Only a
+   * deliberately long request reached 14 s, and that one reports
+   * `finish_reason: 'length'`, which the interface labels. The thinking
+   * indicator covers the wait.
    *
-   * That is the conclusive result: the residue is not in the JavaScript request
-   * layer at all, it is in the llama.cpp context inside the worker, and no
-   * change on this side of the boundary will reach it. The only reset available is tearing the
-   * instance down and loading the model again, measured at 11.5 seconds from
-   * cold — an eleven-second stall after every reply, to avoid a few stray
-   * characters at the start of the next one.
-   *
-   * So it is left visible rather than papered over, and it is worth reporting
-   * upstream. Repairing it here would mean guessing which leading characters
-   * belong to the previous answer, which is the class of text surgery that
-   * broke correct replies the last time it was attempted.
+   * Worth revisiting if wllama fixes the streaming path; worth reporting there
+   * either way.
    */
   async generate(messages, { onToken, signal, schema, maxTokens = DEFAULT_MAX_TOKENS } = {}) {
     if (this.status !== AIStatus.READY || !this._wllama) {
       throw new AIRuntimeError(`generate() called while status is "${this.status}"`);
     }
     throwIfAborted(signal);
+
+    /* A cancelled generation is still running in the worker. Let it finish
+       before starting another — see `_inFlight`. */
+    if (this._inFlight) {
+      try { await this._inFlight; } catch { /* it was abandoned; that is the point */ }
+      this._inFlight = null;
+      throwIfAborted(signal);
+    }
 
     this.status = AIStatus.GENERATING;
 
@@ -299,28 +321,53 @@ export class WllamaRuntime {
     this.lastFinishReason = null;
 
     try {
-      if (onToken) {
-        let out = '';
-        await this._wllama.createChatCompletion({
-          ...params,
-          stream: true,
-          onData: chunk => {
-            const piece = chunk?.choices?.[0]?.delta?.content;
-            if (piece) { out += piece; onToken(piece); }
-            /* The reason arrives on the final chunk, where `delta.content` is
-               usually empty — so it is read outside the `if` above. */
-            const reason = chunk?.choices?.[0]?.finish_reason;
-            if (reason) this.lastFinishReason = reason;
-          },
-        });
-        this.status = AIStatus.READY;
-        return out;
-      }
+      /**
+       * ── One call, and it is the non-streaming one ──
+       *
+       * wllama's streaming delivery intermittently withholds the final chunk of
+       * a generation and hands it to the NEXT one, so roughly half of all
+       * replies lost their last characters and the reply after them opened with
+       * the remains:
+       *
+       *     "The capital of Spain is Madrid"    no full stop
+       *     ".The capital of Kenya is"          there it is
+       *
+       * The same four questions through the non-streaming call, back to back,
+       * came back "The capital of France is Paris." / "…Italy is Rome." /
+       * "…Spain is Madrid." / "…Kenya is Nairobi." — every one complete. So the
+       * model and its context were never the problem, and neither was
+       * `cache_prompt`, the async-iterator form, `break`, draining, or the
+       * request-scoping rewrite in wllama 3.6.0. It is the streaming path
+       * specifically, and not calling it is the fix.
+       *
+       * ── What it costs, measured ──
+       *
+       * Progressive display. In exchange the text is right, and `finish_reason`
+       * arrives — in streaming it never did, because the chunk carrying it is
+       * the one being dropped, so the "ran out of room" notice could not fire
+       * at all.
+       *
+       * The cost is small because CHAT_PROMPT now asks for short answers.
+       * Measured on the 0.5B model: a one-sentence answer 280–530 ms, a
+       * two-paragraph answer 2.2 s. Only a deliberately long request reached
+       * 14 s, and that one is `finish_reason: 'length'`, which the interface
+       * now labels. The thinking indicator covers the wait.
+       *
+       * `onToken` is still honoured, once, with the finished text — callers get
+       * the same contract (what was emitted concatenates to what is returned),
+       * and `MockRuntime` still emits word by word, so every test that pins
+       * fragment reassembly keeps exercising it.
+       */
+      const pending = this._wllama.createChatCompletion(params);
+      this._inFlight = pending;
+      const res = await pending;
+      this._inFlight = null;
 
-      const res = await this._wllama.createChatCompletion(params);
       this.lastFinishReason = res?.choices?.[0]?.finish_reason ?? null;
+      const text = res?.choices?.[0]?.message?.content ?? '';
+      if (onToken && text) onToken(text);
       this.status = AIStatus.READY;
-      return res?.choices?.[0]?.message?.content ?? '';
+      return text;
     } catch (err) {
       /* Cancellation leaves the model loaded and usable — the student ended one
          reply, not the session. Anything else is a real failure. */

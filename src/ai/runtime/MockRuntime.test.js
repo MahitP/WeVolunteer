@@ -182,17 +182,24 @@ describe('WllamaRuntime generation parameters', () => {
     'utf8',
   );
 
-  it('records the streamed-chunk defect where somebody will find it', () => {
-    /* Intermittently the final chunk of a generation is delivered at the start
-       of the next one, so a reply loses its last characters and the following
-       one opens with them. Four fixes were tried and measured; none worked, and
-       the residue is inside wllama's worker. The note is the deliverable — the
-       next person to see a stray leading character should find the four dead
-       ends rather than repeat them, or reach for the text-stripping rule that
-       damaged correct replies last time. */
-    expect(src).toMatch(/known defect in streamed generation/i);
-    expect(src).toMatch(/cache_prompt: false/);
-    expect(src).toMatch(/11\.5 seconds/);
+  it('does not use wllama\'s streaming delivery, and says why', () => {
+    /* Streaming intermittently withheld a generation's final chunk and handed
+       it to the next request, so half of all replies lost their last
+       characters and the next one opened with them. Six fixes were tried on
+       that path and measured; the non-streaming call is clean. If somebody
+       switches this back for progressive display, these are the assertions
+       that should stop them — and the note names the six dead ends so they are
+       not repeated. */
+    expect(src).not.toMatch(/stream:\s*true/);
+    expect(src).toMatch(/Why this does not stream/i);
+    expect(src).toMatch(/wllama 3\.6\.0/);
+  });
+
+  it('serialises generations so a cancelled one cannot collide with the next', () => {
+    /* Cancelling rejects our promise but leaves the worker decoding. Asking
+       again immediately landed on a busy worker and came back as an abort that
+       was never ours — "Stopped." in answer to a new question. */
+    expect(src).toMatch(/_inFlight/);
   });
 
   it('leaves the repetition penalties at llama.cpp defaults', () => {
