@@ -13,6 +13,7 @@ vi.mock('../utils/api', () => ({ api: apiMock }));
 const { routeIntent } = await import('./router.js');
 const { ask } = await import('./assistant.js');
 const { MockRuntime } = await import('./runtime/MockRuntime.js');
+import { withHours } from '../testFixtures/volunteerStats.js';
 
 /**
  * Who Welly is, where "here" is, and who the reader is.
@@ -54,7 +55,7 @@ const STUDENT = { id: 'u1', role: 'student', name: 'Maya Rivera' };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+  apiMock.fetchVolunteerStats.mockResolvedValue(withHours(0, 0));
   apiMock.fetchEventsFiltered.mockResolvedValue({ events: [], pagination: { total: 0 } });
 });
 

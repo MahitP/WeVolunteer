@@ -141,9 +141,35 @@ export const TOOLS = {
     async run() {
       try {
         const stats = await api.fetchVolunteerStats();
+        /**
+         * ── `record`, because that is where the numbers are ──
+         *
+         * This read `stats.hours` and `stats.events ?? stats.attended`.
+         * `GET /api/stats/volunteer` returns none of those. Its top level is
+         * `{monthlyHours, record, milestones, streak, upcomingCount,
+         * serviceHourGoal}` and the figures live one level down, in `record`.
+         *
+         * So both reads were `undefined`, both `??` defaults fired, and Welly
+         * answered "You do not have any verified hours yet" to every student who
+         * ever asked — including one whose dashboard, on the same screen, read
+         * 209 hours. It was never a rounding difference or a stale cache: the
+         * tool was reading fields that have never existed.
+         *
+         * `hoursCredited` and not the raw attendance sum, because that is the
+         * platform's one definition of a credited hour — see the note in
+         * organizationHours.js. `eventsAttended` and not `eventsSignedUp`,
+         * because the card beside this is labelled "Events attended".
+         *
+         * Nothing is defaulted away any more. A response missing `record` is a
+         * broken endpoint, not a student with no hours, and the two must not
+         * produce the same answer — that equivalence is what hid this.
+         */
+        const record = stats?.record;
+        if (!record) return failed('unavailable');
+
         return ok('hours', {
-          hours: Number(stats?.hours ?? 0),
-          events: Number(stats?.events ?? stats?.attended ?? 0),
+          hours: Number(record.hoursCredited ?? 0),
+          events: Number(record.eventsAttended ?? 0),
         });
       } catch (err) {
         return failed(reasonFor(err));

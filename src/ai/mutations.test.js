@@ -7,9 +7,14 @@ const student = { id: 's1', role: 'student' };
 const organizer = { id: 'o1', role: 'organizer' };
 const admin = { id: 'a1', role: 'admin' };
 
-vi.mock('../utils/api.js', () => ({
+vi.mock('../utils/api.js', async () => {
+  /* Imported INSIDE the factory. `vi.mock` is hoisted above every top-level
+     import, so a `withHours` imported at the top of the file is still in its
+     temporal dead zone when this runs. */
+  const { withHours } = await import('../testFixtures/volunteerStats.js');
+  return ({
   api: {
-    fetchVolunteerStats: vi.fn().mockResolvedValue({ hours: 25, events: 5 }),
+    fetchVolunteerStats: vi.fn().mockResolvedValue(withHours(25, 5)),
     fetchCertificates: vi.fn().mockResolvedValue([]),
     fetchOrganizations: vi.fn().mockResolvedValue([]),
     fetchApplications: vi.fn().mockResolvedValue([
@@ -36,7 +41,8 @@ vi.mock('../utils/api.js', () => ({
     updateUserPreference: vi.fn().mockResolvedValue({ success: true }),
     createEvent: vi.fn().mockResolvedValue({ success: true, id: 'ev-created-101', title: 'Park Restoration' }),
   },
-}));
+  });
+});
 
 describe('student actions and draft-and-confirm lifecycle', () => {
   beforeEach(() => {

@@ -36,6 +36,7 @@ const apiMock = {
 vi.mock('../utils/api', () => ({ api: apiMock }));
 
 const { default: WellyView } = await import('./WellyView.jsx');
+import { withHours } from '../testFixtures/volunteerStats.js';
 
 /** A student, because every question below is about a student's own record. */
 const student = { id: 'stu-behaviour-1', name: 'Maya Lin', role: 'student', verified: true, withheld: [] };
@@ -69,7 +70,7 @@ const inTranscript = matcher =>
 beforeEach(() => {
   window.localStorage.clear();
   vi.clearAllMocks();
-  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+  apiMock.fetchVolunteerStats.mockResolvedValue(withHours(35.5, 7));
   apiMock.fetchEventsFiltered.mockResolvedValue({ events: [], pagination: { total: 0 } });
   apiMock.fetchOrganizations.mockResolvedValue([]);
 });

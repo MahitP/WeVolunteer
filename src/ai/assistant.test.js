@@ -21,6 +21,7 @@ const { ask } = await import('./assistant.js');
 const { MockRuntime } = await import('./runtime/MockRuntime.js');
 const { AIStatus } = await import('./runtime/types.js');
 const { clearDraft } = await import('./confirm.js');
+import { withHours } from '../testFixtures/volunteerStats.js';
 
 async function readyRuntime(...responses) {
   const rt = new MockRuntime({ responses });
@@ -31,7 +32,7 @@ async function readyRuntime(...responses) {
 beforeEach(() => {
   clearDraft();
   vi.clearAllMocks();
-  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+  apiMock.fetchVolunteerStats.mockResolvedValue(withHours(35.5, 7));
   apiMock.fetchCertificates.mockResolvedValue([]);
   apiMock.fetchOrganizations.mockResolvedValue([]);
   apiMock.fetchApplications.mockResolvedValue([]);
@@ -48,6 +49,10 @@ describe('answering without a model at all', () => {
     const res = await ask('how many hours do I have', { runtime: null });
 
     expect(res.answer).toBe('You have 35.5 verified hours.');
+    /* The CARD's shape, which is the tool's output and deliberately not the
+       endpoint's — `withHours` above is the response going in. Keeping the two
+       distinct here is the point: they were conflated, and that is how Welly
+       came to read a field the server does not send. */
     expect(res.card).toEqual({ kind: 'hours', data: { hours: 35.5, events: 7 } });
     expect(res.phrasedByModel).toBe(false);
   });
@@ -124,7 +129,7 @@ describe('a lookup is answered from its data, not by the model', () => {
      * something is that the sentence carries the card's figure.
      */
     for (const hours of [0, 0.5, 35.5, 400]) {
-      apiMock.fetchVolunteerStats.mockResolvedValue({ hours, events: 1 });
+      apiMock.fetchVolunteerStats.mockResolvedValue(withHours(hours, 1));
       const res = await ask('how many hours do I have', { runtime: await readyRuntime('anything at all') });
       expect(res.card.data.hours).toBe(hours);
       if (hours) expect(res.answer).toContain(String(hours));
@@ -552,7 +557,7 @@ describe('the instruction-echo failure that was measured', () => {
    * reaches the check by another route.
    */
   it('does not consult the model when the answer is zero', async () => {
-    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+    apiMock.fetchVolunteerStats.mockResolvedValue(withHours(0, 0));
     const rt = await readyRuntime('You could not find anything.');
 
     const res = await ask('how many hours do I have', { runtime: rt });
@@ -563,7 +568,7 @@ describe('the instruction-echo failure that was measured', () => {
   });
 
   it('never lets a zero be described as a failed lookup', async () => {
-    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+    apiMock.fetchVolunteerStats.mockResolvedValue(withHours(0, 0));
     const res = await ask('how many hours do I have', { runtime: null });
 
     expect(res.toolFailed).toBeUndefined();
@@ -603,7 +608,7 @@ describe('the instruction-echo failure that was measured', () => {
        non-empty case no longer differs from the empty one: neither consults the
        model. The guard against switching the model off lives with the
        conversational tests, where the model is what produces the answer. */
-    apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 35.5, events: 7 });
+    apiMock.fetchVolunteerStats.mockResolvedValue(withHours(35.5, 7));
     const rt = await readyRuntime('You have 35.5 hours so far — nice work.');
 
     const res = await ask('how many hours do I have', { runtime: rt });

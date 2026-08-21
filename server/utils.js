@@ -6,6 +6,7 @@ import { sendNotificationEmail, sendMail } from './email.js';
 import { JWT_SECRET, REQUIRE_EMAIL_VERIFICATION, isEmailGateAllowed, COOKIE_NAME, REQUIRE_ADMIN_2FA, DEMO_MODE } from './config.js';
 import { principalFor, requiresSecondFactor, ROLE, ROLES } from './authz.js';
 import { SERVICE_HOUR_GOAL } from './milestones.js';
+import { creditedHoursFor } from './volunteerStats.js';
 import { grantsFor } from './userCapabilities.js';
 import { eventApplicationEligibility } from './eventEligibility.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
@@ -725,14 +726,30 @@ export async function selfUserResponse(row) {
 export async function formatUserResponse(row) {
   if (!row) return null;
 
-  // Calculate hours dynamically from confirmed attendance records where student was present
-  const hoursRow = await db.prepare(`
-    SELECT SUM(hours_awarded) as total
-    FROM attendance
-    WHERE user_id = ? AND present = 1
-  `).get(row.id);
-
-  const totalHours = hoursRow && hoursRow.total ? Number(hoursRow.total) : 0.0;
+  /**
+   * Credited hours, by the platform's one definition of them.
+   *
+   * ── Why this is a call and not a query ──
+   *
+   * It was `SELECT SUM(hours_awarded) FROM attendance WHERE user_id = ? AND
+   * present = 1`, with no reference to the event — so it counted the hours of
+   * events that had since been CANCELLED, which every other surface deliberately
+   * does not. See the note on `creditedHoursFor`: a cancelled event is not
+   * completed service, and printing it as such under a student's name is a claim
+   * the platform cannot support.
+   *
+   * This copy was the one that mattered most, because it is `volunteeredHours`
+   * on the user payload and therefore the large number on the dashboard.
+   * Measured on a scratch database: 209 hours against one event, event
+   * cancelled, dashboard still 209 while the same student's insights, profile
+   * and transcript all read 0. Welly reading the second of those is what
+   * surfaced it — "my dashboard says I have 209hrs […] its been like this for a
+   * while."
+   *
+   * Same single query as before, so this stays as cheap as it was on a path that
+   * runs for every authenticated response.
+   */
+  const totalHours = Number(await creditedHoursFor(db, row.id)) || 0;
 
   return {
     id: row.id,

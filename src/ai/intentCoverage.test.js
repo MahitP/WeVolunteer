@@ -34,6 +34,7 @@ const { routeIntent } = await import('./router.js');
 const { INTENT_CAPABILITY, checkRole } = await import('./roles.js');
 const { TOOLS } = await import('./tools.js');
 const { ask } = await import('./assistant.js');
+import { withHours } from '../testFixtures/volunteerStats.js';
 
 /**
  * Every intent, from the words that produce it to the sentence that comes back.
@@ -218,7 +219,7 @@ beforeEach(() => {
     fn.mockReset();
     fn.mockResolvedValue({});
   }
-  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 4, events: 2 });
+  apiMock.fetchVolunteerStats.mockResolvedValue(withHours(4, 2));
   apiMock.fetchCertificates.mockResolvedValue([]);
   apiMock.fetchOrganizations.mockResolvedValue([]);
   apiMock.fetchApplications.mockResolvedValue([]);

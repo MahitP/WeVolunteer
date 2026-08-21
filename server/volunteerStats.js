@@ -83,6 +83,38 @@ const DUE_COMMITMENTS = `
  *            eventsAwaitingRecord:number, hoursCredited:number,
  *            lastVolunteeredAt:string|null}}
  */
+/**
+ * The credited-hours query, on its own, so the rule has one implementation.
+ *
+ * ── Why this is exported ──
+ *
+ * `formatUserResponse` in utils.js carried its own copy —
+ * `SELECT SUM(hours_awarded) FROM attendance WHERE user_id = ? AND present = 1`
+ * — with no reference to the event, and it is the copy the DASHBOARD shows. So
+ * the platform-wide "cancelled events count for nothing" rule was applied
+ * everywhere hours are presented as credited service EXCEPT the largest number
+ * on the first screen a student sees.
+ *
+ * The two disagreed by the whole value of any cancelled event: measured on a
+ * scratch database with 209 hours against a single event, cancelling it left
+ * the dashboard reading 209 and this reading 0. A student's own record
+ * contradicting itself on the same screen is the exact failure the transcript
+ * argument above was written to prevent.
+ *
+ * One function, called from both. A second copy is what created this, and a
+ * shared SQL string in a constant would have been a second copy with extra
+ * steps — the caller could still forget the join.
+ */
+export async function creditedHoursFor(db, userId) {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
+  `).get(userId);
+  return row?.h ?? 0;
+}
+
 export async function volunteerStats(db, userId, { now = new Date().toISOString() } = {}) {
   const signedUp = (await db.prepare(`
     SELECT COUNT(DISTINCT a.event_id) AS n ${DUE_COMMITMENTS}
@@ -146,12 +178,7 @@ export async function volunteerStats(db, userId, { now = new Date().toISOString(
    * in the pilot database, so no student's displayed total moves. This corrects
    * an edge case rather than restating anybody's record.
    */
-  const hours = (await db.prepare(`
-    SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
-    FROM attendance a
-    JOIN events e ON e.id = a.event_id
-    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
-  `).get(userId))?.h ?? 0;
+  const hours = await creditedHoursFor(db, userId);
 
   return {
     eventsSignedUp: signedUp,

@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor;
+let dir, db, volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor, creditedHoursFor;
 
 const PAST = '2026-01-10T12:00:00.000Z';
 const PAST_END = '2026-01-10T16:00:00.000Z';
@@ -69,7 +69,7 @@ function scenario(handle, {
 
 beforeAll(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'wev-stats-'));
-  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor } = await import('./volunteerStats.js'));
+  ({ volunteerStats, attendanceRecordsFor, lastVolunteeredAt, externalHoursSummary, participationCountsFor, creditedHoursFor } = await import('./volunteerStats.js'));
 });
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -226,6 +226,50 @@ describe('credited hours', () => {
     db.prepare('INSERT INTO external_hours (id, user_id, occurred_on, hours) VALUES (?, ?, ?, ?)')
       .run('x2', 'u1', '2026-03-02', 900);
     expect((await stats()).hoursCredited).toBe(0);
+  });
+});
+
+/**
+ * The query on its own, because two surfaces now share it.
+ *
+ * ── Why it was extracted ──
+ *
+ * `formatUserResponse` in utils.js had its own copy —
+ * `SELECT SUM(hours_awarded) FROM attendance WHERE user_id = ? AND present = 1`
+ * — with no reference to the event. So the platform-wide rule that a cancelled
+ * event counts for nothing was applied to the profile, the transcript, the
+ * organization figures and `hoursCredited` above, and NOT to `volunteeredHours`
+ * on the user payload, which is the large number on the dashboard.
+ *
+ * Measured on a scratch database: 209 hours against one event, event cancelled,
+ * dashboard still reading 209 while the same student's insights read 0. A
+ * record contradicting itself on one screen.
+ */
+describe('creditedHoursFor, the shared rule', () => {
+  it('is the same number hoursCredited reports', async () => {
+    scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1, hours: 4.5 });
+    expect(await creditedHoursFor(db, 'u1')).toBe((await stats()).hoursCredited);
+  });
+
+  it('leaves out an event that was cancelled', async () => {
+    scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 1, hours: 6 });
+    scenario(db, { event: 'e2', eventStatus: 'cancelled', applicationStatus: 'accepted', present: 1, hours: 209 });
+
+    /* The 209 is not credited service: a cancelled event did not happen, and a
+       transcript that lists it is making a claim the platform cannot support.
+       See the note on the function. */
+    expect(await creditedHoursFor(db, 'u1')).toBe(6);
+  });
+
+  it('leaves out a shift the volunteer was marked absent for', async () => {
+    scenario(db, { event: 'e1', applicationStatus: 'accepted', present: 0 });
+    expect(await creditedHoursFor(db, 'u1')).toBe(0);
+  });
+
+  it('is zero rather than null for somebody with no attendance at all', async () => {
+    /* `SUM()` over no rows is NULL, and a dashboard reading "null hours" is
+       worse than one reading zero. */
+    expect(await creditedHoursFor(db, 'u1')).toBe(0);
   });
 });
 

@@ -14,6 +14,7 @@ vi.mock('../utils/api', () => ({ api: apiMock }));
 const { routeIntent } = await import('./router.js');
 const { ask } = await import('./assistant.js');
 const { MockRuntime } = await import('./runtime/MockRuntime.js');
+import { withHours } from '../testFixtures/volunteerStats.js';
 
 /**
  * Two answers from the reported transcript that were not the model's fault.
@@ -36,7 +37,7 @@ const APPLICATIONS = [
 beforeEach(() => {
   vi.clearAllMocks();
   apiMock.fetchApplications.mockResolvedValue(APPLICATIONS);
-  apiMock.fetchVolunteerStats.mockResolvedValue({ hours: 0, events: 0 });
+  apiMock.fetchVolunteerStats.mockResolvedValue(withHours(0, 0));
 });
 
 describe('"Rejected Applications?" returned accepted ones', () => {

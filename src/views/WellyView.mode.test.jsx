@@ -53,16 +53,22 @@ vi.mock('../ai', async () => {
   };
 });
 
-vi.mock('../utils/api', () => ({
+vi.mock('../utils/api', async () => {
+  /* Imported INSIDE the factory. `vi.mock` is hoisted above every top-level
+     import, so a `withHours` imported at the top of the file is still in its
+     temporal dead zone when this runs. */
+  const { withHours } = await import('../testFixtures/volunteerStats.js');
+  return ({
   api: {
-    fetchVolunteerStats: vi.fn().mockResolvedValue({ hours: 0, events: 0 }),
+    fetchVolunteerStats: vi.fn().mockResolvedValue(withHours(0, 0)),
     fetchCertificates: vi.fn().mockResolvedValue([]),
     fetchOrganizations: vi.fn().mockResolvedValue([]),
     fetchApplications: vi.fn().mockResolvedValue([]),
     fetchEventsFiltered: vi.fn().mockResolvedValue({ events: [], pagination: { total: 0 } }),
     verifyCertificate: vi.fn(),
   },
-}));
+  });
+});
 
 const { default: WellyView } = await import('./WellyView.jsx');
 const { readPreferences, writePreferences } = await import('../ai/preferences.js');
