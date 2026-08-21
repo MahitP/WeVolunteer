@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  SYSTEM_PROMPT, CHAT_PROMPT, PROMPT_VERSION, WELLY_NAME,
+  CHAT_PROMPT, PROMPT_VERSION, WELLY_NAME,
   isUsableReply, looksLikeInstructionEcho, INSTRUCTION_FRAGMENTS, claimsAnAction,
 } from './welly.js';
 
@@ -18,16 +18,46 @@ import {
  */
 const OBSERVED_ECHO = 'You could not find anything.';
 
+/**
+ * ── What happened to the SYSTEM_PROMPT suite that used to be here ──
+ *
+ * Seven tests guarded the wording of the prompt that asked the model to phrase
+ * a tool result. That prompt is gone: a lookup is now phrased by `summarise()`
+ * in `assistant.js`, from the same data the card is built from, and the model
+ * is not consulted about it at all.
+ *
+ * Deleting the guards outright would have thrown away the reasoning in them, so
+ * each was taken one at a time:
+ *
+ *   identity / domain / no conditional about empty results / no authorization
+ *   talk / length bound
+ *       → re-aimed at CHAT_PROMPT below, which is now the only prompt and is
+ *         subject to every one of those arguments.
+ *
+ *   "forbids guessing as well as inventing"
+ *       → dropped. It was specifically about answering beyond a DATA block,
+ *         and there is no DATA block. CHAT_PROMPT's own guards — cannot act,
+ *         cannot see the record, does not know the rules — are the equivalent
+ *         boundary for the job that is left, and they are already asserted.
+ *
+ *   "says plainly that it is not a person"
+ *       → dropped here, because CHAT_PROMPT does not say it and the 600-char
+ *         bound is nearly spent. Identity confusion is real at this size and is
+ *         handled where it can be handled correctly: `router.js` routes "what
+ *         is my name", "who made you" and "what are you" to fixed answers, and
+ *         `identity.test.js` pins them. A prompt line would have been a hope.
+ *
+ * `INSTRUCTION_FRAGMENTS` still lists the removed prompt's wording. That is
+ * deliberate and is argued at the list itself; the echo suite below is
+ * unchanged.
+ */
+
 describe('identity', () => {
   it('names Welly and nothing else', () => {
     expect(WELLY_NAME).toBe('Welly');
-    expect(SYSTEM_PROMPT).toContain('Welly');
+    expect(CHAT_PROMPT).toContain('Welly');
     /* Not "Welly AI", not a second product name. */
-    expect(SYSTEM_PROMPT).not.toMatch(/Welly AI|WellyBot|AI assistant named/i);
-  });
-
-  it('says plainly that it is not a person', () => {
-    expect(SYSTEM_PROMPT).toMatch(/not a person/i);
+    expect(CHAT_PROMPT).not.toMatch(/Welly AI|WellyBot|AI assistant named/i);
   });
 
   it('is versioned, so behaviour can be tied to wording', () => {
@@ -37,47 +67,32 @@ describe('identity', () => {
 });
 
 describe('the prompt stays small on purpose', () => {
-  it('is short enough not to crowd out the data', () => {
-    /**
-     * Every sentence here is one a small model can echo, and it competes with
-     * tool results for a context window measured in low thousands of tokens.
-     * The bound is deliberate — if this test fails, the answer is almost never
-     * "raise the limit".
-     */
-    expect(SYSTEM_PROMPT.length).toBeLessThan(500);
-  });
-
   it('says what kind of place this is, not just what it is called', () => {
     /* Without the domain the model answers in the register of a generic
        assistant. Naming the place — students volunteering, organizers running
-       events — is what makes it phrase things in shifts, spots and hours. */
-    expect(SYSTEM_PROMPT).toMatch(/students volunteer/i);
-    expect(SYSTEM_PROMPT).toMatch(/organi[sz]ers run events/i);
+       events — is what makes it phrase things in shifts, spots and hours.
+
+       It is also the answer to "what is this app": asked with only its name in
+       the prompt, the 0.5B model replied "Welly, a place where students can
+       volunteer", having taken its own name for the platform's. */
+    expect(CHAT_PROMPT).toMatch(/students volunteer/i);
+    expect(CHAT_PROMPT).toMatch(/organi[sz]ers run events/i);
+    expect(CHAT_PROMPT).toMatch(/WeVolunteer/);
   });
 
-  it('forbids guessing as well as inventing', () => {
-    /**
-     * "Never invent names, numbers or dates" covers fabricated specifics. It
-     * does not obviously cover the likelier failure at this size: answering a
-     * question the DATA block does not cover with something plausible. That is
-     * what "never guess" is for, and it is folded into the grounding sentence
-     * rather than added as a new one, because the length bound above is real.
-     */
-    expect(SYSTEM_PROMPT).toMatch(/never guess/i);
-  });
-
-  it('states no conditional rule about empty results', () => {
+  it('states no conditional rule about what to say when it does not know', () => {
     /**
      * The one instruction shape this file has measured going wrong. "If the
      * DATA block is empty, say you could not find anything" came back from the
      * 135M model AS the answer, turning a correct zero into what read like a
-     * failure. The empty case is handled by the deterministic summary in
-     * assistant.js instead — code, not a sentence the model can repeat.
+     * failure.
      *
      * Pinned so that a future edit adding a well-meaning "if you don't know,
-     * say so" has to read this first.
+     * say so" has to read this first. The positive form — "you cannot see
+     * someone's record without looking it up" — is asserted below and is not
+     * a conditional, which is the distinction that matters.
      */
-    expect(SYSTEM_PROMPT).not.toMatch(/\bif the data\b|\bif you (do not|don't|cannot|can't)\b|\bif nothing\b/i);
+    expect(CHAT_PROMPT).not.toMatch(/\bif the data\b|\bif you (do not|don't|cannot|can't)\b|\bif nothing\b/i);
   });
 
   it('does not try to enforce what code enforces', () => {
@@ -86,15 +101,16 @@ describe('the prompt stays small on purpose', () => {
      * the server. Writing them into the prompt would imply the model is
      * involved in them, and a prompt is not a boundary.
      */
-    expect(SYSTEM_PROMPT).not.toMatch(/authoriz|permission|allowed to see|capability|only show data the user/i);
+    expect(CHAT_PROMPT).not.toMatch(/authoriz|permission|allowed to see|capability|only show data the user/i);
   });
 });
 
 describe('the conversational prompt', () => {
-  it('is bounded like the other one', () => {
-    /* Same reasoning as SYSTEM_PROMPT: every sentence competes with the
-       conversation for a small context window, and is one more thing a small
-       model can echo. */
+  it('is bounded', () => {
+    /* Every sentence here competes with the conversation for a context window
+       measured in low thousands of tokens, and is one more thing a small model
+       can echo. The bound is deliberate — if this test fails, the answer is
+       almost never "raise the limit". */
     expect(CHAT_PROMPT.length).toBeLessThan(600);
   });
 

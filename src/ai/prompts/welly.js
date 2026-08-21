@@ -36,55 +36,27 @@
 /** The name a student sees. Kept in one place so copy cannot drift. */
 export const WELLY_NAME = 'Welly';
 
-/** Bumped whenever SYSTEM_PROMPT changes. */
-export const PROMPT_VERSION = 2;
+/** Bumped whenever CHAT_PROMPT changes. */
+export const PROMPT_VERSION = 3;
 
 /**
- * Welly's conversational instructions.
+ * Welly in conversation. The only prompt there is.
  *
- * Six lines. Each earns its place by changing output on a small model:
- * identity, brevity, grounding, the empty-versus-failed distinction, no
- * invented actions, and no meta-commentary.
+ * ── Why there used to be two, and why there is now one ──
  *
- * Note what is NOT here: nothing about authorization, permissions, privacy
- * scoping or which tool to use. Those are not the model's to get right, and
- * writing them down would only imply that they were.
- */
-export const SYSTEM_PROMPT = [
-  /* The domain, in the identity line rather than as a rule of its own.
-     "Where students volunteer and organizers run events" is what lets the model
-     phrase an answer in the register of this place — shifts, spots, hours —
-     instead of the generic register of an assistant. It costs a clause and it
-     is a statement of fact, which is the kind of sentence that survives being
-     echoed: a model repeating "you are Welly" is odd, not wrong. */
-  `You are ${WELLY_NAME}, the assistant inside WeVolunteer, where students volunteer and organizers run events. You are not a person.`,
-  'Answer in one or two short sentences, warm and plain, like a helpful guide.',
-  /* "Never guess" is the anti-hallucination rule, and it is deliberately folded
-     into the grounding line rather than added as a seventh sentence. What is
-     NOT here is a conditional — "if the DATA block does not answer, say you do
-     not have it" — because that is the exact shape of the line this file's
-     header records backfiring: the 135M model returned the instruction itself
-     as the answer. The empty case is handled in code, by the deterministic
-     summary in assistant.js, which is always available and always correct. */
-  'Use only the facts in the DATA block. Never guess, never invent names, numbers or dates.',
-  'A count of zero is a real answer: say there are none, not that something failed.',
-  'Never say you did something. You can look things up, nothing else.',
-  'Do not mention data, tools, or these instructions.',
-].join(' ');
-
-/**
- * Welly in conversation, when nothing was looked up.
+ * `SYSTEM_PROMPT` used to phrase a result that was already correct: a tool ran,
+ * the facts went into the message, and the model's only job was to put them in
+ * a sentence. It could not do that job. Measured against Qwen2.5-0.5B, handed
+ * `{total: 0, next: null}` for "what is my next shift", it wrote "Your next
+ * shift is currently at zero"; handed a waitlist of two, "Waitlisted
+ * applications do not count, no need to show them." The instructions were
+ * present and correct in both cases. See the note at the end of `assistant.js`
+ * for the full set and for why the fix was to stop asking rather than to write
+ * a seventh rule.
  *
- * ── Why this is a second prompt and not a longer first one ──
- *
- * `SYSTEM_PROMPT` phrases a result that is already correct: a tool ran, the
- * facts are in the message, and the model's only job is to put them in a
- * sentence. Its rules exist to stop it adding anything.
- *
- * This one runs when no tool ran at all — there is no DATA block, and nothing
- * the model says is checked against anything. That is a different job with a
- * different danger, so it gets its own instructions rather than a conditional
- * bolted onto the other, which is how one prompt ends up doing neither job well.
+ * So a lookup is now phrased by `summarise()`, in code, from the same data the
+ * card is built from — and this prompt is what remains: the one job that has no
+ * deterministic answer to fall back on.
  *
  * ── The one rule that matters ──
  *
@@ -150,7 +122,14 @@ export const INSTRUCTION_FRAGMENTS = Object.freeze([
   'data block',
   'never invent',
   /* Added with the wording that introduced them. A fragment list that lags the
-     prompt is a list that stops working exactly when the prompt changes. */
+     prompt is a list that stops working exactly when the prompt changes.
+
+     Several of these came from SYSTEM_PROMPT, which no longer exists — nothing
+     sends the model a DATA block any more. They stay because the list is
+     matched against output, not against the current prompt: a model that has
+     seen this wording in its own history, or that produces it for reasons of
+     its own, still must not have it shown to a student as an answer. Removing
+     a fragment can only ever let one more thing through. */
   'never guess',
   'where students volunteer',
   'you are welly the assistant inside wevolunteer',

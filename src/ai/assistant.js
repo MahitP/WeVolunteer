@@ -21,8 +21,7 @@ import { routeIntent } from './router.js';
 import { TOOLS, runTool, normalizeEventCategory } from './tools.js';
 import { AIStatus } from './runtime/types.js';
 import { isAbort } from './runtime/types.js';
-import { SYSTEM_PROMPT, CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
-import { asDataBlock } from './prompts/tasks.js';
+import { CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
 import { checkRole, actionReplyFor, abilitiesFor } from './roles.js';
 import { getInformationalAnswer } from './informational.js';
 import { resolveNavigation } from './navigation.js';
@@ -226,30 +225,6 @@ function failureMessage(reason) {
       return "Please specify which application you would like to withdraw.";
     default:
       return "I couldn't look that up just now. Please try again.";
-  }
-}
-
-/** The untrusted payload, fenced and labelled. */
-function dataBlock(kind, data) {
-  return asDataBlock(`DATA (${kind})`, JSON.stringify(data));
-}
-
-/**
- * Results where the deterministic sentence is already the best answer.
- */
-function isEmptyResult(kind, data) {
-  switch (kind) {
-    case 'hours': return !data.hours;
-    case 'certificate': return data.valid !== true;
-    case 'certificates':
-    case 'organizations':
-    case 'applications':
-    case 'opportunities':
-    case 'notifications':
-    case 'vacant_events':
-    case 'admin_appeals': return !data.total;
-    case 'admin_reports': return !data.openReports;
-    default: return false;
   }
 }
 
@@ -905,42 +880,41 @@ export async function ask(
     };
   }
 
-  const fallback = summarise(result.kind, result.data);
-  const card = { kind: result.kind, data: result.data };
-
-  if (!runtime || runtime.status !== AIStatus.READY || isEmptyResult(result.kind, result.data)) {
-    return { intent, answer: fallback, card, phrasedByModel: false };
-  }
-
-  try {
-    const text = await runtime.generate(
-      [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `${String(message).trim()}\n\n${dataBlock(result.kind, result.data)}`,
-        },
-      ],
-      { onToken, signal, maxTokens: MAX_REPLY_TOKENS },
-    );
-
-    const formatted = formatResponseText(text);
-    if (!isUsableReply(formatted)) return { intent, answer: fallback, card, phrasedByModel: false };
-    return { intent, answer: formatted, card, phrasedByModel: true };
-  } catch (err) {
-    if (isAbort(err)) return { intent, answer: fallback, card, cancelled: true, phrasedByModel: false };
-    return { intent, answer: fallback, card, phrasedByModel: false };
-  }
+  /**
+   * ── The sentence over a lookup is written here, not by the model ──
+   *
+   * It used to be: the tool ran, and the model was handed the data and asked to
+   * phrase it, with `summarise()` kept only as a fallback for when there was no
+   * model or the reply was unusable.
+   *
+   * At 0.5B that inverted the reliability. Measured against the real model, on
+   * lookups that had SUCCEEDED and had a correct card sitting under them:
+   *
+   *   next shift, none upcoming   → "Your next shift is currently at zero."
+   *   waitlists, empty            → "Waitlisted applications do not count, no
+   *                                  need to show them."
+   *   applications, asked which
+   *   were rejected               → "Yes, some applications have been accepted
+   *                                  in various events."
+   *   next shift again            → "You are now ready to start your next shift."
+   *   hours, zero                 → "You have no verified hours. I can help
+   *                                  find them for you."
+   *
+   * Every one of those is wrong, and the last also promises something no tool
+   * here can do. The card beside them was right the whole time, so the reader
+   * was shown a correct figure under an incorrect sentence — which is worse
+   * than either alone, because it is the sentence people read.
+   *
+   * `summarise()` is computed from the same data as the card, so it cannot
+   * disagree with it. It is now the answer rather than the fallback. The model
+   * keeps free conversation, where there is no record to get wrong, and this
+   * path stops spending a generation on rephrasing a sentence that was already
+   * correct — which also makes every lookup faster.
+   */
+  return {
+    intent,
+    answer: summarise(result.kind, result.data),
+    card: { kind: result.kind, data: result.data },
+    phrasedByModel: false,
+  };
 }
-
-export const __testing = {
-  summarise,
-  failureMessage,
-  FIXED,
-  SYSTEM_PROMPT,
-  isEmptyResult,
-  WELLY_NAME,
-  formatResponseText,
-  sanitizeHistory,
-};
-
