@@ -11507,6 +11507,11 @@ input:disabled + .premium-slider {
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
+  /* A pill, on one line. Without this the label and the state wrap inside it
+     once the header column narrows — at 820px it became a two-line lozenge with
+     "Welly" over "Chat". */
+  white-space: nowrap;
+  flex: none;
   min-height: 34px;
   padding: 0 var(--s2) 0 var(--s3);
   background: var(--surface);
@@ -11522,6 +11527,18 @@ input:disabled + .premium-slider {
 .welly-mode-btn:hover { border-color: var(--ink-3); color: var(--ink); }
 
 .welly-mode-label { font-weight: 650; color: var(--ink); }
+
+/**
+ * The state, spelled out beside the mode.
+ *
+ * Dropped once the header column is narrow — the tablet layout keeps the
+ * conversation sidebar, which leaves the header about 280px shorter than on a
+ * laptop. The mode name stays, the button's accessible name carries the state
+ * either way, and the panel behind it says it in full.
+ */
+@media (max-width: 1100px) {
+  .welly-mode-detail { display: none; }
+}
 
 .welly-mode-detail {
   color: var(--ink-3);
