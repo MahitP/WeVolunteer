@@ -2924,7 +2924,34 @@ time { font-variant-numeric: tabular-nums; }
 .toast.success svg { color: var(--toast-success); }
 .toast.error svg { color: var(--toast-error); }
 .toast.info svg { color: var(--toast-info); }
-.toast button { color: var(--toast-btn); display: flex; }
+/**
+ * The toast's dismiss control, at a size somebody can actually hit.
+ *
+ * Measured at 14x15px — the icon's own box, because the button had no padding
+ * and no minimum. That is under WCAG 2.2 2.5.8's 24x24 AA floor, and it is the
+ * control every single user of this application reaches: the way out of a
+ * message that is covering something.
+ *
+ * 44px, not 24, because this repo's house rule is 44 and this is exactly the
+ * control it was written for — src/touchTargets.test.js records the same defect
+ * on `.modal-close` and the same reasoning: a dismiss control that needs a
+ * second attempt is the worst one to get wrong, since the first miss usually
+ * lands on whatever the toast is covering.
+ *
+ * The icon stays 14px. The TARGET grew, not the glyph, which is why the centring
+ * matters: without it the icon sits in a corner of its own hit area and the
+ * visible affordance stops agreeing with the clickable one.
+ */
+.toast button {
+  color: var(--toast-btn);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: calc(-1 * var(--s2)) calc(-1 * var(--s2)) calc(-1 * var(--s2)) 0;
+  flex-shrink: 0;
+}
 .toast button:hover { color: var(--ink-inv); }
 
 /* ==========================================================================
@@ -6691,10 +6718,25 @@ input:disabled + .premium-slider {
      and gave the whole app a horizontal scrollbar — including `.toasts`, which
      is absolutely positioned and stretched to the widened document, so the
      symptom showed up somewhere else entirely.
-     `hidden` first for older Safari; `clip` where supported, because it does
-     the same job without creating a scroll container. */
+     `hidden` first for older Safari; `clip visible` where supported, because it
+     does the same job without creating a scroll container.
+
+     ── Why only the HORIZONTAL axis is clipped ──
+
+     Clipping both axes also clipped the CONTENT. Under the text-spacing
+     overrides WCAG 1.4.12 requires a page to tolerate — 1.5 line-height,
+     0.12em letter-spacing, 0.16em word-spacing — this section's content grew
+     from 819px to 901px inside a box that clipped at 819, measured on twelve
+     routes. What sits at the bottom of an error page is the actions, so the
+     thing being cut off was the way out, on the one screen whose whole purpose
+     is to offer one.
+
+     The wash only ever caused a problem on one axis: it made the document 22px
+     wider than the viewport and gave the whole app a horizontal scrollbar.
+     `clip visible` contains exactly that and lets the page grow downwards, which
+     it can do freely because the document already scrolls vertically. */
   overflow: hidden;
-  overflow: clip;
+  overflow: clip visible;
 }
 
 /* The wash. Two soft pools rather than one centred glow, so the light has a

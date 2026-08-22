@@ -110,8 +110,22 @@ test('report: content clipping under the 1.4.12 text-spacing overrides', async (
       const out = [];
       for (const el of document.querySelectorAll('*')) {
         const s = getComputedStyle(el);
-        if (s.overflow === 'visible' && s.overflowY === 'visible') continue;
-        if (s.overflowY === 'auto' || s.overflowY === 'scroll') continue;
+        /**
+         * Only the VERTICAL axis decides whether enlarged text is lost, because
+         * that is the direction text grows when its spacing increases.
+         *
+         * `overflow-y: visible` means content escapes the box and stays on
+         * screen — not clipped, so not a 1.4.12 concern however far it overflows.
+         * `auto`/`scroll` means it is reachable by scrolling — also not lost.
+         * Only `hidden` and `clip` remove it.
+         *
+         * The first version tested `s.overflow` as a whole, which reported
+         * `.err` as clipping even after it was changed to `clip visible` —
+         * horizontal clipping only, which is what it needed and which loses
+         * nothing vertically. A detector that cannot see a fix is worse than no
+         * detector, because it argues for changes that are already made.
+         */
+        if (s.overflowY === 'visible' || s.overflowY === 'auto' || s.overflowY === 'scroll') continue;
         if (el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 2) {
           out.push(`${el.tagName}.${(el.className?.toString?.() || '').slice(0, 40)} ${el.clientHeight}<${el.scrollHeight}`);
         }

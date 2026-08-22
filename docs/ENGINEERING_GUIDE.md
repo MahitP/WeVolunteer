@@ -2449,3 +2449,139 @@ teaches something. A register nobody adds to is a register nobody trusts.
 
 *Established 2026-07-31 at `v1.1.0`. WeVolunteer — volunteer scheduling and
 service-hour tracking for schools and community organizations.*
+
+## Accessibility
+
+### The target, and what it is not
+
+WeVolunteer is built and tested against **WCAG 2.2 Level AA**.
+
+That is a technical target. It is **not** a legal conclusion: nothing in this repository
+establishes that WeVolunteer is "ADA compliant", and no document produced here may say so.
+Whether the ADA applies, and on what terms, depends on the organisation's structure, funding,
+users and jurisdiction — a question for qualified legal advice. Keep the distinction in any
+copy that reaches a user; `docs/legal/policies/13-accessibility-statement.md` is written to
+respect it and is the place to look for the wording.
+
+Corrections worth keeping, because they are easy to get backwards:
+
+- **2.5.5 Target Size (Enhanced) is Level AAA.** The AA criterion is **2.5.8 Target Size
+  (Minimum)** at **24×24 CSS px**, new in 2.2. This repo's 44px house rule is therefore
+  *stricter* than conformance requires. Both are enforced, and measured separately, so a house
+  rule is never reported as a conformance failure.
+- **2.4.13 Focus Appearance is Level AAA.** Focus problems at AA are **2.4.7 Focus Visible**,
+  **2.4.11 Focus Not Obscured (Minimum)** (new in 2.2) and **1.4.11 Non-text Contrast**.
+- **4.1.1 Parsing is obsolete in WCAG 2.2.** Do not treat it as a requirement.
+- **2.5.7 Dragging Movements** is not applicable while there are no drag interactions. If one is
+  added, it becomes live.
+
+### Two layers, and the line between them
+
+**Layer 1 is unconditional.** Keyboard operation, visible focus, semantic structure, accessible
+names, correct heading order, sufficient contrast, reflow, and respecting the operating system's
+`prefers-reduced-motion` are properties of the application. They are never behind a setting.
+
+**Layer 2 is personalisation.** `Settings → Accessibility` offers text size, increased contrast,
+reduced motion, reduced transparency, larger controls and always-underlined links. A person who
+already has what they need can ignore every one of them.
+
+There must never be a setting called "enable keyboard navigation", "screen reader mode" or
+anything of that shape. Such a setting means the application ships inaccessible by default with
+a hidden repair — findable only by using the interface that does not work yet.
+
+### Which guard checks what, and why they are split
+
+This is the part that is easy to get wrong.
+
+- **Static guards under `src/`** parse source text: `focusIndicators`, `textOpacity`,
+  `touchTargets`, `headingLevels`, `documentContrast`, `inputContrast`, `tokens`,
+  `noHardcodedColors`, `accessibilityPreferences`, `settingsSections`. They run in milliseconds
+  and need no browser.
+- **The `a11y/` harness** measures layout in a real Chromium.
+
+The split is not a preference. `getBoundingClientRect()` returns **zero** in jsdom, so a
+rendered assertion in a Vitest test is vacuous in exactly the way that looks convincing —
+`src/touchTargets.test.js` says so in its own header. **Never add a geometry, contrast, focus or
+reflow assertion to a jsdom test.** It belongs in `a11y/`.
+
+Both halves are needed, and they check different claims: a CSS parse proves a rule is
+*declared*, and a browser proves it *paints*. The forced-colors focus defect was a case where
+every declaration was individually correct and the composed result was no focus ring at all.
+
+### Running it
+
+```bash
+npm run a11y                       # the whole sweep
+npm run a11y:local                 # the @local Welly tests, with a real model
+npm run a11y -- a11y/sweep.axe.spec.js     # one sweep
+A11Y_UPDATE_BASELINE=1 npm run a11y -- a11y/sweep.axe.spec.js   # re-record
+```
+
+`WEV_DB_PATH` must be set to an absolute path under `scratch/`. It is not a convenience: the
+harness **refuses to start without it**, because its default would be `server/wevolunteer.db` —
+a real developer database — and `pilot.db` holds real minors' personal data. See
+`a11y/harness/guard.mjs`, which composes the shared refusals from `bin/lib/db-safety.mjs` and
+adds the ones an unattended run needs.
+
+**Harness code must never import `bin/resolveDb.mjs`.** Its own comment records that
+`process.loadEnvFile` overwrites variables the caller explicitly set, which would defeat the
+gate. Use `bin/lib/db-safety.mjs`.
+
+### The ratchet
+
+`a11y/A11Y_BASELINE.json` is one-way. Counts may fall freely; they rise only through an explicit
+reviewed edit to the committed file. A **new** rule firing is a regression and **more of an
+existing rule** is also a regression — without the second half, nine more unlabelled buttons on
+a page that already had one keeps the run green, which is worse than no baseline because it
+reads as proof. Every entry must name the audit finding that explains it, or `compare()` throws.
+
+### Measuring correctly — read this before trusting a number
+
+Running the harness found more defects in the harness than in the application. All six are
+documented in `docs/audits/2026-08-22-accessibility-audit.md` §5. The two most transferable:
+
+- **Settle styles before measuring anything visual.** Entrance animations here run 120–300ms,
+  and a fading element's *composited* colour is lighter than its token. Measured mid-fade, axe
+  reported 49 contrast violations; with animation disabled the same pages reported 18. Thirty-one
+  were artefacts, including the primary button — white on its token is 6.54:1, white on the
+  mid-fade composite is 4.29:1. Acting on those would have meant darkening a conformant palette.
+- **But do not settle a sweep that asks about motion.** Settling sets
+  `animation-duration: 0s`, which made the reduced-motion sweep pass on every route while
+  looking at nothing. That sweep opts out, and carries a control test that injects an infinite
+  animation and fails if the detector cannot find it — because "nothing animates forever" also
+  passes when nothing animates at all.
+
+Filter to elements that are actually **exposed** before reporting a structural finding.
+`display: none` removes an element from the accessibility tree, and counting DOM nodes instead
+produced 23 false "duplicate landmark" findings against navigation that no screen reader has
+ever seen twice.
+
+### Writing new UI
+
+- **Native element first.** A `<fieldset>` with radios gives group naming and position
+  announcements for free; a hand-rolled `role="radiogroup"` is more code that behaves worse.
+- **Every control needs an accessible name**, and the visible label must be part of it
+  (2.5.3). An icon-only control needs `aria-label`; its icon needs `aria-hidden="true"`.
+- **Never remove a focus indicator without a replacement that also survives `forced-colors`.**
+  `--focus` is a `box-shadow`, and forced-colors strips those, so any selector declaring
+  `outline: none` must be named in the `@media (forced-colors: active)` block.
+  `src/focusIndicators.test.js` enforces this and will tell you which selector you missed.
+- **De-emphasise text with a colour, never with `opacity`.** Every real contrast defect found in
+  this audit had that one cause. Opacity on a *container* also dims every descendant and cannot
+  be overridden by one — three attempts to fix a nested badge by changing its own colours failed
+  because the cause was two levels up. A colour inherits and can be overridden; opacity cannot.
+- **No clickable non-interactive elements.** A `<span onClick>` is unreachable by keyboard, and
+  promoting it to a button is not always the fix: if a properly named control already does the
+  same thing, make the text a fact instead.
+- **Status is never colour alone.** Say it in words as well.
+
+### Environment traps
+
+- The API server reads **`API_PORT`** (default 5050) and never `PORT`. Vite reads **`PORT`**
+  (default 5173). The harness uses 5199/5198 so a developer's own dev server survives a run.
+- **`VITE_LOCAL_AI` defaults to `'true'`.** CI sets it to `false`, which renders Welly's
+  engine-unavailable state — correct for structural checks, useless for streaming, which is why
+  those tests are tagged `@local` and excluded there.
+- Vite binds `[::1]` unless given `--host 127.0.0.1`, which once stalled the whole run with both
+  servers visibly up and no test ever starting.
+- `/login` is a **method picker**, not a form. The email fields live behind `?mode=email`.
