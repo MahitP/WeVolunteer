@@ -85,14 +85,16 @@ Already present and verified still working:
 
 **Verification run:** the exact CI command, from a clean `scratch/` directory —
 `NODE_ENV=development DATABASE_ENGINE=sqlite VITE_LOCAL_AI=false WEV_DB_PATH=$PWD/scratch/a11y.db npm run a11y -- --grep-invert @local`
-— **34 tests, 34 passed, 48.9 minutes, exit 0.** Alongside it: the full Vitest
-suite at **7,808 passed / 0 failed** (106 skipped, all pre-existing
+— **37 tests, 37 passed, 9.2 minutes, exit 0.** Alongside it: the full Vitest
+suite at **7,817 passed / 0 failed** (106 skipped, all pre-existing
 PostgreSQL-gated), plus `oxlint` and `vite build` clean.
 
-The 48.9 minutes is worth naming as a cost. Nineteen of them are the axe sweep,
-which is the only one running all four roles; the rest are ~3.5 minutes each.
-It runs in its own CI job precisely so that cost cannot slow the existing
-build-and-test pipeline.
+The runtime is worth a note, because it corroborates A-13. Before that fix the
+same suite took **48.9 minutes**; afterwards, 9.2. Twelve permission-denied
+routes had been waiting out a 15-second timeout each, on every sweep, for a
+`#main-content` that did not exist — so the harness was slow *because of the
+defect*. A five-fold speed-up from adding one landmark is better evidence that
+the landmark was missing than any assertion about it.
 
 After the fixes above, on the current tree:
 
