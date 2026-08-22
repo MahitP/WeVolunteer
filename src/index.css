@@ -12722,3 +12722,32 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   padding: 0;
   margin-bottom: var(--s1);
 }
+
+/**
+ * A field whose label row carries a second control, without that control
+ * landing between the two inputs in the tab order.
+ *
+ * The sign-in form's "Forgot?" button used to live inside the label row, which
+ * is where it belongs visually and exactly the wrong place in the DOM: Tab from
+ * the identifier focused it instead of the password field, so a keyboard user
+ * typing their password typed into nothing and Enter took them to the password
+ * reset screen having lost their input.
+ *
+ * The grid puts the label and the aside on row 1 and the input across row 2,
+ * while the DOM order stays label -> input -> aside. Nothing moves on screen and
+ * Tab goes identifier -> password -> Forgot?. Done with CSS rather than
+ * `tabindex` because a positive tabindex would have to be matched by every other
+ * control on the screen to stay coherent.
+ */
+.field-with-aside {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: var(--s2);
+}
+
+.field-with-aside > label { grid-column: 1; grid-row: 1; }
+.field-with-aside > .field-aside { grid-column: 2; grid-row: 1; justify-self: end; }
+/* The input group and anything after it (the error message) span both columns. */
+.field-with-aside > .input-affix { grid-column: 1 / -1; grid-row: 2; }
+.field-with-aside > .field-error { grid-column: 1 / -1; grid-row: 3; }

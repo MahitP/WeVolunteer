@@ -33,7 +33,17 @@ async function openWelly(browser, request, baseURL) {
   const ctx = await browser.newContext({ baseURL, storageState: statePath });
   const page = await ctx.newPage();
   await page.goto('/welly');
-  await page.locator('#main-content').waitFor({ state: 'visible', timeout: 20000 });
+  /**
+   * Wait for WELLY, not for the shell.
+   *
+   * `#main-content` is the shell's landmark and appears before the view inside
+   * it: routes are code-split, so a Suspense fallback renders first and
+   * WellyView arrives later. Waiting on the shell and then reading
+   * `.welly-transcript` raced the lazy import and reported ".welly-transcript is
+   * gone — was it renamed?" about a page that renders it perfectly well. The
+   * failure looked like a defect in the app and was a defect in the test.
+   */
+  await page.locator('#welly-prompt-input').waitFor({ state: 'visible', timeout: 30000 });
   return { ctx, page };
 }
 

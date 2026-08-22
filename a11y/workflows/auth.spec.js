@@ -64,59 +64,125 @@ test('the password field accepts paste, so a password manager works', async ({ p
 
 test('the password field is autofillable', async ({ page }) => {
   await page.goto(EMAIL_STEP);
+  /* Wait for the field before reading its attributes. Without this the evaluate
+     raced the render, getElementById returned null, and the test reported "no
+     autocomplete token" about a field that has one — a failure of the test that
+     reads exactly like a defect in the app. */
+  await page.locator('#login-password').waitFor({ state: 'visible', timeout: 15000 });
   /* 1.3.5 Identify Input Purpose, and the practical half of 3.3.8: without
      autocomplete tokens a password manager cannot reliably fill these, so the
      person is back to typing a long secret by hand. */
+  /* The identifier field is `type="text" name="username"` — this form accepts a
+     username as well as an address. Selecting on type=email found nothing, so the
+     first version of this test failed for its own reason rather than the app's. */
   const tokens = await page.evaluate(() => ({
-    email: document.querySelector('input[type="email"], input[name*="email" i]')?.getAttribute('autocomplete'),
-    password: document.querySelector('input[type="password"]')?.getAttribute('autocomplete')
+    identifier: document.getElementById('login-identifier')?.getAttribute('autocomplete'),
+    password: document.getElementById('login-password')?.getAttribute('autocomplete')
   }));
 
-  expect(tokens.password, 'the password field has no autocomplete token').toBeTruthy();
-  expect(tokens.email, 'the email field has no autocomplete token').toBeTruthy();
+  expect(tokens.password, 'the password field has no autocomplete token').toBe('current-password');
+  expect(tokens.identifier, 'the identifier field has no autocomplete token').toBe('username');
 });
 
-test('a rejected sign-in explains itself in text, not only in colour', async ({ page }) => {
+test('Tab goes from the identifier straight to the password field', async ({ page }) => {
+  /**
+   * WCAG 2.4.3 Focus Order, and the reason this file earns its place.
+   *
+   * The "Forgot?" control sits in the password field's LABEL ROW, which put it
+   * between the two inputs in DOM order. Typing an email, pressing Tab, typing a
+   * password and pressing Enter — the sequence every keyboard user performs —
+   * landed on "Forgot?", swallowed the password keystrokes, then activated it:
+   * the person arrives on "Reset your password" having lost what they typed, with
+   * no error and no explanation of what happened.
+   *
+   * Found by a keyboard test doing exactly that and ending up on the wrong page.
+   * Nothing else would have caught it: every control is named, every field is
+   * labelled, and axe has nothing to say about the order two correct elements
+   * appear in.
+   */
+  await page.goto(EMAIL_STEP);
+  await page.getByRole('textbox', { name: /email/i }).first().focus();
+  await page.keyboard.press('Tab');
+
+  const landed = await page.evaluate(() => ({
+    id: document.activeElement?.id || '',
+    tag: document.activeElement?.tagName,
+    name: (document.activeElement?.textContent || '').trim().slice(0, 30)
+  }));
+
+  expect(
+    landed.id,
+    `Tab from the identifier landed on ${landed.tag} "${landed.name}" instead of the `
+    + 'password field. A keyboard user typing their password now types it into '
+    + 'nothing, and Enter leaves the sign-in flow.'
+  ).toBe('login-password');
+});
+
+test('a rejected sign-in explains itself in text, and says which field', async ({ page }) => {
+  /**
+   * 3.3.1 Error Identification, satisfied by ASSOCIATION rather than by a live
+   * region — which is what this form does, and is the stronger choice.
+   *
+   * The first version of this test demanded `[role="alert"]` and failed. The test
+   * was wrong. Login moves focus to the field that failed, and that field's
+   * `aria-describedby` points at the error text, so a screen reader announces the
+   * field, its label and the reason together. For a single-field error that beats
+   * announcing into a live region elsewhere on the page, because it also puts the
+   * cursor where the fix has to happen.
+   *
+   * So what matters is: the error exists as text, and it is programmatically tied
+   * to the field it is about.
+   */
   await page.goto(EMAIL_STEP);
   await page.getByRole('textbox', { name: /email/i }).first().fill('nobody@example.org');
-  await page.locator('input[type="password"]').first().fill('definitely-wrong');
+  await page.locator('#login-password').fill('definitely-wrong');
   await page.getByRole('button', { name: /^sign in$/i }).first().click();
 
-  /* A live region, so it is announced without the reader having to go looking —
-     4.1.3 Status Messages. A red border alone tells a screen-reader user
-     nothing, and tells a colour-blind user nothing either. */
-  const announced = page.locator('[role="alert"], [aria-live="assertive"], [aria-live="polite"]')
-    .filter({ hasText: /\S/ }).first();
+  const described = page.locator('[aria-invalid="true"][aria-describedby]').first();
   await expect(
-    announced,
-    'no live region carried the sign-in error, so nothing announces the failure'
+    described,
+    'no field was marked aria-invalid with a description after a rejected sign-in, '
+    + 'so nothing connects the error to the field it is about'
   ).toBeVisible({ timeout: 15000 });
 
-  const text = ((await announced.textContent()) || '').trim();
-  expect(text.length, 'the live region is present but empty').toBeGreaterThan(10);
+  const message = await described.evaluate(el => {
+    const id = el.getAttribute('aria-describedby');
+    return (document.getElementById(id)?.textContent || '').trim();
+  });
+  expect(message.length, 'the error description is empty, so the association points at nothing')
+    .toBeGreaterThan(5);
 });
 
-test('focus is not lost when sign-in fails', async ({ page }) => {
+test('focus lands somewhere useful when sign-in fails', async ({ page }) => {
+  /**
+   * Submitting disables the button (`disabled={loading}`), and a disabled element
+   * loses focus — so without something deliberately taking it, focus falls to the
+   * document body and the next Tab starts from the top of the page. Login handles
+   * that by focusing the field that failed.
+   *
+   * Asserted as "not the body" rather than naming a field, because focusing the
+   * identifier is equally correct when that is what was wrong. The failure worth
+   * catching is focus going nowhere.
+   */
   await page.goto(EMAIL_STEP);
   await page.getByRole('textbox', { name: /email/i }).first().fill('nobody@example.org');
-  await page.locator('input[type="password"]').first().fill('definitely-wrong');
+  await page.locator('#login-password').fill('definitely-wrong');
   await page.getByRole('button', { name: /^sign in$/i }).first().press('Enter');
 
-  await page.locator('[role="alert"], [aria-live]').filter({ hasText: /\S/ }).first()
+  /* Wait for the form to have finished failing, so this does not race the
+     re-render that re-enables the button. */
+  await page.locator('[aria-invalid="true"]').first()
     .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
 
   const focused = await page.evaluate(() => ({
     tag: document.activeElement?.tagName || 'BODY',
-    name: (document.activeElement?.getAttribute('aria-label')
-      || document.activeElement?.textContent || '').trim().slice(0, 40)
+    id: document.activeElement?.id || ''
   }));
 
-  /* Focus falling to the body means the next Tab starts from the top of the
-     document — the keyboard user has to walk the whole page again to retry a
-     password. */
   expect(
     focused.tag,
-    'focus fell to the document body after a failed sign-in, so the keyboard user restarts from the top'
+    'focus fell to the document body after a failed sign-in, so the keyboard user '
+    + 'restarts from the top of the page to try again'
   ).not.toBe('BODY');
 });
 
