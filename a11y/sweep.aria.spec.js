@@ -33,8 +33,32 @@ test('the accessible structure of every route holds up', async ({ browser, reque
          rotor. App.jsx renders two <nav> elements — the desktop rail and the
          mobile bar — and both are labelled "Main", which is the case worth
          catching: a rotor cannot tell them apart. */
+      /**
+       * Only landmarks that are actually EXPOSED.
+       *
+       * The first version of this check counted every matching element in the
+       * DOM and reported "nav x2 all named Main" on 23 routes — the desktop rail
+       * and the mobile bottom bar. That was a defect in the check, not in the
+       * app: `.mobilenav` is `display: none` until its breakpoint and the rail is
+       * hidden below it, and `display: none` removes an element from the
+       * accessibility tree entirely. A screen reader has never seen both.
+       *
+       * Reporting it would have meant renaming working navigation to satisfy a
+       * measurement that was wrong, which is worse than not measuring at all.
+       * `offsetParent` is null for a `display: none` subtree, and the
+       * visibility check covers the cases it misses.
+       */
+      const exposed = el => {
+        const s = getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden') return false;
+        if (el.getAttribute('aria-hidden') === 'true') return false;
+        /* position: fixed elements have a null offsetParent legitimately, so it
+           is only conclusive when the element is not fixed. */
+        return s.position === 'fixed' || el.offsetParent !== null;
+      };
+
       const byRole = {};
-      for (const el of document.querySelectorAll('nav,main,header,footer,aside,[role="navigation"],[role="region"]')) {
+      for (const el of [...document.querySelectorAll('nav,main,header,footer,aside,[role="navigation"],[role="region"]')].filter(exposed)) {
         const role = el.getAttribute('role') || el.tagName.toLowerCase();
         const labelledBy = el.getAttribute('aria-labelledby');
         const name = (
@@ -55,8 +79,7 @@ test('the accessible structure of every route holds up', async ({ browser, reque
          net. */
       const nameless = [];
       for (const el of document.querySelectorAll('a[href], button, [role="button"], [role="link"]')) {
-        const s = getComputedStyle(el);
-        if (s.display === 'none' || s.visibility === 'hidden') continue;
+        if (!exposed(el)) continue;
         const name = (
           el.getAttribute('aria-label')
           || el.getAttribute('title')

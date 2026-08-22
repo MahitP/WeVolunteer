@@ -22,14 +22,34 @@ export const INTERACTIVE = 'a[href], button, input:not([type="hidden"]), select,
  */
 export async function walkFocus(page, max = 150) {
   const seen = [];
-  let lastSignature = null;
   let repeats = 0;
+
+  /* Reset the identity tracker for this page. See `sameAsLast` below. */
+  await page.evaluate(() => { window.__a11yPrevFocused = null; });
 
   for (let i = 0; i < max; i++) {
     await page.keyboard.press('Tab');
     const step = await page.evaluate(() => {
       const el = document.activeElement;
       if (!el || el === document.body) return null;
+
+      /**
+       * Whether focus actually stayed put, by NODE IDENTITY.
+       *
+       * The first version compared a 140-character slice of `outerHTML`, and it
+       * reported 25 keyboard traps that did not exist. Every `.nav-item` in the
+       * rail begins with the same inline `<svg xmlns=... width="17" height="17"
+       * viewBox="0 0 24 24" ...>` markup, so the label — the only part that
+       * differs — falls outside the slice and four distinct navigation buttons
+       * produced one identical signature. The giveaway was that the "trapped"
+       * control was a different one on every route; a real trap is the same
+       * control every time.
+       *
+       * Comparing the element itself cannot be fooled by markup that happens to
+       * start the same way.
+       */
+      const sameAsLast = window.__a11yPrevFocused === el;
+      window.__a11yPrevFocused = el;
       const s = getComputedStyle(el);
       const r = el.getBoundingClientRect();
 
@@ -79,17 +99,18 @@ export async function walkFocus(page, max = 150) {
         outerHTML: el.outerHTML.slice(0, 140).replace(/\s+/g, ' '),
         offScreen: r.bottom < 0 || r.top > innerHeight,
         visibleRing,
-        obscuredBy
+        obscuredBy,
+        sameAsLast
       };
     });
 
     if (!step) break;
 
-    const signature = step.outerHTML;
-    if (signature === lastSignature) {
+    if (step.sameAsLast) {
       repeats += 1;
       /* Three consecutive Tabs that do not move focus is a trap, not a slow
-         widget. Recorded once, then stop. */
+         widget. Recorded once, then stop — continuing would record the same
+         element ninety more times and bury the finding in its own noise. */
       if (repeats >= 2) {
         seen.push({ index: i, ...step, trapped: true });
         break;
@@ -97,7 +118,6 @@ export async function walkFocus(page, max = 150) {
     } else {
       repeats = 0;
     }
-    lastSignature = signature;
     seen.push({ index: i, ...step, trapped: false });
   }
   return seen;

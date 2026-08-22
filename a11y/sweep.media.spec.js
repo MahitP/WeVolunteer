@@ -61,7 +61,10 @@ test('nothing animates forever under prefers-reduced-motion', async ({ browser, 
   const moving = [];
   await forEachRoute(
     { browser, request, baseURL },
-    { context: { reducedMotion: 'reduce' } },
+    /* settle: false — see walk.mjs. Settling sets animation-duration to 0s,
+       which would answer this test's question for it and pass on every route
+       without looking at the page. */
+    { context: { reducedMotion: 'reduce' }, settle: false },
     async (page, route) => {
       const hits = await page.evaluate(() => {
         const out = [];
@@ -86,6 +89,56 @@ test('nothing animates forever under prefers-reduced-motion', async ({ browser, 
     moving,
     `WCAG 2.3.3 / prefers-reduced-motion — elements that animate forever anyway:\n${moving.join('\n')}`
   ).toEqual([]);
+});
+
+/**
+ * The control for the test above, and the reason it is not vacuous.
+ *
+ * "No element animates forever" passes trivially if nothing on the page animates
+ * at all, or if the harness itself removed the animation — which it did once:
+ * the shared walker settles styles before measuring, `animation-duration: 0s`
+ * made every infinite animation invisible, and the reduced-motion sweep passed
+ * on every route while looking at nothing. That is why it now opts out of
+ * settling.
+ *
+ * This proves the detector still works, by finding what it is supposed to find
+ * when motion is ALLOWED. One page, because it is a proof about the detector
+ * rather than about the application. If this ever fails, the test above has
+ * stopped meaning anything and the fix is here, not there.
+ */
+test('the reduced-motion detector finds animation when motion is allowed', async ({ browser, request, baseURL }) => {
+  const roles = await fetchRoles(request, baseURL);
+  const statePath = await signInAs(browser, roles[0], baseURL);
+  /* No reducedMotion override, and no settle: the page as a person sees it. */
+  const ctx = await browser.newContext({ baseURL, storageState: statePath });
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await page.locator('#main-content').waitFor({ state: 'visible' });
+
+  const animated = await page.evaluate(() => {
+    /* Injected on purpose rather than hunting for a spinner that may not be on
+       screen: this asks whether the DETECTION works, not whether the dashboard
+       happens to animate right now. */
+    const probe = document.createElement('div');
+    probe.setAttribute('style',
+      'animation-name: spin; animation-duration: 1s; animation-iteration-count: infinite;');
+    document.body.appendChild(probe);
+    const out = [];
+    for (const el of document.querySelectorAll('*')) {
+      const s = getComputedStyle(el);
+      const dur = parseFloat(s.animationDuration) || 0;
+      if (s.animationIterationCount === 'infinite' && dur > 0) out.push(el.tagName);
+    }
+    probe.remove();
+    return out;
+  });
+
+  await ctx.close();
+  expect(
+    animated.length,
+    'the detector found no infinite animation even with one injected — it cannot '
+    + 'fail, so the reduced-motion assertion above proves nothing'
+  ).toBeGreaterThan(0);
 });
 
 /**

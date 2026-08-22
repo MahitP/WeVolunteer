@@ -41,7 +41,7 @@ const SETTLE = `
  */
 export async function forEachRoute(
   { browser, request, baseURL },
-  { roles = 'first', context = {}, signedOut = false } = {},
+  { roles = 'first', context = {}, signedOut = false, settle = true } = {},
   visit
 ) {
   const unreachable = [];
@@ -102,10 +102,22 @@ export async function forEachRoute(
        * darkening a palette that was already conformant: a scanner number
        * treated as a fact about the product.
        */
-      await page.addStyleTag({ content: SETTLE }).catch(() => {});
-      await page.evaluate(
-        () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-      ).catch(() => {});
+      /**
+       * `settle: false` exists for one caller and is not an optimisation.
+       *
+       * SETTLE sets `animation-duration: 0s`, so any check that ASKS ABOUT
+       * animation is answered by the settle rather than by the page. The
+       * reduced-motion sweep looks for elements still animating infinitely, and
+       * with styles settled it found none and passed — vacuously, on every
+       * route, which is the failure mode this repo's guards are written against.
+       * A sweep measuring motion must not be handed a stylesheet that removed it.
+       */
+      if (settle) {
+        await page.addStyleTag({ content: SETTLE }).catch(() => {});
+        await page.evaluate(
+          () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+        ).catch(() => {});
+      }
 
       const landed = new URL(page.url()).pathname;
       if (landed !== route.concrete) {
