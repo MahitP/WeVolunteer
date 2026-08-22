@@ -18,28 +18,37 @@ const UNSET = ' unset';
  * Refuses any database this harness must not drive a browser through, and
  * returns the one it may.
  *
- * The unset and absolute checks run first because they are pure validation —
- * no I/O, nothing to get wrong by ordering them ahead of everything else.
+ * Order, and why it is this order:
  *
- * The four shared refusals run next, in the same order bin/reset-dev-db.mjs
- * composes them and for the same reasons — production first, because it is the
- * check that must not be reachable past; then the engine, because with
- * DATABASE_ENGINE=postgres a file path is irrelevant and every check after it
- * would be inspecting the wrong thing; then the path; then the contents.
- *
- * The scratch-containment check runs LAST, after the shared refusals rather
- * than before them. Checking it earlier meant a path outside scratch/ was
- * refused for being outside scratch/ even when it was ALSO a production path or
- * a database full of real accounts — hiding the more specific, more useful
- * refusal behind a generic one, and (see below) doing so by way of a crash. The
- * cost of running it last is that a database outside scratch/ may be read
- * before this check ever gets to refuse it — acceptable, because reading is
- * precisely how refuseNonDisposableDatabase proves a database is disposable, it
- * is what the other three tools already do, and refuseProductionLikePath has
- * already rejected production-looking paths by that point.
+ *   1. refuseProduction        — first, because it is the check that must not
+ *      be reachable past, and it needs no dbPath to run.
+ *   2. refuseNonSqliteEngine   — also needs no dbPath; with
+ *      DATABASE_ENGINE=postgres a file path is irrelevant and every check
+ *      after it would be inspecting the wrong thing.
+ *   3. the unset check         — must come before resolveDbPath() is called
+ *      for real, because an unset WEV_DB_PATH is exactly the case whose
+ *      "default" is server/wevolunteer.db, a real developer database.
+ *   4. the absolute check      — a relative path means a different file from
+ *      every working directory this harness runs processes in.
+ *   5. refuseProductionLikePath / refuseNonDisposableDatabase — the same two
+ *      checks bin/reset-dev-db.mjs composes, in its order, now that dbPath
+ *      exists.
+ *   6. the scratch-containment check — LAST. Checking it earlier meant a path
+ *      outside scratch/ was refused for being outside scratch/ even when it
+ *      was ALSO a production path or a database full of real accounts —
+ *      hiding the more specific, more useful refusal behind a generic one.
+ *      The cost of running it last is that a database outside scratch/ may be
+ *      read before this check ever gets to refuse it — acceptable, because
+ *      reading is precisely how refuseNonDisposableDatabase proves a database
+ *      is disposable, it is what the other three tools already do, and
+ *      refuseProductionLikePath has already rejected production-looking paths
+ *      by that point.
  */
 export function assertScratchDatabase({ tool }) {
   const effect = 'delete that database, reseed it, and drive a browser through it';
+
+  refuseProduction({ tool, effect });
+  refuseNonSqliteEngine({ tool, effect });
 
   /* Deliberately NOT resolveDbPath's default. The default is
      server/wevolunteer.db, a real developer database; silently auditing it is
@@ -60,8 +69,6 @@ export function assertScratchDatabase({ tool }) {
 
   const dbPath = resolveDbPath(UNSET);
 
-  refuseProduction({ tool, effect });
-  refuseNonSqliteEngine({ tool, effect });
   refuseProductionLikePath({ tool, dbPath });
   refuseNonDisposableDatabase({ tool, dbPath, effect });
 
@@ -74,11 +81,37 @@ export function assertScratchDatabase({ tool }) {
   const parentPath = path.dirname(dbPath);
   /* realpath only an EXISTING parent: a symlink has to exist to be followed, so
      an absent parent cannot smuggle the target out of scratch/, and resolving
-     it lexically is enough. */
+     it lexically is enough. This covers the PARENT only — a symlinked LEAF
+     (scratch/leaf.db -> /elsewhere/fake.db) has a parent that sits correctly
+     inside scratch/ and would sail through this check while pointing anywhere
+     on disk. The lstat check below is what catches that case; this one alone
+     is not the complete symlink defence. */
   const parent = fs.existsSync(parentPath) ? fs.realpathSync(parentPath) : path.resolve(parentPath);
   if (parent !== scratchReal && !parent.startsWith(scratchReal + path.sep)) {
     refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, outside scratch/.`,
       `Artefacts are written beside the database, so it belongs under\n  ${SCRATCH}, which git already ignores.`);
+  }
+
+  /* The leaf itself, not just its parent. A scratch database has no reason to
+     be a link, so any symlink here is refused outright rather than followed —
+     which closes two escapes the parent check above cannot see: a symlinked
+     LEAF whose own path sits inside scratch/ but whose target does not, and a
+     DANGLING symlinked parent (existsSync follows the link, finds nothing, and
+     reports "does not exist", which fell to the lexical branch above as if it
+     were an ordinary absent file — even though something could appear at the
+     link's target between this check and the reset that follows it).
+     lstatSync, never statSync: statSync follows the link and would describe
+     whatever it points to, not the link itself. */
+  let leafStat = null;
+  try {
+    leafStat = fs.lstatSync(dbPath);
+  } catch {
+    // Genuinely does not exist yet — the ordinary first-run case.
+  }
+  if (leafStat && leafStat.isSymbolicLink()) {
+    refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, which is a symlink.`,
+      'A scratch database has no reason to be a link, and a symlinked leaf can\n'
+      + '  point outside scratch/ regardless of where its own path sits.');
   }
 
   return dbPath;

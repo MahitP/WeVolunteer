@@ -563,15 +563,30 @@ describe('the safety gate cannot be skipped by a new tool', () => {
  *
  * Every assertion above is "exit non-zero and print REFUS". A tool whose file
  * does not exist exits non-zero, and node's own error contains no "REFUS" — so
- * a missing file fails loudly today. But a tool that exits non-zero for ANY
- * duller reason (a syntax error, a bad import) would satisfy the exit-code half
- * while the refusal it is supposed to prove never ran. This asserts the files
- * are real, so the suite is measuring gates rather than crashes.
+ * a missing file fails loudly today. `existsSync` proves only that: the file is
+ * there. It cannot tell a working gate from a broken one — a syntax error or a
+ * bad import still leaves the file sitting on disk, `existsSync` still returns
+ * true, and none of that is what the assertion below actually checks.
+ *
+ * The second assertion per tool is what closes the hole `existsSync` cannot: a
+ * tool with a syntax error exits non-zero and prints no "REFUS", which would
+ * satisfy the exit-code half of every assertion above while the refusal it is
+ * supposed to prove never ran. `node --check` parses the file without running
+ * it and without resolving its imports, so it proves the file parses — nothing
+ * about whether it runs, or what a bad import inside it would do.
  */
 describe('the destructive-tool list points at real tools', () => {
   for (const tool of DESTRUCTIVE_TOOLS) {
     it(`${tool} exists`, () => {
       expect(existsSync(path.join(ROOT, tool)), `${tool} is listed but absent`).toBe(true);
+    });
+
+    it(`${tool} parses without a syntax error`, () => {
+      const res = spawnSync(process.execPath, ['--check', tool], {
+        cwd: ROOT, stdio: 'pipe', encoding: 'utf8'
+      });
+      const combined = String(res.stdout || '') + String(res.stderr || '');
+      expect(res.status, `${tool} failed to parse\n${combined}`).toBe(0);
     });
   }
 });
