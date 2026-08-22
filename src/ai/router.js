@@ -353,6 +353,40 @@ const INFORMATIONAL_MATCHERS = [
    * the third one and no reliable grip on the first two. Each has exactly one
    * correct response, so each gets a rule.
    */
+  /**
+   * "How far is it?"
+   *
+   * ── Why this is a rule and not a search ──
+   *
+   * It matched nothing, so it fell to the unknown fallback: "I can't help with
+   * that one. I can look up opportunities, your volunteer hours, …" — a list
+   * that does not include the thing just asked for, in reply to a question
+   * about the opportunity Welly had listed one turn earlier.
+   *
+   * The answer needs no lookup at all. The card already on screen carries the
+   * event's coordinates and the app already has the reader's, so this is
+   * arithmetic over context. See `distance_to_event` in assistant.js.
+   *
+   * ── What it deliberately does not match ──
+   *
+   * "How far am I from my goal" and "how far through the term" are not about
+   * places. Requiring a distance word next to a place-ish or pronoun subject
+   * keeps those out, and `intentCoverage` re-checks that the hours and
+   * milestone questions still route where they did.
+   */
+  {
+    intent: 'distance_to_event',
+    tool: null,
+    test: text =>
+      (/\bhow\s+far\b/i.test(text)
+        && !/\bhow far (through|along|into)\b/i.test(text)
+        && !/\b(goal|target|milestone|award|hours?)\b/i.test(text))
+      || /\bhow\s+close\s+(is|are)\b/i.test(text)
+      || /\b(is|are)\s+(it|that|this|they|these|those)\s+(far|close|nearby|near)\b/i.test(text)
+      || /\bdistance\s+(to|from)\b/i.test(text)
+      || /\bhow\s+long\s+(does it take\s+)?to\s+get\s+(there|to it)\b/i.test(text),
+    slots: () => ({}),
+  },
   {
     intent: 'identity_self',
     tool: null,

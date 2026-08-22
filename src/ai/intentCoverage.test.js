@@ -133,6 +133,7 @@ const PROBES = {
   create_event: 'start a draft',
   search_opportunities: 'find volunteering opportunities near me',
   capabilities: 'what can you do?',
+  distance_to_event: 'how far is it?',
   identity_self: 'who trained you?',
   identity_platform: 'what is this app called?',
   my_name: "what's my name?",

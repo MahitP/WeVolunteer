@@ -149,7 +149,7 @@ describe('the kinds that deliberately have no card', () => {
 
 describe('attribution', () => {
   it('names the source for the kinds that gained a card', () => {
-    for (const kind of ['next_shift', 'waitlists', 'my_events', 'event_details', 'organizer_summary', 'platform_stats', 'recent_audit']) {
+    for (const kind of ['next_shift', 'waitlists', 'my_events', 'event_details', 'organizer_summary', 'platform_stats', 'recent_audit', 'distances']) {
       const { container, unmount } = render(<AssistantSource kind={kind} />);
       expect(container.textContent, kind).toMatch(/^Source: .+/);
       unmount();
@@ -158,6 +158,36 @@ describe('attribution', () => {
 
   it('says nothing for a kind with no source of its own', () => {
     const { container } = render(<AssistantSource kind="draft" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe('how far away things are', () => {
+  it('lists each place with its distance, in the order it was given', () => {
+    show({
+      kind: 'distances',
+      data: { total: 2, items: [
+        { title: 'Softball Tournament Snack Shack', location: 'Reichler Park', miles: 1.4 },
+        { title: 'Beach Cleanup', location: 'Arroyo Burro', miles: 4.2 },
+      ] },
+    });
+    const list = screen.getByLabelText('How far away these are');
+    const rows = within(list).getAllByRole('listitem').map(li => li.textContent);
+    /* Nearest first, and NOT re-sorted here — assistant.js sorts once so the
+       sentence above the card and the first row cannot disagree. */
+    expect(rows[0]).toMatch(/Softball Tournament Snack Shack/);
+    expect(rows[0]).toMatch(/1\.4 miles away/);
+    expect(rows[1]).toMatch(/4\.2 miles away/);
+  });
+
+  it('says mile, not miles, for exactly one', () => {
+    show({ kind: 'distances', data: { total: 1, items: [{ title: 'Food Bank', location: null, miles: 1 }] } });
+    expect(screen.getByText(/1 mile away/)).toBeInTheDocument();
+    expect(screen.queryByText(/1 miles away/)).toBeNull();
+  });
+
+  it('renders nothing rather than an empty box', () => {
+    const { container } = show({ kind: 'distances', data: { total: 0, items: [] } });
     expect(container).toBeEmptyDOMElement();
   });
 });

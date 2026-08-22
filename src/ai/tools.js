@@ -102,6 +102,21 @@ function localDay(value) {
 }
 
 /** Rows handed to the model, per tool. Enough to answer, far short of a dump. */
+/**
+ * A coordinate, or null.
+ *
+ * The API sends these as numbers, but an event created without a geocoded
+ * address has them absent, and a few older rows carry them as strings. `Number`
+ * on `undefined` is `NaN`, which is a number that would sail through a
+ * `typeof` check and come out of the haversine as `NaN` miles — a distance the
+ * interface would then render as "NaN miles away". Null is the only honest
+ * answer for "we do not know where this is".
+ */
+function coord(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 const MAX_ROWS = 8;
 
 const ok = (kind, data) => ({ ok: true, kind, data });
@@ -331,6 +346,22 @@ export const TOOLS = {
             category: e.category,
             tags: (e.tags || []).slice(0, 3).map(t => t.label || t),
             distance: typeof e.distance === 'number' ? e.distance : null,
+            /**
+             * Where the event is, so a later "how far is it?" can be answered
+             * without another request.
+             *
+             * `distance` above is only populated when the SEARCH carried
+             * coordinates. Somebody who searched before granting location — and
+             * then granted it from the offer under the answer — has a list on
+             * screen with no distances in it, and asking is the obvious next
+             * move. Carrying the point rather than the answer is what makes
+             * that work.
+             *
+             * These are public event locations, already sent to Discover for
+             * exactly this calculation. Nothing about the READER is added here.
+             */
+            latitude: coord(e.latitude ?? e.lat),
+            longitude: coord(e.longitude ?? e.lng),
             deadline: localDay(e.applicationDeadline || e.application_deadline),
           })),
         });
@@ -491,6 +522,10 @@ export const TOOLS = {
           description: event.description,
           category: event.category,
           location: event.location,
+          /* Same reason as the search card: a follow-up about distance should
+             not need a second lookup. See the note there. */
+          latitude: coord(event.latitude ?? event.lat),
+          longitude: coord(event.longitude ?? event.lng),
           deadline: localDay(event.applicationDeadline || event.application_deadline),
           slots: (event.slots || []).slice(0, MAX_ROWS).map(s => ({
             name: s.name,

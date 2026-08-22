@@ -25,6 +25,7 @@ import { CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
 import { checkRole, actionReplyFor, abilitiesFor } from './roles.js';
 import { getInformationalAnswer } from './informational.js';
 import { resolveNavigation } from './navigation.js';
+import { haversineDistance } from '../utils/helpers.js';
 import {
   createDraft,
   getPendingDraft,
@@ -388,6 +389,48 @@ export function sanitizeHistory(history, maxTurns = CHAT_HISTORY_TURNS) {
     .filter(m => !(m.role === 'assistant' && m.systemNotice))
     .slice(-maxTurns)
     .map(m => ({ role: m.role, content: formatResponseText(m.text) }));
+}
+
+/**
+ * The places Welly has just shown, newest first.
+ *
+ * ── Why this reads the transcript rather than running a tool ──
+ *
+ * "How far is it?" is only answerable in context: "it" is whatever was on
+ * screen a moment ago. The cards already carry the coordinates — see `coord` in
+ * tools.js — and the app already has the reader's, so the answer is arithmetic
+ * over what has been said, not a new request.
+ *
+ * Newest first, and it stops at the first card that has any place in it: a
+ * question about "it" means the last thing shown, not everything ever shown.
+ */
+function placesInHistory(history = []) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const card = history[i]?.card;
+    if (!card || history[i].role !== 'assistant') continue;
+
+    const rows = card.kind === 'opportunities' ? (card.data?.items || [])
+      : card.kind === 'event_details' ? [card.data]
+        : [];
+
+    const places = rows.filter(r => r
+      && typeof r.latitude === 'number'
+      && typeof r.longitude === 'number');
+
+    /* A card with events but no coordinates on them is still THE card the
+       question is about — stopping here rather than looking further back is
+       what lets the answer say "I do not know where that one is" instead of
+       measuring to something older and wrong. */
+    if (rows.length) return places;
+  }
+  return [];
+}
+
+/** One mile figure, rounded the way the rest of the app rounds it. */
+function milesTo(position, place) {
+  return Number(haversineDistance(
+    position.lat, position.lng, place.latitude, place.longitude,
+  ).toFixed(1));
 }
 
 /**
@@ -898,6 +941,67 @@ export async function ask(
         intent,
         answer: conversationalAnswer,
         card: null,
+        phrasedByModel: false,
+      };
+    }
+
+    if (intent === 'distance_to_event') {
+      /**
+       * ── "How far is it?" ──
+       *
+       * Reported: asked straight after Welly listed an opportunity, and
+       * answered "I can't help with that one. I can look up opportunities,
+       * your volunteer hours, …" — a list of abilities that does not mention
+       * the one just asked for, about the thing on screen.
+       *
+       * No lookup runs. The card carries the event's coordinates and the app
+       * has the reader's, so this is arithmetic over the transcript.
+       *
+       * The three ways it can have no answer are three different sentences,
+       * because they need three different things from the reader: grant
+       * location, ask about something, or accept that this event has no
+       * address on it. Collapsing them into one "I can't work that out" is the
+       * shape of failure this whole file keeps having to undo.
+       */
+      const places = placesInHistory(history);
+
+      if (!places.length) {
+        return {
+          intent,
+          answer: 'I am not sure which place you mean. Ask me to find some opportunities '
+            + 'first, or open one, and then I can tell you how far away it is.',
+          card: null,
+          phrasedByModel: false,
+          systemNotice: true,
+        };
+      }
+
+      if (!position) {
+        return {
+          intent,
+          answer: 'I don’t have your location, so I can’t measure the distance yet.',
+          card: null,
+          phrasedByModel: false,
+          /* The same offer the search path makes: a button, because a browser
+             opens its permission dialog only for a gesture. */
+          needsLocation: true,
+        };
+      }
+
+      const measured = places
+        .map(p => ({ title: p.title, location: p.location || null, miles: milesTo(position, p) }))
+        .sort((a, b) => a.miles - b.miles);
+
+      const nearest = measured[0];
+      const answer = measured.length === 1
+        ? `${nearest.title} is about ${nearest.miles} ${nearest.miles === 1 ? 'mile' : 'miles'} away.`
+        : `The closest is ${nearest.title}, about ${nearest.miles} `
+          + `${nearest.miles === 1 ? 'mile' : 'miles'} away.`;
+
+      return {
+        intent,
+        answer,
+        card: { kind: 'distances', data: { total: measured.length, items: measured } },
         phrasedByModel: false,
       };
     }

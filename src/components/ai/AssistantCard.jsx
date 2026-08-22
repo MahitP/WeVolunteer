@@ -302,6 +302,36 @@ export default function AssistantCard({ card, onAction }) {
         </ul>
       );
 
+    /**
+     * How far away the places just shown are.
+     *
+     * ── Why the card exists rather than the sentence carrying it ──
+     *
+     * The sentence names the closest one, which is the answer to "how far is
+     * it?" when there is one thing on screen and the useful half of it when
+     * there are several. The rest belong in a list: reading six distances out
+     * in a paragraph is worse than a column of them, and the column is also
+     * what makes the ordering visible.
+     *
+     * Sorted nearest-first by `assistant.js`; the order is not re-derived here,
+     * so the sentence and the first row cannot disagree.
+     */
+    case 'distances':
+      if (!data.items?.length) return null;
+      return (
+        <ul className="ai-card stack-xs" aria-label="How far away these are">
+          {data.items.map((d, i) => (
+            <li key={`${d.title}-${i}`}>
+              <span className="strong">{d.title}</span>
+              <span className="dim small ai-card-meta">
+                {d.miles} {d.miles === 1 ? 'mile' : 'miles'} away
+                {d.location ? ` · ${d.location}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+
     case 'my_events':
       if (!data.items?.length) return null;
       return (
@@ -410,6 +440,10 @@ export function AssistantSource({ kind }) {
     waitlists: 'Your applications',
     my_events: 'Your events',
     event_details: 'WeVolunteer opportunities',
+    /* Measured in this browser from a location that never left it — see
+       LocationContext. Naming the source matters more here than elsewhere
+       because a distance sounds like something a server worked out. */
+    distances: 'Measured on your device',
     organizer_summary: 'Your events',
     platform_stats: 'Platform analytics',
     recent_audit: 'The audit trail',

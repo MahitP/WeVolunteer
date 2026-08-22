@@ -108,6 +108,9 @@ export const INTENT_CAPABILITY = Object.freeze({
   capabilities: null,
   /* Who Welly is, what this place is, and who the reader is. Everyone may ask;
      `my_name` reads the session's own user and nobody else's. */
+  /* Arithmetic over what is already on screen — no record is read, so there is
+     nothing here to authorise. */
+  distance_to_event: null,
   identity_self: null,
   identity_platform: null,
   my_name: null,
