@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useMe
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Send, Square, Trash2, Plus, MessageSquare, Clock, X,
-  ChevronRight, AlertCircle, Pencil, Check, MapPin, ShieldCheck
+  ChevronRight, AlertCircle, Pencil, Check, MapPin
 } from 'lucide-react';
 import WellyMark from '../components/ai/WellyMark';
 import AssistantCard, { AssistantSource } from '../components/ai/AssistantCard';
@@ -258,8 +258,32 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
     selectConversation(`conv-${Date.now()}`, []);
   }, [currentUser?.id, refreshConversations, selectConversation]);
 
+  /**
+   * The load currently running, or the last one that finished.
+   *
+   * ── Two jobs, both of them about the same race ──
+   *
+   * `loadRuntime` is called on mount, from the mode control, from a retry, and
+   * from a `storage` event when Settings changes the preference in another tab.
+   * Nothing stopped two of those overlapping, and the second would see
+   * `runtimeRef.current` still null — the first has not assigned it yet — and
+   * build a SECOND engine. Both finish, the later assignment wins, and the
+   * earlier one is left loaded and unreachable, holding its weights. With the
+   * Advanced model that is 1.4 GB leaked on a page whose whole premise is
+   * running inside a browser tab. React's StrictMode double-invokes effects in
+   * development, so this happened on every single mount there.
+   *
+   * Chaining rather than de-duplicating, because the calls do not always mean
+   * the same thing: `selectMode` writes a new preference and then calls this,
+   * and must not be handed the in-flight load of the OLD preference.
+   *
+   * The second job is `send`. See the wait there.
+   */
+  const loadingRef = useRef(Promise.resolve());
+
   // Load the on-device AI runtime in the background
   const loadRuntime = useCallback(async () => {
+    const run = async () => {
     const currentPrefs = readPreferences();
     setPrefs(currentPrefs);
     const model = currentPrefs.modelId ? modelById(currentPrefs.modelId) : null;
@@ -299,6 +323,15 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
       });
       setStatus(AIStatus.ERROR);
     }
+    };
+
+    /* `.then(run, run)` and not `.finally`: a previous load that REJECTED must
+       still let this one start. Nothing here rejects today — the body catches
+       everything — and relying on that from the outside is how the next edit
+       breaks it silently. */
+    const next = loadingRef.current.then(run, run);
+    loadingRef.current = next.catch(() => {});
+    return next;
   }, []);
 
   /**
@@ -597,6 +630,36 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
 
     /** Still the conversation this question was asked in, and still mounted. */
     const current = () => aliveRef.current && activeConvIdRef.current === convId;
+
+    /**
+     * ── Waiting for the engine the reader chose ──
+     *
+     * Reported: "Sometimes it defaults to Welly Chat for some reason even if im
+     * on AI mode."
+     *
+     * It was not random. `runtimeRef.current` is assigned only once the model
+     * has finished loading, and `ask` falls back to Welly Chat for anything
+     * else — so every question asked during the load was answered by Chat,
+     * silently, while the pill overhead said "Starting up". The Advanced model
+     * takes the better part of a minute on a cold start, which is exactly when
+     * somebody is most likely to type something.
+     *
+     * The load is already running; this waits for it rather than racing it. No
+     * new work and no new timeout — `loadRuntime` catches its own failures, so
+     * this settles when the load does, whichever way it went. Once loaded the
+     * promise is already resolved and this costs a microtask.
+     *
+     * Only when the reader has actually chosen Welly AI. With it off, the
+     * promise resolved at mount and there is nothing to wait for.
+     */
+    if (!runtimeRef.current && prefs.enabled && prefs.modelId) {
+      setLiveStatus('Starting Welly AI');
+      await loadingRef.current;
+      /* `busy` is already true, so nothing else could have started meanwhile —
+         but the reader may have switched conversations or left. */
+      if (!current()) { setBusy(false); return; }
+    }
+
 
     try {
       const res = await ask(question, {
@@ -1245,33 +1308,72 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
           </div>
 
           {/**
-            * The composer footer, and the one link on it.
+            * What Welly is, under the box you type into.
             *
-            * ── Why certificate verification is here ──
+            * ── Why this replaced a link to certificate verification ──
             *
-            * `/verify/:code` is public and is the link printed on a certificate,
-            * so the page has always existed and has never been reachable from
-            * inside the app: "there's no way to go to /verify unless u go to the
-            * specific link."
+            * That link was here because it was the only route into `/verify`
+            * from inside the app. It has a proper home now — a button on every
+            * dashboard — and it never belonged on this row: "I do think a small
+            * legal disclaimer would fit its place."
             *
-            * Of the four destinations it belongs to this one. Verifying a code
-            * is a lookup, Welly is where lookups happen, and Welly already has
-            * `verify_certificate` as a tool — this is a second door to a
-            * capability that is here rather than a feature borrowed from another
-            * page. The composer footer specifically, and not the empty state or
-            * the sidebar: the empty state disappears at the first message, and
-            * the sidebar is a drawer on a phone. This line is on screen for
-            * every role at every width, and it is already the quiet row.
+            * ── Three things, and why each is worth the line ──
             *
-            * Deliberately not in the nav rail. It is a thing somebody does once,
-            * usually holding a piece of paper, and a rail item would price it
-            * like Discover.
+            * It makes mistakes. Not a formality: this is a 0.5B–1.5B model
+            * running in a browser tab, and the honest description of it is
+            * "often wrong", not "occasionally imprecise". A student comparing
+            * Welly's answer to their transcript needs to know which one wins.
+            *
+            * It is for volunteering. The model will happily discuss anything,
+            * which invites it to be trusted on things it has no business being
+            * trusted on.
+            *
+            * Do not type personal details. Nothing here asks for any — see
+            * `asksForPersonalInfo` — but the box accepts whatever is typed into
+            * it, and "we cannot see it" is not the same as "it is a good idea".
+            *
+            * ── What this deliberately does NOT say ──
+            *
+            * "Nothing leaves your device." It is the sentence somebody reading
+            * the mode pill would expect, and it is not true of the whole
+            * feature: what you TYPE stays in the browser when Welly AI is
+            * running, and a lookup about your own hours or events is answered
+            * by WeVolunteer's server exactly as the rest of the app is. Saying
+            * the stronger thing here would make the assistant's one privacy
+            * claim the one place it overstates itself.
+            *
+            * So the on-device claim stays where it is conditional and accurate
+            * — the mode panel, which knows whether the model is actually
+            * running — and this links to the policy that sets out both halves.
             */}
           <div className="welly-composer-footer dim small">
-            <span>Grounded in your records. Nothing changes without your confirmation.</span>
-            <Link to="/verify" className="welly-verify-link">
-              <ShieldCheck size={13} aria-hidden="true" />
-              <span>Check a certificate</span>
+            {/**
+              * Two wordings, swapped by viewport height rather than one that is
+              * hidden when there is no room.
+              *
+              * The full sentence is three wrapped lines on a phone in landscape,
+              * which pushed the composer itself below the fold. The obvious fix
+              * is the one that used to be here — `display: none` under
+              * `max-height: 520px` — and it is not available any more: a
+              * disclaimer that disappears on small screens is not a disclaimer,
+              * and small screens are most of them.
+              *
+              * So the short form keeps the two clauses that are about the
+              * reader's safety and drops the one that is a reassurance. Both are
+              * asserted in WellyView.disclaimer.test.jsx so neither can quietly
+              * lose a clause the other still has.
+              */}
+            <span className="welly-footer-long">
+              Welly is a prototype for volunteering questions. It makes mistakes,
+              so check anything that matters, and it never changes anything without
+              your confirmation. Please don’t type personal details here.
+            </span>
+            <span className="welly-footer-short">
+              Welly is a prototype and makes mistakes. Please don’t type personal
+              details here.
+            </span>
+            <Link to="/legal/ai-and-on-device-processing" className="welly-policy-link">
+              How Welly uses your information
             </Link>
           </div>
         </div>

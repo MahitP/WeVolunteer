@@ -89,15 +89,22 @@ describe('/verify with a code still works exactly as before', () => {
 
 describe('the way in from inside the app', () => {
   /**
-   * Welly's composer footer, of the four navigation destinations.
+   * ── It moved, and this file records where from ──
    *
-   * Verifying a code is a lookup and Welly is where lookups happen — it already
-   * has `verify_certificate` as a tool, so this is a second door to something
-   * that is here rather than a feature borrowed from another page. The footer
-   * rather than the empty state or the sidebar: the empty state disappears at
-   * the first message, and the sidebar is a drawer on a phone.
+   * This asserted a "Check a certificate" link in Welly's composer footer, and
+   * a CSS rule keeping that footer visible at short viewport heights so the
+   * link could not vanish.
+   *
+   * Both are gone. The entry point is a button on all three dashboards, which
+   * `verifyCertificateEntry.test.jsx` covers across every role — a better place
+   * than a footnote under a chat box, and it is where it was asked for. The
+   * footer now carries Welly's disclaimer instead: "I do think a small legal
+   * disclaimer would fit its place."
+   *
+   * What is asserted here is the half that would otherwise be nobody's job —
+   * that the route did not simply disappear when it moved.
    */
-  it('is reachable from Welly at every viewport height', async () => {
+  it('is not left behind under the composer', async () => {
     const { default: WellyView } = await import('./WellyView.jsx');
     render(
       <MemoryRouter>
@@ -105,33 +112,21 @@ describe('the way in from inside the app', () => {
       </MemoryRouter>,
     );
 
-    const link = screen.getByRole('link', { name: /check a certificate/i });
+    expect(screen.queryByRole('link', { name: /check a certificate/i })).toBeNull();
+  });
+
+  it('is reachable from the dashboard instead', async () => {
+    /* One assertion here so this file's subject — how somebody gets to
+       verification — stays answerable from this file. The per-role matrix is in
+       verifyCertificateEntry.test.jsx. */
+    const { default: VerifyCertificateAction } = await import('../components/common/VerifyCertificateAction');
+    render(<MemoryRouter><VerifyCertificateAction /></MemoryRouter>);
+
+    const link = screen.getByRole('link', { name: /verify a certificate/i });
     expect(link).toHaveAttribute('href', '/verify');
-
-    /**
-     * The short-viewport block hides the footer to reclaim a line, which used
-     * to cost only a reassurance the reader had already seen. It now holds the
-     * only route to verification inside the app, so the rule hides the SPAN and
-     * leaves the link — a route that exists at one viewport height and not
-     * another is not a route.
-     *
-     * Asserted against the stylesheet rather than a computed style, because
-     * jsdom applies no media queries at all: a `getComputedStyle` check here
-     * would pass whatever the rule said.
-     */
-    const { readFileSync } = await import('node:fs');
-    const { join } = await import('node:path');
-    const css = readFileSync(join(process.cwd(), 'src', 'index.css'), 'utf8');
-    /* The brace matters: there is an earlier `@media (max-height: 520px) and
-       (orientation: landscape)` block, and a prefix match lands in that one. */
-    const start = css.indexOf('@media (max-height: 520px) {');
-    expect(start).toBeGreaterThan(-1);
-    /* To the closing brace of the media block: it is the only `}` in column
-       zero after the opening, because every rule inside is indented. */
-    const short = css.slice(start, css.indexOf('\n}', start) + 2);
-
-    expect(short).toMatch(/\.welly-composer-footer > span \{\s*display: none;/);
-    /* And the row itself is NOT hidden, which is what the rule used to do. */
-    expect(short).not.toMatch(/\.welly-composer-footer \{[^}]*display:\s*none/);
+    /* And it looks like a button rather than a line of text — `btn-ghost` is
+       `background: transparent` with no border, which is what it used to be. */
+    expect(link.className).toMatch(/\bbtn\b/);
+    expect(link.className).not.toMatch(/btn-ghost/);
   });
 });

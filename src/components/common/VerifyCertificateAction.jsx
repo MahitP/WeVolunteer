@@ -23,13 +23,22 @@ import { ShieldCheck } from 'lucide-react';
  * times, in the same position on all three — top of the content column, right
  * aligned, above the first card.
  *
- * ── Why it is quiet ──
+ * ── Quiet, but a button ──
  *
- * Verification is a thing somebody does once, usually holding a piece of
- * paper. It must be findable without competing with the dashboard's actual
- * job — the next shift, the approval queue, the open reports. So: ghost
- * button, small, and no count or badge to make it look urgent. It is deliberately
- * NOT in the navigation rail, which would price it like Discover.
+ * Verification is a thing somebody does once, usually holding a piece of paper.
+ * It must be findable without competing with the dashboard's actual job — the
+ * next shift, the approval queue, the open reports.
+ *
+ * It was `btn-ghost` for that reason, which was a step too far: ghost is
+ * `background: transparent` with no border, so at small size beside a heading
+ * it reads as a line of text that happens to have an icon. Reported as exactly
+ * that — "right now it's only text but make it look like a button."
+ *
+ * `btn-secondary` is the quietest variant that still has a surface, a border
+ * and a shadow, so it is legible as something to press without competing with a
+ * primary action. Still small, still no count or badge to make it look urgent,
+ * and still deliberately NOT in the navigation rail, which would price it like
+ * Discover.
  *
  * The role is irrelevant to it, which is why nothing here is conditional. A
  * student checking their own code, an organizer checking a volunteer's, and an
@@ -39,7 +48,7 @@ import { ShieldCheck } from 'lucide-react';
 export default function VerifyCertificateAction() {
   return (
     <div className="verify-cert-action">
-      <Link className="btn btn-ghost btn-sm" to="/verify">
+      <Link className="btn btn-secondary btn-sm" to="/verify">
         <ShieldCheck size={15} aria-hidden="true" />
         <span>Verify a certificate</span>
       </Link>

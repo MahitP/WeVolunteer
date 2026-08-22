@@ -12284,30 +12284,35 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 .welly-composer-footer {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   justify-content: center;
-  gap: var(--s1) var(--s3);
+  gap: var(--s1) var(--s2);
+  /* Bounded to the composer's own measure. Left to the full width the
+     disclaimer sets a line far longer than anything else on the page and stops
+     reading as a footnote. */
+  max-width: 78ch;
+  margin: var(--s2) auto 0;
   text-align: center;
-  margin-top: var(--s2);
   font-size: 0.75rem;
+  line-height: 1.45;
   opacity: 0.7;
 }
 
 /* The only link on the quiet row, so it carries the underline rather than a
    colour — the row is already at 0.7 opacity and a brand-coloured link in it
    reads as an error state. */
-.welly-verify-link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
+.welly-policy-link {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
   white-space: nowrap;
 }
 
-.welly-verify-link:hover { color: var(--brand); }
-.welly-verify-link svg { flex: none; }
+.welly-policy-link:hover { color: var(--brand); }
+
+/* The long wording by default; the short one only where the long one would
+   cost the composer its place on screen. See the note at the markup. */
+.welly-footer-short { display: none; }
 
 /**
  * A short viewport — a phone in landscape, or a small window.
@@ -12345,20 +12350,22 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
     padding: var(--s1) var(--s3);
   }
   /**
-   * The sentence goes, the link stays.
+   * The footer stays, tighter.
    *
-   * This whole block is a density adjustment, and hiding the footer was the
-   * cheapest line to reclaim when it held only a reassurance the reader has
-   * already seen. It now also holds the only route to certificate verification
-   * inside the app, and a route that exists at one viewport height and not
-   * another is not a route. So the row keeps its link and drops its prose.
+   * This block is a density adjustment and the footer used to be hidden here
+   * outright — cheap, when it held only a reassurance the reader had already
+   * seen. It now carries the disclaimer: that Welly makes mistakes, that it is
+   * for volunteering, and that personal details do not belong in the box. A
+   * disclaimer that disappears when the window is short is not a disclaimer, so
+   * it keeps its place and gives up its margins instead.
    */
-  .welly-composer-footer > span {
-    display: none;
-  }
   .welly-composer-footer {
     margin-top: var(--s1);
+    font-size: 0.6875rem;
+    line-height: 1.35;
   }
+  .welly-footer-long { display: none; }
+  .welly-footer-short { display: inline; }
 }
 
 @media (prefers-reduced-motion: reduce) {

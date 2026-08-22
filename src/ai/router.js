@@ -209,6 +209,75 @@ function applicationStatusAsked(text) {
   return null;
 }
 
+/**
+ * What somebody is searching FOR, with the asking stripped out.
+ *
+ * ── The defect ──
+ *
+ *     "Find volunteering opportunities near me"     → 1 opportunity
+ *     "Search up Volunteering Oppertunities near me" → none found
+ *
+ * Same request, same database, same second. The phrase list below removed
+ * "find", "opportunities", "near me" and the rest — but not "search" or "up".
+ * So `query` came out as the literal string "Search up", which went to the
+ * server as a free-text filter, matched no event title, and produced "I
+ * couldn't find any opportunities matching that." A student reads that as
+ * "there is nothing", not "you phrased it differently".
+ *
+ * ── Why a residue check and not more words on the list ──
+ *
+ * Adding "search" and "up" fixes that sentence and not the next one. The list
+ * is subtractive: it removes what it recognises and TRUSTS WHATEVER IS LEFT to
+ * be a topic, so every unlisted way of asking becomes a nonsense filter. The
+ * failure is silent and looks exactly like an empty database.
+ *
+ * So the residue is checked instead. After the phrase pass, a token only counts
+ * as a topic if it is not one of the words people ask WITH. Something unlisted
+ * — "kindly dig up any gardening shifts" — leaves "kindly gardening", which is
+ * a worse filter than "gardening" but still finds the gardening events; the old
+ * shape would have searched for "kindly dig up".
+ *
+ * Wrong in the harmless direction, in other words, which is the opposite of
+ * what it did before.
+ */
+const ASKING_WORDS = new Set([
+  /* Verbs of requesting. */
+  'search', 'find', 'look', 'looking', 'lookup', 'get', 'give', 'show', 'list',
+  'need', 'want', 'wanted', 'help', 'see', 'check', 'browse', 'discover',
+  /* Particles and fillers that survive a verb. */
+  'up', 'out', 'me', 'my', 'i', 'im', 'you', 'your', 'us', 'we',
+  'a', 'an', 'the', 'some', 'any', 'anything', 'something', 'stuff', 'things', 'thing',
+  'is', 'are', 'was', 'were', 'be', 'been', 'do', 'does', 'did', 'can', 'could',
+  'would', 'will', 'shall', 'should', 'may', 'might', 'have', 'has', 'had', 'got',
+  'to', 'for', 'of', 'on', 'in', 'at', 'by', 'with', 'from', 'about',
+  'and', 'or', 'but', 'so', 'that', 'this', 'these', 'those', 'it', 'its',
+  'there', 'here', 'please', 'hey', 'hi', 'hello', 'just', 'also', 'well',
+  'what', 'whats', 'which', 'where', 'when', 'who', 'how',
+  'near', 'nearby', 'close', 'around', 'local', 'area',
+  /* The domain nouns. Every search is for these; naming one says nothing. */
+  'opportunity', 'opportunities', 'event', 'events', 'shift', 'shifts',
+  'volunteer', 'volunteering', 'volunteers', 'opening', 'openings', 'slot', 'slots',
+]);
+
+function searchTopic(text) {
+  const stripped = String(text)
+    .replace(CERTIFICATE_CODE, ' ')
+    .replace(/#[\p{L}\p{N}][\p{L}\p{N} -]*/gu, ' ')
+    .replace(NEARBY, ' ')
+    /* Multi-word and inflected forms, which a per-token set cannot express. */
+    .replace(/\b(coming up|this (weekend|week|month)|next (weekend|week|month)|right now)\b/gi, ' ')
+    .replace(/[?!.,;:'"]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const topic = stripped
+    .split(' ')
+    .filter(w => w && !ASKING_WORDS.has(w.toLowerCase()))
+    .join(' ');
+
+  return topic;
+}
+
 /** Affirmations, gratitude and conversational wrap-ups. */
 const AFFIRMATION = /^(thanks?|thank you|ty|thx|cool|awesome|great|perfect|ok|okay|k|alright|got it|understood|sounds good|will do|nice)[\s!.,?]*$/i;
 
@@ -694,14 +763,7 @@ const MATCHERS = [
         .filter(Boolean);
       if (tags.length) slots.tags = tags;
 
-      const query = text
-        .replace(CERTIFICATE_CODE, ' ')
-        .replace(/#[\p{L}\p{N}][\p{L}\p{N} -]*/gu, ' ')
-        .replace(NEARBY, ' ')
-        .replace(/\b(find|show|me|any|some|are|there|what|whats|what's|is|the|a|an|for|to|i|can|could|you|please|opportunit(y|ies)|events?|volunteer(ing)?|shifts?|near|open|coming up|this|weekend|week)\b/gi, ' ')
-        .replace(/[?!.,]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+      const query = searchTopic(text);
       if (query) slots.query = query;
 
       return slots;

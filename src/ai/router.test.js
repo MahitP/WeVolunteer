@@ -82,15 +82,58 @@ describe('opportunity slots', () => {
      * The server matches substrings against titles and descriptions, so sending
      * the whole sentence would match nothing. The routing words come out and
      * the subject stays.
+     *
+     * The first case expected "about tutoring" and now gets "tutoring": the
+     * extractor stopped being a list of phrases to delete and became a check on
+     * what is LEFT, so a preposition no longer rides along into the filter. A
+     * narrower, more accurate query — and the reason for the change is the next
+     * test down.
      */
     expect(route('find me volunteering opportunities about tutoring').slots.query)
-      .toBe('about tutoring');
+      .toBe('tutoring');
     expect(route('are there any food pantry events near me').slots.query)
       .toBe('food pantry');
   });
 
   it('leaves the query out entirely when nothing is left', () => {
     expect(route('show me opportunities').slots.query).toBeUndefined();
+  });
+
+  it('does not turn an unrecognised way of asking into a search term', () => {
+    /**
+     * ── The defect ──
+     *
+     *     "Find volunteering opportunities near me"      → 1 opportunity
+     *     "Search up Volunteering Oppertunities near me" → none found
+     *
+     * Same request, same database, same second. The old extractor deleted the
+     * phrases it knew and trusted whatever remained to be a topic, so "Search
+     * up" — two words nobody had thought to list — became a free-text filter,
+     * matched no event title, and produced "I couldn't find any opportunities
+     * matching that."
+     *
+     * That is the worst possible way to be wrong here: it is indistinguishable
+     * from an empty database, so a student concludes there is nothing rather
+     * than that they phrased it unusually.
+     */
+    for (const text of [
+      'Search up Volunteering Oppertunities near me',
+      'search up volunteering opportunities',
+      'can you look up any volunteer shifts',
+      'hey show me what events are there',
+      'i need to find something to volunteer for',
+    ]) {
+      expect(route(text).slots.query, text).toBeUndefined();
+    }
+  });
+
+  it('still keeps a real topic out of a wordy sentence', () => {
+    /* The other half. Dropping the query whenever the sentence is long would
+       "fix" the case above by making search useless. */
+    expect(route('can you search up any beach cleanup shifts near me').slots.query)
+      .toBe('beach cleanup');
+    expect(route('hey i need to find animal shelter volunteering').slots.query)
+      .toBe('animal shelter');
   });
 });
 
