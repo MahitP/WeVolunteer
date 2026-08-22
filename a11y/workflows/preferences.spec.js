@@ -171,6 +171,101 @@ test('resetting to defaults removes every attribute', async ({ browser, request,
   await ctx.close();
 });
 
+test('the app setting escalates reduced motion when the OS has no preference', async ({ browser, request, baseURL }) => {
+  /**
+   * The escalation case, which the media sweep does NOT cover.
+   *
+   * `sweep.media.spec.js` emulates `prefers-reduced-motion: reduce` and checks
+   * the CSS honours it. This is the other direction: the OS says nothing, the
+   * reader asks US for less motion, and the app setting has to win against
+   * animations that are only declared inside
+   * `@media (prefers-reduced-motion: no-preference)` — of which this stylesheet
+   * has one, an infinite pulse on Welly's busy glyph.
+   *
+   * Reasoning about `!important` versus source order is exactly the kind of thing
+   * that is easy to get right on paper and wrong in a browser, so it is measured.
+   */
+  const roles = await fetchRoles(request, baseURL);
+  const statePath = await signInAs(browser, roles[0], baseURL);
+  /* reducedMotion: 'no-preference' explicitly — not merely unset — so the
+     no-preference media block is ACTIVE and has something to override. */
+  const ctx = await browser.newContext({
+    baseURL, storageState: statePath, reducedMotion: 'no-preference'
+  });
+  const page = await ctx.newPage();
+  await page.goto('/settings?section=accessibility');
+  await page.getByRole('group', { name: /text size/i })
+    .waitFor({ state: 'visible', timeout: 30000 });
+
+  await page.getByRole('checkbox', { name: /reduce motion/i }).check();
+  expect(await page.getAttribute('html', 'data-motion')).toBe('reduce');
+
+  const stillMoving = await page.evaluate(() => {
+    /* Inject the exact shape the no-preference block produces, so this tests the
+       override rather than whatever happens to be on the settings page. */
+    const probe = document.createElement('div');
+    probe.setAttribute('style',
+      'animation-name: spin; animation-duration: 1.4s; animation-iteration-count: infinite;');
+    document.body.appendChild(probe);
+    const s = getComputedStyle(probe);
+    const result = {
+      duration: s.animationDuration,
+      iterations: s.animationIterationCount
+    };
+    probe.remove();
+    return result;
+  });
+
+  await ctx.close();
+
+  /* The app setting must flatten both: a duration of 0 and a single iteration.
+     Either alone would leave movement on screen. */
+  expect(
+    parseFloat(stillMoving.duration),
+    `an inline infinite animation still runs for ${stillMoving.duration} with the `
+    + 'app-level Reduce motion on, so the setting cannot override a rule declared '
+    + 'inside @media (prefers-reduced-motion: no-preference)'
+  ).toBeLessThan(0.01);
+  expect(stillMoving.iterations).toBe('1');
+});
+
+test('an OS contrast preference is honoured without visiting Settings', async ({ browser, request, baseURL }) => {
+  /**
+   * `prefers-contrast: more` — macOS and Windows "Increase contrast".
+   *
+   * A reader who has already told their device they need more contrast should not
+   * have to tell WeVolunteer as well. This was genuinely missing: the stylesheet
+   * had no `prefers-contrast` block at all, so that preference did nothing here
+   * until the reader found Settings → Accessibility and asked a second time.
+   *
+   * Measured by comparing a muted token against the default, because the whole
+   * mechanism is "muted text moves towards full-strength ink".
+   */
+  const roles = await fetchRoles(request, baseURL);
+  const statePath = await signInAs(browser, roles[0], baseURL);
+
+  const read = async contrast => {
+    const ctx = await browser.newContext({ baseURL, storageState: statePath, contrast });
+    const page = await ctx.newPage();
+    await page.goto('/');
+    await page.locator('#main-content').waitFor({ state: 'visible', timeout: 20000 });
+    const value = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--ink-3').trim());
+    await ctx.close();
+    return value;
+  };
+
+  const normal = await read('no-preference');
+  const more = await read('more');
+
+  expect(normal, 'could not read --ink-3 at all').not.toBe('');
+  expect(
+    more,
+    'prefers-contrast: more changed nothing — a reader whose OS already asks for '
+    + 'more contrast gets our default palette until they find the setting'
+  ).not.toBe(normal);
+});
+
 test('the Accessibility Statement is reachable and says what it must', async ({ browser, request, baseURL }) => {
   const { ctx, page } = await openAccessibilitySettings(browser, request, baseURL);
 

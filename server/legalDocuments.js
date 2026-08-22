@@ -410,7 +410,7 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The accessibility standard WeVolunteer is built and tested against, what has actually been verified and how, what is known to be unfinished, and how to report a barrier.',
     effectiveAt: '2026-08-22',
     file: '13-accessibility-statement.md',
-    contentHash: 'd256879d03b064e83b425e351caba9270bddd176bb4b3543f5ae3dcfb6dbf463',
+    contentHash: '8a2e2f8f9dda72b997e15270529320e63334bd020284672ef20e5ef728de8726',
     bundledWith: null,
   },
 ];

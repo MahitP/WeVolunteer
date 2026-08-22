@@ -12611,6 +12611,41 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 }
 
 /**
+ * The same treatment, applied automatically when the OPERATING SYSTEM asks.
+ *
+ * macOS "Increase contrast", Windows "Increase contrast" and the equivalent on
+ * Android and iOS all set `prefers-contrast: more`. Without this block, a reader
+ * who had already told their device they need more contrast got nothing from
+ * WeVolunteer until they found Settings → Accessibility and asked a second time
+ * — which is the thing this whole design is supposed to avoid: an accessibility
+ * need already expressed, ignored until repeated in our interface.
+ *
+ * `prefers-contrast` is NOT `forced-colors`. Forced-colours replaces the palette
+ * with the user's own and is handled separately below; this one keeps our palette
+ * and asks for more separation within it, which is exactly what the
+ * `data-contrast='high'` tokens already do. So it reuses them rather than
+ * inventing a parallel set.
+ *
+ * The app setting stays useful on top of this: it covers the reader whose device
+ * preference is off — a shared machine, a browser that does not expose it — and,
+ * because both resolve to the same tokens, having both on is identical to having
+ * either on.
+ */
+@media (prefers-contrast: more) {
+  :root {
+    --ink-2: var(--ink);
+    --ink-3: var(--ink-2);
+    --rule: var(--ink-3);
+    --rule-strong: var(--ink-2);
+  }
+
+  .dim,
+  .small.dim {
+    color: var(--ink);
+  }
+}
+
+/**
  * Reduce motion, as an addition to the system preference and never a veto of it.
  *
  * The eight `prefers-reduced-motion` blocks above still apply on their own. This

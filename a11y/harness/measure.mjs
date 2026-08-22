@@ -134,12 +134,36 @@ export function interactiveRects(page) {
         return r.width > 0 && r.height > 0;
       })
       .map(el => {
-        const r = el.getBoundingClientRect();
+        /**
+         * The EFFECTIVE target, not the control's own box.
+         *
+         * WCAG 2.5.8 measures what a pointer can activate. A native checkbox or
+         * radio renders at 16x16 in Chromium, and when it sits inside a `<label>`
+         * — which is the pattern this codebase uses everywhere, including the
+         * Privacy switches and the Accessibility settings — clicking anywhere in
+         * that label activates it. The target is therefore the label.
+         *
+         * Measuring the input alone reported every one of those as a 16x16
+         * failure. Probed on the opportunity dialog: two checkboxes at 16x16
+         * inside labels measuring 109x44 and 138x44 — comfortably conformant, and
+         * reported as defects by a check that looked at the wrong box. Acting on
+         * that would have meant restyling conformant controls to satisfy a
+         * mismeasurement.
+         *
+         * Only an ancestor label counts. A `label[for=...]` sitting elsewhere in
+         * the DOM is also clickable, but it is not contiguous with the control,
+         * and 2.5.8 is about the size of a single target rather than the sum of
+         * separated ones.
+         */
+        const label = el.closest('label');
+        const target = label && label.contains(el) ? label : el;
+        const r = target.getBoundingClientRect();
         return {
           w: Math.round(r.width),
           h: Math.round(r.height),
           tag: el.tagName,
-          name: (el.getAttribute('aria-label') || el.textContent || '')
+          measured: target === el ? 'self' : 'label',
+          name: (el.getAttribute('aria-label') || el.textContent || label?.textContent || '')
             .trim().replace(/\s+/g, ' ').slice(0, 50),
           outerHTML: el.outerHTML.slice(0, 120).replace(/\s+/g, ' ')
         };

@@ -37,6 +37,17 @@ verified the accessibility tree a browser computes, which is a strong proxy and 
 thing. And it must not describe the automated suite as proof of conformance: a criterion is not
 satisfied because a scanner failed to flag it.
 
+**Contact address.** `support@wevolunteers.org`, matching `MAIL_DOMAIN` in `src/config.js` and
+every other policy in this directory. The first draft of this page invented
+`support@wevolunteer.app` — a domain nothing else in the platform uses — which would have sent
+somebody reporting a barrier to an address that may not receive mail. Caught by comparing the
+addresses across all thirteen policies rather than by reading this one.
+
+Note that `SUPPORT_EMAIL` is overridable per deployment (`VITE_SUPPORT_EMAIL`), and a Markdown
+policy cannot read runtime configuration. A district that changes it must edit this page too —
+which is the same constraint every other policy here already carries, so it is a known property
+of the Legal Center rather than something new.
+
 **Verification note.** Every claim in the draft below was true of the audit recorded in
 `docs/audits/2026-08-22-accessibility-audit.md` at the time of writing. If a later change
 alters the target, the tooling, or the list of known limitations, this document must change in
@@ -164,7 +175,7 @@ The form asks what went wrong and, if you want to add it, what you were using �
 and your screen reader or other assistive technology. That last part helps but is never
 required.
 
-You can also reach us by email at **support@wevolunteer.app** with "Accessibility" in the
+You can also reach us by email at **support@wevolunteers.org** with "Accessibility" in the
 subject line, if a form is itself the barrier.
 
 ## What happens to your report
