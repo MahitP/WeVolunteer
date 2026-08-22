@@ -53,6 +53,21 @@ const shared = {
 
 export default defineConfig({
   testDir: './a11y',
+  /**
+   * `*.spec.js` is Playwright's; `*.test.js` is Vitest's.
+   *
+   * Two runners share the `a11y/` directory: the harness's own guards
+   * (`harness/guard.test.js`, `harness/routes.test.js`, `harness/baseline.test.js`)
+   * are Vitest tests, registered in vitest.config.js's server project because
+   * they spawn processes and read the filesystem and need no browser at all.
+   *
+   * Without this, Playwright collected them too and the whole run failed at
+   * collection with "Cannot read properties of undefined (reading 'config')" —
+   * Vitest's `describe` is not Playwright's. It failed only when running the
+   * FULL suite, not any single spec, which is exactly the shape of defect that
+   * reaches CI and nowhere else.
+   */
+  testMatch: /.*\.spec\.js$/,
   globalSetup: './a11y/harness/globalSetup.mjs',
   /* Serial. The suites share one database, and two specs signing in or mutating
      state concurrently produce failures that read as accessibility defects. */
