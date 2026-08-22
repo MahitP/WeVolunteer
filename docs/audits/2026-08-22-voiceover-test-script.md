@@ -1,212 +1,340 @@
-# VoiceOver test script — WeVolunteer accessibility audit
+# VoiceOver test script — WeVolunteer
 
-**Date:** 2026-08-22
-**Runs on:** macOS, Safari, with VoiceOver
-**Time needed:** about 60–90 minutes for the whole script; each section stands alone
-
----
-
-## Why this exists
-
-The automated suite in `a11y/` verifies what the **browser computes** — the names,
-roles, states, heading tree and live-region wiring that a screen reader is handed. That
-catches most defects that would affect a screen-reader user, and it catches them on every
-commit.
-
-It cannot hear anything. It cannot tell you whether an announcement is too verbose to sit
-through, whether one interrupts another at the wrong moment, whether a live update arrives in a
-useful order, or whether a long streamed answer is bearable. Those are the questions below.
-
-**So the results of this script are not a duplicate of the automated run.** They are the only
-evidence for a whole class of criteria, and the audit document marks anything they cover as
-`unverified` until this is filled in.
+**For:** someone who has never run an accessibility audit. No prior knowledge assumed.
+**You need:** a Mac, Safari, about 90 minutes. You do not need to be able to use VoiceOver well.
+**Verified:** both setup commands below were run on 2026-08-22 and work; the app came up on
+`localhost:5173` with all six demo accounts present. Every account, route and control name in this
+document was checked against the running application.
+**Date written:** 2026-08-22 · against commit `b3a05f7`
 
 ---
 
-## Before you start
+## Read this first (2 minutes)
 
-1. Start the app with a scratch database and the AI model available:
+Automated tests already check everything a machine can: that every control has a name, that
+focus is always visible, that nothing is unreachable by keyboard, that colours have enough
+contrast, that pages work at 320 pixels wide. **All of that passes.** You are not re-checking it.
 
-   ```bash
-   mkdir -p scratch
-   WEV_DB_PATH="$PWD/scratch/manual.db" DATABASE_ENGINE=sqlite node bin/reset-dev-db.mjs --yes
-   WEV_DB_PATH="$PWD/scratch/manual.db" DATABASE_ENGINE=sqlite VITE_LOCAL_AI=true npm run dev
-   ```
+You are checking the one thing no machine can: **what it actually sounds like.** A screen reader
+can be handed technically perfect information and still be unusable — announcements can be too
+long, arrive in the wrong order, interrupt each other, or repeat forever.
 
-   The Welly section needs `VITE_LOCAL_AI=true`, and the model downloads on first use — start
-   that download before you begin so it is ready when you reach section 9.
+So the question you are answering throughout is not "is this correct?" but:
 
-2. Open **Safari** (not Chrome — VoiceOver's behaviour differs, and Safari is the pairing most
-   macOS screen-reader users actually have).
-3. Turn VoiceOver on with **Command-F5**.
-4. Sign in as the seeded student: **leo.chen@example.com** / **password123**.
+> **Could somebody who cannot see the screen actually use this?**
 
-### Notation
+If something takes you thirty seconds of confused listening, that is a FAIL even if you can't say
+which rule it breaks. Write down what you heard. That is the whole job.
 
-- **VO** means the Control and Option keys held together.
-- **VO + Right Arrow** — move to the next item.
-- **VO + Space** — activate the item you are on.
-- **VO + U** — open the rotor (then Left/Right Arrow to change list, Up/Down to move in it).
-- **Control** — interrupt speech. Useful and used deliberately in section 9.
-- **Tab / Shift-Tab** — move between controls without VoiceOver's cursor.
+### Three tests matter more than the rest
+
+If you only do part of this, do these:
+
+| Priority | Test | Why |
+| --- | --- | --- |
+| **1** | **§9 — Welly streaming** (test 9.4) | The highest-risk unknown in the entire application. A streamed AI answer can re-read itself on every word. Nothing automated can hear this. |
+| **2** | **§13 — Error page verbosity** (test 13.1) | We deliberately left a design decision open for you to judge. See §13. |
+| **3** | **§1 and §4 — Sign in, and signing up for an opportunity** | The two things a student must be able to do. If either fails, nothing else matters. |
+
+---
+
+## Setup (5 minutes) — do this once
+
+**1. Start the app.** Open Terminal, and run these two commands. The first prepares a throwaway
+test database; the second starts the app. Leave the second one running.
+
+```bash
+cd "/Users/mahit/Documents/Important Coding Files/New Projects/SBVolunteers App/.claude/worktrees/wevolunteer-ada-wcag-accessibility-d7f91d" && mkdir -p scratch && WEV_DB_PATH="$PWD/scratch/manual.db" DATABASE_ENGINE=sqlite node bin/reset-dev-db.mjs --yes
+```
+
+```bash
+cd "/Users/mahit/Documents/Important Coding Files/New Projects/SBVolunteers App/.claude/worktrees/wevolunteer-ada-wcag-accessibility-d7f91d" && WEV_DB_PATH="$PWD/scratch/manual.db" DATABASE_ENGINE=sqlite VITE_LOCAL_AI=true npm run dev
+```
+
+Wait until it prints a line with `localhost:5173`. **This uses a fake database with made-up
+students. It cannot touch real data.**
+
+**2. Open Safari** — not Chrome. VoiceOver behaves differently in each, and Safari is the pairing
+most Mac screen-reader users actually have.
+
+**3. Go to `http://localhost:5173` and sign in** once, normally, with your mouse:
+email `leo.chen@example.com`, password `password123`. Then **sign out again** — test §1 needs you
+signed out. (Profile menu → Sign out.)
+
+**4. Start the Welly model downloading now**, because it takes a while and §9 needs it. Sign in,
+click **Welly** in the left-hand navigation, wait until it stops saying it is preparing, then
+leave that tab open. Come back to it at §9.
+
+**5. Turn VoiceOver on: press `Command` + `F5`.**
+A dark rounded box appears at the bottom of the screen showing what VoiceOver is saying. That box
+is your source of truth — **if you're unsure what you heard, read the box.**
+
+To turn VoiceOver off again: `Command` + `F5`.
+
+### The five keys you need
+
+| Key | What it does |
+| --- | --- |
+| `Control`+`Option`+`→` | Move to the next thing on the page. **Written below as `VO`+`→`.** |
+| `Control`+`Option`+`Space` | Activate the thing you're on (like clicking it). **`VO`+`Space`.** |
+| `Tab` | Jump to the next control (button, link, field), skipping plain text. |
+| `Control` (on its own) | **Stop VoiceOver talking.** Use this constantly. |
+| `Control`+`Option`+`U` | Open the "rotor" — a menu of all the headings or landmarks on the page. Then `←`/`→` to switch between lists, `↑`/`↓` to move through one, `Return` to jump there, `Escape` to close. |
+
+**If VoiceOver gets stuck or confused:** press `Control` to silence it, then `Command`+`F5` twice
+to restart it. This is normal and is not a finding.
 
 ### How to record a result
 
-For each row, write **pass**, **fail**, or a note. A note is often more useful than a verdict —
-"reads the name but says 'button' twice" is exactly the kind of thing nothing else will find.
+For every numbered test below, write one of:
 
-If something is wrong, the most valuable thing you can write is **what you heard**, verbatim.
+- **PASS** — it did what the "Expected" column says.
+- **FAIL** — it didn't. **Then write down what you actually heard**, as close to word-for-word as
+  you can manage. That sentence is the most valuable thing in this document.
+- **UNCLEAR** — you couldn't tell. This is a legitimate answer and often means the announcement
+  was too confusing to judge, which is itself worth knowing.
 
----
-
-## 1. Signing in
-
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Load `/login` | The page's heading is announced ("Welcome back"), and you can tell this is a sign-in page | |
-| **VO + Right Arrow** through the method picker | Each provider button says whether it is available — the disabled ones should say something like "Google — not set up on this site, dimmed button", not just "button" | |
-| Activate "Sign in with email" | The new screen is announced; you can tell the form appeared | |
-| **VO + Right Arrow** to the email field | Announced as a text field with the label "Email", not just "edit text" | |
-| Type an email, Tab to password | Announced as a secure text field with a label | |
-| Paste a password with Command-V | The paste works. If it silently does nothing, that is a **WCAG 3.3.8 failure** and important — say so | |
-| Submit with a **wrong** password | The error is **spoken without you moving focus**, and it says what is wrong | |
-| After the error | Focus is somewhere sensible — not back at the top of the page, not lost | |
-| Submit with the right password | You can tell you are signed in, and where you have landed | |
+Use the finding-id column when reporting back, e.g. "H-9.4 FAIL — it read the whole answer again
+every time a word appeared."
 
 ---
 
-## 2. The shell: skip link, navigation, headings
+# §1 · Signing in — PRIORITY 3
 
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Press **Tab** once on any signed-in page | "Skip to main content, link" | |
-| Activate it | Focus moves to the main content; the next Tab is inside the page, not back in the navigation | |
-| **VO + U**, then choose **Landmarks** | You can tell the navigation, main and banner apart. **Note if two entries are both called "Main"** — the desktop rail and the mobile bar share that name, and the audit expects this to be reported | |
-| **VO + U**, then **Headings** | There is exactly one heading level 1, and it names the page you are on | |
-| Move through the rail with Tab | Each item says where it goes, and the current page is announced as current | |
-| Resize the window narrow so the bottom bar appears, then Tab | The bottom navigation items are reachable and named | |
+Start signed out, at `http://localhost:5173/login`.
 
----
-
-## 3. Finding an opportunity
-
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Go to Discover | The page and its heading are announced | |
-| **VO + Right Arrow** through one opportunity card | You can hear the title, the date, the place, and how many places are left — **the number of spots must be spoken, not implied by a colour or a bar** | |
-| Apply a filter | The change in results is announced, or is discoverable without hunting. Note if the list silently changes | |
-| Set filters that match nothing | The empty state is announced and explains itself — not just silence | |
-| Open an opportunity's details | You can tell a new view opened, and its heading is announced | |
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-1.1 | Load `/login`. Listen. | You hear a page heading, something like "Welcome back, heading level 1". | You can tell you're on a sign-in page. | It says nothing, or reads a wall of text before telling you where you are. | |
+| H-1.2 | Press `VO`+`→` about six times through the sign-in options. | Each option says whether it's usable — e.g. "Google — not set up on this site, dimmed, button". | Unavailable options say **why** they're unavailable. | An option just says "button" or "dimmed" with no explanation. | |
+| H-1.3 | Get to "Sign in with email" and press `VO`+`Space`. | You can tell the screen changed and a form appeared. | Something announces the change. | Silence — you have no idea anything happened. | |
+| H-1.4 | Press `Tab` until you reach the email field. Listen. | "Email or username, edit text" (or similar) — a **name**, not just "edit text". | The field says what it's for. | It says only "edit text" or reads the greyed-out example text as if it were the label. | |
+| H-1.5 | Type `leo.chen@example.com`. Press `Tab` **once**. Listen. | You land on the **password field**. | The next stop is the password field. | You land on "Forgot?" or anything else. **This was a real bug we fixed — please confirm it's gone.** | |
+| H-1.6 | Type `password123`. Press `Return`. | You're signed in; you can tell you've arrived somewhere new. | Something tells you you're on the dashboard. | Silence, or you can't tell whether it worked. | |
+| H-1.7 | Sign out. Return to the email form. Type `leo.chen@example.com` and a **wrong** password. Press `Return`. | The error is **spoken without you doing anything**, and says what's wrong. | You hear the problem without hunting for it. | Silence — you'd have to go looking to discover it failed. | |
+| H-1.8 | Straight after H-1.7, press `Tab` **once**. | You're near the fields, not at the very top of the page. | You can retry without walking the whole page again. | The next `Tab` starts from the browser toolbar or the top of the page. | |
+| H-1.9 | On the email form, put your cursor in the password field and press `Command`+`V`. | Paste works (even if you paste nonsense). | Text appears. | Nothing happens — that would break password managers. | |
 
 ---
 
-## 4. Signing up for an opportunity
+# §2 · Getting around — the shell
 
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Find the sign-up control | It says what it will do — a name like "Sign up" or "Apply", not "button" | |
-| Activate it | The outcome is **spoken**: that you are signed up, or waitlisted, or that it failed | |
-| If a confirmation dialog appears | Focus moves into it, its title is announced, **Escape** closes it, and focus returns to the control you used | |
-| After signing up | The card or page reflects the new state audibly, without a reload | |
+Sign in first. Any page.
 
----
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-2.1 | Press `Tab` **once** on a freshly loaded page. | "Skip to main content, link". | It's the very first thing. | Anything else comes first. | |
+| H-2.2 | Press `VO`+`Space` on it. | Focus jumps into the page content. Press `Tab` again — you should be **inside** the content, not back in the navigation. | The next `Tab` is in the page body. | You end up back in the navigation, or nothing moves. | |
+| H-2.3 | Press `VO`+`U`, then `←`/`→` until you reach the **Landmarks** list. | You hear a small list — navigation, main, banner. | You can tell the navigation from the page content. | The list is empty, or every entry has the same name so you can't tell them apart. | |
+| H-2.4 | Same rotor, switch to **Headings**. | A short list, starting with one heading level 1 naming the page. | There's exactly one level-1 heading and it names the page you're on. | There are two level-1 headings, or none. | |
+| H-2.5 | `Tab` through the left-hand navigation. | Each item says where it goes, and the page you're currently on is announced as **current** or **selected**. | You can tell which page you're on. | Nothing indicates the current page. | |
+| H-2.6 | Click a navigation item to go to a different page. Listen. | *Open question — just record what happens.* | — | — | |
 
-## 5. The calendar and date picker
-
-This is the control most likely to have problems. Take your time.
-
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Tab to a date field's calendar button | It is named, e.g. "Choose date" | |
-| Press **Enter** to open, then again with **Space** | Both open it | |
-| **Arrow keys** | Move a day at a time, and each date is announced as a full date ("Wednesday 3 September"), not just a number | |
-| Change month | The new month is announced | |
-| Land on a **disabled** date | It is announced as unavailable — not silently unselectable | |
-| Land on the **selected** date | It is announced as selected | |
-| **Home** / **End** | Move to the start and end of the week | |
-| **Escape** | Closes the calendar **and returns focus to the button that opened it** | |
+> **H-2.6 note:** we know changing pages may be **silent** for VoiceOver. That's a real gap we
+> haven't fixed, because fixing it means choosing what to announce, and we'd rather know what it
+> feels like first. **Just write down whether you can tell the page changed, and how you noticed.**
 
 ---
 
-## 6. Attendance and check-in
+# §3 · Discover — finding an opportunity
 
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Open the check-in view | The heading and purpose are announced | |
-| Find the way to check in **without a camera** | There is one, and you can find it with VoiceOver. **If the only route is scanning a QR code, that is an important finding** | |
-| Enter a check-in code | The field is labelled; success or failure is spoken | |
-| Check attendance status | The status is spoken as words, not conveyed by a colour | |
+Go to **Discover** in the navigation.
 
----
-
-## 7. Notifications and toasts
-
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Tab to the notifications bell | Its name includes the number of unread notifications as a **number** — "Notifications, 3 unread", not "Notifications" with a coloured dot | |
-| Open the popover | Focus moves into it; **Escape** closes it and returns focus | |
-| Move through the list | Read and unread are distinguishable **audibly** | |
-| Trigger a toast (save a setting) | It is announced **once**, and you can understand it | |
-| Trigger a toast **while reading a paragraph** | Record whether it **interrupts you mid-sentence** or waits. Either can be right — note which happens and whether it felt correct for that message | |
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-3.1 | Press `VO`+`→` through one opportunity card, start to finish. | You hear the title, the date and time, the place, and **how many places are left as a number**. | Places remaining are **spoken as words or a number**. | Availability is only a colour or a bar — you can't tell how full it is. | |
+| H-3.2 | Count roughly how many `VO`+`→` presses one card takes. | Under about 12. | It's a manageable amount to listen to. | It takes so long you'd give up before reaching the button. **Say how many.** | |
+| H-3.3 | `Tab` to a filter or search control and change it. | The list changes **and something tells you** — e.g. "6 opportunities". | You learn the results changed without going to look. | The list silently changes underneath you. | |
+| H-3.4 | Set filters so nothing matches. | You hear a message explaining there are no results. | The empty state is announced and explains itself. | Silence, or an unexplained blank. | |
 
 ---
 
-## 8. Forms and errors: Settings
+# §4 · Opportunity details and signing up — PRIORITY 3
 
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Go to Settings, move through the section navigation | Each section is named; the current one is announced as current | |
-| Open **Accessibility** | The heading is announced. In the Text size group, VoiceOver should say the group name and your position — something like "Text size, Large, radio button, 2 of 3" | |
-| Toggle a switch (e.g. Larger controls) | Its new state is announced ("checked" / "unchecked" or "on" / "off") | |
-| With **Increase contrast** on, move around the app | Nothing has become harder to read or disappeared | |
-| With **Text size: Extra large**, move around the app | Nothing is cut off; nothing overlaps | |
-| Submit a form with a deliberate mistake (e.g. a bad email in Account) | The error is spoken, names the field, and says how to fix it | |
-| Move to the field that failed | The error is announced **with the field**, not only at the top of the page | |
+Still on Discover.
 
----
+> Automated tests **do** cover this dialog now (name, focus, Escape, control sizes, contrast). What
+> they can't check is whether it's bearable to listen to.
 
-## 9. Welly — the section that matters most
-
-Run this with `VITE_LOCAL_AI=true` and the model already downloaded.
-
-The automated suite verifies that the transcript is **not** a live region and that a separate
-`role="status"` region exists. It cannot tell you what that sounds like. This can.
-
-| Action | Expected announcement | Result |
-| --- | --- | --- |
-| Open Welly | The page and its heading are announced | |
-| Tab to the message box | It has a real name, not just "edit text" — a placeholder does not count | |
-| **VO + Right Arrow** through the suggestion chips | You hear a group name ("Try asking") and then each suggestion; each says the same words you can see on it | |
-| Ask "How many hours do I have?" and press Enter | **Something tells you it is working** — a "thinking" or "generating" announcement | |
-| **While the answer is streaming — the critical one** | Record exactly what you hear. It should **not** re-read the growing answer over and over. If you hear the same sentence repeatedly getting longer, that is the defect this design exists to prevent and it is the single most important finding in this script | |
-| When the answer finishes | The **complete answer is spoken once** | |
-| Press **Control** to interrupt mid-answer | Speech stops, and you can still read the answer afterwards with **VO + Right Arrow** or the rotor | |
-| **VO + U** → Headings, or move back through the transcript | You can tell **who said what** — each turn identifies itself as you or Welly, including when you jump straight into the middle of the transcript rather than reading from the top | |
-| Ask a second question | The same behaviour; the earlier turns are still readable | |
-| Open the conversation history and switch conversations | Each conversation is named; the current one is announced as current; the transcript change is discoverable | |
-| Use the rename and delete buttons | Both are named, and say which conversation they act on | |
-| Turn off the network (or wait for a model error) and ask something | The failure is **spoken** and says something useful | |
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-4.1 | `Tab` to a card's "View shifts" / "View details" button and press `Return`. | You hear that a dialog opened, and its title. | You know a dialog opened and what it's about. | Silence, or you can't tell anything changed. | |
+| H-4.2 | Press `VO`+`→` a few times. | You stay **inside** the dialog. | Everything you reach belongs to the dialog. | You wander into the page behind it. | |
+| H-4.3 | Find the shift/time information. | Dates, times and remaining places are all spoken. | You could decide whether to sign up from what you heard. | Some essential detail is only visual. | |
+| H-4.4 | Find the sign-up control and listen to its name. | It says what it does — "Sign up", "Apply", "Request this shift". | The name describes the action. | It says only "button", or something ambiguous. | |
+| H-4.5 | Activate it. | The result is **spoken**: signed up, or waitlisted, or why it failed. | You learn the outcome without hunting. | Silence — you don't know if it worked. **This is the most important test in this section.** | |
+| H-4.6 | Press `Escape`. | The dialog closes and focus returns to the button you opened it from. | Pressing `Tab` continues from where you were in the list. | Focus is lost and `Tab` restarts at the top of the page. | |
 
 ---
 
-## 10. Two things to try at the end
+# §5 · The calendar and date picker
 
-| Action | What to look for | Result |
-| --- | --- | --- |
-| Zoom Safari to 200% (**Command-+** five times) and repeat sections 3 and 4 | Nothing is cut off, nothing needs sideways scrolling, and everything you could reach before you still can | |
-| Turn on **System Settings → Accessibility → Display → Reduce motion**, reload, and move around | Animations are gone or much reduced. Nothing spins forever | |
+Go to **Calendar**, or any form with a date field (e.g. **Log hours**).
+
+> The date picker was written specifically to be accessible. Treat this as verifying it.
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-5.1 | `Tab` to the calendar button. | It's named — "Choose date" or similar. | It says what it opens. | It says only "button". | |
+| H-5.2 | Press `Return`, then press `Return` again from scratch with `Space` instead. | Both open the calendar. | Both keys work. | Only one does. | |
+| H-5.3 | Press the `→` arrow key a few times. | Each date is announced as a **full date** — "Wednesday 3 September" — not just "3". | You know which day you're on without counting. | It reads only numbers. | |
+| H-5.4 | Move to a **greyed-out / unavailable** date. | It's announced as unavailable or dimmed. | You're told you can't pick it. | It sounds identical to a selectable date. | |
+| H-5.5 | Move onto the currently **selected** date. | It's announced as selected. | You can tell which date is chosen. | Nothing distinguishes it. | |
+| H-5.6 | Change month using the month control. | The new month is announced. | You know which month you're in. | Silence. | |
+| H-5.7 | Press `Escape`. | The calendar closes and focus returns to the button that opened it. | The next `Tab` continues from that button. | Focus is lost. | |
 
 ---
 
-## How to report back
+# §6 · Attendance and check-in
 
-For each finding, this is all that is needed:
+Sign in as the organizer instead: sign out, then `jordan.whitfield@example.org` / `password123`.
+Go to **Check-in** (you may need to open an event first).
 
-- **Where** — the page and the control.
-- **What you did** — the keys you pressed.
-- **What you heard** — verbatim if you can.
-- **What you expected** instead.
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-6.1 | Load the check-in screen. | The heading tells you what this screen is for. | You know where you are. | Unclear. | |
+| H-6.2 | `Tab` through everything and look for a way to check in **without using a camera**. | There is one — typing a code, or a list of names. | A non-camera route exists **and you found it with VoiceOver**. | The only route is scanning a QR code. **This would be an important finding — a camera-only flow excludes several disabilities at once.** | |
+| H-6.3 | Enter a check-in code (any value). | The field is named, and success or failure is spoken. | You learn the outcome. | Silence. | |
+| H-6.4 | Find someone's attendance status. | The status is spoken as **words** — "attended", "absent". | Status is in words. | It's only a colour or an icon. | |
 
-Findings get an id in `docs/audits/2026-08-22-accessibility-audit.md` of the form `H-01`, `H-02`
-— `H` for human-verified — so they can be told apart from the machine-measured ones at a glance.
-If something in section 9 is wrong, say so first: it is the part nothing else can check.
+---
+
+# §7 · Notifications and pop-up messages
+
+Back as the student. Any page.
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-7.1 | `Tab` to the notifications bell. | Its name includes the number of unread items — "Notifications, 3 unread". | You hear a **number**. | It just says "Notifications" and the count is only a coloured dot. | |
+| H-7.2 | Open it with `Return`. | Focus moves into the panel; you hear it opened. | You're inside the panel. | You can't tell it opened, or focus stays behind. | |
+| H-7.3 | `VO`+`→` through the list. | Read and unread items sound different. | You can tell them apart **by ear**. | Only a colour distinguishes them. | |
+| H-7.4 | Press `Escape`. | It closes and focus returns to the bell. | `Tab` continues from the bell. | Focus is lost. | |
+| H-7.5 | Go to **Settings → Privacy** and toggle **"Show my volunteer hours publicly"**. A pop-up confirmation appears at the corner of the screen. | The message is announced **once** — e.g. "Your hours can now appear on the leaderboard." | You hear it once, clearly. | You hear it repeatedly, or not at all. | |
+| H-7.6 | Start `VO`+`→` reading a long paragraph, and **while it is still talking**, toggle that same switch again. | *Open question — record what happens.* | — | — | |
+| H-7.7 | `Tab` to the pop-up's dismiss (×) button and activate it. | It is named ("Dismiss") and easy to hit. | Named, and you can activate it without missing. | Unnamed, or so small you miss it. **It was 14×15 pixels before we fixed it — please confirm it now feels reachable.** | |
+
+> **H-7.6 note:** does the pop-up **cut VoiceOver off mid-word**, or wait politely until it
+> finishes? Either can be correct — an error should interrupt, a "saved" confirmation probably
+> shouldn't. **Write down which happened and whether it felt right for that message.**
+
+---
+
+# §8 · Settings, forms and errors
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-8.1 | Go to **Settings**. `Tab` through the section list. | Each section is named; the one you're viewing is announced as current. | You can tell which section is open. | Nothing indicates it. | |
+| H-8.2 | Open **Account**, `Tab` to the email field, and enter something invalid like `notanemail`. Submit. | The error is spoken, names the field, and says how to fix it. | You know **which** field and **what** to do. | A vague error, or one you have to go looking for. | |
+| H-8.3 | Move back to the field that failed. | The error is announced **together with the field**. | The field repeats its problem when you land on it. | The error only exists elsewhere on the page. | |
+
+---
+
+# §9 · Welly — PRIORITY 1 · the most important section
+
+Use the tab where you left the model downloading. Go to **Welly**.
+
+> **Why this matters most.** Welly streams its answer in word by word. The naive way to build this
+> makes a screen reader re-read the entire growing answer every few words — genuinely unusable, and
+> it's a live bug in several well-known AI products today. We deliberately built it differently, and
+> automated tests confirm the *structure* is right. **Nobody has ever heard it.** That's you.
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-9.1 | `Tab` to the message box. | It has a real name — "Ask Welly", "Message" — not just "edit text". | It's named. | Only "edit text", or it reads the faint example text as the label. | |
+| H-9.2 | Before typing, `VO`+`→` through the suggestion buttons. | You hear a group name ("Try asking") and then each suggestion. | You can tell they're a group of suggestions. | They sound like unrelated loose buttons. | |
+| H-9.3 | Type `How many hours do I have?` and press `Return`. | Something tells you it's working — "Welly is thinking" or similar. | You know it's working. | Total silence — you can't tell if it heard you. | |
+| **H-9.4** | **Now just listen, without touching anything, until the answer finishes.** | You hear a "thinking" message, then a pause, then **the complete answer read once**. | **Nothing is read more than once.** You hear it once, at the end. | **You hear the same sentence over and over, each time slightly longer.** That's the failure this design exists to prevent — report it immediately and quote what you heard. | |
+| H-9.5 | Ask a second question. Halfway through the answer, press `Control` to stop the speech. Then use `VO`+`→` to read the answer yourself. | Speech stops immediately; you can still read the whole answer. | You can interrupt and read at your own pace. | You can't stop it, or the answer isn't readable afterwards. | |
+| H-9.6 | Use `VO`+`→` to move back up through the conversation. | Each message identifies **who said it** — "You asked", "Welly replied". | You can tell who said what. | Messages run together and you can't tell speaker from speaker. | |
+| H-9.7 | Use the rotor (`VO`+`U`) or `VO`+`→` to jump **straight into the middle** of the conversation. | The message you land on still tells you who said it. | Speaker is identified even when you didn't read from the top. | You have no idea who's talking. | |
+| H-9.8 | Open the conversation history, `Tab` through it, and switch to another conversation. | Each conversation is named; the current one is announced as current; you can tell the transcript changed. | You can navigate between conversations. | Unnamed entries, or you can't tell it switched. | |
+| H-9.9 | `Tab` to the rename and delete buttons next to a conversation. | Each says what it does **and which conversation** — "Rename 'My hours'". | Both are named and say which one they affect. | Two unnamed buttons next to a conversation you don't want to delete by accident. | |
+| H-9.10 | Turn off Wi-Fi and ask a question. | The failure is **spoken** and says something useful. | You're told it failed and roughly why. | Silence, or an unexplained stall. | |
+
+---
+
+# §10 · Settings → Accessibility
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-10.1 | Go to **Settings → Accessibility**. `VO`+`→` into the Text size options. | You hear the group name and your position — something like "Text size, Large, radio button, 2 of 3". | You hear the **group name** and **which option of how many**. | Three loose radio buttons with no group and no position. | |
+| H-10.2 | Choose **Extra large**. | Text across the app gets bigger. Nothing overlaps or gets cut off. | It works and nothing breaks. | Text is clipped, overlapping, or unreadable. | |
+| H-10.3 | Turn on **Increase contrast**. Move around the app. | Text is darker. Nothing has vanished or become unreadable. | Everything still readable. | Something disappeared or got worse. | |
+| H-10.4 | Turn on each remaining switch one at a time. | Each announces its new state — "checked" / "on". | State changes are spoken. | You can't tell whether it turned on. | |
+| H-10.5 | Reload the page with everything still on. | Your settings are still applied, **immediately** — no flash of the old appearance. | Settings survive, with no visible flicker. | Settings are lost, or you see the page change appearance a moment after loading. | |
+| H-10.6 | Press **Reset to defaults**. | Everything returns to normal. | It works. | Something stays changed. | |
+
+---
+
+# §11 · Legal Center → Accessibility Statement
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-11.1 | From **Settings → Accessibility**, `Tab` to "Accessibility Statement" and activate it. | It opens the statement page in the Legal Center. | You arrive at a readable page with a heading. | Broken link, or an empty page. | |
+| H-11.2 | Read it with `VO`+`→`, or skim it visually. | It's honest: names WCAG 2.2 AA, says manual screen-reader testing is **not finished**, lists known limitations, and does **not** claim to be "ADA compliant". | Nothing in it sounds like an overclaim to you. | Anything reads as a promise we can't back up. **Quote it.** | |
+| H-11.3 | Find the reporting link on that page and follow it. | You reach a report form with the category **already set to accessibility**. | The category is pre-filled. | You have to find "Accessibility problem" in a dropdown yourself. | |
+| H-11.4 | On the report form, `Tab` through the fields. | Every field is named; the category dropdown announces its current value. | All named. | Any unnamed field. | |
+
+---
+
+# §12 · Messages
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-12.1 | Go to **Messages** and `Tab` to the message box. | It's named. **And you can tell by ear or by looking that it's focused** — there should be a visible ring around the box. | Named, and focus is visibly indicated. | Unnamed, or **no visible focus indicator** — this was a real bug we fixed, please confirm. | |
+| H-12.2 | `VO`+`→` through a conversation. | You can tell who sent each message. | Sender is identifiable. | Messages run together. | |
+| H-12.3 | `Tab` to the recipient picker and type a couple of letters. | Suggestions appear and are announced; `↓` moves through them; `Return` picks one. | You can choose a recipient using only the keyboard. | Suggestions appear silently, or arrow keys don't work. | |
+
+---
+
+# §13 · Error pages — PRIORITY 2 · we want your judgment
+
+To reach one: while signed in as the **student**, type this in the address bar:
+`http://localhost:5173/admin/roster`
+(Students aren't allowed there, so you'll get a "you can't open this" page.)
+
+> **Why this is priority 2.** That whole page is currently marked as one big *alert*. That means
+> VoiceOver may read **the entire page** — the logo, the heading, the explanation, every button —
+> the instant it appears, and interrupt whatever it was saying to do it. That might be helpful,
+> because otherwise you'd get no announcement at all. Or it might be a wall of speech you can't
+> escape. **We deliberately have not changed it, because this is a judgment only a listener can
+> make.** Your answer decides whether we change it.
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| **H-13.1** | Load `/admin/roster` as the student and **listen without touching anything.** | *Open question.* | The announcement is useful: you learn you can't open this and what to do, in a sentence or two. | It reads the whole page at you, or takes so long you'd give up. **Estimate how many seconds it talks for.** | |
+| H-13.2 | Now press `Control` to stop it, then `VO`+`→` to read the page yourself. | You can read it at your own pace. | Readable. | Unreadable or it keeps re-announcing. | |
+| H-13.3 | Press `VO`+`U` and open the **Landmarks** list. | There's a "main" landmark containing the error content. | A main landmark exists. | The list is empty — the content is in no landmark. **This was a real bug we fixed, please confirm.** | |
+| H-13.4 | `Tab` through the page. | There's at least one way onward — a link or button. | You can leave without using the address bar. | Nothing to `Tab` to. | |
+| H-13.5 | Try a nonsense URL: `http://localhost:5173/does-not-exist`. Repeat H-13.1. | Same as above. | Same. | Same. | |
+
+**On H-13.1, please answer these three questions in words:**
+1. Roughly how many seconds did VoiceOver talk before you could do anything?
+2. Did it interrupt something you were already listening to?
+3. If you were blind and hit this page ten times a day, would this help you or annoy you?
+
+---
+
+# §14 · Two final checks
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-14.1 | Turn VoiceOver off. Press `Command`+`+` five times to zoom to 200%. Redo §3 and §4 with the mouse. | Everything still works. No sideways scrolling. Nothing cut off. | Everything you could reach before, you still can. | Content clipped, or you have to scroll sideways to read. | |
+| H-14.2 | **System Settings → Accessibility → Display → Reduce motion: ON.** Reload the app and move around. | Animations are gone or much reduced. Nothing spins forever. | Noticeably calmer. | Something still spins or slides continuously. | |
+
+---
+
+## Reporting back
+
+Send me the table results. For anything that FAILED or was UNCLEAR, include:
+
+1. **The ID** — e.g. `H-9.4`.
+2. **What you did** — the keys you pressed.
+3. **What you heard** — as close to word-for-word as you can. *This is the most useful part.*
+4. **What you expected instead.**
+
+**Lead with §9 (Welly) and §13 (error page verbosity)** — those two are the reason this document
+exists. Everything else is confirmation.
+
+If you get through only the three priority sections, that is still a genuinely useful result and I
+can act on it.
