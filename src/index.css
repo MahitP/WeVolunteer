@@ -12751,3 +12751,16 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 /* The input group and anything after it (the error message) span both columns. */
 .field-with-aside > .input-affix { grid-column: 1 / -1; grid-row: 2; }
 .field-with-aside > .field-error { grid-column: 1 / -1; grid-row: 3; }
+
+/**
+ * The landmark wrapper for a full-page error.
+ *
+ * `App.jsx` returns a refusal or a 404 before it builds the shell, so there is no
+ * `<main>` on those pages and the error content sat in no landmark at all —
+ * measured on twelve routes, with `#main-content` absent entirely. This adds the
+ * landmark and nothing else: `.err` keeps its own min-height, max-width and
+ * centring, so the composition is unchanged.
+ */
+.err-page {
+  display: block;
+}
