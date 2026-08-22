@@ -1,63 +1,109 @@
-import { ROUTES } from './routes.mjs';
+import { ROUTES, SIGNED_OUT_ROUTES } from './routes.mjs';
 import { fetchRoles } from './roles.mjs';
 import { signInAs } from './signIn.mjs';
 
 /**
- * Visits every route, for one role or all of them, and hands each page to a
- * visitor.
+ * Visits every route and hands each page to a visitor.
  *
  * ── Why this is shared rather than inlined per sweep ──
  *
- * Four sweeps need the same loop, and two lines of it fail silently.
+ * Five sweeps need the same loop, and three lines of it fail silently.
  *
  * The wait for the main landmark is there because route-level code splitting
  * means a Suspense fallback — LoadingSkeleton — is what renders first. A sweep
  * that measures before it resolves measures the skeleton and reports a clean
  * page.
  *
- * And a route whose fixture 404s must be RECORDED rather than measured, because
- * a 404 body passes almost every accessibility check there is. A skip would be
- * the quiet failure: the route stops being audited and nothing says so.
+ * A route whose fixture 404s must be RECORDED rather than measured, because a
+ * 404 body passes almost every accessibility check there is. A skip would be the
+ * quiet failure: the route stops being audited and nothing says so.
  *
- * Duplicated four times, each copy is one edit away from disagreeing with the
+ * And a route that REDIRECTS must be recorded too. This one was a real defect in
+ * the first version: signed in, /login, /signup and /welcome all redirect to the
+ * dashboard, so the sweep measured the dashboard three extra times and reported
+ * the counts under the auth routes' names. The sign-in page — the one every
+ * unauthenticated visitor sees, and the one place a locked-out person cannot work
+ * around a defect — was never audited at all. The numbers looked plausible,
+ * which is exactly what made it dangerous.
+ *
+ * Duplicated five times, each copy is one edit away from disagreeing with the
  * others, and the disagreement looks like a real finding. So there is one copy.
  */
 export async function forEachRoute(
   { browser, request, baseURL },
-  { roles = 'first', context = {} } = {},
+  { roles = 'first', context = {}, signedOut = false } = {},
   visit
 ) {
-  const all = await fetchRoles(request, baseURL);
-  /* One role by default: page structure, focus order and layout are properties
-     of the shell and the view, not of authorisation. Only the axe sweep needs
-     every role, because a rule can fire on markup only one role is shown. */
-  const chosen = roles === 'all' ? all : all.slice(0, 1);
   const unreachable = [];
+  const redirected = [];
   const visited = [];
 
-  for (const role of chosen) {
-    const statePath = await signInAs(browser, role, baseURL);
-    const ctx = await browser.newContext({ baseURL, storageState: statePath, ...context });
+  /**
+   * Signed out there is no role, so one pass over the routes an unauthenticated
+   * visitor can actually reach: the auth screens, the legal centre, certificate
+   * verification and the appeal link. Everything else redirects to sign-in, and
+   * measuring the sign-in page under another route's name is the defect above.
+   */
+  const passes = signedOut
+    ? [{ role: { key: 'signed-out' }, storageState: undefined, routes: SIGNED_OUT_ROUTES }]
+    : await signedInPasses({ browser, request, baseURL }, roles);
+
+  for (const pass of passes) {
+    const ctx = await browser.newContext({
+      baseURL,
+      ...(pass.storageState ? { storageState: pass.storageState } : {}),
+      ...context
+    });
     const page = await ctx.newPage();
 
-    for (const route of ROUTES) {
+    for (const route of pass.routes) {
       let res;
       try {
         res = await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
       } catch (err) {
-        unreachable.push(`${route.concrete} (${role.key}) -> navigation threw: ${err.message.split('\n')[0]}`);
+        unreachable.push(
+          `${route.concrete} (${pass.role.key}) -> navigation threw: ${err.message.split('\n')[0]}`
+        );
         continue;
       }
       if (res && res.status() >= 400) {
-        unreachable.push(`${route.concrete} (${role.key}) -> HTTP ${res.status()}`);
+        unreachable.push(`${route.concrete} (${pass.role.key}) -> HTTP ${res.status()}`);
         continue;
       }
+
+      /* Let a client-side redirect happen before deciding where we are: the
+         router redirects after hydration, not in the HTTP response. */
       await page.locator('#main-content, main, [role="main"]').first()
         .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-      await visit(page, route, role);
-      visited.push(`${route.path}::${role.key}`);
+
+      const landed = new URL(page.url()).pathname;
+      if (landed !== route.concrete) {
+        redirected.push(`${route.concrete} (${pass.role.key}) -> ${landed}`);
+        continue;
+      }
+
+      await visit(page, route, pass.role);
+      visited.push(`${route.path}::${pass.role.key}`);
     }
     await ctx.close();
   }
-  return { unreachable, visited };
+
+  return { unreachable, redirected, visited };
+}
+
+async function signedInPasses({ browser, request, baseURL }, roles) {
+  const all = await fetchRoles(request, baseURL);
+  /* One role by default: page structure, focus order and layout are properties
+     of the shell and the view, not of authorisation. Only the axe sweep asks for
+     every role, because a rule can fire on markup only one role is shown. */
+  const chosen = roles === 'all' ? all : all.slice(0, 1);
+  const out = [];
+  for (const role of chosen) {
+    out.push({
+      role,
+      storageState: await signInAs(browser, role, baseURL),
+      routes: ROUTES
+    });
+  }
+  return out;
 }

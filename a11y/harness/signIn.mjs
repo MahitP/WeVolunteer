@@ -34,18 +34,24 @@ export async function signInAs(browser, role, baseURL) {
   const picker = page.getByRole('button', { name: /sign in with email/i });
   if (await picker.count() > 0) await picker.first().click();
 
-  /* The seeded shortcut when it is offered, because it is one click and cannot
-     mistype a password. Falling back to the form matters: the shortcut renders
-     only when the server returns demo accounts, and a role could be seeded
-     without one. */
-  const shortcut = page.locator('.auth-demo-btn', { hasText: role.email.split('@')[0] }).first();
-  if (await shortcut.count() > 0) {
-    await shortcut.click();
-  } else {
-    await page.getByLabel(/email/i).first().fill(role.email);
-    await page.getByLabel(/password/i).first().fill('password123');
-    await page.getByRole('button', { name: /^sign in$/i }).click();
-  }
+  /**
+   * The form, always — not the seeded one-click shortcut.
+   *
+   * Two reasons. The shortcut's visible text is the account's display name
+   * ("Leo Chen"), which this function does not have; it has the email, so
+   * matching on it was matching nothing and silently falling through. And using
+   * the real form means every run exercises the login path an actual person
+   * uses, which is the thing being audited.
+   *
+   * Locators are role-precise on purpose. getByLabel(/email/i) matched
+   * `<main aria-labelledby="email-heading">` — the landmark is legitimately
+   * NAMED "email" on this screen, so a label-text match finds the region before
+   * the field and then fails with "Element is not an <input>". Asking for the
+   * textbox by its accessible name cannot make that mistake.
+   */
+  await page.getByRole('textbox', { name: /email/i }).first().fill(role.email);
+  await page.locator('input[type="password"]').first().fill('password123');
+  await page.getByRole('button', { name: /^sign in$/i }).first().click();
 
   /* The signed-in shell's landmark. Waiting on a URL would pass while an error
      banner is the only thing on screen. */
