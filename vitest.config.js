@@ -71,7 +71,7 @@ export default defineConfig({
              behind. See server/testTempCleanup.js for why this is one global hook
              with an age threshold rather than 55 afterAll blocks. */
           globalSetup: ['./server/testTempCleanup.js'],
-          include: ['server/**/*.test.js'],
+          include: ['server/**/*.test.js', 'a11y/**/*.test.js'],
           exclude: EXCLUDE,
           environment: 'node',
           isolate: true,

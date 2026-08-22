@@ -32,7 +32,12 @@ const ROOT = process.cwd();
 const DESTRUCTIVE_TOOLS = [
   'bin/seed-pilot.js',
   'bin/simulate-pilot.js',
-  'bin/reset-dev-db.mjs'
+  'bin/reset-dev-db.mjs',
+  /* The accessibility harness resets a scratch database before every run, which
+     makes it destructive in exactly the way this suite exists for. Listed here
+     rather than given its own guard so a refusal added to the shared gate
+     reaches it automatically — the drift this file's header describes. */
+  'bin/a11y-audit.mjs'
 ];
 
 /**
@@ -551,4 +556,22 @@ describe('the safety gate cannot be skipped by a new tool', () => {
       + 'composes the gate itself.'
     ).toEqual([]);
   });
+});
+
+/**
+ * Guards the guard.
+ *
+ * Every assertion above is "exit non-zero and print REFUS". A tool whose file
+ * does not exist exits non-zero, and node's own error contains no "REFUS" — so
+ * a missing file fails loudly today. But a tool that exits non-zero for ANY
+ * duller reason (a syntax error, a bad import) would satisfy the exit-code half
+ * while the refusal it is supposed to prove never ran. This asserts the files
+ * are real, so the suite is measuring gates rather than crashes.
+ */
+describe('the destructive-tool list points at real tools', () => {
+  for (const tool of DESTRUCTIVE_TOOLS) {
+    it(`${tool} exists`, () => {
+      expect(existsSync(path.join(ROOT, tool)), `${tool} is listed but absent`).toBe(true);
+    });
+  }
 });
