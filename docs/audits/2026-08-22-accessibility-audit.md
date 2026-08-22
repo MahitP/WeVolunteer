@@ -107,6 +107,7 @@ After the fixes above, on the current tree:
 | `sweep.geometry.spec.js` | 2.5.8 target size, 1.4.10 reflow at 320px, 1.4.12 text spacing | **0** below the 24×24 AA floor; **0** routes scroll horizontally at 320px |
 | `workflows/auth.spec.js` | the signed-out authentication journey, keyboard only | Sign-in completes by keyboard; paste is not blocked; autocomplete tokens present; the error reaches a live region; focus is not lost on failure |
 | `workflows/welly.spec.js` | Welly's structure and live-region wiring | The transcript is not a live region; an atomic `role="status"` exists outside it; the input has a real name; suggestions are a labelled group satisfying 2.5.3; every conversation control is named |
+| `workflows/dialogs.spec.js` | the inside of the opportunity dialog — the details and signup flow | It is an `aria-modal` with a name; focus lands inside; axe finds **0** violations within it; every control is named and meets 24×24 as an effective target; Escape closes it and returns focus to the trigger; at 320px it reflows with a working scroller and its actions reachable |
 | `workflows/mobile.spec.js` | the mobile shell at 390px | The bottom bar is a named landmark of named controls with `aria-current`; the desktop rail is confirmed hidden so this really is the mobile tree; the skip link is still the first tab stop; every route renders content inside `main` |
 | `workflows/preferences.spec.js` | Settings → Accessibility end to end, and the statement | The section is reachable through the navigation and renders; text size is a real radio group and **measurably** resizes the root; each switch writes its attribute **and** the stylesheet reacts; Larger controls produces ≥44px buttons; preferences survive a reload applied before first paint; reset removes every attribute; the statement is reachable, names WCAG 2.2, explains how to report, and makes no legal-compliance claim; the report link arrives with the category preselected |
 
@@ -252,6 +253,20 @@ Stated plainly rather than left to be discovered.
 6. **Transient states are under-covered.** The weather badge's contrast defect existed only during
    the ~300ms its forecast was loading, and a clean run proves nothing about it. Loading, empty
    and error states are measured only when a sweep happens to catch them.
+7. **A route change announces nothing.** `LoadingSkeleton` is decorative divs with no text, so a
+   screen reader is not told anything false during a navigation — it is told nothing at all. Not
+   fixed here, because fixing it means choosing an announcement strategy, and that is a judgement
+   better made after hearing what silence feels like. Asked as an open question in the VoiceOver
+   script (H-2.6).
+8. **Only the opportunity dialog is measured from the inside.** Dialog CONTENTS are now swept for
+   the event/signup dialog (`workflows/dialogs.spec.js`), which is the flow that matters most, but
+   `ProfileEditModal`, `CertificateModal`, `CheckInCodeModal`, `ReportModal`, `ResolutionModal` and
+   `LegalUpdateModal` are still covered only by the shared `Modal` guarantees and the static
+   `dialogSemantics` guard.
+9. **Settings sections other than Appearance are swept only in the Accessibility panel.** The route
+   sweep visits `/settings`, which defaults to Appearance, so the Privacy, Notifications, Security
+   and Messaging panels have never been through axe in a browser. `workflows/preferences.spec.js`
+   covers the Accessibility panel specifically.
 7. **Certificates are printable pages, not tagged PDFs.**
 
 ---
