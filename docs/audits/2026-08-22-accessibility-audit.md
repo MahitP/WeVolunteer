@@ -81,6 +81,17 @@ Already present and verified still working:
 
 ## 4. Measured results, in full
 
+**Verification run:** the exact CI command, from a clean `scratch/` directory —
+`NODE_ENV=development DATABASE_ENGINE=sqlite VITE_LOCAL_AI=false WEV_DB_PATH=$PWD/scratch/a11y.db npm run a11y -- --grep-invert @local`
+— **34 tests, 34 passed, 48.9 minutes, exit 0.** Alongside it: the full Vitest
+suite at **7,808 passed / 0 failed** (106 skipped, all pre-existing
+PostgreSQL-gated), plus `oxlint` and `vite build` clean.
+
+The 48.9 minutes is worth naming as a cost. Nineteen of them are the axe sweep,
+which is the only one running all four roles; the rest are ~3.5 minutes each.
+It runs in its own CI job precisely so that cost cannot slow the existing
+build-and-test pipeline.
+
 After the fixes above, on the current tree:
 
 | Sweep | What it measures | Result |
