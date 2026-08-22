@@ -284,17 +284,62 @@ both `outline` and `box-shadow` on `:focus` and `:focus-visible`. Fix restores a
 ring consistent with the rest of the application. Guard: extend P0-1's parse —
 no selector may zero both properties without a restoration.
 
-**P0-3 — `LocationThumbnail.jsx:13`.** `<span onClick>` with a `cursor: pointer`
-inline style. Becomes a `<button>`, keeping the visual through the existing
-class. Guard: the clickable-non-interactive scan, generalised.
+**P0-3 — the location cluster.** Reclassified during implementation recon; see
+[Recon corrections](#recon-corrections). The work is a single task covering three
+related defects in `src/components/location/`, none of which is individually a
+blocker.
 
-**P0-4 — `LocationDisplay.jsx:32`.** `<div onClick>` opening directions, named
-only by `title`. Becomes a `<button>` with a real accessible name that says where
-it goes. Guard: as P0-3.
+### Recon corrections
 
-Plus whatever the sweep promotes to P0 — a keyboard trap, an unreachable dialog,
+Two of the four defects named above did not survive verification. Recording the
+correction here rather than quietly implementing something different, because a
+spec that keeps a disproven claim is the failure this document's evidence-class
+discipline exists to prevent.
+
+**`LocationThumbnail.jsx:13` is real but is not a blocker — P2, not P0.** Its
+`onClick` is `onViewDetails`, which is *the same action* as the card's footer
+button at `src/components/EventCard.jsx:133`. So the span is a duplicate pointer
+affordance beside a real, keyboard-reachable control, and no workflow is blocked
+by it. It is also probably broken on its own terms: the button calls
+`onViewDetails(event)` while the span calls `onViewDetails(clickEvent)`, and the
+handler `App.jsx` passes is named `openEventById`. The fix is to make the fact
+non-interactive — which removes a mislabelled affordance rather than removing
+functionality, since the properly-named control stays.
+
+**`LocationDisplay.jsx:32` is not reachable at all.** Nothing outside
+`src/components/location/` imports it; the barrel re-exports it and no consumer
+takes it. The live event-details path renders `LocationCard` instead
+(`EventDetailsExperience.jsx:12`). So this is dead code, not a user-facing
+defect, and the honest resolution is deletion rather than a fix that implies
+somebody was affected.
+
+**The live defect the recon found instead is `LocationCard`.** It is materially
+better than the dead component — it has a real `<button>` with visible "Get
+Directions" text — but it opens an external URL with `window.open`, so
+cmd-click and middle-click do not work, a popup blocker can silently eat it, and
+nothing announces that a new tab opened. Meanwhile
+`src/components/location/DirectionsButton.jsx` **already solves this correctly
+and is unused**: a real `<a>`, `mapsDirectionsUrl` with a `geo:` app handoff,
+`aria-label`, `aria-hidden` on the icon, and an `sr-only` "(opens in a new tab)".
+Its own docstring records having been fixed once already. So the fix is adoption
+of an existing component, not new code — the shared-component-first principle
+applying to a component that already exists.
+
+`LocationCard` also passes `onClick={openDirections}` into `MapPreview`, making
+the map a clickable non-interactive region. Not a blocker, for the same reason as
+the thumbnail: the real button is right there.
+
+**Net effect on scope.** Two genuine P0s remain (P0-1 and P0-2, both focus
+indicators, both application-wide). The location work stays in scope because it
+is cheap and adjacent, but it is recorded at its true severity. Whether any
+further P0 exists is now a question for the harness rather than for grep — which
+is the entire argument for building the harness first.
+
+**Whatever the sweep promotes to P0** — a keyboard trap, an unreachable dialog,
 essential information conveyed by colour alone, or a workflow that cannot be
-completed from the keyboard. Findings at P1 through P3 are inventoried and left
+completed from the keyboard. Given that two of four grep-found P0s were
+downgraded on inspection, the expectation should be that the harness both
+promotes and demotes. Findings at P1 through P3 are inventoried and left
 for the follow-up specs; fixing them here is what produces an unreviewable
 branch, which the engineering guide records having already happened once on a
 branch with "accessibility" in its name.
