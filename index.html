@@ -39,6 +39,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>WeVolunteer</title>
     <script src="/theme.js"></script>
+    <!--
+      Accessibility preferences, before the first paint, for the same reason
+      theme.js is here: a text-size or contrast setting applied after React
+      mounts is a visible flash of the interface the reader said they could not
+      use. See src/hooks/useAccessibilityPreferences.js for the other half.
+    -->
+    <script src="/a11y-prefs.js"></script>
   </head>
   <body>
     <div id="root"></div>

@@ -386,6 +386,33 @@ export const LEGAL_DOCUMENTS = [
     contentHash: '10239aee73d74a7d20bbe75489bd3e2d365319634fcf15798757b2313adbd924',
     bundledWith: null,
   },
+  {
+    slug: 'accessibility-statement',
+    /**
+     * `notice` / `notice`, and it matters which.
+     *
+     * This document grants nothing and asks for nothing: it states an
+     * accessibility target, what was tested, what is known to be broken, and how
+     * to report a barrier. `scope: 'signup'` would put a checkbox in front of
+     * every new account and prompt every existing one to re-accept a document
+     * that makes no demands of them — which is both pointless and the way people
+     * learn to click through consent screens without reading them.
+     *
+     * It is also the document most likely to change often, because it names
+     * current known limitations. A `notice` can be revised without invalidating
+     * anybody's acceptance, which is the property that makes honest revision
+     * cheap enough to actually do.
+     */
+    version: '1.0',
+    title: 'Accessibility Statement',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'The accessibility standard WeVolunteer is built and tested against, what has actually been verified and how, what is known to be unfinished, and how to report a barrier.',
+    effectiveAt: '2026-08-22',
+    file: '13-accessibility-statement.md',
+    contentHash: 'd256879d03b064e83b425e351caba9270bddd176bb4b3543f5ae3dcfb6dbf463',
+    bundledWith: null,
+  },
 ];
 
 /**

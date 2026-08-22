@@ -4542,10 +4542,28 @@ time { font-variant-numeric: tabular-nums; }
   outline: none;
 }
 
+/**
+ * The ring moves to the wrapper; it does not disappear.
+ *
+ * This rule zeroed `outline` AND `box-shadow` together, on both `:focus` and
+ * `:focus-visible`, which made the message composer the one control in the
+ * application with no focus indicator at all — for everybody, in every mode, not
+ * just in a forced-colours one. A keyboard user tabbing into a conversation had
+ * no way to tell they had arrived in the text box.
+ *
+ * The textarea keeps `outline: none` because the visible border belongs to
+ * `form.message-composer` around it, and a ring tight around the text inside a
+ * bordered box reads as a doubled edge. `:focus-within` on the wrapper is the
+ * same indicator in the right place.
+ */
 .composer-input:focus,
 .composer-input:focus-visible {
   outline: none;
-  box-shadow: none;
+}
+
+.message-composer:focus-within {
+  box-shadow: var(--focus);
+  border-radius: var(--r-sm);
 }
 
 .composer-input::placeholder { color: var(--ink-3); }
@@ -12379,3 +12397,232 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   }
 }
 
+
+
+/* ==========================================================================
+   Forced colors — Windows High Contrast, and any user colour scheme
+   ========================================================================== */
+
+/**
+ * Focus rings, restored.
+ *
+ * `--focus` is a box-shadow by construction — two rings, `0 0 0 2px
+ * var(--surface), 0 0 0 4px var(--brand)` — and the note at `.persona-option`
+ * explains why `outline: 2px solid var(--focus)` would be invalid. Forced-colors
+ * mode strips box-shadow. Combined with the global `:focus { outline: none }`
+ * near the top of this file, that left this application with NO focus indicator
+ * at all, on any control, on any page, in the mode used by the people who most
+ * depend on one. It was invisible in review because nobody reviews CSS in High
+ * Contrast, and no static guard could see it because every declaration involved
+ * is individually correct.
+ *
+ * The colour is a system keyword rather than a token on purpose. forced-colors
+ * repaints authored colours, so `var(--brand)` could be mapped to something
+ * indistinguishable from the background; `Highlight` is the colour the user's own
+ * scheme picked for exactly this job.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    /* Not merely redundant: a shadow that survived would sit under the outline
+       and read as a doubled ring. */
+    box-shadow: none;
+  }
+
+  /* Controls that opt out of the global rule and paint their own shadow ring.
+     Listed because each declares `outline: none` locally, which the rule above
+     cannot reach through. */
+  .dp-toggle:focus-visible,
+  .dp-nav-btn:focus-visible,
+  .dp-quick:focus-visible,
+  .dp-cell:focus-visible,
+  .form-input:focus,
+  .message-composer:focus-within,
+  .skip-link:focus {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* A border the user's scheme can see, on the surfaces that rely on a
+     background difference alone to read as a container. In forced-colors those
+     backgrounds all collapse to Canvas, so without this a card, a dialog and the
+     page behind them become one undifferentiated field. */
+  .card,
+  .modal,
+  .popover,
+  .form-input,
+  .btn {
+    border: 1px solid CanvasText;
+  }
+
+  /* Status colour carries meaning elsewhere in this file; here it cannot, so the
+     border is what distinguishes them. The text always says the status too — see
+     the colour-independence rule in the engineering guide — so nothing is lost. */
+  .status { border: 1px solid CanvasText; }
+}
+
+/* ==========================================================================
+   Accessibility preferences — Settings → Accessibility
+   ========================================================================== */
+
+/**
+ * Six optional personalisations, keyed off `data-` attributes on `<html>`.
+ *
+ * Written by src/hooks/useAccessibilityPreferences.js and, before the first
+ * paint, by public/a11y-prefs.js. A default writes NO attribute, so every rule
+ * here is additive and an unset preference has zero specificity cost.
+ *
+ * None of these is required for the application to be accessible. Keyboard
+ * operation, focus indicators, semantic structure, reflow and the system's
+ * reduced-motion preference are unconditional. These are for the person who
+ * wants MORE than the default gives them.
+ */
+
+/**
+ * Text size scales the ROOT, not each rule.
+ *
+ * Every size in this stylesheet is in `rem`, so moving the root moves the whole
+ * type scale together and nothing has to be listed. Anything in `px` would not
+ * scale — which is the argument for keeping it that way.
+ *
+ * The steps are deliberately modest (112.5% and 125%). Browser zoom already
+ * exists and goes much further; what this offers is bigger TEXT without bigger
+ * everything, which zoom cannot do, and a step large enough to break the layout
+ * would be worse than no setting.
+ */
+:root[data-text-size='large'] { font-size: 112.5%; }
+:root[data-text-size='x-large'] { font-size: 125%; }
+
+/**
+ * High contrast, distinct from forced-colors.
+ *
+ * forced-colors replaces the palette with the user's own; this keeps the
+ * WeVolunteer palette and pushes its ends apart — for somebody who wants more
+ * separation without giving up the interface's colours entirely. Only the
+ * text-and-border tokens move; brand and status hues keep their meaning.
+ */
+:root[data-contrast='high'] {
+  --ink-2: var(--ink);
+  --ink-3: var(--ink-2);
+  --rule: var(--ink-3);
+  --rule-strong: var(--ink-2);
+}
+
+:root[data-contrast='high'] .dim,
+:root[data-contrast='high'] .small.dim {
+  color: var(--ink);
+}
+
+/**
+ * Reduce motion, as an addition to the system preference and never a veto of it.
+ *
+ * The eight `prefers-reduced-motion` blocks above still apply on their own. This
+ * covers the reader whose device preference is off — a shared machine, a browser
+ * that does not expose it — and who wants less movement here. There is
+ * deliberately no "animate anyway" value: somebody who asked their operating
+ * system for less motion asked for a reason.
+ */
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/**
+ * Reduce transparency.
+ *
+ * `backdrop-filter` appears eight times in this file, and a blurred translucent
+ * bar over moving content is hard to read for anybody with reduced contrast
+ * sensitivity — and on the topbar it sits behind text. Replacing it with an
+ * opaque surface loses a visual flourish and nothing else.
+ */
+:root[data-transparency='reduce'] .topbar,
+:root[data-transparency='reduce'] .modal-overlay,
+:root[data-transparency='reduce'] .popover,
+:root[data-transparency='reduce'] .mobilenav {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--paper) !important;
+}
+
+:root[data-transparency='reduce'] .modal-overlay {
+  /* The overlay must still read as a layer over the page, or a dialog stops
+     looking modal. Opaque enough to remove the blur, dark enough to separate. */
+  background: rgba(0, 0, 0, 0.75) !important;
+}
+
+/**
+ * Larger controls.
+ *
+ * The 44px floor in this file is inside `@media (hover: none) and (pointer:
+ * coarse)` — it applies to touch and not to a mouse. This extends it to any
+ * pointer, for a reader with a tremor or limited fine motor control on a laptop,
+ * where the coarse-pointer rule never fires.
+ */
+:root[data-controls='large'] .btn,
+:root[data-controls='large'] .btn-icon,
+:root[data-controls='large'] .modal-close,
+:root[data-controls='large'] .icon-btn,
+:root[data-controls='large'] button.rail-item,
+:root[data-controls='large'] .form-input,
+:root[data-controls='large'] select,
+:root[data-controls='large'] .dp-toggle,
+:root[data-controls='large'] .dp-nav-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+:root[data-controls='large'] .btn-sm {
+  min-height: 44px;
+  padding-inline: var(--s3);
+}
+
+/**
+ * Always show link underlines.
+ *
+ * A link distinguished from body text by colour alone is a 1.4.1 problem when
+ * the contrast between the two is under 3:1, and it is a comprehension problem
+ * for far more people than that. On by choice rather than by default because
+ * this interface uses colour plus weight plus position, and underlining every
+ * link in a dense list is noisy for readers who do not need it.
+ */
+:root[data-link-underlines='always'] a,
+:root[data-link-underlines='always'] .auth-link,
+:root[data-link-underlines='always'] .link {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Navigation and buttons styled as links are controls, not prose links: a rail
+   of underlined navigation items reads as a list of broken text. */
+:root[data-link-underlines='always'] .nav a,
+:root[data-link-underlines='always'] .mobilenav a,
+:root[data-link-underlines='always'] .btn,
+:root[data-link-underlines='always'] .rail-item {
+  text-decoration: none;
+}
+
+/**
+ * A fieldset that groups without drawing a box.
+ *
+ * `<fieldset>` is the right element — it names the group for assistive
+ * technology through its `<legend>`, which is what makes "Text size, Large, 2 of
+ * 3" possible with no ARIA — and its default border and padding do not belong
+ * inside a card that already has both. Resetting the appearance keeps the
+ * semantics, which is the only reason to use it.
+ */
+.a11y-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.a11y-fieldset > legend {
+  padding: 0;
+  margin-bottom: var(--s1);
+}
