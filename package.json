@@ -24,7 +24,10 @@
     "db:reset:dev": "node --env-file-if-exists=.env bin/reset-dev-db.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:postgres": "WEV_POSTGRES_APP_TEST=1 vitest run --project server"
+    "test:postgres": "WEV_POSTGRES_APP_TEST=1 vitest run --project server",
+    "a11y": "node bin/a11y-audit.mjs --yes",
+    "a11y:local": "VITE_LOCAL_AI=true node bin/a11y-audit.mjs --yes --grep @local",
+    "a11y:report": "node bin/a11y-report.mjs"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",
@@ -42,6 +45,8 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.17",

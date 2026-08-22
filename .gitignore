@@ -164,3 +164,8 @@ public/uploads/
 .cursor/
 CLAUDE.md
 AGENTS.md
+
+# Accessibility harness output. The baseline is committed; runs are not.
+/test-results/
+/playwright-report/
+/a11y/.auth/
