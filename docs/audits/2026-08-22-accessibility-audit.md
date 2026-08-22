@@ -64,6 +64,8 @@ Already present and verified still working:
 | A-03 | Five instances of `opacity` used to de-emphasise text that a muted colour token had already de-emphasised, producing contrast from 2.38:1 to 4.10:1. Worst: the Welly disclaimer telling somebody not to type personal information into it, at 2.65:1 | 1.4.3 (AA) | P1 | `src/index.css`, `LocationDisplay.css` | Low-vision users, and anybody in bright light | Fixed, **measured** |
 | A-04 | The toast dismiss control measured **14×15px** — the icon's own box, with no padding and no minimum | 2.5.8 (AA) | P1 | `src/components/common/Toasts.jsx` | Motor-impaired and touch users; it is the way out of a message covering something | Fixed, **measured** |
 | A-05 | The error page clipped its own content vertically. Under the text-spacing overrides 1.4.12 requires, content grew from 819px to 901px inside a box clipping at 819 — and what sits at the bottom of an error page is the actions | 1.4.12 (AA) | P1 | `src/index.css` `.err` | Anybody using a text-spacing user stylesheet, on the one screen whose purpose is offering a way out | Fixed, **measured** |
+| A-11 | **Tab from the sign-in identifier landed on "Forgot?", not the password field.** The control sits in the password field's label row, which put it between the two inputs in DOM order. Typing an email, Tab, typing a password, Enter — the sequence every keyboard user performs — swallowed the password keystrokes and activated "Forgot?", landing the person on "Reset your password" having lost what they typed, with no error and no explanation | 2.4.3 (A) | **P1** | `src/views/Login.jsx` | Every keyboard user signing in — on the one page where there is no way around a defect | Fixed, **measured** |
+| A-12 | `/report-issue?category=` was ignored. Settings → Accessibility and the Accessibility Statement both link there as `?category=accessibility`, and the view initialised its state to `''` and never read the URL — so somebody following an "accessibility problem" link still had to find the right option in a dropdown, using the interface that was failing them | 3.3.2 (A) | P2 | `src/views/ReportIssue.jsx` | Anybody reporting a barrier. Introduced by this initiative and fixed in it | Fixed, **measured** |
 | A-06 | The theme picker marked its selection with a CSS class only, so assistive technology met three identically named buttons with no way to tell which was current | 4.1.2 (A) | P2 | `src/views/Settings.jsx` | Screen-reader users | Fixed, **inspected** |
 | A-07 | Welly's suggestion chips had a visual "Try asking" label with no programmatic association, so AT met six unrelated buttons with no context | 1.3.1 (A) | P2 | `src/views/WellyView.jsx` | Screen-reader users | Fixed, **inspected** |
 
@@ -89,7 +91,8 @@ After the fixes above, on the current tree:
 | `sweep.media.spec.js` | forced-colors focus, reduced-motion, 200% zoom | Focus visible under `forced-colors: active` on **every route**; nothing animates infinitely under `prefers-reduced-motion`; the dashboard survives the 200% equivalent |
 | `sweep.geometry.spec.js` | 2.5.8 target size, 1.4.10 reflow at 320px, 1.4.12 text spacing | **0** below the 24×24 AA floor; **0** routes scroll horizontally at 320px |
 | `workflows/auth.spec.js` | the signed-out authentication journey, keyboard only | Sign-in completes by keyboard; paste is not blocked; autocomplete tokens present; the error reaches a live region; focus is not lost on failure |
-| `workflows/welly.spec.js` | Welly's structure and live-region wiring | The transcript is not a live region; an atomic `role="status"` exists outside it; the input has a real name; suggestions are a labelled group satisfying 2.5.3 |
+| `workflows/welly.spec.js` | Welly's structure and live-region wiring | The transcript is not a live region; an atomic `role="status"` exists outside it; the input has a real name; suggestions are a labelled group satisfying 2.5.3; every conversation control is named |
+| `workflows/preferences.spec.js` | Settings → Accessibility end to end, and the statement | The section is reachable through the navigation and renders; text size is a real radio group and **measurably** resizes the root; each switch writes its attribute **and** the stylesheet reacts; Larger controls produces ≥44px buttons; preferences survive a reload applied before first paint; reset removes every attribute; the statement is reachable, names WCAG 2.2, explains how to report, and makes no legal-compliance claim; the report link arrives with the category preselected |
 
 The exactly-one-`h1` result is worth naming separately: it is the browser confirming
 [`src/headingLevels.test.js`](../../src/headingLevels.test.js)'s claim, which that guard makes by
@@ -112,6 +115,19 @@ before.
 | 4 | Landmark duplication counted DOM nodes without checking exposure | **23 false findings.** `.mobilenav` is `display: none` until its breakpoint and `.sidebar` is hidden below it; `display: none` removes an element from the accessibility tree, so no screen reader has ever seen both |
 | 5 | Keyboard-trap detection compared a 140-character `outerHTML` slice, and every `.nav-item` starts with identical inline SVG | **25 false traps.** The giveaway was that the "trapped" control differed on every route; a real trap is the same control every time |
 | 6 | Fixing #3 made the reduced-motion sweep vacuous: settling styles sets `animation-duration: 0s`, so "which elements still animate infinitely" found none | A green result proving nothing, on every route. That sweep now opts out of settling and carries a control test that injects an infinite animation and fails if the detector cannot see it |
+| 7 | The 1.4.12 clipping detector tested `overflow` as a whole, so it kept reporting `.err` after the fix — `clip visible` is not `visible` | A detector that cannot see a fix argues for changes already made. Only `overflow-y` decides whether growing text is lost |
+
+Three further failures were the **tests'** wrong assumptions rather than the application's
+defects, and the corrections are worth more than the tests were:
+
+| Assumption | What the app actually does |
+| --- | --- |
+| A sign-in error must reach `[role="alert"]` | Login moves focus to the failed field, whose `aria-describedby` points at the error — so the field, its label and the reason are announced together. For a single-field error that is **better** than a live region elsewhere, because it also puts the cursor where the fix happens. The test now asserts the association |
+| The identifier is `input[type="email"]` | It is `type="text" name="username"`, because the form accepts a username too |
+| A statement must not contain the string "ADA compliant" | The statement contains it in order to **disown** it. A substring test forbade the very disclaimer it was meant to protect; the check now matches affirmative claims only, and separately requires the disclaimer to be present |
+
+Two more were races: reading an attribute before the form rendered, and reading Welly's
+transcript before its lazy import resolved. Both reported correct markup as missing.
 
 ---
 
@@ -231,9 +247,15 @@ verification outstanding.**
 
 What that means concretely: every criterion a browser can check is checked, on every route, and
 passes — and those checks now run in CI behind a one-way ratchet, so they cannot silently
-regress. Two application-wide P0 focus defects and five real contrast defects were found and
-fixed. The accessible structure of the application is genuinely good, and most of that predates
-this work.
+regress. Two application-wide P0 focus defects, five real contrast defects, a target-size
+failure on the control every user reaches, a clipped error page, and a tab order that sent
+keyboard users to password reset were all found and fixed. The accessible structure of the
+application is genuinely good, and most of that predates this work.
+
+The tab-order defect is the one worth dwelling on, because it is the shape of what automated
+testing misses: every control was named, every field labelled, contrast passing, axe silent —
+and the form still could not be completed by keyboard in the obvious way. It took walking the
+journey rather than scanning the page.
 
 What it does not mean: that a blind user has completed a workflow. Nobody has listened to this
 application. The single largest remaining risk is that a structurally correct live region
