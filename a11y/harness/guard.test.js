@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, renameSync } from 'fs';
+import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, renameSync, mkdirSync, chmodSync, linkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -214,6 +214,92 @@ describe('the containment check refuses a symlinked WEV_DB_PATH', () => {
     expect(res.code, res.combined).not.toBe(0);
     expect(res.combined).toMatch(/REFUS/i);
     expect(res.combined).toMatch(/symlink/i);
+  });
+
+  it('refuses a component it is not permitted to inspect, rather than assuming', () => {
+    /* Escape #4, and the one that made the invariant a lie.
+     *
+     * The walk's error handling was a bare `catch { continue }`, so EVERY lstat
+     * failure read as "nothing here yet". `chmod 000` on an intermediate
+     * directory makes lstat throw EACCES, not ENOENT — so the leaf was skipped
+     * as absent, the walk approved containment from a shallower ancestor, and a
+     * symlinked leaf pointing outside scratch/ sailed through.
+     *
+     * refuseNonDisposableDatabase could not cover for it either: its existsSync
+     * returns false for the same permission reason, so the content check was
+     * skipped too. Both gates were blind to this path for one shared reason.
+     *
+     * The rule this pins: a gate that cannot determine what a component IS must
+     * refuse. "I could not look" is not "it is fine". */
+    if (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)) {
+      /* chmod 000 does not deny the owner as root, and Windows ignores it
+         outright, so the premise of this test cannot hold there. Skipped
+         explicitly rather than left to pass vacuously. */
+      return;
+    }
+
+    const outsideDir = mkdtempSync(path.join(tmpdir(), 'wev-a11y-eacces-'));
+    writeFileSync(path.join(outsideDir, 'fake.db'), '');
+    const blockedDir = path.join(ROOT, 'scratch', `blocked-${process.pid}`);
+    mkdirSync(blockedDir, { recursive: true });
+    const dbFile = path.join(blockedDir, 'file.db');
+    symlinkSync(path.join(outsideDir, 'fake.db'), dbFile);
+
+    let res;
+    try {
+      chmodSync(blockedDir, 0o000);
+      res = run({ WEV_DB_PATH: dbFile });
+    } finally {
+      /* chmod back BEFORE removing, or the cleanup fails and leaves an
+         unreadable directory inside scratch/ for every later run. */
+      chmodSync(blockedDir, 0o755);
+      rmSync(blockedDir, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+
+    expect(res.code, res.combined).not.toBe(0);
+    expect(res.combined).toMatch(/REFUS/i);
+    /* The message must name the inspection failure, not a containment verdict
+       it never actually reached. */
+    expect(res.combined).toMatch(/could not be inspected/i);
+    expect(res.combined).toMatch(/EACCES/);
+  });
+
+  it('refuses a hardlinked database, which no symlink check can see', () => {
+    /* A hardlink shares an inode with a file elsewhere on the same device and
+       has no link to follow, so lstat reports an ordinary file and every
+       symlink check above is blind to it. nlink > 1 is the observable part.
+       Verified by hand: a hardlink gives nlink = 2 with isSymbolicLink() false.
+     *
+     * Without this, containment was only "containment plus a content
+     * heuristic" — refuseNonDisposableDatabase catches a hardlink to pilot.db
+     * by reading it and finding the owner accounts, but a real SQLite file
+     * carrying none of those markers would pass both checks. */
+    const outsideDir = mkdtempSync(path.join(tmpdir(), 'wev-a11y-hardlink-'));
+    const outsideFile = path.join(outsideDir, 'target.db');
+    writeFileSync(outsideFile, '');
+    const dbFile = path.join(ROOT, 'scratch', `hard-${process.pid}.db`);
+
+    let res;
+    try {
+      /* A hardlink cannot cross devices. If /tmp is a different filesystem the
+         link fails, and the premise cannot hold — skip rather than assert on a
+         setup that did not happen. */
+      try {
+        linkSync(outsideFile, dbFile);
+      } catch (err) {
+        if (err?.code === 'EXDEV') return;
+        throw err;
+      }
+      res = run({ WEV_DB_PATH: dbFile });
+    } finally {
+      rmSync(dbFile, { force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
+
+    expect(res.code, res.combined).not.toBe(0);
+    expect(res.combined).toMatch(/REFUS/i);
+    expect(res.combined).toMatch(/hard link/i);
   });
 
   it('accepts the ordinary happy path: a real scratch/, database absent', () => {

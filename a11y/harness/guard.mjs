@@ -82,9 +82,31 @@ export function assertScratchDatabase({ tool }) {
  * component that actually exists rather than inspecting only the parent or
  * only the leaf.
  *
- * The invariant this establishes: no component of the path is a symlink
- * anywhere it exists, and the deepest component that does exist lies inside
- * scratch/.
+ * ── The invariant, stated exactly ──
+ *
+ * No component of the path is a symlink or a multiply-linked file anywhere it
+ * exists; any component that cannot be INSPECTED is a refusal; and the deepest
+ * component that does exist lies inside scratch/. Components below that point
+ * cannot be links, because they do not exist.
+ *
+ * ── The threat this exists to stop ──
+ *
+ * An ACCIDENT: a developer or a CI job pointing WEV_DB_PATH at pilot.db, which
+ * holds real minors' personal data. That is the failure this must make
+ * impossible, and it is the standard to judge this function against.
+ *
+ * ── What it does NOT defend against, named rather than implied ──
+ *
+ * There is a window between this gate exiting and bin/reset-dev-db.mjs running
+ * in a second process, and nothing re-validates containment there. A local
+ * actor who can swap a component inside that window is not stopped. Closing it
+ * would mean the shared reset-dev-db.mjs depending on a11y/, inverting the
+ * dependency for a threat this gate was never scoped to cover. Recorded as a
+ * known limitation, deliberately, rather than left for somebody to assume.
+ *
+ * Four escapes were found in this one check, each fix inviting the next. The
+ * lesson worth keeping: a comment claiming completeness is how the first three
+ * survived review.
  *
  * This replaced three separate special-case checks, each of which covered one
  * end of the path and was blind to the others — and each fix invited the
@@ -142,14 +164,45 @@ function assertContainedInScratch(tool, dbPath) {
     let stat;
     try {
       stat = fs.lstatSync(candidate);
-    } catch {
-      continue; // nothing here yet — keep walking upward
+    } catch (err) {
+      /* ONLY "absent" means keep walking. A bare `catch` here treated every
+         failure as absence, and that was an escape: `chmod 000` on an
+         intermediate directory makes lstat throw EACCES, which was skipped as
+         though nothing were there, so the walk approved containment from a
+         shallower ancestor while the real leaf was a symlink pointing outside
+         scratch/. refuseNonDisposableDatabase is blind to the same path for the
+         same reason — its existsSync also returns false.
+
+         A gate that cannot determine what a component IS must refuse. "I could
+         not look" is not "it is fine". */
+      if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') continue;
+      refuse(tool, `${candidate} could not be inspected (${err?.code || 'unknown error'}).`,
+        'This gate refuses whatever it cannot verify. A component it is not\n'
+        + '  permitted to inspect could be a link to anywhere, so proceeding would\n'
+        + `  mean guessing about a path that decides which database is opened.`);
     }
 
     if (stat.isSymbolicLink()) {
       refuse(tool, `${candidate} is a symlink.`,
         'A scratch database, and everything containing it, has to be a real\n'
         + `  directory or file — not a link that could point outside ${SCRATCH}.`);
+    }
+
+    /* A hardlink is lstat-indistinguishable from an ordinary file — same
+       inode as a file elsewhere on the same device, no link to follow, so the
+       symlink check above cannot see it. nlink > 1 is the observable part, and
+       a scratch database has no legitimate reason to have a second name.
+
+       Without this, containment was only ever "containment plus a content
+       heuristic": refuseNonDisposableDatabase catches a hardlink to pilot.db by
+       reading it and finding the owner accounts, but a real SQLite file
+       carrying none of those markers would pass both checks. */
+    if (stat.isFile() && stat.nlink > 1) {
+      refuse(tool, `${candidate} has ${stat.nlink} hard links.`,
+        'A scratch database should have exactly one name. More than one means\n'
+        + `  these bytes are also reachable from outside ${SCRATCH}, where this\n`
+        + '  gate cannot see them and where deleting "the scratch database" would\n'
+        + '  not be deleting a scratch database.');
     }
 
     const real = fs.realpathSync(candidate);
