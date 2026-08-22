@@ -112,7 +112,13 @@
      white, just less opaque, mirroring how --ink-2/--ink-3 step down from
      --ink on the paper background. */
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  --ink-inv-3: rgba(255, 255, 255, 0.7);
+  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
+     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
+     dashboard card that tells somebody when their next shift is. 0.8 gives
+     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
+     alpha over a coloured surface is exactly where a muted token stops being
+     readable without anybody noticing. */
+  --ink-inv-3: rgba(255, 255, 255, 0.8);
 
   /* — Borders ——————————————————————————————————— */
   --border: var(--neutral-200);
@@ -375,7 +381,13 @@
   --ink-3: var(--text-muted);
   --ink-inv: #ffffff;
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  --ink-inv-3: rgba(255, 255, 255, 0.7);
+  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
+     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
+     dashboard card that tells somebody when their next shift is. 0.8 gives
+     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
+     alpha over a coloured surface is exactly where a muted token stops being
+     readable without anybody noticing. */
+  --ink-inv-3: rgba(255, 255, 255, 0.8);
 
   --border: rgba(199, 208, 203, 0.13);
   --border-hover: rgba(199, 208, 203, 0.24);
@@ -1896,7 +1908,12 @@ time { font-variant-numeric: tabular-nums; }
   white-space: nowrap;
 }
 .hourspill.zero { background: var(--surface-3); color: var(--ink-2); }
-.hourspill span { font-weight: 500; opacity: 0.8; }
+/* No `opacity` here.
+   `.hourspill.zero` already uses `--ink-2` on `--surface-3`, which is 5.52:1.
+   Dimming it a further 0.8 composited to #6d7a74 and dropped it to 3.65:1 — a
+   contrast failure created by de-emphasising text a muted token had already
+   de-emphasised. The weight difference is what marks it as secondary. */
+.hourspill span { font-weight: 500; }
 
 /* ==========================================================================
    Stats
@@ -1999,7 +2016,22 @@ time { font-variant-numeric: tabular-nums; }
 .nextshift-what { font-size: 0.875rem; opacity: 0.9; margin-top: 0.25rem; }
 .nextshift-detail {
   font-size: 0.8125rem;
-  opacity: 0.78;
+  /**
+   * `color`, never `opacity`.
+   *
+   * This was `opacity: 0.78`, and opacity on a CONTAINER dims everything nested
+   * inside it — including the weather badge, whose own text is opaque white
+   * chosen precisely so it would be readable on the translucent surface behind
+   * it. Measured, that badge came out at 3.66:1 while every token involved in it
+   * looked correct in isolation, and three attempts to fix it by changing the
+   * badge's own colours moved the number without reaching 4.5:1, because the
+   * cause was two levels up.
+   *
+   * `--ink-inv-3` de-emphasises this row's own text — 4.81:1 on the panel — and
+   * INHERITS, so a descendant that sets its own colour keeps it. That is the
+   * whole difference: colour is overridable by children, opacity is not.
+   */
+  color: var(--ink-inv-3);
   margin-top: var(--s2);
   display: flex;
   gap: var(--s4);
@@ -2036,7 +2068,22 @@ time { font-variant-numeric: tabular-nums; }
   margin-top: 0;
   background: var(--brand-translucent);
   border-color: var(--brand-translucent-border);
-  color: var(--ink-inv-2);
+  /**
+   * Opaque white, not a muted alpha — the one place in this file where stacked
+   * transparency has to stop.
+   *
+   * `--brand-translucent` is white-with-alpha over the panel's green, and
+   * `--ink-inv-2` is white-with-alpha again on top of that. Two alphas
+   * multiplying over a coloured surface make the final colour something nobody
+   * can predict from either token: measured, this text came out at #b7d3c8 on
+   * #297b59 — 3.23:1 — while both tokens individually look like safe choices,
+   * and raising either one moved the result unpredictably.
+   *
+   * `--ink-inv` removes the second alpha entirely and lands at 5.16:1. The badge
+   * is small and already set apart by its background; it does not need its text
+   * dimmed as well.
+   */
+  color: var(--ink-inv);
 }
 .nextshift .weather-temp,
 .nextshift .weather-icon {
@@ -12313,11 +12360,18 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   text-align: center;
   font-size: 0.75rem;
   line-height: 1.45;
-  opacity: 0.7;
+  /* No `opacity`.
+     `--ink-3` on `--paper` is 4.56:1 and passes. At 0.7 opacity it composited to
+     #8e9993 and measured 2.65:1 — the worst text contrast anywhere in the
+     application, on the line that tells somebody Welly makes mistakes and not to
+     type personal information into it. A disclaimer nobody can read is not a
+     disclaimer. The smaller size and the muted token are the de-emphasis; the
+     opacity was the defect. */
+  color: var(--ink-3);
 }
 
 /* The only link on the quiet row, so it carries the underline rather than a
-   colour — the row is already at 0.7 opacity and a brand-coloured link in it
+   colour — the row is already muted and a brand-coloured link in it
    reads as an error state. */
 .welly-policy-link {
   color: inherit;

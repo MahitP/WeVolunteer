@@ -2,6 +2,16 @@ import { ROUTES, SIGNED_OUT_ROUTES } from './routes.mjs';
 import { fetchRoles } from './roles.mjs';
 import { signInAs } from './signIn.mjs';
 
+/** Kills animation and transition, so a measurement sees final styles. */
+const SETTLE = `
+  *, *::before, *::after {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+`;
+
 /**
  * Visits every route and hands each page to a visitor.
  *
@@ -75,6 +85,27 @@ export async function forEachRoute(
          router redirects after hydration, not in the HTTP response. */
       await page.locator('#main-content, main, [role="main"]').first()
         .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+
+      /**
+       * Settle the styles before anything measures them.
+       *
+       * This is not a convenience — it is the difference between real findings
+       * and fabricated ones, and it was measured: the first contrast run
+       * reported 49 violations, and with motion disabled the same pages reported
+       * 18. Thirty-one were artefacts.
+       *
+       * Entrance animations in this stylesheet run 120-300ms, and an element
+       * mid-fade has a COMPOSITED colour lighter than the token it was given.
+       * axe reported the primary button's background as #3b8668 when the token
+       * is #0f6b45 — white on the token is 6.54:1 and passes, white on the
+       * mid-fade composite is 4.29:1 and fails. Acting on that would have meant
+       * darkening a palette that was already conformant: a scanner number
+       * treated as a fact about the product.
+       */
+      await page.addStyleTag({ content: SETTLE }).catch(() => {});
+      await page.evaluate(
+        () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+      ).catch(() => {});
 
       const landed = new URL(page.url()).pathname;
       if (landed !== route.concrete) {
