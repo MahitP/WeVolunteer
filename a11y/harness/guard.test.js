@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, rmSync, symlinkSync, unlinkSync } from 'fs';
+import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -87,18 +87,25 @@ describe('the accessibility harness refuses a database it must not audit', () =>
 /**
  * The symlink defence, exercised directly.
  *
- * The containment check resolves the database's PARENT with realpathSync so a
- * symlinked directory cannot smuggle the target out of scratch/ — but that
- * alone has two blind spots. A symlinked LEAF (the database path itself is a
- * link) has a parent that sits correctly inside scratch/ and would sail
- * through the parent check while pointing anywhere on disk. And a DANGLING
- * symlink — one whose target does not exist — defeats existsSync, which
- * follows links and reports "not found" for a dangling one, which then falls
- * to a lexical comparison that only sees the link's own path, never where it
- * points or fails to point. Both are closed by a single lstatSync check on
- * the resolved WEV_DB_PATH itself: lstatSync (never statSync, which follows
- * the link) succeeds whether or not the link's target exists, and reports the
- * link as a link either way.
+ * The containment check walks every filesystem component of the resolved
+ * WEV_DB_PATH, deepest first, and stops at the first one that actually exists:
+ * if that component is a symlink it is refused outright, otherwise it is
+ * realpath'd and must resolve inside scratch/. This replaced three earlier
+ * special-case checks that each covered one end of the path:
+ *
+ *   - a leaf-only check (lstat dbPath itself) cannot see a symlinked PARENT,
+ *     and is blind even to a DANGLING one, because lstatSync on the full leaf
+ *     path throws ENOENT when an intermediate component does not resolve —
+ *     indistinguishable from "does not exist yet";
+ *   - a parent-only check (realpath dirname(dbPath)) cannot see a symlinked
+ *     LEAF, whose parent sits correctly inside scratch/ while the leaf itself
+ *     points anywhere;
+ *   - neither one can see scratch/ ITSELF being a symlink, which corrupts the
+ *     baseline every comparison is made against rather than just one path
+ *     being compared against it.
+ *
+ * The tests below exercise all four shapes, plus the ordinary case where none
+ * of this fires.
  */
 describe('the containment check refuses a symlinked WEV_DB_PATH', () => {
   it('refuses a symlinked parent directory that points outside scratch/, pinning the existing parent check', () => {
@@ -147,5 +154,84 @@ describe('the containment check refuses a symlinked WEV_DB_PATH', () => {
     expect(res.code, res.combined).not.toBe(0);
     expect(res.combined).toMatch(/REFUS/i);
     expect(res.combined).toMatch(/symlink/i);
+  });
+
+  it('refuses when an intermediate component is a dangling symlink', () => {
+    /* The exact escape the leaf-only and parent-only checks each missed: the
+       intermediate directory is a symlink to somewhere that does not exist,
+       so lstatSync on the full leaf path throws ENOENT (an intermediate
+       component that will not resolve), and existsSync on the parent alone
+       also returns false and falls to a lexical comparison that never
+       notices the parent is a link at all. The walk instead finds THIS
+       component — the first one that actually exists on disk — and refuses
+       it directly. */
+    const missingTarget = path.join(tmpdir(), `wev-a11y-missing-mid-${process.pid}-${Date.now()}`);
+    const linkPath = path.join(ROOT, 'scratch', `sym-dangle-mid-${process.pid}`);
+    symlinkSync(missingTarget, linkPath);
+    const dbFile = path.join(linkPath, 'file.db');
+
+    const res = run({ WEV_DB_PATH: dbFile });
+
+    unlinkSync(linkPath);
+
+    expect(res.code, res.combined).not.toBe(0);
+    expect(res.combined).toMatch(/REFUS/i);
+    // Names the link component itself, not just a generic "outside scratch/"
+    // — proof the walk found the symlink rather than stopping at the first
+    // thing that merely doesn't exist.
+    expect(res.combined).toContain(linkPath);
+  });
+
+  it('refuses when scratch/ itself is a symlink', () => {
+    /* The target file is pre-created so the walk's FIRST existing component
+       is the leaf itself — a real file, not a symlink — and containment
+       succeeds or fails purely on which directory realpathSync(SCRATCH)
+       resolved to. If the up-front "is SCRATCH itself a symlink" guard were
+       missing, scratchReal would silently become the attacker's directory
+       and this exact case would pass. Without pre-creating the file, the walk
+       would instead hit the scratch/ symlink itself as the first EXISTING
+       component and refuse there — which would pass even with the guard
+       removed, and prove nothing about it. */
+    const fakeScratch = mkdtempSync(path.join(tmpdir(), 'wev-a11y-fake-scratch-'));
+    const dbFile = path.join(fakeScratch, 'a11y.db');
+    writeFileSync(dbFile, '');
+
+    const realScratch = path.join(ROOT, 'scratch');
+    const backupScratch = path.join(ROOT, `scratch.guard-test-backup-${process.pid}`);
+    const hadRealScratch = existsSync(realScratch);
+    if (hadRealScratch) renameSync(realScratch, backupScratch);
+
+    let res;
+    try {
+      symlinkSync(fakeScratch, realScratch);
+      res = run({ WEV_DB_PATH: path.join(realScratch, 'a11y.db') });
+    } finally {
+      unlinkSync(realScratch);
+      if (hadRealScratch) renameSync(backupScratch, realScratch);
+      rmSync(fakeScratch, { recursive: true, force: true });
+    }
+
+    expect(res.code, res.combined).not.toBe(0);
+    expect(res.combined).toMatch(/REFUS/i);
+    expect(res.combined).toMatch(/symlink/i);
+  });
+
+  it('accepts the ordinary happy path: a real scratch/, database absent', () => {
+    /* Without this, a walk that refuses everything indiscriminately would
+       look identical to a walk that refuses only what it should. */
+    const dbFile = path.join(ROOT, 'scratch', 'a11y.db');
+    rmSync(dbFile, { force: true });
+
+    const res = spawnSync(process.execPath, [TOOL, '--yes', '--dry-run'], {
+      cwd: ROOT, stdio: 'pipe', encoding: 'utf8',
+      env: {
+        ...process.env, NODE_ENV: 'development',
+        WEV_DB_PATH: dbFile,
+        DATABASE_ENGINE: 'sqlite'
+      }
+    });
+    const combined = String(res.stdout || '') + String(res.stderr || '');
+    expect(res.status, combined).toBe(0);
+    expect(combined).not.toMatch(/REFUS/i);
   });
 });

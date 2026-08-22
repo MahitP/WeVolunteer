@@ -72,49 +72,100 @@ export function assertScratchDatabase({ tool }) {
   refuseProductionLikePath({ tool, dbPath });
   refuseNonDisposableDatabase({ tool, dbPath, effect });
 
-  /* Containment is checked LAST, and it never creates the directory it is
-     validating. The first version did — `mkdirSync` on the target's parent
-     before deciding whether that parent was allowed — which crashed with
-     EACCES on `/var/lib/...` and produced a stack trace where a refusal
-     belonged. A gate that dies is not a gate. */
-  const scratchReal = fs.realpathSync(ensureDir(SCRATCH));
-  const parentPath = path.dirname(dbPath);
-  /* realpath only an EXISTING parent: a symlink has to exist to be followed, so
-     an absent parent cannot smuggle the target out of scratch/, and resolving
-     it lexically is enough. This covers the PARENT only — a symlinked LEAF
-     (scratch/leaf.db -> /elsewhere/fake.db) has a parent that sits correctly
-     inside scratch/ and would sail through this check while pointing anywhere
-     on disk. The lstat check below is what catches that case; this one alone
-     is not the complete symlink defence. */
-  const parent = fs.existsSync(parentPath) ? fs.realpathSync(parentPath) : path.resolve(parentPath);
-  if (parent !== scratchReal && !parent.startsWith(scratchReal + path.sep)) {
-    refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, outside scratch/.`,
-      `Artefacts are written beside the database, so it belongs under\n  ${SCRATCH}, which git already ignores.`);
-  }
-
-  /* The leaf itself, not just its parent. A scratch database has no reason to
-     be a link, so any symlink here is refused outright rather than followed —
-     which closes two escapes the parent check above cannot see: a symlinked
-     LEAF whose own path sits inside scratch/ but whose target does not, and a
-     DANGLING symlinked parent (existsSync follows the link, finds nothing, and
-     reports "does not exist", which fell to the lexical branch above as if it
-     were an ordinary absent file — even though something could appear at the
-     link's target between this check and the reset that follows it).
-     lstatSync, never statSync: statSync follows the link and would describe
-     whatever it points to, not the link itself. */
-  let leafStat = null;
-  try {
-    leafStat = fs.lstatSync(dbPath);
-  } catch {
-    // Genuinely does not exist yet — the ordinary first-run case.
-  }
-  if (leafStat && leafStat.isSymbolicLink()) {
-    refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, which is a symlink.`,
-      'A scratch database has no reason to be a link, and a symlinked leaf can\n'
-      + '  point outside scratch/ regardless of where its own path sits.');
-  }
+  assertContainedInScratch(tool, dbPath);
 
   return dbPath;
+}
+
+/**
+ * Refuses unless dbPath is contained in scratch/, checking every filesystem
+ * component that actually exists rather than inspecting only the parent or
+ * only the leaf.
+ *
+ * The invariant this establishes: no component of the path is a symlink
+ * anywhere it exists, and the deepest component that does exist lies inside
+ * scratch/.
+ *
+ * This replaced three separate special-case checks, each of which covered one
+ * end of the path and was blind to the others — and each fix invited the
+ * next, which was the signal that the property was being approximated rather
+ * than actually checked:
+ *
+ *   - A leaf-only check (lstat dbPath itself) cannot see a symlinked PARENT.
+ *     Worse, it cannot even see a DANGLING symlinked parent: lstatSync on the
+ *     full leaf path throws ENOENT when an intermediate component doesn't
+ *     resolve, indistinguishable from "does not exist yet".
+ *   - A parent-only check (realpath dirname(dbPath)) cannot see a symlinked
+ *     LEAF — the parent sits correctly inside scratch/ while the leaf itself
+ *     points anywhere on disk.
+ *   - Neither one can see scratch/ ITSELF being a symlink, which is worse
+ *     than either: `ensureDir` succeeds on a symlinked directory, and
+ *     realpathSync(SCRATCH) then resolves THROUGH it, so the baseline every
+ *     comparison below is made against becomes the attacker's directory
+ *     rather than the repository's scratch/.
+ */
+function assertContainedInScratch(tool, dbPath) {
+  /* Refuse a symlinked SCRATCH before it becomes the baseline everything else
+     is compared against. lstatSync tolerates SCRATCH not existing yet
+     (ensureDir below creates it as a real directory in that case), but if it
+     already exists it must be a real directory, not a link elsewhere. */
+  try {
+    if (fs.lstatSync(SCRATCH).isSymbolicLink()) {
+      refuse(tool, `${SCRATCH} is a symlink.`,
+        'scratch/ has to be a real directory. Every containment check below is\n'
+        + '  a comparison against its real location, and a symlinked scratch/ would\n'
+        + '  make that comparison meaningless — it would resolve through the link\n'
+        + '  and use wherever that link points as the baseline instead.');
+    }
+  } catch {
+    // Does not exist yet — ensureDir below creates it as a real directory.
+  }
+  const scratchReal = fs.realpathSync(ensureDir(SCRATCH));
+
+  /* Walk from the target upward, deepest first. The FIRST component that has
+     an entry on disk is the first thing the OS would actually traverse to
+     resolve dbPath, so it is the one that decides: a symlink there is refused
+     outright rather than followed, and a real entry there is realpath'd and
+     must be scratchReal or a descendant of it. Every component BELOW that
+     point does not exist, so it is a plain lexical name — it cannot itself be
+     a symlink, because a symlink is a filesystem entry that would exist. */
+  const resolved = path.resolve(dbPath);
+  const ancestors = [];
+  for (let cursor = resolved; ; ) {
+    ancestors.push(cursor);
+    const next = path.dirname(cursor);
+    if (next === cursor) break; // reached the filesystem root
+    cursor = next;
+  }
+
+  for (const candidate of ancestors) {
+    let stat;
+    try {
+      stat = fs.lstatSync(candidate);
+    } catch {
+      continue; // nothing here yet — keep walking upward
+    }
+
+    if (stat.isSymbolicLink()) {
+      refuse(tool, `${candidate} is a symlink.`,
+        'A scratch database, and everything containing it, has to be a real\n'
+        + `  directory or file — not a link that could point outside ${SCRATCH}.`);
+    }
+
+    const real = fs.realpathSync(candidate);
+    if (real !== scratchReal && !real.startsWith(scratchReal + path.sep)) {
+      refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, outside scratch/.`,
+        `Artefacts are written beside the database, so it belongs under\n  ${SCRATCH}, which git already ignores.`);
+    }
+    return;
+  }
+
+  // The filesystem root always exists, so the loop above always returns
+  // before falling out the bottom — this is a defensive backstop, not a
+  // reachable branch, for the case where nothing along the path could be
+  // inspected at all.
+  refuse(tool, `WEV_DB_PATH resolves to ${dbPath}, and no part of that path could be found.`,
+    `Point WEV_DB_PATH at a path under ${SCRATCH}.`);
 }
 
 function ensureDir(dir) {

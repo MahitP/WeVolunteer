@@ -56,7 +56,7 @@ const reset = spawnSync(process.execPath, ['bin/reset-dev-db.mjs', '--yes'], {
 });
 if (reset.status !== 0) process.exit(reset.status ?? 1);
 
-const pw = spawnSync('npx', ['playwright', 'test', ...args.filter(a => a !== '--yes')], {
+const pw = spawnSync('npx', ['playwright', 'test', ...args.filter(a => a !== '--yes' && a !== '--dry-run')], {
   cwd: ROOT, stdio: 'inherit',
   env: { ...process.env, WEV_DB_PATH: dbPath, DATABASE_ENGINE: 'sqlite' }
 });
