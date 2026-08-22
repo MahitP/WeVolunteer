@@ -104,10 +104,31 @@ export function requiresSecondFactor(role) {
   return SECOND_FACTOR_REQUIRED_ROLES.includes(role);
 }
 
+/**
+ * ── `assistant.use`: reaching Welly at all ──
+ *
+ * Welly's page used to be gated on `self.read`, which every signed-in account
+ * except `partner` holds — including an organizer who has not accepted the
+ * Organizer Agreement. That is the one account it should not be open to, and
+ * `self.read` cannot express it: `organizerAgreement.js` deliberately leaves
+ * that capability in place so somebody who has not accepted can still sign in,
+ * open Settings and read the agreement. Withholding it would be the lockout its
+ * note argues against.
+ *
+ * So the assistant gets a name of its own. It is withheld with the rest of the
+ * student-facing set until the agreement is signed, which is what already puts
+ * Messages out of reach for the same account and for the same reason: Welly
+ * answers questions ABOUT students — who applied, who attended, how many hours
+ * were credited — and every one of those is a thing the agreement governs.
+ *
+ * Not granted to `partner`, which holds no `self.read` either, so the page has
+ * never been open to it and nothing changes there.
+ */
 export const CAPABILITIES = {
   student: [
     'event.view', 'event.apply', 'application.withdraw',
     'self.read', 'self.write', 'portfolio.write', 'message.send', 'qr.present',
+    'assistant.use',
     /**
      * Leaving a persona preview, held by EVERY role including this one.
      *
@@ -193,6 +214,7 @@ export const CAPABILITIES = {
     'event.view', 'event.create', 'event.edit.own', 'applicant.review',
     'attendance.mark', 'attendance.view', 'attendance.scan', 'announcement.post',
     'message.send', 'self.read', 'self.write', 'service.verify.own_event',
+    'assistant.use',
     /**
      * Leaving a persona preview, held by EVERY role including this one.
      *
@@ -321,6 +343,7 @@ export const CAPABILITIES = {
     'message.send',
     'attendance.mark', 'attendance.view',
     'self.read', 'self.write', 'geocode.use',
+    'assistant.use',
     /**
      * Leaving a persona preview, held by EVERY role including this one.
      *

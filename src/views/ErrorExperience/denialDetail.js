@@ -43,6 +43,10 @@ const FEATURE_NAMES = Object.freeze({
   'event.create': 'posting a new opportunity',
   'attendance.mark': 'the check-in scanner',
   'message.send': 'messages',
+  /* The assistant's own name, because that is what the reader clicked and what
+     the navigation calls it. "the on-device assistant" would describe how it is
+     built to somebody who only wanted to know why it is gone. */
+  'assistant.use': 'Welly',
   'portfolio.write': 'your volunteer portfolio',
   /* Named for the thing the reader was trying to do, not for the capability.
      "the member directory" would be accurate and would tell a fifteen-year-old

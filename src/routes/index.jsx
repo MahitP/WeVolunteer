@@ -294,7 +294,7 @@ export const APP_ROUTES = [
   /* Own certificates only: one carries a full name, an organization, dates and
      a verification code. */
   { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
-  { path: '/welly', element: <WellyView />, requiredCap: 'self.read' },
+  { path: '/welly', element: <WellyView />, requiredCap: 'assistant.use' },
   { path: '/settings', element: <Settings /> },
   /**
    * Reporting a problem with the platform.

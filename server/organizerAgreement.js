@@ -70,6 +70,22 @@ export const ORGANIZER_GATED_CAPABILITIES = Object.freeze([
   // Reaching a student directly, or broadcasting to all of them.
   'announcement.post',
   'message.send',
+  /**
+   * The assistant, for the same reason as `message.send` beside it.
+   *
+   * Welly answers questions about students — who applied, who attended, how
+   * many hours were credited, which of this organizer's events still need
+   * volunteers. Every one of those is information the agreement governs, and
+   * every one of them is reachable by typing a sentence rather than by finding
+   * the screen that shows it.
+   *
+   * The individual tools behind it are capability-checked too, so an
+   * unaccepted organizer who reached the page would be refused answer by
+   * answer. This is the outer half: the page itself is not open to them, which
+   * is both clearer than a chat that refuses everything and consistent with
+   * Messages, which they also cannot open.
+   */
+  'assistant.use',
   // Aggregates over their events, which are aggregates over students.
   'analytics.own_events',
   /**

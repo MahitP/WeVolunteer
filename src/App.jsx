@@ -325,7 +325,7 @@ const NAV = [
   { id: 'browse', path: '/discover', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
-  { id: 'welly', path: '/welly', label: 'Welly', icon: Sparkles, requiredCap: 'self.read' },
+  { id: 'welly', path: '/welly', label: 'Welly', icon: Sparkles, requiredCap: 'assistant.use' },
   /* "New event" is deliberately NOT a nav entry.
 
      It was one, which put the single most common organizer action behind reading

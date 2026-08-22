@@ -27,6 +27,7 @@ import App, { navItemsFor, navSectionsFor, ROLE_LABEL, tabForPath } from './App'
 import ProfileMenu from './components/account/ProfileMenu';
 import { ROLES } from './authz.js';
 import { api } from './utils/api';
+import { ORGANIZER_GATED_CAPABILITIES } from '../server/organizerAgreement.js';
 
 vi.mock('./utils/api');
 vi.mock('./services/socket', () => ({
@@ -414,6 +415,72 @@ describe('the `/` dashboard, per role', () => {
        in `BrowseEvents.createAction.test.jsx`, which is where the affordance is. */
     expect(labels).not.toContain('Messages');
     expect(labels).toContain('Discover');
+  });
+
+  it('hides Welly from an organizer who has not accepted, exactly like Messages', async () => {
+    /**
+     * ── Why Welly needed a capability of its own ──
+     *
+     * It was gated on `self.read`, which this account holds and must keep:
+     * `organizerAgreement.js` deliberately leaves it so somebody who has not
+     * accepted can still sign in, open Settings and read the agreement.
+     * Withholding it would be the lockout that file's note argues against.
+     *
+     * So `self.read` cannot express "may use the assistant", and the assistant
+     * was open to the one account it should not be. Welly answers questions
+     * ABOUT students — who applied, who attended, how many hours were credited
+     * — which is the same material the agreement governs and the same reason
+     * Messages is withheld.
+     *
+     * The two are asserted together on one account, because "like Messages" is
+     * the actual requirement: if a later change restores one and not the other,
+     * this is what says so.
+     */
+    const withheld = [...ORGANIZER_GATED_CAPABILITIES];
+    const labels = navItemsFor(USER('organizer', { withheld })).map(n => n.label);
+
+    expect(labels).not.toContain('Welly');
+    expect(labels).not.toContain('Messages');
+    /* And the pause is still explicable: they can reach the dashboard that
+       carries the acceptance banner. */
+    expect(labels).toContain('Dashboard');
+  });
+
+  it('refuses /welly to them by URL, and says which feature it was', async () => {
+    /* Hiding a rail item is not a gate. Somebody with the page bookmarked, or
+       following a link from a conversation, arrives at the route directly —
+       and must land on something that names what is limited rather than a
+       blank or a 404. `denialDetail.js` holds the plain-language name, and
+       `denialDetail.test.js` requires every gated route to have one. */
+    signedInAs(USER('organizer', { withheld: [...ORGANIZER_GATED_CAPABILITIES] }));
+    renderAt('/welly');
+
+    /* The refusal names the feature. `/Welly/` alone would match the navigation
+       item and the topbar and pass whatever the route did — measured: it passes
+       with the gate reverted. The sentence is the assertion. */
+    expect(await screen.findByText(/does not have permission for Welly/i)).toBeInTheDocument();
+
+    /* And the page itself did not render. The composer is the one element only
+       WellyView has. */
+    expect(document.getElementById('welly-prompt-input')).toBeNull();
+  });
+
+  it('gives Welly back once the agreement is accepted', async () => {
+    /* The other direction. A gate nothing can pass is not a gate, it is a
+       removal. */
+    const labels = navItemsFor(USER('organizer', { withheld: [] })).map(n => n.label);
+    expect(labels).toContain('Welly');
+    expect(labels).toContain('Messages');
+  });
+
+  it('leaves every other role’s access to Welly alone', () => {
+    for (const role of ['student', 'organizer', 'admin', 'super_admin']) {
+      expect(navItemsFor(USER(role)).map(n => n.label), role).toContain('Welly');
+    }
+    /* `partner` holds no `self.read` either, so the page has never been open to
+       it and this changes nothing there. Asserted so the claim is on the
+       record rather than assumed. */
+    expect(navItemsFor(USER('partner')).map(n => n.label)).not.toContain('Welly');
   });
 });
 
