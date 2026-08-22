@@ -25,6 +25,20 @@ These apply to every task. Do not restate them; do not violate them.
 - **Do not run `npm run dev`** to start the harness; it uses `nodemon` and `concurrently`. Playwright's `webServer` starts plain `node` and `vite` processes.
 - **Never claim a criterion passes because axe did not flag it.** Every finding carries an evidence class: `measured`, `inspected`, `human-verified`, or `unverified`.
 - **No ADA compliance claims** in any deliverable.
+- **A check that only reports is named `report:` and says so.** Exactly two checks
+  in this plan deliberately print findings instead of asserting — the 44px house
+  rule and the 1.4.12 clipping heuristic, both in `a11y/sweep.geometry.spec.js`.
+  Failing the build on either would stall the audit on something no AA criterion
+  requires (2.5.5 is AAA) or on a heuristic that needs a person to interpret. Each
+  one's test name must begin `report:` and its docstring must carry the line
+  "Asserts nothing, deliberately —" followed by the reason. A reviewer must be able
+  to tell intent from oversight, and nobody may later mistake a passing run for a
+  verified criterion. **Any other assertion-free test is a defect.**
+- **Diagnostic `console.log` beside a real assertion is fine, and is not a
+  `report:` test.** `a11y/sweep.aria.spec.js` and the Welly streaming check each
+  assert one thing and print evidence for the audit document alongside it. Their
+  docstrings must say which line is the pass/fail, so nobody reads the printed
+  lists as having been checked.
 - **Commit style:** imperative subject, no assistant attribution, no `Co-Authored-By`. Explain the failure the change prevents, in the style of the surrounding codebase.
 - **Test style:** this repo writes guard tests with a docstring explaining the specific failure the test exists to prevent, and it distrusts vacuous assertions. Match that. A test that would pass against `null` needs a guard-the-guard assertion first.
 
@@ -39,6 +53,7 @@ These apply to every task. Do not restate them; do not violate them.
 | `a11y/harness/roles.mjs` | Fetches roles from `GET /api/auth/demo-accounts`; maps role to the routes it may reach. |
 | `a11y/harness/signIn.mjs` | Signs in one role, saves a Playwright `storageState`. |
 | `a11y/harness/axe.mjs` | axe-core injection with the WCAG 2.2 tag set; normalises results into baseline shape. |
+| `a11y/harness/walk.mjs` | `forEachRoute` — the one place that signs in, visits every route, waits for the main landmark, and records unreachable ones. Every sweep uses it. |
 | `a11y/harness/measure.mjs` | Layout primitives: focus walk, target-size measurement, reflow check. |
 | `a11y/harness/baseline.mjs` | Reads/compares/writes `A11Y_BASELINE.json`. Owns the ratchet rule. |
 | `a11y/sweep.axe.spec.js` | axe across every route x role. |
@@ -652,7 +667,7 @@ while reporting the route it meant to visit.
 ## Task 3: Route inventory and per-role sign-in
 
 **Files:**
-- Create: `a11y/harness/routes.mjs`, `a11y/harness/routes.test.js`, `a11y/harness/roles.mjs`, `a11y/harness/signIn.mjs`, `a11y/roles.spec.js`
+- Create: `a11y/harness/routes.mjs`, `a11y/harness/routes.test.js`, `a11y/harness/roles.mjs`, `a11y/harness/signIn.mjs`, `a11y/harness/walk.mjs`, `a11y/roles.spec.js`
 - Reference: `src/pageTitleCoverage.test.js:28-33` (the existing parse of the route table)
 
 **Interfaces:**
@@ -661,6 +676,10 @@ while reporting the route it meant to visit.
   - `FIXTURES: Record<string, string>` — parameter name to seeded value.
   - `fetchRoles(request, baseURL) -> Promise<Array<{ key, email, role }>>`
   - `signInAs(browser, role, baseURL) -> Promise<string>` — returns a `storageState` file path.
+  - `forEachRoute({ browser, request, baseURL }, { roles, context }, visit) -> Promise<{ unreachable: string[] }>`
+    — every sweep's loop. `roles` is `'first'` (default) or `'all'`; `context` is
+    passed to `browser.newContext`; `visit(page, route, role)` runs once per
+    route per role. Tasks 4, 6, 7 and 8 all consume this.
 
 - [ ] **Step 1: Write the inventory test first**
 
@@ -865,7 +884,61 @@ export async function signInAs(browser, role, baseURL) {
 }
 ```
 
-- [ ] **Step 6: Prove sign-in works for every role**
+- [ ] **Step 6: Write the one route-walking loop every sweep uses**
+
+Create `a11y/harness/walk.mjs`:
+
+```js
+import { ROUTES } from './routes.mjs';
+import { fetchRoles } from './roles.mjs';
+import { signInAs } from './signIn.mjs';
+
+/**
+ * Visits every route, for one role or all of them, and hands each page to a
+ * visitor.
+ *
+ * ── Why this is shared rather than inlined per sweep ──
+ *
+ * Four sweeps need the same loop, and two lines of it are the kind that fail
+ * silently. The wait for the main landmark is there because route-level code
+ * splitting means a Suspense fallback — LoadingSkeleton — is what renders first;
+ * a sweep that scans before it resolves measures the skeleton and reports a
+ * clean page. And a route whose fixture 404s must be RECORDED rather than
+ * scanned, because a 404 body passes almost every accessibility check there is.
+ *
+ * Duplicated four times, each copy is one edit away from disagreeing with the
+ * others, and the disagreement looks like a real finding. So there is one copy.
+ */
+export async function forEachRoute({ browser, request, baseURL }, { roles = 'first', context = {} } = {}, visit) {
+  const all = await fetchRoles(request, baseURL);
+  /* One role by default: page structure and focus order are properties of the
+     shell, not of authorisation. Only the axe sweep needs every role, because a
+     rule can fire on markup only one role is shown. */
+  const chosen = roles === 'all' ? all : all.slice(0, 1);
+  const unreachable = [];
+
+  for (const role of chosen) {
+    const statePath = await signInAs(browser, role, baseURL);
+    const ctx = await browser.newContext({ baseURL, storageState: statePath, ...context });
+    const page = await ctx.newPage();
+
+    for (const route of ROUTES) {
+      const res = await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
+      if (res && res.status() >= 400) {
+        unreachable.push(`${route.concrete} (${role.key}) -> HTTP ${res.status()}`);
+        continue;
+      }
+      await page.locator('#main-content, main, [role="main"]').first()
+        .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+      await visit(page, route, role);
+    }
+    await ctx.close();
+  }
+  return { unreachable };
+}
+```
+
+- [ ] **Step 7: Prove sign-in works for every role**
 
 Create `a11y/roles.spec.js`:
 
@@ -890,17 +963,17 @@ test('every seeded role can sign in and reach a shell', async ({ browser, reques
 });
 ```
 
-- [ ] **Step 7: Run it**
+- [ ] **Step 8: Run it**
 
 Run: `npm run a11y -- a11y/roles.spec.js`
 
 Expected: PASS, listing each role. If `getByLabel(/password/i)` matches more than one field, tighten the pattern against the real markup in `src/views/Login.jsx` — do not switch to a CSS selector, because the label association is itself part of what is being audited.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add a11y/harness/routes.mjs a11y/harness/routes.test.js a11y/harness/roles.mjs a11y/harness/signIn.mjs a11y/roles.spec.js
-git commit -m "Derive the audit's route and role inventory from the sources of truth"
+git add a11y/harness/routes.mjs a11y/harness/routes.test.js a11y/harness/roles.mjs a11y/harness/signIn.mjs a11y/harness/walk.mjs a11y/roles.spec.js
+git commit -m "Derive the audit's route and role inventory, and share the one loop that walks it"
 ```
 
 Use this commit body:
@@ -921,6 +994,13 @@ that email address".
 
 storageState is saved per role and reused across routes, because a sign-in per
 page visit is the difference between a harness people run and one they abandon.
+
+forEachRoute exists once rather than four times because two lines of it fail
+silently: the wait for the main landmark is what stops a sweep measuring a
+LoadingSkeleton Suspense fallback and calling it a clean page, and a 404 body
+passes almost every accessibility check there is, so an unreachable fixture must
+be recorded rather than scanned. Four copies would be one edit from disagreeing,
+and the disagreement would look like a real finding.
 ```
 
 ---
@@ -931,7 +1011,7 @@ page visit is the difference between a harness people run and one they abandon.
 - Create: `a11y/harness/axe.mjs`, `a11y/harness/baseline.mjs`, `a11y/harness/baseline.test.js`, `a11y/sweep.axe.spec.js`, `a11y/A11Y_BASELINE.json`
 
 **Interfaces:**
-- Consumes: `ROUTES`, `fetchRoles`, `signInAs` (Task 3).
+- Consumes: `forEachRoute` (Task 3).
 - Produces:
   - `scan(page) -> Promise<Array<{ id, impact, help, selector }>>`
   - `tally(violations) -> Record<string, number>`
@@ -1105,9 +1185,7 @@ Create `a11y/sweep.axe.spec.js`:
 
 ```js
 import { test, expect } from '@playwright/test';
-import { ROUTES } from './harness/routes.mjs';
-import { fetchRoles } from './harness/roles.mjs';
-import { signInAs } from './harness/signIn.mjs';
+import { forEachRoute } from './harness/walk.mjs';
 import { scan, tally } from './harness/axe.mjs';
 import { load, save, compare } from './harness/baseline.mjs';
 
@@ -1119,44 +1197,28 @@ import { load, save, compare } from './harness/baseline.mjs';
  * from page A to page B" would read as one fix and one regression rather than as
  * nothing changing.
  *
+ * `roles: 'all'` here and nowhere else. A rule can fire on markup only one role
+ * is ever shown, so axe needs every role; page structure and focus order are
+ * properties of the shell, so the other sweeps do not.
+ *
  * Set A11Y_UPDATE_BASELINE=1 to record the current state. That is an explicit,
  * reviewable act, which is the only way the ratchet is allowed to loosen.
  */
 test('axe finds no new WCAG 2.2 AA violations', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
 
-  const roles = await fetchRoles(request, baseURL);
   const found = {};
-  const unreachable = [];
-
-  for (const role of roles) {
-    const statePath = await signInAs(browser, role, baseURL);
-    const ctx = await browser.newContext({ baseURL, storageState: statePath });
-    const page = await ctx.newPage();
-
-    for (const route of ROUTES) {
-      const res = await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
-
-      /* A fixture that 404s means the seed changed under us. Recorded and failed
-         at the end rather than skipped: a skip is how a route stops being
-         audited without anybody noticing. */
-      if (res && res.status() >= 400) {
-        unreachable.push(`${route.concrete} (${role.key}) -> HTTP ${res.status()}`);
-        continue;
-      }
-
-      /* Suspense fallbacks are LoadingSkeleton. Scanning one measures the
-         skeleton, not the page. */
-      await page.locator('#main-content, main, [role="main"]').first()
-        .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+  const { unreachable } = await forEachRoute(
+    { browser, request, baseURL },
+    { roles: 'all' },
+    async (page, route, role) => {
+      /* networkidle on top of walk.mjs's landmark wait: axe reads computed
+         styles, and a stylesheet or web font still in flight changes them. */
       await page.waitForLoadState('networkidle').catch(() => {});
-
-      const violations = await scan(page);
-      const counts = tally(violations);
+      const counts = tally(await scan(page));
       if (Object.keys(counts).length) found[`${route.path}::${role.key}`] = counts;
     }
-    await ctx.close();
-  }
+  );
 
   if (process.env.A11Y_UPDATE_BASELINE) {
     const stamped = {};
@@ -1573,7 +1635,7 @@ declared, and a forced-colors browser context proves it paints.
 - Create: `a11y/harness/measure.mjs`, `a11y/sweep.focus.spec.js`
 
 **Interfaces:**
-- Consumes: `ROUTES`, `fetchRoles`, `signInAs`.
+- Consumes: `forEachRoute` (Task 3).
 - Produces: `walkFocus(page, max) -> Promise<Array<{ index, tag, name, outerHTML, inView, visibleRing, obscuredBy }>>`, `interactiveRects(page) -> Promise<Array<{ w, h, tag, name, outerHTML }>>`, `scrollsHorizontally(page) -> Promise<boolean>`. Task 7 uses the last two.
 
 - [ ] **Step 1: Write the measurement primitives**
@@ -1685,36 +1747,24 @@ Create `a11y/sweep.focus.spec.js`:
 
 ```js
 import { test, expect } from '@playwright/test';
-import { ROUTES } from './harness/routes.mjs';
-import { fetchRoles } from './harness/roles.mjs';
-import { signInAs } from './harness/signIn.mjs';
+import { forEachRoute } from './harness/walk.mjs';
 import { walkFocus } from './harness/measure.mjs';
 
 /**
  * Keyboard reachability across every route, for the first seeded role.
  *
- * One role, not all of them, because focus order is a property of the shell and
- * the page rather than of authorisation, and the shell is shared. Role-specific
- * keyboard behaviour is covered by the workflow specs, which is where it
- * actually differs.
+ * One role, because focus order is a property of the shell and the page rather
+ * than of authorisation, and the shell is shared. Role-specific keyboard
+ * behaviour is covered by the workflow specs, which is where it differs.
  */
 test('every route is keyboard-navigable with a visible focus indicator', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
-
-  const roles = await fetchRoles(request, baseURL);
-  const statePath = await signInAs(browser, roles[0], baseURL);
-  const ctx = await browser.newContext({ baseURL, storageState: statePath });
-  const page = await ctx.newPage();
 
   const noRing = [];
   const obscured = [];
   const noStops = [];
 
-  for (const route of ROUTES) {
-    await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
-    await page.locator('#main-content, main, [role="main"]').first()
-      .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-
+  await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     const walk = await walkFocus(page);
 
     /* A page with no tab stops at all is either genuinely static or a page whose
@@ -1725,8 +1775,7 @@ test('every route is keyboard-navigable with a visible focus indicator', async (
       if (!step.visibleRing) noRing.push(`${route.path} — ${step.tag} "${step.name}" ${step.outerHTML}`);
       if (step.obscuredBy) obscured.push(`${route.path} — ${step.tag} "${step.name}" covered by .${step.obscuredBy}`);
     }
-  }
-  await ctx.close();
+  });
 
   console.log(`routes with no tab stops: ${noStops.join(', ') || 'none'}`);
 
@@ -1778,7 +1827,7 @@ shadow — and a check that fails everything is a check nobody reads.
 - Create: `a11y/sweep.geometry.spec.js`
 
 **Interfaces:**
-- Consumes: `interactiveRects`, `scrollsHorizontally` (Task 6), `ROUTES`, `fetchRoles`, `signInAs`.
+- Consumes: `forEachRoute` (Task 3), `interactiveRects` and `scrollsHorizontally` (Task 6).
 
 - [ ] **Step 1: Write the geometry sweep**
 
@@ -1786,9 +1835,7 @@ Create `a11y/sweep.geometry.spec.js`:
 
 ```js
 import { test, expect } from '@playwright/test';
-import { ROUTES } from './harness/routes.mjs';
-import { fetchRoles } from './harness/roles.mjs';
-import { signInAs } from './harness/signIn.mjs';
+import { forEachRoute } from './harness/walk.mjs';
 import { interactiveRects, scrollsHorizontally } from './harness/measure.mjs';
 
 /**
@@ -1803,27 +1850,13 @@ import { interactiveRects, scrollsHorizontally } from './harness/measure.mjs';
  */
 const AA_MIN = 24;
 
-/** The house rule, measured separately so the two are never confused. */
+/** The house rule, reported separately so the two are never confused. */
 const HOUSE_MIN = 44;
-
-async function eachRoute(browser, request, baseURL, contextOptions, visit) {
-  const roles = await fetchRoles(request, baseURL);
-  const statePath = await signInAs(browser, roles[0], baseURL);
-  const ctx = await browser.newContext({ baseURL, storageState: statePath, ...contextOptions });
-  const page = await ctx.newPage();
-  for (const route of ROUTES) {
-    await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
-    await page.locator('#main-content, main, [role="main"]').first()
-      .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-    await visit(page, route);
-  }
-  await ctx.close();
-}
 
 test('interactive targets meet the 24x24 AA minimum', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
   const tooSmall = [];
-  await eachRoute(browser, request, baseURL, {}, async (page, route) => {
+  await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     for (const el of await interactiveRects(page)) {
       /* An inline link inside a sentence is explicitly excepted by 2.5.8. */
       if (el.tag === 'A' && el.h < AA_MIN && el.w > AA_MIN * 2) continue;
@@ -1835,12 +1868,19 @@ test('interactive targets meet the 24x24 AA minimum', async ({ browser, request,
   expect(tooSmall, `below the 24x24 AA floor:\n${tooSmall.join('\n')}`).toEqual([]);
 });
 
-test('touch targets are measured against the 44px house rule', async ({ browser, request, baseURL }) => {
+/**
+ * Asserts nothing, deliberately — the 44px floor is a house rule ABOVE Level AA,
+ * so a shortfall here is not a conformance defect and failing the build on it
+ * before the inventory exists would stall the audit on something no criterion
+ * requires. Task 11 records what this prints. src/touchTargets.test.js keeps
+ * enforcing the rule where it matters, on the controls it names.
+ */
+test('report: touch targets measured against the 44px house rule', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
   const tooSmall = [];
-  await eachRoute(
-    browser, request, baseURL,
-    { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true },
+  await forEachRoute(
+    { browser, request, baseURL },
+    { context: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } },
     async (page, route) => {
       for (const el of await interactiveRects(page)) {
         if (el.tag === 'A' && el.w > HOUSE_MIN * 2) continue;
@@ -1850,9 +1890,6 @@ test('touch targets are measured against the 44px house rule', async ({ browser,
       }
     }
   );
-  /* Reported, not failed. The 44px rule is a house rule above AA, and failing
-     the build on it before the inventory exists would stall the audit on
-     something that is not a conformance defect. Task 9 records these. */
   console.log(`below the 44px house rule (${tooSmall.length}):\n${tooSmall.join('\n')}`);
 });
 
@@ -1866,8 +1903,9 @@ test('touch targets are measured against the 44px house rule', async ({ browser,
 test('no route scrolls horizontally at 320px', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
   const overflowing = [];
-  await eachRoute(
-    browser, request, baseURL, { viewport: { width: 320, height: 512 } },
+  await forEachRoute(
+    { browser, request, baseURL },
+    { context: { viewport: { width: 320, height: 512 } } },
     async (page, route) => {
       if (await scrollsHorizontally(page)) {
         const w = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -1879,17 +1917,20 @@ test('no route scrolls horizontally at 320px', async ({ browser, request, baseUR
 });
 
 /**
- * WCAG 1.4.12 Text Spacing — the exact four values the criterion names.
- *
- * Applied with !important because the criterion is about a user stylesheet doing
- * precisely that, and the failure it looks for is a fixed-height container
- * clipping the result. Scrollable containers are excluded: scrollable is not
+ * WCAG 1.4.12 Text Spacing — the exact four values the criterion names, applied
+ * with !important because a user stylesheet doing precisely that is what the
+ * criterion describes. Scrollable containers are excluded: scrollable is not
  * clipped.
+ *
+ * Asserts nothing, deliberately — `scrollHeight > clientHeight` is a heuristic
+ * for clipping, not proof of it, and separating a genuinely clipped label from a
+ * container that is merely taller than its box needs a person looking at it.
+ * Task 11 records what this prints and triages it into findings.
  */
-test('content is not clipped under the 1.4.12 text-spacing overrides', async ({ browser, request, baseURL }) => {
+test('report: content clipping under the 1.4.12 text-spacing overrides', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
   const clipped = [];
-  await eachRoute(browser, request, baseURL, {}, async (page, route) => {
+  await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     await page.addStyleTag({ content: `
       * { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
       p { margin-bottom: 2em !important; }
@@ -1917,7 +1958,7 @@ test('content is not clipped under the 1.4.12 text-spacing overrides', async ({ 
 
 Run: `npm run a11y -- a11y/sweep.geometry.spec.js`
 
-Expected: the two reporting tests always pass and print findings. The 2.5.8 and 1.4.10 tests may FAIL — those failures are the audit's output. For each, decide fix-now (a one-line CSS change) or record-as-finding with an allowlist entry carrying a finding id.
+Expected: the two `report:` tests always pass and print findings. The 2.5.8 and 1.4.10 tests may FAIL — those failures are the audit's output. For each, decide fix-now (a one-line CSS change) or record-as-finding with an allowlist entry carrying a finding id.
 
 - [ ] **Step 3: Commit**
 
@@ -1950,7 +1991,7 @@ containers are excluded, since scrollable is not clipped.
 - Create: `a11y/sweep.aria.spec.js`
 
 **Interfaces:**
-- Consumes: `ROUTES`, `fetchRoles`, `signInAs`.
+- Consumes: `forEachRoute` (Task 3).
 
 - [ ] **Step 1: Write the sweep**
 
@@ -1958,9 +1999,7 @@ Create `a11y/sweep.aria.spec.js`:
 
 ```js
 import { test, expect } from '@playwright/test';
-import { ROUTES } from './harness/routes.mjs';
-import { fetchRoles } from './harness/roles.mjs';
-import { signInAs } from './harness/signIn.mjs';
+import { forEachRoute } from './harness/walk.mjs';
 
 /**
  * The accessible structure the browser actually computes, per route.
@@ -1972,20 +2011,12 @@ import { signInAs } from './harness/signIn.mjs';
  */
 test('the accessible structure of every route holds up', async ({ browser, request, baseURL }) => {
   test.setTimeout(30 * 60 * 1000);
-  const roles = await fetchRoles(request, baseURL);
-  const statePath = await signInAs(browser, roles[0], baseURL);
-  const ctx = await browser.newContext({ baseURL, storageState: statePath });
-  const page = await ctx.newPage();
 
   const wrongH1 = [];
   const badHeadings = [];
   const ambiguousLandmarks = [];
 
-  for (const route of ROUTES) {
-    await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
-    await page.locator('#main-content, main, [role="main"]').first()
-      .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-
+  await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     const structure = await page.evaluate(() => {
       const levels = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')]
         .map(h => ({ level: Number(h.tagName[1]), text: h.textContent.trim().slice(0, 40) }));
@@ -2016,19 +2047,20 @@ test('the accessible structure of every route holds up', async ({ browser, reque
     if (structure.h1Count !== 1) wrongH1.push(`${route.path} has ${structure.h1Count} h1 elements`);
     if (structure.skips.length) badHeadings.push(`${route.path}: ${structure.skips.join('; ')}`);
     if (structure.ambiguous.length) ambiguousLandmarks.push(`${route.path}: ${structure.ambiguous.join(', ')}`);
-  }
-  await ctx.close();
+  });
 
-  /* Reported rather than failed: a skipped heading level is a 1.3.1 concern
-     whose fix is often a decision about what the missing section is, and
-     stalling the harness on it would stop the audit meant to enumerate them. */
   console.log(`skipped heading levels (${badHeadings.length}):\n${badHeadings.join('\n')}`);
   console.log(`indistinguishable duplicate landmarks (${ambiguousLandmarks.length}):\n${ambiguousLandmarks.join('\n')}`);
 
-  /* This one DOES fail. src/headingLevels.test.js already enforces exactly one
-     h1 per page by static analysis, reasoning about an allowlist of views that
-     render outside the shell. If runtime disagrees, that reasoning is wrong,
-     and a guard that is wrong is worse than no guard. */
+  /* This is the assertion. src/headingLevels.test.js already enforces exactly
+     one h1 per page by static analysis, reasoning about an allowlist of views
+     that render outside the shell. If runtime disagrees, that reasoning is
+     wrong, and a guard that is wrong is worse than no guard.
+
+     The two console lines above are reported rather than asserted: a skipped
+     heading level is a 1.3.1 concern whose fix is a decision about what the
+     missing section IS, and stalling the harness on it would stop the audit
+     meant to enumerate them. Task 11 records both lists. */
   expect(wrongH1, `routes whose h1 count contradicts headingLevels.test.js:\n${wrongH1.join('\n')}`).toEqual([]);
 });
 ```
@@ -2560,7 +2592,7 @@ test('@local the chat input has a real accessible name', async ({ page }) => {
     .not.toBe('');
 });
 
-test('@local record how a streamed reply reaches the live region', async ({ page }) => {
+test('@local a streamed reply reaches the live region', async ({ page }) => {
   test.setTimeout(5 * 60 * 1000);
   await page.goto('/welly');
   await page.locator('#main-content').waitFor({ state: 'visible' });
@@ -2583,9 +2615,16 @@ test('@local record how a streamed reply reaches the live region', async ({ page
   const distinct = [...new Set(samples.filter(Boolean))];
   const growing = distinct.filter((s, i) => i > 0 && s.startsWith(distinct[i - 1]) && s.length > distinct[i - 1].length);
 
-  /* Deliberately not a threshold. The right announcement strategy is a design
-     decision this audit is measuring, not one it should impose. Recorded so the
-     audit document and the VoiceOver script can be written from evidence. */
+  /* The two printed lines are EVIDENCE for the audit document, not checks: how
+     many distinct states the region passed through, and how many of those merely
+     extended the previous one. A high growing count means the region announces
+     accumulation rather than completion — but whether that is bearable is a
+     question for a person with a screen reader, and imposing a threshold here
+     would be this audit deciding a design question it is supposed to be
+     measuring.
+
+     The assertion below is the only pass/fail in this test: a live region that
+     never changed announced nothing at all, which is a defect on any reading. */
   console.log(`live-region samples: ${distinct.length} distinct, ${growing.length} strictly growing`);
   console.log(distinct.slice(0, 6).map(s => `  "${s.slice(0, 80)}"`).join('\n'));
   expect(distinct.length, 'the live region never changed — nothing was announced').toBeGreaterThan(0);
@@ -2851,6 +2890,8 @@ unset being a refusal, and the server reads API_PORT while Vite reads PORT.
 
 **Spec coverage.** Safety boundary → Task 1. Architecture and the derived inventory → Tasks 1-3. The nine check families → axe (4), accessible structure and heading tree (8), focus walk and 2.4.11 (6), target size (7), reflow (7), text spacing (7), forced-colors (5), reduced-motion (5) — eight files covering nine families, with target size and the house rule measured as separate tests inside Task 7. WCAG 2.2 corrections → Task 7 (2.5.8 versus 2.5.5) and Task 11 §5 (3.3.8, 2.5.7, 4.1.1, 1.3.5, 3.2.6, 3.3.7). The two P0s → Task 5. Location reclassification → Task 9. Deep workflows → Task 10. Welly `@local` → Task 10 Steps 10-12. Audit document, VoiceOver script, evidence classes → Task 11. CI and documentation → Task 12. Every out-of-scope item is absent from every task, as intended.
 
+**Pre-flight rulings applied.** Two conflicts between the plan and a reviewer's rubric were settled before execution and are now encoded above: the two genuinely assertion-free checks are named `report:` and declare it in their docstrings (Global Constraints), and the route-walking loop that four sweeps duplicated is now a single `forEachRoute` in `a11y/harness/walk.mjs`, created in Task 3 and consumed by Tasks 4, 6, 7 and 8. `forEachRoute` also centralises the two lines that fail silently — the wait for the main landmark, and recording a 404 fixture rather than scanning it — which previously existed only in the axe sweep.
+
 **Placeholder scan.** No `TBD`, no "add appropriate error handling", no "similar to Task N". Three places specify required content and assertions rather than literal code — Task 10 Steps 4/6/8 and Task 11 Steps 3/4 — because their content is the run's actual findings and the audit prose, neither of which can be written before the run. Every other code step contains real code.
 
-**Type consistency.** `assertScratchDatabase({ tool })` — defined Task 1, called Tasks 1 and 2. `ROUTES` / `FIXTURES` — defined Task 3, consumed Tasks 4, 6, 7, 8. `fetchRoles(request, baseURL)` and `signInAs(browser, role, baseURL)` — defined Task 3, consumed Tasks 4-8 and 10. `scan(page)` / `tally(violations)` — Task 4. `load` / `save` / `compare` — defined Task 4, consumed Tasks 4 and 11. `walkFocus` / `interactiveRects` / `scrollsHorizontally` — defined Task 6, consumed Tasks 6 and 7. Baseline shape `{ "<route>::<role>": { "<rule>": { count, finding } } }` — written Task 4, read Tasks 4 and 11. Ports 5199 and 5198 — Task 2 only. Consistent throughout.
+**Type consistency.** `assertScratchDatabase({ tool })` — defined Task 1, called Tasks 1 and 2. `ROUTES` / `FIXTURES` — defined Task 3, consumed Tasks 4, 6, 7, 8. `fetchRoles(request, baseURL)` and `signInAs(browser, role, baseURL)` — defined Task 3, consumed by `forEachRoute`, by Task 5's media sweep, and by Task 10. `forEachRoute({ browser, request, baseURL }, { roles, context }, visit)` — defined Task 3, consumed Tasks 4, 6, 7, 8. `scan(page)` / `tally(violations)` — Task 4. `load` / `save` / `compare` — defined Task 4, consumed Tasks 4 and 11. `walkFocus` / `interactiveRects` / `scrollsHorizontally` — defined Task 6, consumed Tasks 6 and 7. Baseline shape `{ "<route>::<role>": { "<rule>": { count, finding } } }` — written Task 4, read Tasks 4 and 11. Ports 5199 and 5198 — Task 2 only. Consistent throughout.
