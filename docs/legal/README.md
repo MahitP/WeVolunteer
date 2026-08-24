@@ -31,7 +31,10 @@ Everything produced by the 2026-08-05 legal and design engagement.
 | **[09 — Implementation roadmap](09-ROADMAP.md)** | **Start here for execution.** Full repo audit, then every remaining task as an independently shippable PR with acceptance criteria, complexity and rollout risk |
 | **[08 — Implementation log](08-IMPLEMENTATION-LOG.md)** | What was actually built across both implementation sessions, and what was found while building it |
 | **[07 — Consent system](07-CONSENT-SYSTEM.md)** | **Current.** Legal journeys per role, signup consent UX, consent-record schema, versioning and re-consent, Legal Center IA, organizer and safety acknowledgements, gap analysis, roadmap |
-| [policies/](policies/) | The ten legal documents, each with a specification block and a draft |
+| [11 — Policy audit 2026-08-06](11-POLICY-AUDIT-2026-08-06.md) | Document-by-document audit against the code, at the v1.0 renumbering |
+| [12 — Policy implementation plan](12-POLICY-IMPLEMENTATION-PLAN.md) | The work that audit generated |
+| **[13 — Acceptable use, automation and abuse](13-ACCEPTABLE-USE-AND-ABUSE-REVIEW.md)** | **Current.** Why there is no separate AUP, no DMCA agent and no EULA; the automation policy and its reasoning; why pending applications do not feed Auto Select; the application and signup limits; open items for the owner |
+| [policies/](policies/) | The thirteen legal documents, each with a specification block and a draft |
 
 > ### ⚠️ Read the re-audit first
 >
