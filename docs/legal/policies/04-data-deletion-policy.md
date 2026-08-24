@@ -26,17 +26,19 @@ anonymisation (re-audit Q9 — the "When it happens" section below currently pro
 > — disclosure and a revocation path — remains. The draft below is written **honestly against
 > current behaviour**.
 >
-> **The "Choose what happens to your certificates" section is retained, marker and all.**
-> Certificate voiding is scheduled to be built later in this programme, so the section is kept as
-> the specification of what the text will say once it ships — not deleted and rewritten. Its
-> `[[NOT YET IMPLEMENTED]]` marker is deliberate and **blocks publication of this document until
-> the feature lands**, which is the correct behaviour: publishing a choice that does not exist
-> would be a misrepresentation, and deleting the section would lose the drafted text. Whoever
-> ships the feature removes the marker in the same pull request.
+> **The "Choose what happens to your certificates" section is gone, and this note is what is
+> left of it.** It held drafted text for certificate voiding — a feature that is not built —
+> behind a `[[NOT YET IMPLEMENTED]]` marker, on the theory that keeping the specification was
+> worth more than removing it. That was wrong in a way the marker did not describe: the drafted
+> text sat in the **published body** under a real heading, so this document told a student who
+> was deciding whether to delete their account that they could void their certificates, while the
+> Privacy Policy in the same set said plainly that no such option exists. A reader met the false
+> version at the exact moment of deciding.
 >
-> Until then, the Privacy Policy carries the honest version of the same fact — that no way to
-> switch off indefinite certificates exists today — and must be kept in step with this section
-> when it changes.
+> The section is replaced with the true position. Nothing here now blocks publication. Whoever
+> ships voiding adds the option to this document, the Privacy Policy and
+> [06](/legal/certificate-verification-policy) together, and writes the text then — the drafted
+> version is in git history, which is a better home for it than a published policy.
 
 ---
 
