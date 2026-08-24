@@ -89,6 +89,49 @@ describe('buildHtmlTemplate escapes its title', () => {
   });
 });
 
+describe('sendNotificationEmail escapes its text fallback', () => {
+  /**
+   * Asserted against the source rather than by sending a message, and that is a
+   * deliberate proportionality call.
+   *
+   * `sendNotificationEmail` interpolated `text` raw into a `<p>`. `text` is a
+   * notification title and body, which carry event titles and user names — the
+   * same values the worker path above was fixed for. The sweep that fixed the
+   * worker did not reach this helper, because the only thing that calls it is
+   * `createNotification`, and `createNotification` has no production callers. A
+   * helper nothing calls looks exactly like a helper that is safe.
+   *
+   * Driving it for real needs a database, a seeded user and a mocked transport,
+   * to prove a property of one template line in code no request can reach. The
+   * guide asks for coverage proportional to consequence; this is the
+   * proportionate version, and it fails just as loudly if the escape is removed.
+   *
+   * `htmlContent` must stay unescaped — it exists so a caller can pass markup it
+   * composed, and escaping it would render the email as source. That asymmetry
+   * is the thing worth pinning, so both halves are asserted.
+   */
+  it('wraps the text branch in escapeHtml and leaves htmlContent raw', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const path = await import('node:path');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(path.join(here, 'email.js'), 'utf8');
+
+    const body = source.slice(source.indexOf('export async function sendNotificationEmail'));
+    const paragraph = body.slice(body.indexOf('<p>'), body.indexOf('</p>'));
+
+    expect(
+      paragraph,
+      'the plain-text fallback is interpolated into HTML unescaped — a notification '
+      + 'title or body carries event titles and user names'
+    ).toContain('escapeHtml(text)');
+    expect(
+      paragraph,
+      'htmlContent is the caller-composed markup branch and must not be escaped'
+    ).toContain('htmlContent ||');
+  });
+});
+
 describe('notification emails escape database values', () => {
   /**
    * Exercised through the worker's real path rather than a unit call, because the

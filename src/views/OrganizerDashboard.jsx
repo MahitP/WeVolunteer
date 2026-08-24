@@ -7,6 +7,9 @@ import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
+/* Mirrored from the server so the two roster exports cannot disagree about what
+   a safe cell is — the same reason src/authz.js imports server/authz.js. */
+import { csvCell } from '../../server/csv.js';
 const TABS = [{
   id: 'active',
   label: 'Active'
@@ -158,9 +161,8 @@ export default function OrganizerDashboard({
     }
   };
   const downloadRosterCSV = () => {
-    const escCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const roster = rosterOf(acceptedApps);
-    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(escCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(escCell).join(','))].join('\n');
+    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(csvCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(csvCell).join(','))].join('\n');
     const blob = new Blob([rows], {
       type: 'text/csv;charset=utf-8;'
     });

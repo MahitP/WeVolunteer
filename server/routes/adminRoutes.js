@@ -6,6 +6,7 @@ import { authenticateToken, formatUserResponse } from '../utils.js';
 import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
+import { csvCell } from '../csv.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
 /* Shared with `alerting.js`, which asks the same question for somebody who did
    not come to look. Two definitions of "stale" would drift. */
@@ -976,21 +977,13 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('report.re
       ORDER BY u.name ASC
     `).all();
 
-    const sanitizeCsv = (val) => {
-      let str = String(val || '');
-      if (/^[=+\-@\t\r]/.test(str)) {
-        str = "'" + str;
-      }
-      return `"${str.replace(/"/g, '""')}"`;
-    };
-
     // Create CSV content
     const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
     const rows = students.map(s => [
       s.id,
-      sanitizeCsv(s.name),
-      sanitizeCsv(s.email),
-      sanitizeCsv(s.school),
+      csvCell(s.name),
+      csvCell(s.email),
+      csvCell(s.school),
       s.created_at,
       s.total_hours
     ]);
