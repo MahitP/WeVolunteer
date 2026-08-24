@@ -165,10 +165,15 @@ until you turn it on**, and you can turn it off again whenever you like.
 Some organizers pick volunteers by hand. Others use **Auto Select**, which is a computer
 draw. You should know how it works:
 
-- Auto Select gives students with **fewer recorded hours a better chance**, on purpose, so
+- Auto Select gives students with **fewer credited hours a better chance**, on purpose, so
   that opportunities spread around instead of going to the same few people.
-- It uses **only** your total credited service hours. It does not use your grade, your
-  school, your profile, your bio, or anything about who you are.
+- It uses **two things and nothing else**: your total credited service hours, and whether you
+  turned up to shifts you were accepted for. Hours come first by a wide margin; attendance is
+  a small adjustment, and if we have no attendance record for you it counts neither for nor
+  against you.
+- It does **not** use your grade, your school, your profile, your bio, or anything about who
+  you are. The exact formula, and the exact limits on how much attendance can matter, are
+  published in the [Volunteer Record Policy](/legal/volunteer-record-policy#auto-select).
 - It is random within that weighting, and every draw is recorded so it can be checked later.
 
 If you were not selected and you want to know why, ask the organizer. If you think a draw was

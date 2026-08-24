@@ -313,8 +313,13 @@ the [Community Guidelines](/legal/community-guidelines), and anything on the "ne
 skips it.
 
 **Appeals.** If you think we got it wrong, you can submit an appeal directly through the
-platform. Your appeal will always be reviewed by a different administrator than the one who
-issued the original decision. If we were wrong, we say so and we undo it.
+platform. An appeal is **never** decided by the administrator who issued the decision — the
+software refuses it, and no level of privilege overrides that. WeVolunteer currently has one
+administrator, so if they are the person who decided your case there is nobody inside the app
+who can hear the appeal; we will tell you so and arrange for someone independent outside the
+platform to look at it, rather than leave it open. The
+[Community Guidelines](/legal/community-guidelines#if-you-think-we-got-it-wrong) carry the
+detail. If we were wrong, we say so and we undo it.
 
 **Closing your own account.** You can do it whenever you like, from Settings. See the
 [Data Deletion Policy](/legal/data-deletion-policy) for exactly what happens — including the

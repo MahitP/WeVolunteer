@@ -213,7 +213,13 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    contentHash: 'b37cfe18ae0927a47f09445852b3a84ba2112dcffd39232b2346f94dcf5f9ab7',
+    /* Re-pinned for the appeals correction. §9 promised an appeal is "always"
+       reviewed by a different administrator; the Community Guidelines say the
+       software REFUSES a self-review and there is currently one administrator,
+       so the contract was the more-read document making a promise the
+       operational document says cannot be kept. Pre-launch correction, so 1.0
+       stands. */
+    contentHash: 'afe17549aa0ceb648039b3567e7cd9654d59c71a0fab69bfb6174ba5c7066dae',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
@@ -238,7 +244,12 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
-    contentHash: '90c09ee6e52c3ff5aa3b920b6495e627a92e3830e77d1a6d6aef79369a6b4504',
+    /* Re-pinned because the Auto Select disclosure was false. It said the draw
+       uses "only" total credited hours; v1.3 added the attendance term, which
+       the Volunteer Record Policy documents in full. This is the document a
+       guardian reads about automated decision-making, so of the two it was the
+       worse one to be wrong. Pre-launch correction, so 1.0 stands. */
+    contentHash: 'f426de67149332b0333a8e2a2855ab0f9417b1ae8b4dca1ba5a773afb83161be',
     bundledWith: null,
   },
   {
@@ -274,7 +285,12 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: '68c860b21099c600a0a381fdeaa8ef167cc5fad9735a3cd2ebf6413895e8eff8',
+    /* Re-pinned for the deletion deadline. Rule 6 said "when the event is over";
+       the Organizer Agreement §5 — the document that actually binds an organizer
+       — says within 30 days. This file already defers to §4 for the sharing
+       rule, so it now defers to §5 here for the same reason rather than
+       restating a deadline it does not own. Pre-launch correction, 1.0 stands. */
+    contentHash: '9e624189f900a3b700f13777f43c676cdef341ba1b756415a5973bcc74a58f54',
     bundledWith: null,
   },
   {
@@ -328,7 +344,12 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: '2a1d059a5d26e4aef5975749bcb12ee155fffba6eff16deddfb4d74209350f71',
+    /* Re-pinned to remove a dangling clause. "Previous versions are kept at"
+       introduced a URL that had been deleted, leaving the sentence spliced into
+       the v1.0 paragraph mid-clause. 01 and 02 carry the same passage without
+       it, so the clean form already existed and this was the one file that
+       diverged. Pre-launch correction, 1.0 stands. */
+    contentHash: '58ae889d647a791533266e037668a7eeea3475697046bb3c4eed274f90e930ef',
     bundledWith: null,
   },
   {
