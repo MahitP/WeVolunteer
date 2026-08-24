@@ -156,13 +156,78 @@ This is the acceptable-use section. Do not:
   other than volunteering — including coordinating with an organizer to record hours that were
   not worked
 - File reports you know to be false, or use the Report button to harass someone
-- Scrape, bulk-download, or automate access to WeVolunteer; use bots or scripts against it; or
-  resell access to it
-- Try to break, overload, probe, or get around the security of the service, or access an
-  account, event, or record you were not given access to
+- Scrape or bulk-download WeVolunteer, or resell access to it. Other rules about automation are
+  in section 4.1 — automation is not banned outright, and that section says where the line is
+- Get around a limit rather than working within it — a rate limit, an application limit, a
+  block, or a suspension. If you hit a limit and think it is wrong, tell us; do not route
+  around it
+- Deliberately disrupt the service or make it worse for other people. Flooding it with
+  requests, filling it with content nobody will use, or setting out to slow it down or take it
+  offline all count, whether or not it works
+- Exploit a bug instead of reporting one. If something behaves in a way that is obviously not
+  intended and it works in your favour, using it is a breach of these terms even though the
+  software let you. Section 4.2 is how to report it, and we would much rather have the report
+- Upload or send malware, or anything designed to damage a device or take control of one
+- Try to break, probe, or get around the security of the service, or access an account, event,
+  or record you were not given access to. Section 4.2 covers looking for security problems on
+  purpose, which is a different thing and is welcome
 - Use WeVolunteer to advertise, recruit, sell, or fundraise for anything unrelated to a
   volunteer event
 - Post anything illegal
+
+### 4.1 Automation, and where the line is
+
+Some of you write code. That is a good thing, and a blanket ban on it would be both
+unenforceable and a bit insulting, so here is the actual rule.
+
+**A commitment to turn up has to be made by a person.** Do not run anything that applies to
+opportunities, accepts a place, or cancels one without you seeing it and deciding. Not because
+automation is unfair — **Auto Select is a random draw held after the deadline, so applying
+faster wins you nothing at all** — but because an application is a promise that a real person
+will be somewhere at a particular time. An organizer is counting on that, and a script cannot
+make a promise.
+
+**These are fine:**
+
+- Reading your own information — your shifts, your hours, your applications — however you like
+- Putting your WeVolunteer commitments into your own calendar, automatically
+- Watching for opportunities that suit you and telling you about them
+- Assistive technology of any kind, including tools that fill in or navigate on your behalf
+  because typing or pointing is difficult. Nothing in this section is meant to get in the way
+  of that, and if it does, tell us and we will fix the rule
+
+**These are not:**
+
+- Submitting applications, acceptances, or cancellations without a person deciding each one
+- Anything that applies on your behalf while you are asleep, at school, or otherwise not
+  looking
+- Holding places you do not intend to take, so that other people cannot have them
+- Running enough requests to affect anybody else's use of the service
+
+We publish rate limits and an application limit rather than hiding them, so a tool you write
+can respect them. If you are building something and are not sure which side of this it falls
+on, ask at **support@wevolunteers.org** before you run it. We would rather answer that question
+than suspend an account over it.
+
+### 4.2 Telling us about a security problem
+
+If you think you have found a security or privacy flaw, we want to hear about it. Email
+**security@wevolunteers.org** with enough detail to reproduce it. That address is also the
+safety inbox, so say "security" in the subject line and it will be read as a technical report.
+
+**If you report something in good faith and follow the two rules below, we will not treat it as
+a breach of these terms and we will not pursue you for it.**
+
+1. **Use your own account and your own data.** Do not read, change, or keep anybody else's
+   information — and if you come across somebody else's data by accident, stop, and tell us
+   what you saw so we know what was exposed.
+2. **Do not break the service to prove it can be broken.** No load testing, no denial of
+   service, no deleting or altering data that is not yours.
+
+Give us a reasonable chance to fix it before you tell anybody else. We will confirm we got your
+report, tell you what we found, and say when it is fixed. There is no payment for this — we are
+one person running a volunteering platform for a school district, not a company with a bounty
+programme — but we will credit you if you would like us to.
 
 The [Community Guidelines](/legal/community-guidelines) explain what these look like in
 practice, and they are part of these terms. Breaking them is breaking these terms.
@@ -293,9 +358,34 @@ We may remove content that breaks these terms or the Community Guidelines. Where
 will tell you what was removed and why, unless telling you would interfere with a safety
 investigation.
 
-If you believe something on WeVolunteer infringes your copyright, email
-legal@wevolunteers.org with a link to it, what it copies, and how to reach you. We will
-look at it, and we will usually take the content down while we do.
+### If you think something here copies your work
+
+Email **legal@wevolunteers.org** and tell us:
+
+- where it is — a link, or enough detail to find it
+- what it copies, and where the original is
+- that you own it, or that you are allowed to act for whoever does
+- how to reach you
+
+We will look at it, and we will usually take the content down while we do. That is not us
+agreeing you are right; it is what a small platform can do quickly while somebody works out
+what happened.
+
+**If we remove something of yours and you think we were wrong**, reply and say so. Tell us what
+was removed and why you are entitled to post it. If we cannot see a good reason to keep it
+down, we will put it back and tell the person who complained that we have. You do not need a
+lawyer to do this and we will not ask you for one.
+
+**If somebody repeatedly posts other people's work**, they lose their account. We are not going
+to set a number, because on a platform this size the honest answer is that it is a judgement
+somebody makes by looking, not a counter.
+
+**What this is not.** WeVolunteer has not registered a copyright agent with the United States
+Copyright Office, and this section does not claim the protection from liability that
+registration is a condition of. We do not need to make that claim to act on a complaint, and we
+would rather describe what we actually do. What people upload here is short text and a small
+profile picture, on a platform that charges nothing and shows no advertising; if that ever
+changes, so should this paragraph.
 
 ## 9. Suspending or closing accounts
 

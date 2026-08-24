@@ -213,13 +213,28 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    /* Re-pinned for the appeals correction. §9 promised an appeal is "always"
-       reviewed by a different administrator; the Community Guidelines say the
-       software REFUSES a self-review and there is currently one administrator,
-       so the contract was the more-read document making a promise the
-       operational document says cannot be kept. Pre-launch correction, so 1.0
-       stands. */
-    contentHash: 'afe17549aa0ceb648039b3567e7cd9654d59c71a0fab69bfb6174ba5c7066dae',
+    /**
+     * Re-pinned twice in this pass, both pre-launch corrections, so 1.0 stands.
+     *
+     * First for the appeals paragraph. §9 promised an appeal is "always"
+     * reviewed by a different administrator; the Community Guidelines say the
+     * software REFUSES a self-review and there is currently one administrator,
+     * so the contract was the more-read document making a promise the
+     * operational document says cannot be kept.
+     *
+     * Then for the acceptable-use review. §4 already covered scraping, bots,
+     * probing and multi-accounting — it is where an Acceptable Use Policy would
+     * have gone, which is why no separate one was written. What it did not cover
+     * was rate-limit circumvention, deliberate disruption, exploiting a bug
+     * rather than reporting it, or malware; "overload" was one word inside
+     * another bullet. §4.1 states the automation policy, and §4.2 gives a
+     * security report somewhere to go and a promise not to punish it — neither
+     * existed anywhere in the set. §8's copyright paragraph became a procedure
+     * with a counter-notice and a repeat-infringer consequence, and says
+     * plainly that no agent is registered rather than implying a safe harbour
+     * that has not been claimed.
+     */
+    contentHash: '1b836c654ef924490c420b1dbe1f4ff2f93abb90af8edaf19cfc01791c2a8514',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
