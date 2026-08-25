@@ -48,7 +48,18 @@ const SORTS = {
    * `NULLS LAST` is understood by SQLite 3.30+ (this runs 3.51) and states the
    * intent directly instead of encoding it as a boolean sort key.
    */
-  distance: 'distance_miles ASC NULLS LAST'
+  distance: 'distance_miles ASC NULLS LAST',
+  /**
+   * `relevance` is the only sort whose ORDER BY is built per request.
+   *
+   * The others are constants over columns. This one orders by the position an
+   * event holds in the fused ranking that `discoverSearch.js` produced, which is
+   * data rather than schema — so `buildEventOrder` takes the candidate list and
+   * assembles a CASE from it. With no candidates (no query, or Pinecone
+   * unavailable) it degrades to `soonest`, which is the default a student sees
+   * anyway, so a relevance sort never becomes an error.
+   */
+  relevance: null
 };
 
 export const EVENT_SORTS = Object.keys(SORTS);
@@ -100,10 +111,37 @@ export function parseEventFilters(query = {}) {
      * user hosts or has applied to, which is bounded by their own activity rather
      * than by the district's history. Browse is a separate, filtered, paged query.
      */
-    mine: false
+    mine: false,
+    /**
+     * Event ids proposed by semantic search, in relevance order.
+     *
+     * NOT parsed from the query string — a client cannot ask for specific ids,
+     * because that would be a way to probe for events by guessing. The route
+     * fills this in from `discoverSearch.js` after the filters are validated.
+     */
+    semanticIds: null,
+    /**
+     * True when the caller asked for suggestions rather than a browse.
+     *
+     * Parsed here — unlike `semanticIds`, which a client may not supply — because
+     * it is a request for a MODE, not for particular rows. It cannot name an
+     * event, so it cannot be used to probe for one.
+     */
+    recommended: false,
+    /**
+     * Whether `semanticIds` NARROWS the result or merely widens the text match.
+     *
+     * Discover widens: an event matching the typed words is shown whether or not
+     * the vector search proposed it. Recommendations narrow: the suggestion IS
+     * the list, so anything outside it does not belong. One flag rather than two
+     * code paths, so both go through the same predicates.
+     */
+    restrictToSemanticIds: false
   };
 
   const bool = (v) => v === 'true' || v === '1' || v === true;
+
+  if (query.recommended != null) out.recommended = bool(query.recommended);
 
   if (query.q != null && String(query.q).trim()) out.q = String(query.q).trim().slice(0, 200);
   if (query.category && query.category !== 'All') out.category = String(query.category);
@@ -167,7 +205,15 @@ export function parseEventFilters(query = {}) {
   }
 
   if (query.sort != null) {
-    if (!SORTS[query.sort]) {
+    /**
+     * `hasOwnProperty`, not truthiness.
+     *
+     * `relevance` maps to null — its ORDER BY is assembled per request from the
+     * candidate list rather than being a constant — so a truthiness test would
+     * reject the one sort that is spelled differently from the others while
+     * accepting anything the object happens to inherit.
+     */
+    if (!Object.prototype.hasOwnProperty.call(SORTS, query.sort)) {
       return { ok: false, field: 'sort', error: `sort must be one of: ${EVENT_SORTS.join(', ')}` };
     }
     out.sort = String(query.sort);
@@ -296,13 +342,50 @@ export function buildEventWhere(filters, userId, db = null) {
     // A position test on lowered text rather than LIKE: no wildcard characters
     // in user input can change the shape of the match. The engines spell the
     // function differently, so it comes from the dialect layer.
-    clauses.push(`(
+    const lexical = `
       ${substringPosition(db, 'lower(e.title)', 'lower(@q)')}
       OR ${substringPosition(db, 'lower(e.description)', 'lower(@q)')}
       OR ${substringPosition(db, 'lower(e.location)', 'lower(@q)')}
       OR ${substringPosition(db, 'lower(u.name)', 'lower(@q)')}
-    )`);
+    `;
     params.q = filters.q;
+
+    /**
+     * ── The semantic half, added as an OR and nothing more ──
+     *
+     * `filters.semanticIds` is a list of event ids Pinecone proposed for this
+     * query. Widening the text predicate is the ENTIRE integration on the read
+     * path, and that is deliberate: every other clause in this function, the
+     * sort, the `COUNT(*) OVER ()`, the LIMIT/OFFSET and the serialiser are
+     * untouched, so a semantically-found event is subject to exactly the same
+     * rules as a lexically-found one. There is no second code path to keep in
+     * step and no way for a candidate to arrive with fewer checks applied.
+     *
+     * It is an OR rather than a replacement because the substring match is not
+     * the weaker half. Somebody typing `Chess` wants the event called Chess
+     * Club, and an embedding is not reliably better at that than an exact
+     * match is — see `shouldUseSemantic`, which keeps the shortest and most
+     * literal queries away from the vendor entirely.
+     *
+     * Positional names because SQLite has no array binding, the same reason
+     * the tag facet spells its own IN list out.
+     */
+    const semantic = semanticIdParams(filters.semanticIds, params);
+    clauses.push(semantic ? `((${lexical}) OR ${semantic})` : `(${lexical})`);
+  }
+
+  /**
+   * Recommendations restrict rather than widen — see `restrictToSemanticIds`.
+   *
+   * Written as its own clause so it AND-s with everything else: a suggested
+   * event still has to survive the status scope, the date bounds, the open-only
+   * test and every other filter the caller sent. There is no path by which an id
+   * from the vector index reaches a response without passing them.
+   */
+  if (filters.restrictToSemanticIds) {
+    const restrict = semanticIdParams(filters.semanticIds, params);
+    /* An empty candidate list must match NOTHING rather than everything. */
+    clauses.push(restrict || '1 = 0');
   }
 
   if (filters.category) { clauses.push('e.category = @category'); params.category = filters.category; }
@@ -427,10 +510,59 @@ export function buildEventWhere(filters, userId, db = null) {
   };
 }
 
-/** `ORDER BY` for the chosen sort, always with a stable tiebreak. */
-export function buildEventOrder(sort) {
+/**
+ * Binds a candidate id list and returns the `IN` fragment, or '' for no list.
+ *
+ * The parameter names are shared with `buildEventOrder` on purpose: the
+ * relevance sort orders by position within this same list, and generating the
+ * names twice is how the two would drift apart.
+ *
+ * Bounded at MAX_SEMANTIC_IDS. The list arrives from a bounded top-K, but a
+ * predicate built by string concatenation should carry its own ceiling rather
+ * than trust its caller's.
+ */
+const MAX_SEMANTIC_IDS = 100;
+
+export function semanticIdParams(ids, params) {
+  if (!Array.isArray(ids) || ids.length === 0) return '';
+  const capped = ids.slice(0, MAX_SEMANTIC_IDS).filter((id) => typeof id === 'string' && id);
+  if (!capped.length) return '';
+  const names = capped.map((_, i) => `@sem${i}`);
+  capped.forEach((id, i) => { params[`sem${i}`] = id; });
+  return `e.id IN (${names.join(', ')})`;
+}
+
+/**
+ * `ORDER BY` for the chosen sort, always with a stable tiebreak.
+ *
+ * @param {string} sort one of EVENT_SORTS
+ * @param {string[]} [semanticIds] the fused ranking, when sorting by relevance
+ */
+export function buildEventOrder(sort, semanticIds = null) {
   // e.id last, unconditionally: two events that tie on the sort key have no
   // inherent order, and without a tiebreak `offset` is unsound — a row can
   // appear on two pages or on none.
-  return `ORDER BY ${SORTS[sort] || SORTS.soonest}, e.id ASC`;
+  const tiebreak = 'e.id ASC';
+
+  if (sort === 'relevance') {
+    const ids = Array.isArray(semanticIds) ? semanticIds.slice(0, MAX_SEMANTIC_IDS) : [];
+    if (!ids.length) return `ORDER BY ${SORTS.soonest}, ${tiebreak}`;
+
+    /**
+     * Position in the candidate list, as a CASE.
+     *
+     * The alternative — sorting in JavaScript after the query — cannot work
+     * here: the page is chosen by LIMIT/OFFSET inside SQL, so an ordering
+     * applied afterwards would reorder one page rather than choose which rows
+     * belong on it.
+     *
+     * Events the semantic half never proposed (they matched the words instead)
+     * sort after every candidate rather than being dropped, and then by date
+     * among themselves.
+     */
+    const whens = ids.map((_, i) => `WHEN @sem${i} THEN ${i}`).join(' ');
+    return `ORDER BY CASE e.id ${whens} ELSE ${MAX_SEMANTIC_IDS} END ASC, ${SORTS.soonest}, ${tiebreak}`;
+  }
+
+  return `ORDER BY ${SORTS[sort] || SORTS.soonest}, ${tiebreak}`;
 }

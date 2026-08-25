@@ -2351,6 +2351,33 @@ exist so the decision is made on evidence rather than enthusiasm.
 - **Sequencing note.** Multi-district almost certainly forces §10.1 and §10.2.
   Treat them as one programme, not three tickets.
 
+### 10.9 Semantic search (adopted, v1.3)
+
+Unlike the rest of this section, this one has already happened — recorded here
+because the *trigger* and the *constraint* are the parts worth keeping.
+
+- **What forced it.** The Discover search was a SQL substring match over title,
+  description, location and organizer name. It answers "chess" perfectly and
+  "something outdoors with animals" not at all, and the second is how students
+  actually describe what they want.
+- **What it must never become.** Pinecone is a **derived index**, not a source of
+  truth. It returns candidate ids; the authoritative query decides what anybody
+  may see. The architecture is arranged so that this cannot be got wrong by
+  accident: the entire read-path integration is one extra `OR e.id IN (…)` on the
+  existing text predicate, so every filter, scope and serialisation rule applies
+  to a semantically-found event exactly as it always has.
+- **The constraint that shaped it.** Pinecone's Starter plan is treated as
+  permanent, and it is metered — 5,000,000 embedding tokens and **500 rerank
+  requests** a month. That is why unchanged events are never re-embedded (a
+  content hash in `event_search_index`, migration 059), why browsing never calls
+  the vendor, and why reranking is off by default.
+- **The relevant lesson for anyone editing the events query.** `server/eventQuery.js`
+  now feeds a derived index as well as the page. Changing what the query
+  considers searchable means changing what gets embedded, and a field that
+  changes on every read will silently re-embed the corpus.
+
+See [`docs/operations/pinecone.md`](operations/pinecone.md).
+
 ### 10.8 Sequencing
 
 Roughly ascending cost and risk, given today's foundations:

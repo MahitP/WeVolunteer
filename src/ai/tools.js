@@ -355,7 +355,22 @@ export const TOOLS = {
           q: typeof query === 'string' ? query.slice(0, 200) : '',
           tags: Array.isArray(tags) && tags.length ? tags.map(t => String(t).slice(0, 50)).join(',') : '',
           openOnly: true,
-          sort: typeof lat === 'number' && typeof lng === 'number' ? 'distance' : 'soonest',
+          /**
+           * Nearest when the question was about distance, most relevant when it
+           * was about meaning, soonest when it was neither.
+           *
+           * Welly asks this endpoint the same question BrowseEvents does, and
+           * gets the same semantic search for free — the intelligence lives in
+           * `GET /api/events`, not in the assistant. That is the reason there is
+           * no vector search inside Welly to keep in step with the one in
+           * Discover: a question typed at an assistant is natural language
+           * almost by definition, which is precisely the case `relevance` is
+           * for, and `relevance` degrades to `soonest` whenever there are no
+           * semantic candidates — so this is never worse than what it replaced.
+           */
+          sort: typeof lat === 'number' && typeof lng === 'number'
+            ? 'distance'
+            : (typeof query === 'string' && query.trim().length >= 3 ? 'relevance' : 'soonest'),
           lat: typeof lat === 'number' ? lat : undefined,
           lng: typeof lng === 'number' ? lng : undefined,
           maxDistance: typeof maxDistance === 'number' ? maxDistance : undefined,

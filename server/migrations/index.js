@@ -67,6 +67,7 @@ import repairTfaLoginAttempts from './055_repair_tfa_login_attempts.js';
 import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
 import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
+import eventSearchIndex from './059_event_search_index.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -383,7 +384,15 @@ export const MIGRATIONS = [
    * list and refuses a column it does not know about. Running 058 first would
    * make 057 throw on every database.
    */
-  hoursCloseOut
+  hoursCloseOut,
+  /**
+   * 059 — the bookkeeping table that keeps the Pinecone search index in step
+   * with `events`, and stops it re-embedding content that has not changed.
+   *
+   * A new table with a foreign key to `events`, so it must run after `events`
+   * exists; nothing else depends on its order. Additive on both engines.
+   */
+  eventSearchIndex
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

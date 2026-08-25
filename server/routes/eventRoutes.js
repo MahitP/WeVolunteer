@@ -17,7 +17,10 @@ import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabul
 import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
-import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder } from '../eventQuery.js';
+import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder, semanticIdParams } from '../eventQuery.js';
+import { shouldUseSemantic, semanticCandidates } from '../search/discoverSearch.js';
+import { markEventDirty, removeEventFromIndex } from '../search/eventIndexer.js';
+import { recommendationsFor, explanationText } from '../search/recommendations.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import { canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds } from '../organizations.js';
 import { MAIL_DOMAIN } from '../emailIdentity.js';
@@ -233,9 +236,77 @@ router.get('/api/events', authenticateToken, async (req, res) => {
      * derived rather than stored, and both the WHERE and the ORDER BY need to
      * reference them.
      */
+    /**
+     * ── The semantic half of Discover ──
+     *
+     * Pinecone is asked for candidate event ids, and the ids are handed to the
+     * query below as an extra OR on the text predicate. Nothing else changes:
+     * the filters, the sort, the `COUNT(*) OVER ()`, the paging and the
+     * serialiser are the same code that ran before this existed, so an event
+     * found by meaning is subject to exactly the rules an event found by
+     * substring has always been subject to.
+     *
+     * Failure is ordinary. `semanticCandidates` resolves with an empty list when
+     * Pinecone is unconfigured, slow, or down, and the request then runs the
+     * pure-SQL search — a complete answer rather than a degraded one. Nothing is
+     * awaited that can take longer than `SEARCH_TIMEOUT_MS`.
+     */
+    if (filters.q && shouldUseSemantic(filters.q)) {
+      const semantic = await semanticCandidates(filters.q, filters);
+      if (semantic.ok && semantic.ids.length) filters.semanticIds = semantic.ids;
+    }
+
+    /**
+     * ── Recommendations are a MODE of this endpoint, not a second one ──
+     *
+     * `?recommended=true` resolves a set of suggested event ids and hands them
+     * to the very same query, filters, serialiser and response shape as an
+     * ordinary browse. That is deliberate and it is the whole design: the
+     * serialisation below is a hundred lines of batched loads — slots, accepted
+     * counts, attendance, tags, viewer bans, memberships — and a recommendations
+     * endpoint that reimplemented it would be a second read path that drifts,
+     * misses a ban check, and has to be fixed twice.
+     *
+     * So a recommendation cannot show anything a browse would not show. It is a
+     * browse in a different order.
+     *
+     * With no ids — a brand-new student, or Pinecone unavailable — nothing is
+     * restricted and the caller gets soonest-first open opportunities, which is
+     * a good answer rather than an empty one.
+     */
+    let recommendation = null;
+    if (filters.recommended) {
+      /**
+       * A suggestion is an invitation to act, so it is always scoped to things
+       * that can be acted on.
+       *
+       * This is forced rather than defaulted. `parseEventFilters` defaults
+       * `scope` to `all` — correct for the endpoint, because the dashboards and
+       * the calendar need completed and cancelled events to render service
+       * history — and inheriting that default here meant a cold-start
+       * recommendation could suggest an event that was cancelled last spring.
+       * Nothing in the ranking would catch it, because ranking is not a filter.
+       *
+       * `openOnly` comes with it, and is three conditions rather than one:
+       * posted as open, a free place, and the deadline not yet passed. Suggesting
+       * a full event is the same failure in a politer form.
+       */
+      filters.scope = 'listable';
+      filters.openOnly = true;
+
+      recommendation = await recommendationsFor(db, req.user.id, {
+        limit: Math.max(limit ?? 12, 12),
+      });
+      if (recommendation.ids.length) {
+        filters.semanticIds = recommendation.ids;
+        filters.restrictToSemanticIds = true;
+        if (filters.sort === 'soonest') filters.sort = 'relevance';
+      }
+    }
+
     const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db });
     const { where, params } = buildEventWhere(filters, req.user.id, db);
-    const order = buildEventOrder(filters.sort);
+    const order = buildEventOrder(filters.sort, filters.semanticIds);
 
     const FROM = `
       FROM events e
@@ -539,6 +610,14 @@ router.get('/api/events', authenticateToken, async (req, res) => {
       return res.json(formattedEvents);
     }
 
+    /* The explanation describes the whole suggestion rather than any one card,
+       so it rides on the envelope. `basis` is the machine-readable half — it is
+       how a client can tell a cold-start list from a personalised one without
+       parsing prose. */
+    const recommendationEnvelope = recommendation
+      ? { recommendation: { text: explanationText(recommendation.explanation ?? {}), basis: recommendation.reason } }
+      : null;
+
     /**
      * `places` is computed over the whole listable set, deliberately ignoring the
      * filters.
@@ -583,6 +662,7 @@ router.get('/api/events', authenticateToken, async (req, res) => {
 
     res.json({
       events: formattedEvents,
+      ...(recommendationEnvelope ?? {}),
       pagination: {
         total,
         limit,
@@ -984,6 +1064,16 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
     });
 
     /**
+     * Queue the new event for the search index.
+     *
+     * After the commit and outside the transaction, because it is bookkeeping
+     * about a fact that is now true rather than part of the fact itself — and
+     * because a search index must never be able to roll back the creation of an
+     * event. `markEventDirty` is one local upsert and cannot throw.
+     */
+    await markEventDirty(db, eventId, { reason: 'create' });
+
+    /**
      * Tell the organization's members, in one pass, after the commit.
      *
      * `memberIds` is a single query returning ids; the loop then writes rows
@@ -1309,6 +1399,14 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
         await replaceEventTags(tx, eventId, tagCheck.value);
       }
 
+      /* The edit changed title, description, category, location, tags or
+         audience — every one of which is embedded or filtered on. Marked inside
+         the transaction here because, unlike creation, there is no post-commit
+         block to hang it from and the mark is idempotent: a rolled-back edit
+         leaves an event queued for a re-index that will compute the same hash it
+         already has and send nothing. */
+      await markEventDirty(tx, eventId, { reason: 'update' });
+
       // 2. Differential sync slots.
       //
       // `removedIds` was computed above and has already been checked for
@@ -1541,6 +1639,21 @@ router.delete('/api/events/:id', authenticateToken, requireCapAny(['event.modera
       await tx.prepare('DELETE FROM events WHERE id = ?').run(eventId);
 
       /**
+       * The one index operation that cannot wait for the drain.
+       *
+       * `event_search_index` has a foreign key to `events`, so this DELETE
+       * cascades the bookkeeping row away — and with it every trace of which
+       * Pinecone record belonged to this event. A queued deletion would have
+       * nothing left to find. Done here, while the id is still in hand.
+       *
+       * It never throws and its failure does not roll the deletion back: an
+       * orphaned vector is a candidate that hydrates to nothing, which the
+       * reconciler reports and `pinecone:reconcile --remove-orphans` clears.
+       * A failed event deletion, by contrast, is a user-visible bug.
+       */
+      await removeEventFromIndex(eventId);
+
+      /**
        * An administrator deleting somebody ELSE's event is recorded.
        *
        * This route had no audit row at all, so an administrator could remove
@@ -1597,6 +1710,12 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
     }
 
     await db.prepare('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
+
+    /* Status is indexed metadata: it is how a search skips the years of
+       completed history a district accumulates, and how a cancelled event stops
+       being offered at all. `shouldIndex` turns the cancelled case into a
+       deletion when the queue drains. */
+    await markEventDirty(db, eventId, { reason: 'status' });
 
     // Calling off an event is the one change every confirmed volunteer must
     // hear about immediately — they may have arranged a ride around it.

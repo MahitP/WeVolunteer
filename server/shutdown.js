@@ -35,6 +35,7 @@ import { releaseInstanceLock, stopInstanceLockHeartbeat } from './instanceLock.j
 import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { stopRetentionWorker } from './workers/retentionWorker.js';
 import { logLifecycle, drainTelemetry } from './telemetry.js';
+import { stopIndexWorker } from './search/indexWorker.js';
 
 /**
  * How long to wait for in-flight requests before giving up on them.
@@ -185,6 +186,19 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
     // the WAL is crash-safe and recovers on next open.
     console.error('[Shutdown] Database close failed:', err);
   }
+
+  /**
+   * 6b. Stop the search index worker.
+   *
+   * Before the telemetry flush and after the database close attempt, because a
+   * pass in flight is holding a database handle. Nothing is lost by stopping
+   * mid-queue: the work it had not done is still `pending` in
+   * `event_search_index`, which is exactly why that table exists rather than an
+   * in-memory list.
+   */
+  try {
+    await stopIndexWorker();
+  } catch { /* a worker that will not stop must not stop the shutdown */ }
 
   /**
    * 7. Flush telemetry last of all.

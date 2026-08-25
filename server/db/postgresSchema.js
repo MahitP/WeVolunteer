@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 65 tables, 95 indexes, 20 triggers
+ * Contents: 66 tables, 96 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -787,6 +787,28 @@ CREATE TABLE IF NOT EXISTS event_comments (
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+CREATE TABLE IF NOT EXISTS event_search_index (
+      event_id     TEXT PRIMARY KEY,
+      /* sha256 of the embedded text plus the filterable metadata. NULL until
+         the event has been sent successfully even once. */
+      content_hash TEXT,
+      /* Which document schema produced that hash. A bump invalidates every row
+         without anybody having to remember to clear the table. */
+      doc_version  INTEGER NOT NULL DEFAULT 1,
+      /* 'pending'  the content changed and Pinecone has not been told
+         'indexed'  Pinecone holds this exact content
+         'failed'   the last attempt failed; last_error says how
+         'removed'  deliberately absent from the index (a cancelled event) */
+      state        TEXT NOT NULL DEFAULT 'pending'
+                   CHECK(state IN ('pending', 'indexed', 'failed', 'removed')),
+      /* A short reason code, never a vendor response body. */
+      last_error   TEXT,
+      attempts     INTEGER NOT NULL DEFAULT 0,
+      indexed_at   TEXT,
+      updated_at   TEXT NOT NULL,
+      FOREIGN KEY(event_id) REFERENCES events(id) ON DELETE CASCADE
+    );
+
 CREATE TABLE IF NOT EXISTS event_tags (
       event_id TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -1013,6 +1035,9 @@ CREATE INDEX IF NOT EXISTS idx_error_groups_source
 
 CREATE INDEX IF NOT EXISTS idx_error_groups_triage
       ON error_groups(status, last_seen_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_search_index_state
+      ON event_search_index(state);
 
 CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
 
@@ -1379,7 +1404,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 58;
+export const LATEST_MIGRATION_VERSION = 59;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

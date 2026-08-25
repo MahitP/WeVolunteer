@@ -24,7 +24,12 @@
     "db:reset:dev": "node --env-file-if-exists=.env bin/reset-dev-db.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:postgres": "WEV_POSTGRES_APP_TEST=1 vitest run --project server"
+    "test:postgres": "WEV_POSTGRES_APP_TEST=1 vitest run --project server",
+    "pinecone:setup": "node --env-file-if-exists=.env bin/pinecone-index.mjs setup",
+    "pinecone:backfill": "node --env-file-if-exists=.env bin/pinecone-index.mjs backfill",
+    "pinecone:reindex": "node --env-file-if-exists=.env bin/pinecone-index.mjs reindex",
+    "pinecone:reconcile": "node --env-file-if-exists=.env bin/pinecone-index.mjs reconcile",
+    "pinecone:stats": "node --env-file-if-exists=.env bin/pinecone-index.mjs stats"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",

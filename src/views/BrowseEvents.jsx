@@ -179,6 +179,7 @@ export default function BrowseEvents({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState(ALL_CATEGORIES);
   const [sortBy, setSortBy] = useState('soonest');
+
   const [openOnly, setOpenOnly] = useState(true);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [recommendations, setRecommendations] = useState([]);
@@ -263,6 +264,35 @@ export default function BrowseEvents({
    * Declared after `searchIntent` and before the sections read it.
    */
   const sigil = searchIntent.kind;
+
+  /**
+   * Whether this search is one the server can rank by meaning.
+   *
+   * Mirrors `shouldUseSemantic` on the server, and deliberately only mirrors the
+   * parts that are about the QUERY — a sigil search, and anything too short to
+   * be more than a prefix. It does not try to know whether Pinecone is
+   * configured or reachable, because the client is not told and should not be:
+   * `relevance` degrades to `soonest` server-side, so the worst case of offering
+   * it when the vendor is down is a sort that behaves like the default.
+   */
+  const semanticQuery = searchIntent.kind === 'all' && searchIntent.value.trim().length >= 3;
+
+  /**
+   * A sort the user can no longer see must not stay selected.
+   *
+   * `relevance` is only offered while there is a query. Clearing the box with it
+   * selected would leave a `<select>` whose value matches none of its options —
+   * which renders as blank, reads as nothing to a screen reader, and silently
+   * sends a sort the server quietly treats as `soonest` anyway.
+   *
+   * Declared HERE rather than beside the other state: `semanticQuery` is a
+   * `const` in the same scope, so a hook reading it from above the declaration
+   * is a temporal-dead-zone ReferenceError on every render. The bundler does not
+   * catch that; the component tests did, immediately.
+   */
+  useEffect(() => {
+    if (sortBy === 'relevance' && !semanticQuery) setSortBy('soonest');
+  }, [sortBy, semanticQuery]);
   const showEvents = sigil === 'users' ? false : (scope === 'all' || scope === 'events');
   const showPeople = canDiscover && sigil !== 'tag' && (scope === 'all' || scope === 'people');
   const showOrganizations = canDiscover && sigil !== 'users'
@@ -902,6 +932,16 @@ export default function BrowseEvents({
             <SlidersHorizontal size={14} className="s-c4c3e3" />
             <span className="dim nowrap">Sort</span>
             <select className="select" value={sortBy} onChange={e => setSortBy(e.target.value)} aria-label="Sort by">
+              {/*
+                * Offered only while there is something to be relevant TO.
+                *
+                * With an empty search box the server has no candidate ranking,
+                * so `relevance` resolves to `soonest` — and an option that
+                * silently means the same as another option is a control that
+                * lies. It appears when a query does, which is also the only
+                * moment anybody wants it.
+                */}
+              {semanticQuery && <option value="relevance">Most relevant</option>}
               <option value="soonest">Starting soonest</option>
               <option value="deadline">Closing soonest</option>
               <option value="spots">Most spots open</option>

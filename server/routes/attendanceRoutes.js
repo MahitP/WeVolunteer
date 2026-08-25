@@ -17,6 +17,7 @@ import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
 import { canRunEvent } from '../organizations.js';
 import { canSeeCertificates } from '../serviceVisibility.js';
+import { markEventDirty } from '../search/eventIndexer.js';
 
 const router = express.Router();
 
@@ -128,6 +129,11 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCapAny(['att
       outcome.completion = completion;
       if (completion.complete && event.status !== 'completed') {
         await tx.prepare("UPDATE events SET status = 'completed' WHERE id = ?").run(eventId);
+        /* `completed` is indexed metadata, so the index has to hear about it —
+           this is the transition that moves an event out of the default
+           `listable` scope a student browses. It is NOT the hours close-out,
+           which is a separate lifecycle and deliberately not indexed at all. */
+        await markEventDirty(tx, eventId, { reason: 'completed' });
         outcome.eventCompleted = true;
       }
     });

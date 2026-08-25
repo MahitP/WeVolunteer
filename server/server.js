@@ -30,6 +30,8 @@ import { startNotificationWorker } from './workers/notificationWorker.js';
 import { startExportWorker } from './workers/exportWorker.js';
 import { installShutdownHandlers } from './shutdown.js';
 import { logLifecycle, telemetryStatus } from './telemetry.js';
+import { startIndexWorker } from './search/indexWorker.js';
+import { pineconeStatus } from './search/pineconeConfig.js';
 import { startAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { startRetentionWorker } from './workers/retentionWorker.js';
 import {
@@ -208,6 +210,25 @@ httpServer.listen(PORT, BIND_ADDRESS, () => {
   if (telemetry.enabled) {
     logLifecycle('boot', { outcome: 'listening', ok: true });
   }
+
+  /**
+   * The Pinecone search index, if one is configured.
+   *
+   * Printed either way, for the same reason the telemetry line above is: an
+   * operator reading the boot output should be able to tell whether semantic
+   * Discover is on without going and looking. Off is the default and is not a
+   * warning — Discover works without it.
+   *
+   * `startIndexWorker` returns false when Pinecone is unconfigured, so nothing
+   * is scheduled and nothing has to be stopped later.
+   */
+  const search = pineconeStatus();
+  console.log(
+    search.enabled
+      ? `[search] Pinecone enabled (index ${search.index}, namespace ${search.namespace}).`
+      : `[search] Pinecone disabled (${search.reason}). Discover uses database search only.`
+  );
+  startIndexWorker(db);
   if (IS_PRODUCTION && BIND_ADDRESS === '0.0.0.0') {
     // Not fatal: this is a legitimate configuration behind a firewall or inside a
     // container. But it is only safe deliberately, so it says so out loud rather
