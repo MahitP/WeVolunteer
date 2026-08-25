@@ -332,7 +332,17 @@ if (IS_PRODUCTION && !REQUIRE_ADMIN_2FA) {
 }
 
 export const VALID_GRADES = ['9', '10', '11', '12', 'Adult', 'N/A'];
-export const VALID_CATEGORIES = ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
+/**
+ * Re-exported, not declared.
+ *
+ * `VALID_CATEGORIES` has been imported from here by `eventRoutes.js` since the
+ * first release, so the name stays. What it names now comes from
+ * `server/eventCategories.js`, which is the one place the vocabulary is written
+ * and the only one the client can also read. A second literal here would be a
+ * list to forget to update, and the symptom of forgetting is a category the
+ * dropdown offers and the API refuses.
+ */
+export { VALID_CATEGORIES } from './eventCategories.js';
 
 export const APP_NAME = process.env.APP_NAME || 'WeVolunteer';
 

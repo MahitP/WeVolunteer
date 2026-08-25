@@ -65,6 +65,8 @@ import ledgerDuplicateBackfill from './053_ledger_duplicate_backfill.js';
 import resyncUnacceptedLegalHashes from './054_resync_unaccepted_legal_hashes.js';
 import repairTfaLoginAttempts from './055_repair_tfa_login_attempts.js';
 import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
+import widenEventCategories from './057_widen_event_categories.js';
+import hoursCloseOut from './058_hours_close_out.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -354,7 +356,34 @@ export const MIGRATIONS = [
    * column is the wrong one: converting values in a table that is about to be
    * rebuilt would convert the rows that get discarded.
    */
-  isoLoginAttemptTimestamps
+  isoLoginAttemptTimestamps,
+  /**
+   * 057 — REBUILDS `events` to widen the CHECK on `category` from five values to
+   * sixteen. Additive to the vocabulary: every original value survives, so no
+   * existing row can fail the new constraint and none is rewritten.
+   *
+   * `events` has eleven ON DELETE CASCADE children, two of them students'
+   * credited hours and their private messages, so it carries the same six guards
+   * and the same `ownTransaction: true` as 018 — `PRAGMA foreign_keys = OFF` is
+   * a silent no-op inside an open transaction, and that is the one failure here
+   * nothing else can detect.
+   *
+   * Order-dependent only on the columns it copies existing: `organization_id`
+   * and `credits_hours` arrive with 031, `audience` with 045. Both are far
+   * above, and the migration refuses outright rather than dropping a column it
+   * does not know about.
+   */
+  widenEventCategories,
+  /**
+   * 058 — two nullable columns recording the deliberate act of closing an
+   * event's hours out, and who performed it.
+   *
+   * Additive on both engines and order-independent beyond `events` existing —
+   * but it MUST stay after 057, which rebuilds `events` from an explicit column
+   * list and refuses a column it does not know about. Running 058 first would
+   * make 057 throw on every database.
+   */
+  hoursCloseOut
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
@@ -589,6 +618,248 @@ export function runMigrations(db, migrations = MIGRATIONS) {
       applied.push(label(m));
     } catch (err) {
       throw new Error(`Migration ${label(m)} failed: ${err.message}`, { cause: err });
+    }
+  }
+
+  return { applied, skipped };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PostgreSQL
+   ═══════════════════════════════════════════════════════════════════════════
+
+   ── The gap this closes ──
+
+   A PostgreSQL database is created at the DESTINATION rather than walked to it:
+   `applyPostgresSchema` runs `server/db/postgresSchema.js`, which is generated
+   from a freshly-booted SQLite database and therefore already contains the
+   result of every migration in the registry. That is the right design for a
+   NEW database, and it was the whole design — which meant PostgreSQL had a
+   fresh-install path and no upgrade path at all.
+
+   Every statement in the generated schema is `CREATE TABLE IF NOT EXISTS` or
+   `CREATE OR REPLACE`. Against a database that already has the tables, all of
+   them are no-ops. So a schema change made after a deployment was provisioned
+   — a widened CHECK, a new column, a new index — never reached it, and nothing
+   said so: the boot succeeded, the application served traffic, and the first
+   symptom was a constraint violation on a value the UI offered.
+
+   It was worse than merely absent. The baseline row was written
+   `WHERE NOT EXISTS (SELECT 1 … WHERE version = ?)` against the CURRENT latest
+   version, so every release that added a migration inserted ANOTHER row named
+   `postgres_baseline` claiming that migration had been applied. The bookkeeping
+   did not just fail to record the change; it recorded a change that never
+   happened, which is the one state a migration system must never reach.
+
+   ── The rule ──
+
+   Migrations at or below `POSTGRES_BASELINE_VERSION` never run on PostgreSQL.
+   They are the SQLite-only history — fourteen of them are the create-copy-drop-
+   rename dance SQLite requires because it cannot `ALTER` a CHECK constraint,
+   and translating a workaround for a limitation PostgreSQL does not have would
+   be a longer route to the same schema with fourteen more chances to get it
+   wrong. The generated DDL already IS their result.
+
+   Every migration ABOVE that line must carry a `postgres.up`, and
+   `runPostgresMigrations` throws at boot if one does not. Failing the boot is
+   deliberate: the alternative is skipping the migration silently, which is
+   exactly the defect above wearing a different hat.
+*/
+
+/**
+ * The last migration whose effect a PRE-EXISTING PostgreSQL database already
+ * has, purely because the generated schema built it.
+ *
+ * ── Why this is frozen and not derived ──
+ *
+ * It reads like `LATEST_MIGRATION_VERSION` and must never be computed from the
+ * registry the way that one is. `LATEST_MIGRATION_VERSION` answers "what does
+ * the DDL in postgresSchema.js contain today", which moves with every
+ * regeneration. This answers "what had already been applied to databases out in
+ * the world when PostgreSQL support shipped", which is a fact about the past and
+ * cannot move. Deriving it would make every new migration retroactively part of
+ * the baseline — the deployed database would be told the change was already
+ * there, and it would not be.
+ *
+ * 56 because `postgresSchema.js` was generated at version 56 when the engine
+ * was declared ready. Migration 57 is the first change PostgreSQL has to be
+ * walked through.
+ *
+ * ── The one database this could get wrong, checked ──
+ *
+ * A PostgreSQL database provisioned slightly earlier carries a baseline row at
+ * 55, so 56 is neither recorded nor run on it. That is deliberate and safe:
+ * migration 056 rewrites `tfa_login_attempts.last_attempt_at` from SQLite's
+ * `datetime('now')` format into the ISO-8601 the rest of the schema uses, and
+ * PostgreSQL never wrote a value in that format — the only writer is the
+ * application, which writes ISO. There is nothing there to convert. Every other
+ * migration at or below this line is SQLite DDL whose result the generated
+ * schema already contains.
+ *
+ * Raise this ONLY when re-baselining deliberately — that is, when no deployed
+ * PostgreSQL database predates the new number. Raising it to silence the
+ * "no PostgreSQL implementation" refusal below would tell every deployed
+ * database that a change it has not received is already applied.
+ */
+export const POSTGRES_BASELINE_VERSION = 56;
+
+/**
+ * The checksum recorded for a version the generated schema supplied rather than
+ * a migration having run.
+ *
+ * Distinguished from a real checksum because there is no code to hash: nothing
+ * executed, the DDL simply already said so. `runPostgresMigrations` therefore
+ * skips the source-drift check on these rows instead of failing every boot on a
+ * hash that could never match.
+ */
+export const POSTGRES_BASELINE_CHECKSUM = 'baseline';
+
+/** Migrations that must run on PostgreSQL, lowest version first. */
+export function postgresMigrations(migrations = MIGRATIONS) {
+  return [...migrations]
+    .filter(m => m.version > POSTGRES_BASELINE_VERSION)
+    .sort((a, b) => a.version - b.version);
+}
+
+/**
+ * `schema_migrations`, on PostgreSQL.
+ *
+ * A separate function from `ensureBookkeeping` rather than a branch inside it,
+ * because that one is synchronous and reads `PRAGMA table_info` — neither of
+ * which exists here. The shape is the same, and `db.postgresSchema.test.js`
+ * pins the generated DDL that normally creates it; this runs first anyway so
+ * that a database provisioned before the table existed still gets one.
+ */
+async function ensurePostgresBookkeeping(db) {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    integer PRIMARY KEY,
+      name       text NOT NULL,
+      applied_at text NOT NULL,
+      checksum   text
+    );
+    ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum text;
+  `);
+}
+
+/**
+ * Records every registry version as supplied-by-the-schema, for a database that
+ * was EMPTY when the schema was applied.
+ *
+ * ── Why every version and not just the highest ──
+ *
+ * The previous code wrote one row, at the latest version. That is enough to
+ * answer "how far along is this database" and not enough to drive a runner:
+ * add migration 58 and a database freshly created at 57 has no row for 58, so
+ * 58 is outstanding — and its `postgres.up` would run against DDL that already
+ * contains 58's change, because the generated schema is regenerated with it.
+ * Applying a change to a database that already has it is the failure mode this
+ * whole file exists to prevent, so the fresh database records the lot.
+ *
+ * Exported for `applyPostgresSchema`, which is generated and must not carry
+ * logic of its own.
+ */
+export async function seedPostgresBaseline(db, migrations = MIGRATIONS) {
+  await ensurePostgresBookkeeping(db);
+  const now = new Date().toISOString();
+  for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
+    await db.prepare(
+      `INSERT INTO schema_migrations (version, name, applied_at, checksum)
+            SELECT ?, ?, ?, ?
+             WHERE NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = ?)`
+    ).run(m.version, m.name, now, POSTGRES_BASELINE_CHECKSUM, m.version);
+  }
+}
+
+/** Whether this PostgreSQL database has ever been through schema bookkeeping. */
+export async function postgresIsFresh(db) {
+  await ensurePostgresBookkeeping(db);
+  const row = await db.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get();
+  return Number(row?.count ?? row?.COUNT ?? 0) === 0;
+}
+
+/**
+ * Applies every outstanding PostgreSQL migration, lowest version first.
+ *
+ * The async twin of `runMigrations`, and deliberately a twin rather than a
+ * branch: that one is synchronous top to bottom (`node:sqlite` is), and the
+ * PostgreSQL adapter is async top to bottom. Threading `await` through the
+ * SQLite path to share one function would make the engine every deployment
+ * actually runs on pay for the one that is being ported to.
+ *
+ * Each migration runs inside `runInTransaction`, so a failure leaves the
+ * database exactly as it was — including the `schema_migrations` row, which is
+ * written inside the same transaction as the DDL it describes. PostgreSQL has
+ * transactional DDL, so unlike SQLite there is no rebuild that has to opt out:
+ * `ownTransaction` is a SQLite concern (`PRAGMA foreign_keys` cannot change
+ * inside an open transaction) and is ignored here.
+ */
+export async function runPostgresMigrations(db, migrations = MIGRATIONS) {
+  await ensurePostgresBookkeeping(db);
+
+  const seenVersions = new Set();
+  for (const m of migrations) {
+    if (seenVersions.has(m.version)) {
+      throw new Error(`Duplicate migration version ${m.version} (${m.name})`);
+    }
+    seenVersions.add(m.version);
+  }
+
+  const rows = await db.prepare('SELECT version, checksum FROM schema_migrations').all();
+  const already = new Map(rows.map(r => [Number(r.version), r.checksum]));
+  const applied = [], skipped = [];
+
+  const { runInTransaction } = await import('../db/connectionContext.js');
+
+  for (const m of postgresMigrations(migrations)) {
+    if (already.has(m.version)) {
+      const stored = already.get(m.version);
+      /* A baseline row records that the generated DDL already contained this
+         change. No code ran, so there is nothing to hash and nothing to have
+         drifted — verifying it would fail every boot on a value that could
+         never match. */
+      if (stored !== POSTGRES_BASELINE_CHECKSUM) {
+        if (stored === null) throw new Error(checksumErrorMessage(m, 'is missing (NULL)'));
+        if (stored !== checksumOf(m)) {
+          throw new Error(checksumErrorMessage(m, "does not match the migration's current source"));
+        }
+      }
+      skipped.push(label(m));
+      continue;
+    }
+
+    /**
+     * Refused rather than skipped.
+     *
+     * A migration above the baseline with no PostgreSQL implementation is a
+     * schema change that reaches SQLite and not PostgreSQL. Skipping it is how
+     * the two engines drift into disagreeing about the same table, and the
+     * symptom is a constraint violation in production on a value development
+     * accepts. The boot stops, and it names what to write.
+     */
+    if (typeof m.postgres?.up !== 'function') {
+      throw new Error(
+        `Migration ${label(m)} has no PostgreSQL implementation.\n`
+        + `  Every migration above POSTGRES_BASELINE_VERSION (${POSTGRES_BASELINE_VERSION}) must export\n`
+        + '  `postgres: { up: async (db) => … }` alongside its SQLite `up`, because a\n'
+        + '  PostgreSQL database that already exists receives no DDL from\n'
+        + '  postgresSchema.js — every statement in it is CREATE … IF NOT EXISTS.\n'
+        + '  Refusing to boot rather than skipping: a skipped schema change is a\n'
+        + '  production constraint violation on a value development accepts.'
+      );
+    }
+
+    try {
+      await runInTransaction(db, async (tx) => {
+        await m.postgres.up(tx);
+        await tx.prepare(
+          'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)'
+        ).run(m.version, m.name, new Date().toISOString(), checksumOf(m));
+      });
+      console.log(`Migration applied (postgres): ${label(m)}`);
+      applied.push(label(m));
+    } catch (err) {
+      throw new Error(`Migration ${label(m)} failed on PostgreSQL: ${err.message}`, { cause: err });
     }
   }
 

@@ -96,3 +96,71 @@ describe('a 2xx response that is not JSON', () => {
     await expect(api.apiFetch('/api/admin/organizers/pending')).rejects.toMatchObject({ status: 502 });
   });
 });
+
+/**
+ * `X-Request-Id`, and the thread it starts.
+ *
+ * The server sets one on every response from its first middleware — including
+ * responses produced by middleware that refused the request, which are exactly
+ * the ones somebody will later be trying to find. Capturing it here is what lets
+ * `reportClientError` send it, and one search in Better Stack then returns the
+ * access record and the error record for the same failure.
+ */
+describe('request correlation', () => {
+  const respond = ({ ok = false, status = 500, requestId = null, body = { error: 'Internal server error' } }) => {
+    const headers = new Headers();
+    if (requestId) headers.set('X-Request-Id', requestId);
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok, status, headers, json: () => Promise.resolve(body),
+    })));
+  };
+
+  const ID = 'b3f1c2d4-0000-4a1b-9c3d-1122334455aa';
+
+  it('puts the server\'s id on the error it throws', async () => {
+    respond({ status: 500, requestId: ID });
+    await expect(api.apiFetch('/api/events')).rejects.toMatchObject({ requestId: ID });
+  });
+
+  it('carries it on a 4xx refusal too, which is where it is most useful', async () => {
+    respond({ status: 403, requestId: ID, body: { error: 'Access denied' } });
+    await expect(api.apiFetch('/api/events')).rejects.toMatchObject({ status: 403, requestId: ID });
+  });
+
+  /**
+   * No id means nothing between the browser and the app produced the response —
+   * a captive portal, a proxy error page. That is worth knowing: there is no
+   * server-side record to go and find.
+   */
+  it('is null when the response came from something that is not this server', async () => {
+    respond({ status: 502, requestId: null });
+    await expect(api.apiFetch('/api/events')).rejects.toMatchObject({ requestId: null });
+  });
+
+  /**
+   * A hostile or unusual `headers.get` must not add a second failure to a path
+   * that is already handling one. Asserted with a header bag that throws rather
+   * than with one that is absent: `apiFetch` has read `response.headers` since
+   * long before correlation existed (the CSV content-type check), so "no headers
+   * at all" is not a response this client has ever accepted, and pretending
+   * otherwise would be a test written for code that does not exist.
+   */
+  it('does not add a second failure when reading the header throws', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 500,
+      headers: { get: (name) => { if (name === 'X-Request-Id') throw new Error('boom'); return null; } },
+      json: () => Promise.resolve({ error: 'Internal server error' }),
+    })));
+    await expect(api.apiFetch('/api/events')).rejects.toMatchObject({
+      status: 500, requestId: null,
+    });
+  });
+
+  it('does not send an id of its own — the server assigns them', async () => {
+    respond({ ok: true, status: 200, body: {} });
+    await api.apiFetch('/api/events');
+    const headers = globalThis.fetch.mock.calls[0][1]?.headers ?? {};
+    expect(Object.keys(headers).map(k => k.toLowerCase())).not.toContain('x-request-id');
+  });
+});

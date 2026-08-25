@@ -29,6 +29,7 @@ if (IS_PRODUCTION && DEMO_MODE) {
 import { startNotificationWorker } from './workers/notificationWorker.js';
 import { startExportWorker } from './workers/exportWorker.js';
 import { installShutdownHandlers } from './shutdown.js';
+import { logLifecycle, telemetryStatus } from './telemetry.js';
 import { startAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { startRetentionWorker } from './workers/retentionWorker.js';
 import {
@@ -185,6 +186,28 @@ const BIND_ADDRESS = process.env.BIND_ADDRESS || '0.0.0.0';
 
 httpServer.listen(PORT, BIND_ADDRESS, () => {
   console.log(`WeVolunteer API Server listening on ${BIND_ADDRESS}:${PORT}`);
+
+  /**
+   * One line saying whether telemetry is on, and the matching record if it is.
+   *
+   * The console line is unconditional and deliberately so: "Better Stack is not
+   * configured" is the single most useful thing an operator can read when they
+   * are wondering why a dashboard is empty, and a silent no-op tells them
+   * nothing. It names the reason — unset, malformed host, refused as insecure —
+   * rather than just the state.
+   *
+   * The `lifecycle.boot` record is what makes a restart visible IN Better Stack,
+   * which is the context for every gap in the other logs.
+   */
+  const telemetry = telemetryStatus();
+  console.log(
+    telemetry.enabled
+      ? '[telemetry] Better Stack enabled.'
+      : `[telemetry] Better Stack disabled (${telemetry.reason}). Logs stay local.`
+  );
+  if (telemetry.enabled) {
+    logLifecycle('boot', { outcome: 'listening', ok: true });
+  }
   if (IS_PRODUCTION && BIND_ADDRESS === '0.0.0.0') {
     // Not fatal: this is a legitimate configuration behind a firewall or inside a
     // container. But it is only safe deliberately, so it says so out loud rather

@@ -117,9 +117,55 @@ function optionalText(value, field) {
  * @param {object} entry   `{ adminId, action, targetUserId?, details? }`
  * @returns {Promise<{id: string, createdAt: string}>} what was written
  */
+/**
+ * Telemetry, resolved once at module load.
+ *
+ * Dynamic, like `errorReporter.js`'s: `telemetry.js` imports `redactMessage`
+ * from that module, and a static import chain here would tie the audit writer
+ * to the telemetry module's own load order for no benefit. Fire-and-forget; a
+ * failure to load leaves the pulse off and changes nothing else.
+ */
+let telemetryModule = null;
+import('./telemetry.js')
+  .then((m) => { telemetryModule = m; })
+  .catch(() => { telemetryModule = null; });
+
+function logSecurityEvent(action) {
+  if (typeof action !== 'string' || !action) return;
+  telemetryModule?.logSecurityEvent?.(action);
+}
+
 export async function recordAudit(db, entry) {
   const values = auditValues(db, entry);
   await db.prepare(INSERT_SQL).run(...values);
+
+  /**
+   * A pulse to telemetry: the ACTION NAME, and nothing else.
+   *
+   * ── What is deliberately not sent ──
+   *
+   * `details` is prose written at ~30 call sites and names people by
+   * construction — "Suspended Chris Vale", "Exported the accepted roster for
+   * …". So is `targetUserId`. Neither leaves the application. What goes out is
+   * `ACCOUNT_SUSPENDED`, a constant from our own source.
+   *
+   * ── Why here and not at the call sites ──
+   *
+   * This is the one function every privileged action already passes through,
+   * and adding the call at thirty sites would mean thirty chances to pass the
+   * wrong thing. The audit table remains the record; this is only so somebody
+   * watching Better Stack can see that privileged actions are happening at all
+   * without opening a `super_admin` screen.
+   *
+   * AFTER the row is written and outside its own failure path: telemetry must
+   * never be the reason an audit write appears to fail. `logSecurityEvent`
+   * cannot throw, and the guard is belt-and-braces on the most consequential
+   * table in the schema.
+   */
+  try {
+    logSecurityEvent(entry?.action);
+  } catch { /* an audit row is not lost to a telemetry problem */ }
+
   return { id: values[0], createdAt: values[5] };
 }
 

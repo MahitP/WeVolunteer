@@ -39,7 +39,22 @@ import { useDebounce } from '../hooks/useDebounce';
 import DatePicker from '../components/common/DatePicker';
 import { DistinctionTag } from '../components/profile/Distinction';
 import OrgAvatar from '../components/common/OrgAvatar';
-const CATEGORIES = ['All', 'School', '5K', 'Food Pantry', 'Fundraiser', 'Other'];
+import { CATEGORY_GROUPS } from '../eventCategories';
+/**
+ * The category filter is a grouped select, not a row of chips.
+ *
+ * It was six chips, one of which was "All", and that worked while the
+ * vocabulary was five words. It is sixteen now (see
+ * `server/eventCategories.js`), and sixteen chips is three wrapped rows of
+ * buttons above the results — a filter that costs more screen than the thing it
+ * filters. The select carries the same six-way choice in one line, shows the
+ * groups as `<optgroup>` headings, and sits beside Sort, which is already a
+ * select and is the same kind of control: one choice, many options.
+ *
+ * The value sent to the API is unchanged — one category string, or nothing for
+ * "All" — so `eventQuery.js` and every saved link keep working.
+ */
+const ALL_CATEGORIES = 'All';
 
 /**
  * A coordinate rounded to the neighbourhood before it leaves the device.
@@ -162,7 +177,7 @@ export default function BrowseEvents({
   onEventsSeen
 }) {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('All');
+  const [category, setCategory] = useState(ALL_CATEGORIES);
   const [sortBy, setSortBy] = useState('soonest');
   const [openOnly, setOpenOnly] = useState(true);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -326,7 +341,7 @@ export default function BrowseEvents({
     scope: 'listable',
     /* A sigil is a scope instruction, not text to match against a title. */
     q: searchIntent.kind === 'all' ? (searchIntent.value || undefined) : undefined,
-    category: category !== 'All' ? category : undefined,
+    category: category !== ALL_CATEGORIES ? category : undefined,
     /* Joined for the URL; the server also accepts a repeated parameter. Undefined
        rather than an empty string when nothing is selected, so the query does not
        carry a filter that means nothing. A `#tag` search adds its tag to
@@ -553,10 +568,10 @@ export default function BrowseEvents({
    */
   const canSeeOrganizations = can(currentUser, 'organization.join');
 
-  const hasFilters = query || category !== 'All' || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
+  const hasFilters = query || category !== ALL_CATEGORIES || !openOnly || showFavoritesOnly || selectedTags.length > 0 || advancedCount > 0;
   const clearFilters = () => {
     setQuery('');
-    setCategory('All');
+    setCategory(ALL_CATEGORIES);
     setOpenOnly(true);
     setShowFavoritesOnly(false);
     setFromDate('');
@@ -952,11 +967,23 @@ export default function BrowseEvents({
         )}
 
         <div className="row row-wrap s-775d10">
-          <div className="chips">
-            {CATEGORIES.map(cat => <button key={cat} className="chip" aria-pressed={category === cat} onClick={() => setCategory(cat)}>
-                {cat}
-              </button>)}
-          </div>
+          <label className="row browse-category">
+            <span className="small dim">Category</span>
+            <select
+              className="select"
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+            >
+              <option value={ALL_CATEGORIES}>All categories</option>
+              {CATEGORY_GROUPS.map(({ group, categories }) => (
+                <optgroup key={group} label={group}>
+                  {categories.map(c => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
 
           <button className="btn btn-secondary btn-sm s-dc310e" aria-expanded={showFilters} onClick={() => setShowFilters(v => !v)}>
             <Filter size={13} /> More filters

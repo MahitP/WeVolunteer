@@ -1148,22 +1148,32 @@ function AppShell({ toasts, addToast, removeToast }) {
     }
   };
 
-  const setSelectedEventState = (eventId) => {
+  /**
+   * @param {string|null} eventId
+   * @param {'hours'} [mode]  which screen the modal opens on. Omitted means the
+   *                          event itself, which is every existing caller.
+   *
+   * `mode` rides in the URL beside `event` so the destination survives a reload
+   * and a copied link, exactly as the event id does. It is cleared whenever the
+   * modal closes or a different event is opened, so it cannot leak from one
+   * event onto the next.
+   */
+  const setSelectedEventState = (eventId, mode) => {
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete('mode');
     if (eventId === null) {
-      const newParams = new URLSearchParams(searchParams);
       newParams.delete('event');
-      setSearchParams(newParams);
     } else {
-      const newParams = new URLSearchParams(searchParams);
       newParams.set('event', eventId);
-      setSearchParams(newParams);
+      if (mode) newParams.set('mode', mode);
     }
+    setSearchParams(newParams);
   };
 
   // Callers pass either an event object (cards, dashboards) or an id string
   // (notifications, calendar, profiles). Normalise here rather than at nine
   // call sites — `viewVolunteer` below already takes the same approach.
-  const openEventById = (eventOrId) => {
+  const openEventById = (eventOrId, options) => {
     const id = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
     if (!id) return addToast('That event is no longer available.', 'info');
 
@@ -1173,7 +1183,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     if (typeof eventOrId === 'object' && eventOrId) rememberEvents([eventOrId]);
 
     const known = events.some(e => e.id === id) || !!seenEvents[id] || typeof eventOrId === 'object';
-    if (known) setSelectedEventState(id);
+    if (known) setSelectedEventState(id, options?.mode);
     else addToast('That event is no longer available.', 'info');
   };
 
@@ -1991,6 +2001,11 @@ function AppShell({ toasts, addToast, removeToast }) {
             onViewOrganizer={(id) => { setSelectedEventState(null); viewOrganizer(id); }}
             isFavorited={favorites.includes(selectedEvent.id)}
             onToggleFavorite={toggleFavorite}
+            /* `hours` in the URL, `attendance` in the component: the parameter is
+               named for what a reader is going to, the mode for the screen that
+               renders it. EventModal ignores it for anybody who could not have
+               reached that screen by pressing the button. */
+            initialMode={searchParams.get('mode') === 'hours' ? 'attendance' : 'view'}
           />
           </React.Suspense>
         </ErrorBoundary>

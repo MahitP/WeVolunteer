@@ -1541,6 +1541,23 @@ time { font-variant-numeric: tabular-nums; }
 .toolbar .input-affix { flex: 1 1 240px; min-width: 0; }
 .toolbar .select { width: auto; min-width: 150px; }
 
+/* Discover's category filter. `width: auto` so the control is as wide as its
+   longest option rather than the full row, and a floor under it so the shortest
+   option ("All categories") does not shrink it to a stub. It replaced a row of
+   chips when the vocabulary grew to sixteen values — see the note in
+   BrowseEvents.jsx. */
+.browse-category { gap: var(--s2); }
+.browse-category .select { width: auto; min-width: 11rem; }
+
+/* The organizer dashboard's "hours not closed out" card.
+
+   Deliberately brand-coloured rather than amber or red: it sits directly below
+   the applications card, which uses those for people who are actually waiting,
+   and nobody is waiting on this one. Same 3px left rule so the two read as one
+   region of decisions. See the note in OrganizerDashboard.jsx. */
+.s-closeout-card { border-color: var(--brand); border-left-width: 3px; }
+.s-closeout-eyebrow { color: var(--brand); }
+
 .chips { display: flex; gap: var(--s2); flex-wrap: wrap; }
 .chip {
   padding: 0.25rem 0.6875rem;
@@ -9038,10 +9055,6 @@ input:disabled + .premium-slider {
 
    Every colour is a token, so both themes come from the same rules — there is no
    dark-mode block here because there is nothing hardcoded to override. */
-/* The full tag list on the event details modal, above the facts inset. The
-   card's row is dense by design; this one has room to breathe. */
-.event-modal-tags { margin-bottom: var(--s4); }
-
 .tag-chips {
   display: flex;
   flex-wrap: wrap;
@@ -9053,6 +9066,16 @@ input:disabled + .premium-slider {
      card wider than its grid column. */
   min-width: 0;
 }
+
+/* The full tag list on the event details modal, above the facts inset. The
+   card's row is dense by design; this one has room to breathe.
+
+   AFTER `.tag-chips` and not before it, which is the whole of the bug this
+   ordering fixes. Both selectors are one class, so specificity is equal and the
+   later rule wins — `margin: var(--s1) 0 0` reset the bottom margin to zero and
+   the chips sat flush against the top edge of the facts panel. Written above,
+   the declaration was present in the stylesheet and had no effect on screen. */
+.event-modal-tags { margin-bottom: var(--s3); }
 
 .tag-chip {
   display: inline-flex;

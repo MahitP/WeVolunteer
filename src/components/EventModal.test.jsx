@@ -231,3 +231,100 @@ describe('EventModal location', () => {
     });
   });
 });
+
+/**
+ * `initialMode`, and why it is gated.
+ *
+ * The organizer dashboard's close-out reminder links straight to the Closeout
+ * screen rather than to the event page beside a button that reaches it. It does
+ * that through `?event=<id>&mode=hours`, which is how this modal already carries
+ * its event id — so the destination survives a reload and a shared link.
+ *
+ * The consequence is that a mode can now arrive from the URL, and a URL is
+ * user-supplied. Until now `'attendance'` was reachable only from a button
+ * rendered inside `{isOwner && …}`; ungated, any signed-in student could type
+ * the parameter and be handed the full roster with names and credited hours —
+ * which is exactly what `attendeeVisibility` exists to control.
+ *
+ * The server refuses to ACT on any of it regardless (`canRunEvent` guards every
+ * attendance route). These cases are about not RENDERING what it would refuse.
+ */
+describe('opening straight into the hours screen', () => {
+  const ATTENDANCE_COPY = /Only ticked volunteers are credited|Everyone is accounted for|Hours for this event are final/;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.fetchCheckins.mockResolvedValue([]);
+  });
+
+  /* The screen loads check-ins before it renders anything but a skeleton, so
+     the copy arrives on the next tick rather than synchronously. */
+  it('opens on the hours screen for the organizer who hosts it', async () => {
+    renderWithRouter(
+      <EventModal
+        event={mockEvent}
+        currentUser={mockCurrentUser}
+        applications={[]}
+        onClose={vi.fn()}
+        initialMode="attendance"
+      />
+    );
+    expect(await screen.findByText(ATTENDANCE_COPY)).toBeInTheDocument();
+  });
+
+  it('opens on the hours screen for an administrator', async () => {
+    renderWithRouter(
+      <EventModal
+        event={mockEvent}
+        currentUser={{ id: 'admin-1', role: 'admin' }}
+        applications={[]}
+        onClose={vi.fn()}
+        initialMode="attendance"
+      />
+    );
+    expect(await screen.findByText(ATTENDANCE_COPY)).toBeInTheDocument();
+  });
+
+  /** THE case. A crafted URL must not become a roster. */
+  it('ignores the request from a student, showing the event instead', () => {
+    renderWithRouter(
+      <EventModal
+        event={mockEvent}
+        currentUser={{ id: 'stu-1', role: 'student' }}
+        applications={[]}
+        onClose={vi.fn()}
+        initialMode="attendance"
+      />
+    );
+    expect(screen.queryByText(ATTENDANCE_COPY)).toBeNull();
+    /* Ignored, not refused: a stale link should open the event, not an error. */
+    expect(screen.getByText('Test Event')).toBeInTheDocument();
+  });
+
+  it('ignores the request from an organizer who does not host this event', () => {
+    renderWithRouter(
+      <EventModal
+        event={mockEvent}
+        currentUser={{ id: 'org-2', role: 'organizer' }}
+        applications={[]}
+        onClose={vi.fn()}
+        initialMode="attendance"
+      />
+    );
+    expect(screen.queryByText(ATTENDANCE_COPY)).toBeNull();
+    expect(screen.getByText('Test Event')).toBeInTheDocument();
+  });
+
+  it('opens on the event itself when no mode is asked for', () => {
+    renderWithRouter(
+      <EventModal
+        event={mockEvent}
+        currentUser={mockCurrentUser}
+        applications={[]}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByText(ATTENDANCE_COPY)).toBeNull();
+    expect(screen.getByText('Test Event')).toBeInTheDocument();
+  });
+});

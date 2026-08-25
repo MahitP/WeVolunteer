@@ -7,11 +7,12 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config.js';
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
+import { logHttpRequest } from './telemetry.js';
 
 import authRoutes from './routes/authRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
@@ -108,6 +109,77 @@ if (process.env.TRUST_PROXY) {
  * lives in an HttpOnly cookie and is never echoed in a body, and there is no CSRF
  * token in a payload to extract.
  */
+/**
+ * A correlation id for every request, and one structured record when it ends.
+ *
+ * ── Why first ──
+ *
+ * Before compression, before helmet, before the body parser: a request that is
+ * refused by CORS, killed by the body-size limit or rejected as malformed JSON
+ * is exactly the one somebody will later be trying to find, and an id assigned
+ * after those would not exist on any of them.
+ *
+ * ── What the id is for ──
+ *
+ * It is the thread from a browser error to a backend log. `X-Request-Id` goes
+ * back on the response, `api.js` puts it on the `ApiError` it throws, the crash
+ * reporter sends it with the report, and the error handler stores it on the
+ * error row. Searching one id in Better Stack then returns the access record,
+ * the error record and — through `fingerprint` — the group in the dashboard.
+ *
+ * An inbound `X-Request-Id` is DELIBERATELY not honoured. It is client-supplied,
+ * unauthenticated and would let anyone poison a shared field or collide with
+ * somebody else's trace. A proxy that wants its own id can read this one out of
+ * the response.
+ *
+ * ── Why `res.on('finish')` ──
+ *
+ * It fires once the response is flushed, which is the only point at which the
+ * status code and the duration are both known. `close` would also fire for a
+ * client that hung up, and a cancelled request is not a server event worth a
+ * record.
+ *
+ * Nothing here can fail a request: the handler is wrapped, and `logHttpRequest`
+ * cannot throw.
+ */
+app.use((req, res, next) => {
+  req.id = randomUUID();
+  res.setHeader('X-Request-Id', req.id);
+
+  const startedAt = process.hrtime.bigint();
+  res.on('finish', () => {
+    try {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      logHttpRequest({
+        method: req.method,
+        /* The Express PATTERN, never `req.originalUrl` — a real URL carries a
+           query string, and query strings carry search terms and addresses. */
+        route: req.route?.path ?? routePatternOf(req),
+        statusCode: res.statusCode,
+        durationMs: Math.round(durationMs),
+        requestId: req.id,
+        role: req.principal?.effectiveRole ?? req.user?.role,
+        userHash: hashUserId(req.user?.id),
+      });
+    } catch { /* telemetry must never touch the response */ }
+  });
+
+  next();
+});
+
+/**
+ * The mounted path for a request that never reached a route handler.
+ *
+ * `req.route` is undefined for a 404, for anything refused by middleware, and
+ * for a static file. `req.baseUrl` is the mount point, which is safe (it is
+ * declared in code) and answers "was this /api or the SPA" — enough to tell a
+ * flood of 404s against the API from a bot crawling the front end.
+ */
+function routePatternOf(req) {
+  if (typeof req.baseUrl === 'string' && req.baseUrl) return req.baseUrl;
+  return req.originalUrl?.startsWith('/api') ? '/api/*' : null;
+}
+
 app.use(compression({
   threshold: 1024,
   level: 6,
@@ -1309,6 +1381,9 @@ app.use(async (err, req, res, _next) => {
     userHash: hashUserId(req.user?.id),
     role: req.principal?.effectiveRole ?? req.user?.role,
     release: VERSION,
-    context: { statusCode: 500, method: req.method }
+    /* `requestId` joins this row to the access record and to whatever the
+       browser reported, which is the whole point of the id. It is a UUID this
+       server generated; see the note on CONTEXT_KEYS. */
+    context: { statusCode: 500, method: req.method, requestId: req.id }
   });
 });

@@ -287,11 +287,37 @@ export default function EventShiftsTab({
                             )}
                           </div>
                         ) : (
+                          /**
+                            * ── The word is "Select", because that is all
+                            *    pressing it does ──
+                            *
+                            * It read "Request", and "Request" is the name of the
+                            * thing the button at the bottom of this list does.
+                            * Pressing it changed the label to "Selected", which
+                            * a reader takes as the past tense of the verb they
+                            * just performed — so the row said, in the two words
+                            * it has, that the application had been sent. It had
+                            * not. Nothing leaves this screen until "Send
+                            * application" is pressed, and a volunteer who closed
+                            * the page here had applied for nothing.
+                            *
+                            * "Select" → "Selected" is the same pair of words
+                            * describing an act this control actually performs.
+                            * The states that mean a real application — "Awaiting
+                            * decision", "Waitlisted", "You're confirmed", each
+                            * with Withdraw or Release beside it — are rendered
+                            * from `mine` in the branch above, which comes from
+                            * the server. So the two are no longer expressible in
+                            * the same words, and a reload (which empties
+                            * `selectedSlots` and refetches `mine`) can only ever
+                            * show the truthful one.
+                            */
                           <button
                             className="btn btn-secondary btn-sm"
+                            aria-pressed={isFull && !isSelected ? undefined : isSelected}
                             disabled={refused || signupsClosed || (isFull && !isSelected)}
                             onClick={() => handleSlotSelect(slot.id)}>
-                            {isSelected ? 'Selected' : isFull ? 'Full' : 'Request'}
+                            {isSelected ? 'Selected' : isFull ? 'Full' : 'Select'}
                           </button>
                         )
                       ) : null}

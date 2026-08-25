@@ -14,6 +14,7 @@ import {
 } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
 import TagChips from './common/TagChips';
+import { can } from '../authz';
 import { DECISION_LABELS, isFinal } from '../appeals';
 import LocationLink from './location/LocationLink';
 import DirectionsButton from './location/DirectionsButton';
@@ -33,11 +34,46 @@ import Modal from './Modal';
 
 export default function EventModal({
   event, currentUser, applications = [], onClose, refreshEvents, refreshApplications, addToast, onViewVolunteerProfile,
-  isFavorited, onToggleFavorite
+  isFavorited, onToggleFavorite, initialMode = 'view'
 }) {
   const dialogRef = useModal(onClose);
   const navigate = useNavigate();
-  const [mode, setMode] = useState('view'); // 'view' | 'edit' | 'attendance'
+  /**
+   * Which screen this modal opens on. `'view' | 'edit' | 'attendance'`.
+   *
+   * `initialMode` exists so the organizer dashboard's close-out reminder can
+   * land somebody ON the Closeout screen rather than beside a button that
+   * reaches it. It arrives from the `?mode=` search parameter, which is how the
+   * modal already carries `?event=` — so the destination survives a reload and a
+   * shared link, like every other modal state here.
+   *
+   * ── Gated, because the parameter is user-supplied ──
+   *
+   * Until now `'attendance'` was reachable only from a button rendered inside
+   * `{isOwner && …}`. A mode read from the URL has no such protection: any
+   * signed-in student could type `?event=X&mode=hours` and, ungated, be handed
+   * the full roster with names and credited hours — which `attendeeVisibility`
+   * exists to control. So the request is honoured only for somebody who could
+   * have pressed the button, and ignored (not refused) otherwise: a stale link
+   * should open the event, not an error.
+   *
+   * The server refuses regardless — every attendance route checks `canRunEvent`
+   * — so this is about not RENDERING what it would refuse to act on.
+   *
+   * The test is the server's, said in the same two parts: a capability that
+   * admits the screen at all (`requireCapAny` on every attendance route), AND
+   * standing to act on THIS event — hosting it, or holding the `event.moderate`
+   * bypass that `canRunEvent` accepts. Written with `can()` and an id
+   * comparison rather than role names, per the rule
+   * `authz.completeness.test.js` enforces: `can()` for "may this kind of actor",
+   * ids for "is this their own row".
+   */
+  const mayManageHours =
+    (can(currentUser, 'attendance.mark') || can(currentUser, 'organization.event.manage.own'))
+    && (currentUser?.id === event?.organizerId || can(currentUser, 'event.moderate'));
+  const [mode, setMode] = useState(
+    initialMode === 'attendance' && mayManageHours ? 'attendance' : 'view',
+  );
   const [tab, setTab] = useState('shifts');
   const [submitting, setSubmitting] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -364,7 +400,7 @@ export default function EventModal({
             <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
               <h2>
                 {mode === 'edit' ? 'Edit event'
-                  : mode === 'attendance' ? 'Finalise hours'
+                  : mode === 'attendance' ? (event.hoursClosedOutAt ? 'Hours (final)' : 'Finalise hours')
                   : event.title}
               </h2>
               {mode === 'view' && currentUser?.role === 'student' && onToggleFavorite && (
@@ -401,7 +437,11 @@ export default function EventModal({
               </p>
             )}
             {mode === 'attendance' && (
-              <p className="lead">Mark who actually attended. Only the volunteers you tick are credited.</p>
+              <p className="lead">
+                {event.hoursClosedOutAt
+                  ? 'These hours have been closed out and are part of each volunteer\u2019s permanent record.'
+                  : 'Mark who actually attended. Only the volunteers you tick are credited.'}
+              </p>
             )}
           </div>
           <button className="modal-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
@@ -593,7 +633,13 @@ export default function EventModal({
                         ? 'Hours can be finalised once a shift has ended'
                         : undefined}>
                       <ClipboardCheck size={13} />
-                      {event.status === 'completed' ? 'Correct hours' : 'Finalise hours'}
+                      {/* Three states, three words. "Correct hours" on an event
+                          whose hours are already final would name an action the
+                          server refuses; "View hours" says what the screen is
+                          for once nothing on it can change. */}
+                      {event.hoursClosedOutAt ? 'View hours'
+                        : event.status === 'completed' ? 'Correct hours'
+                          : 'Finalise hours'}
                     </button>
                   </div>
                 </div>
@@ -714,7 +760,7 @@ export default function EventModal({
                     {/**
                       * The appeal control, and the ONLY control offered here.
                       *
-                      * The shift rows below used to render a disabled "Request"
+                      * The shift rows below used to render a disabled "Select"
                       * button under this notice — a Join button that is greyed
                       * out still reads as "you could join", and the reader is
                       * left to work out that the notice above is the reason. So

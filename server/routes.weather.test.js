@@ -122,6 +122,53 @@ describe('weather proxy', () => {
     });
   });
 
+  /**
+   * ── The hour asked for is the hour answered, in any server timezone ──
+   *
+   * The route built its lookup key with `targetDate.setMinutes(0, 0, 0)` — a
+   * LOCAL-time setter — and then formatted it with `toISOString()`, which is
+   * UTC. Those agree only where the server's offset is a whole number of hours.
+   * Open-Meteo is asked with `timezone=UTC`, so `hourly.time` is UTC hours on
+   * the hour, and in a half-hour zone the lookup went to the hour BEFORE the one
+   * requested for every request whose UTC minutes were under :30.
+   *
+   * In production that is not a 404. Open-Meteo returns sixteen days of hourly
+   * data, so the neighbouring hour is present and gets returned — a confidently
+   * wrong temperature for the wrong hour. The cases above surface it as a 404
+   * only because their mocked series holds nothing but the requested hour.
+   *
+   * Every other case in this file fails on a machine in such a zone and passes
+   * everywhere else, which makes them a regression test that depends on who runs
+   * it. These force the zone, so the rule is checked wherever the suite runs.
+   */
+  describe('the server\'s own timezone', () => {
+    const ZONES = ['UTC', 'America/New_York', 'Asia/Kolkata', 'Australia/Adelaide', 'Asia/Kathmandu'];
+
+    it.each(ZONES)('answers for the requested UTC hour in %s', async (tz) => {
+      const original = process.env.TZ;
+      process.env.TZ = tz;
+      try {
+        /* :05 past the hour, which is inside the half-hour window the broken
+           version pushed onto the previous hour. */
+        const when = targetHour();
+        when.setUTCMinutes(5, 0, 0);
+        const hourAsked = when.toISOString().slice(0, 13);
+
+        upstream.mockResolvedValue(ok(forecastCovering(when.toISOString())));
+        const res = await get(freshCoords(), when, student);
+
+        expect(res.status, `${tz} missed the hour it asked for`).toBe(200);
+        expect(res.body.result.temperature).toBe(72);
+
+        /* And it asked Open-Meteo about that hour rather than a neighbour: the
+           mocked series contains only `hourAsked`, so a 200 proves the match. */
+        expect(forecastCovering(when.toISOString()).hourly.time[0]).toBe(`${hourAsked}:00`);
+      } finally {
+        process.env.TZ = original;
+      }
+    });
+  });
+
   describe('coordinate precision', () => {
     it('asks Open-Meteo for two decimal places, not four', async () => {
       const when = targetHour();

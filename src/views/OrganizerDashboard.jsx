@@ -7,6 +7,8 @@ import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
+import { CATEGORY_GROUPS } from '../eventCategories';
+import { can } from '../authz';
 const TABS = [{
   id: 'active',
   label: 'Active'
@@ -74,6 +76,45 @@ export default function OrganizerDashboard({
   }, [hosted, pendingApps]);
   const overdueReview = needsReview.filter(x => x.overdue);
   const stuckApplicants = overdueReview.reduce((sum, x) => sum + x.pending, 0);
+
+  /**
+   * Finished events whose hours are credited but not yet made permanent.
+   *
+   * ── Why this needs saying at all ──
+   *
+   * Closing out is a deliberate act, which is what stops a mistyped number
+   * becoming permanent the instant the last checkbox is ticked. The cost of that
+   * design is that it can simply not happen: an organizer finishes an event,
+   * credits everybody, and never returns. Nothing is broken — the hours are
+   * credited, the certificates are issued, the students are fine — so there is
+   * no error anywhere to notice. It just never becomes final.
+   *
+   * ── Why it is not urgent, and must not look it ──
+   *
+   * Nobody is waiting on this. Unlike an undecided applicant, where a day's
+   * delay lands on a student who is told nothing, an un-closed event costs
+   * nobody anything today. So this uses `--brand` and the word "ready", not the
+   * amber and red the applications card uses, and the copy says the hours are
+   * still correctable before it mentions permanence. An organizer who reads it
+   * as an alarm will close out to make the alarm go away, which is precisely the
+   * unconsidered press the confirmation exists to prevent.
+   *
+   * ── Authorization ──
+   *
+   * `hosted` is already `organizerId === currentUser.id`, and `canManageHours`
+   * below repeats the server's capability test. The server checks `canRunEvent`
+   * on every attendance route regardless, so this decides what is OFFERED, never
+   * what is allowed.
+   */
+  const canManageHours = can(currentUser, 'attendance.mark')
+    || can(currentUser, 'organization.event.manage.own');
+  const awaitingCloseOut = useMemo(() => {
+    if (!canManageHours) return [];
+    return hosted
+      .filter(e => eventPermissions(e).canCloseOutHours)
+      /* Longest-finished first: the one most likely to have been forgotten. */
+      .sort((a, b) => new Date(a.endDatetime || a.startDatetime) - new Date(b.endDatetime || b.startDatetime));
+  }, [hosted, canManageHours]);
 
   // Events with a shift running today — the only ones check-in is useful for.
   // Compared on local calendar day, not a 24h window: an organizer opening the
@@ -401,6 +442,68 @@ export default function OrganizerDashboard({
           </div>
         </section>}
 
+      {/**
+        * ── Hours waiting to be made permanent ──
+        *
+        * A sibling card in the same decisions region rather than a row inside
+        * the one above, because the two carry different urgencies and merging
+        * them would flatten both: "3 students have been waiting since the
+        * deadline" and "2 events are ready whenever you are" cannot share one
+        * headline without one of them lying.
+        *
+        * Second, not first, for the same reason — the card above is about people
+        * who are stuck.
+        *
+        * The word is always "close out HOURS", never "close": this dashboard
+        * already has a "Close sign-ups" control three sections down, and those
+        * two actions are unrelated. One stops new applications; this one
+        * permanently locks credited service hours.
+        */}
+      {awaitingCloseOut.length > 0 && (
+        <section className="card s-closeout-card">
+          <div className="card-body">
+            <div className="row-between row-wrap s-615dbe">
+              <div>
+                <div className="eyebrow s-closeout-eyebrow">Ready when you are</div>
+                <h2 className="s-956c6f">
+                  {awaitingCloseOut.length} finished event{awaitingCloseOut.length !== 1 ? 's' : ''} with
+                  hours not closed out
+                </h2>
+                <p className="small s-00e727">
+                  The hours are credited and <strong>still correctable</strong>. Closing them out makes
+                  them a permanent part of each volunteer&rsquo;s record, which cannot be undone.
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => onViewDetails(awaitingCloseOut[0], { mode: 'hours' })}
+              >
+                Review hours <ArrowRight size={15} />
+              </button>
+            </div>
+
+            {awaitingCloseOut.length > 1 && (
+              <div className="list s-2b52df">
+                {awaitingCloseOut.map(event => (
+                  <button
+                    key={event.id}
+                    className="list-row s-0a650c"
+                    onClick={() => onViewDetails(event, { mode: 'hours' })}
+                  >
+                    <DateChip iso={event.startDatetime} />
+                    <span className="truncate s-49cdf8">
+                      <span className="person-name truncate">{event.title}</span>
+                      <span className="person-meta tnum">Finished {timeAgo(event.endDatetime || event.startDatetime)}</span>
+                    </span>
+                    <span className="tag">Hours open</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* ── Programme at a glance ── */}
       <section className="stats">
         <div className="stat">
@@ -611,11 +714,15 @@ export default function OrganizerDashboard({
               ...f,
               category: e.target.value
             }))}>
-                    <option value="School">School project</option>
-                    <option value="5K">5K run / athletics</option>
-                    <option value="Food Pantry">Food pantry</option>
-                    <option value="Fundraiser">Fundraiser</option>
-                    <option value="Other">Other community service</option>
+                    {/* From the shared vocabulary, not a fourth hand-written
+                        copy of it. The copy that used to be here offered five
+                        values and would have silently re-filed an event in any
+                        of the eleven added since. */}
+                    {CATEGORY_GROUPS.map(({ group, categories }) => (
+                      <optgroup key={group} label={group}>
+                        {categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                 </div>
                 <div className="field">

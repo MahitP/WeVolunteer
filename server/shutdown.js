@@ -34,6 +34,7 @@ import { stopExportWorker } from './workers/exportWorker.js';
 import { releaseInstanceLock, stopInstanceLockHeartbeat } from './instanceLock.js';
 import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { stopRetentionWorker } from './workers/retentionWorker.js';
+import { logLifecycle, drainTelemetry } from './telemetry.js';
 
 /**
  * How long to wait for in-flight requests before giving up on them.
@@ -184,6 +185,26 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
     // the WAL is crash-safe and recovers on next open.
     console.error('[Shutdown] Database close failed:', err);
   }
+
+  /**
+   * 7. Flush telemetry last of all.
+   *
+   * After the database, because the interesting thing to record is how the
+   * shutdown went — including a database close that failed — and because
+   * nothing above needs Better Stack to be reachable.
+   *
+   * `drainTelemetry`, not `flushTelemetry`: the latter posts one batch of 50,
+   * and a busy server can be holding several hundred records — including the
+   * ones describing why it is restarting. The drain is bounded by the queue cap
+   * and each pass swallows its own failures, so an unreachable endpoint costs
+   * one request timeout per pass and nothing else.
+   *
+   * When telemetry is unconfigured — the default — both calls are no-ops.
+   */
+  try {
+    logLifecycle('shutdown', { outcome: exitCode === 0 ? 'clean' : 'forced', ok: exitCode === 0 });
+    await drainTelemetry();
+  } catch { /* a shutdown must not fail on its own epilogue */ }
 
   console.log(`[Shutdown] Complete (exit ${exitCode}).`);
   return exitCode;

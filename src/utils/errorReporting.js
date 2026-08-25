@@ -95,6 +95,20 @@ function worthReporting(error) {
  * @param {string}  [meta.kind]      'crash' | 'chunk' | …; the situation, not a status code
  * @param {string}  [meta.route]     the screen it happened on; normalised server-side
  */
+/**
+ * The server request id an error carries, if it came from a failed API call.
+ *
+ * Only `ApiError` has one, and only when the request reached this application.
+ * Read defensively and shape-checked before it is sent: this runs on an error
+ * path, and a value that is not a plain id is not worth a second failure.
+ */
+function requestIdOf(error) {
+  try {
+    const id = error?.requestId;
+    return typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id) ? id : undefined;
+  } catch { return undefined; }
+}
+
 export function reportClientError(error, { kind, route } = {}) {
   try {
     if (!error) return;
@@ -118,8 +132,15 @@ export function reportClientError(error, { kind, route } = {}) {
       /* `source`, `release`, `status`, `fingerprint` and `user_hash` are
          deliberately absent: the server assigns every one of them and ignores a
          client that sends them. A report claiming `source: 'server'` would
-         otherwise escape the client-group ceiling entirely. */
-      const body = JSON.stringify({ kind, message, stack, route });
+         otherwise escape the client-group ceiling entirely.
+
+         `requestId` is the exception, and it is safe for the opposite reason:
+         it is a value the SERVER minted and handed back on `X-Request-Id`, so a
+         client echoing it can at worst point at a request that already exists.
+         It is what joins this crash to the API call that caused it — see
+         `requestIdOf` in api.js. Absent for a crash with no failed request
+         behind it, which is most of them. */
+      const body = JSON.stringify({ kind, message, stack, route, requestId: requestIdOf(error) });
 
       /* `.catch` rather than try/catch: the rejection arrives on a later tick,
          where a throw would be an unhandled rejection — which our own

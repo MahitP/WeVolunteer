@@ -60,6 +60,12 @@ describe('eventPermissions — everything is available on a fresh event', () => 
       canChangeSettings: true,
       canDelete: true,
       canDuplicate: true,
+      /* An open event has no final roster to freeze, so there is nothing to
+         close out yet. `toEqual` on the whole object is deliberate — it fails
+         when a key is ADDED, which is how a new permission gets a case here
+         rather than shipping unasserted. */
+      canCloseOutHours: false,
+      hoursClosedOut: false,
       blockedReason: null
     });
   });
@@ -81,6 +87,68 @@ describe('eventPermissions — everything is available on a fresh event', () => 
   it('treats a missing hasAttendance flag as no attendance', () => {
     // Older cached payloads predate the field; they must not silently lock the UI.
     expect(eventPermissions({ status: 'open' }).canDelete).toBe(true);
+  });
+});
+
+/**
+ * Closing an event's hours out — the separate, one-way act that makes credited
+ * hours permanent.
+ *
+ * ── The distinction these cases exist to hold ──
+ *
+ * `completed` and "hours are locked" are NOT the same thing, and the whole
+ * design turns on their not being. `completed` is written the instant every
+ * accepted volunteer has a record — a side effect of ticking the last checkbox —
+ * so if it also froze the hours, a single-volunteer event would freeze on its
+ * first save with no moment in which to notice a mistyped 40.
+ *
+ * So a completed event is offered the close-out and remains fully correctable
+ * until somebody takes it. `canEditDetails` being false on the same event while
+ * `canCloseOutHours` is true is the point, not an inconsistency: the event's
+ * DETAILS are frozen by completion and its HOURS are not.
+ */
+describe('eventPermissions — closing the hours out', () => {
+  const completed = (over = {}) => eventPermissions({ status: 'completed', hoursClosedOutAt: null, ...over });
+
+  it('offers it on a completed event whose hours are still open', () => {
+    expect(completed().canCloseOutHours).toBe(true);
+    expect(completed().hoursClosedOut).toBe(false);
+  });
+
+  /** Completion freezes the event's details and deliberately not its hours. */
+  it('leaves a completed event\'s hours correctable while its details are not', () => {
+    const perms = completed();
+    expect(perms.canEditDetails).toBe(false);
+    expect(perms.canCloseOutHours).toBe(true);
+  });
+
+  it('stops offering it once the hours have been closed out', () => {
+    const perms = completed({ hoursClosedOutAt: '2026-08-20T10:00:00.000Z' });
+    expect(perms.canCloseOutHours).toBe(false);
+    expect(perms.hoursClosedOut).toBe(true);
+  });
+
+  /**
+   * Closing out an unfinished roster would freeze it with people still to
+   * credit, and they could then never be credited by anybody.
+   */
+  it('refuses it before the event is complete', () => {
+    for (const status of ['open', 'closed']) {
+      expect(eventPermissions({ status }).canCloseOutHours, status).toBe(false);
+    }
+  });
+
+  it('refuses it on a cancelled event, which has no hours to freeze', () => {
+    expect(eventPermissions({ status: 'cancelled' }).canCloseOutHours).toBe(false);
+  });
+
+  it('fails safe on a payload that predates the field', () => {
+    /* An older cached event has no `hoursClosedOutAt`. That must read as "not
+       closed out" — the direction that offers a control the server may refuse,
+       never one that hides a legitimate action. */
+    expect(eventPermissions({ status: 'completed' }).canCloseOutHours).toBe(true);
+    expect(eventPermissions(undefined).canCloseOutHours).toBe(false);
+    expect(eventPermissions(undefined).hoursClosedOut).toBe(false);
   });
 });
 

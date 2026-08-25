@@ -210,12 +210,12 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCapAny(['att
     if (error instanceof AttendanceRefused) {
       const { error: code, message, ...rest } = error.outcome;
       /* `reason_required` and `invalid_hours` are both malformed submissions —
-         400. `shift_not_ended` and `slot_unpriceable` are well-formed requests
-         refused by the state of the world — the shift has not happened yet, or
-         the event's own times are broken — so both are 409s. The distinction is
-         whether the caller could fix it by resending different values.
-         `shift_not_ended` is a well-formed request refused by the state of
-         the world — 409. */
+         400. `shift_not_ended`, `slot_unpriceable` and `hours_locked` are
+         well-formed requests refused by the state of the world — the shift has
+         not happened yet, the event's own times are broken, or the event has
+         been closed out and its hours are final — so all three are 409s. The
+         distinction is whether the caller could fix it by resending different
+         values. */
       const badRequest = code === 'reason_required' || code === 'invalid_hours';
       return res.status(badRequest ? 400 : 409).json({ error: message, code, ...rest });
     }
@@ -231,6 +231,119 @@ class AttendanceRefused extends Error {
     this.outcome = outcome;
   }
 }
+
+/**
+ * 9c. Close the hours out — the deliberate act that makes them permanent.
+ *
+ * ── Why this exists as an act rather than as a consequence ──
+ *
+ * The alternative was to freeze hours the moment `events.status` becomes
+ * `completed`, and it fails on what `completed` actually is: not a decision, but
+ * a side effect of `computeEventCompletion` finding that every accepted
+ * volunteer now has a record. On a single-volunteer event the first save would
+ * both credit the student and freeze the number, so a mistyped 40 would be
+ * permanent before anybody looked at it — and the whole reason `finalizeAttendance`
+ * demands a reason and writes a ledger entry is that corrections are expected.
+ * It would also contradict this API's own words: `PUT /api/events/:id` refuses a
+ * completed event with "…its details can no longer be changed. Attendance can
+ * still be corrected."
+ *
+ * So closing out is pressed, not reached.
+ *
+ * ── The preconditions, and why each one ──
+ *
+ *   · The event must be `completed`. That is the platform's existing statement
+ *     that every shift has ended and every accepted volunteer is accounted for,
+ *     so it is exactly the condition under which "these are the final numbers"
+ *     can be true. Closing out earlier would freeze a roster with people still
+ *     to credit, and they could then never be credited by anyone.
+ *   · A cancelled event has no hours to close out, and `finalizeAttendance`
+ *     already refuses to credit one.
+ *   · Not already closed out — 409 rather than a silent success, because the
+ *     second caller is either a double-click or a second organizer, and both
+ *     deserve to be told which of them it was and when.
+ *
+ * ── One-way, deliberately ──
+ *
+ * There is no reopen route and no `DELETE`. "No takebacksies" is the product
+ * requirement, and a reopen endpoint is the hole through which every bypass of
+ * it would go. `PATCH /api/events/:id/status` already refuses a completed event,
+ * so the precondition cannot be unwound either.
+ */
+router.post('/api/events/:id/hours/close-out', authenticateToken, requireCapAny(['attendance.mark', 'organization.event.manage.own']), async (req, res) => {
+  const eventId = req.params.id;
+
+  try {
+    const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
+    if (!event) return res.status(404).json({ error: 'Event not found' });
+    const refusal = await hostRefusal(req.principal, event);
+    if (refusal) return res.status(refusal.status).json(refusal.body);
+
+    if (event.hours_closed_out_at) {
+      return res.status(409).json({
+        error: 'The hours for this event were already closed out.',
+        code: 'already_closed_out',
+        closedOutAt: event.hours_closed_out_at,
+      });
+    }
+    if (event.status === 'cancelled') {
+      return res.status(409).json({
+        error: 'This event was cancelled, so there are no hours to close out.',
+        code: 'event_cancelled',
+      });
+    }
+    if (event.status !== 'completed') {
+      return res.status(409).json({
+        error: 'Every shift has to have ended and every confirmed volunteer has to be '
+          + 'accounted for before the hours can be closed out. Finalise the roster first.',
+        code: 'event_not_complete',
+      });
+    }
+
+    const now = new Date().toISOString();
+    /**
+     * Guarded in the UPDATE as well as above.
+     *
+     * The read and the write are two statements, so two organizers pressing at
+     * once could both pass the check. `WHERE hours_closed_out_at IS NULL` makes
+     * the database the arbiter, and `changes === 0` means somebody else won —
+     * which is reported as the same 409 rather than as a success that overwrote
+     * their attribution with ours.
+     */
+    const result = await db.prepare(
+      `UPDATE events SET hours_closed_out_at = ?, hours_closed_out_by = ?
+        WHERE id = ? AND hours_closed_out_at IS NULL`
+    ).run(now, req.user.id, eventId);
+
+    if (result.changes === 0) {
+      const fresh = await db.prepare('SELECT hours_closed_out_at FROM events WHERE id = ?').get(eventId);
+      return res.status(409).json({
+        error: 'The hours for this event were already closed out.',
+        code: 'already_closed_out',
+        closedOutAt: fresh?.hours_closed_out_at ?? null,
+      });
+    }
+
+    /**
+     * Recorded in the audit trail, because this is the one action on the
+     * platform that makes a student's service record unchangeable. The ledger
+     * records every change to hours and had nothing to say about the decision to
+     * allow no more.
+     */
+    await recordAudit(db, {
+      adminId: req.user.id,
+      action: 'EVENT_HOURS_CLOSED_OUT',
+      targetUserId: null,
+      details: `Closed out the hours for "${event.title}" (${event.id}). `
+        + 'Credited hours for this event can no longer be changed.',
+    });
+
+    res.json({ success: true, closedOutAt: now, closedOutBy: req.user.id });
+  } catch (error) {
+    console.error('Close out hours error:', error);
+    res.status(500).json({ error: 'Internal server error closing out hours' });
+  }
+});
 
 // 10. Edit Event Details and Slots (Organizer only)
 

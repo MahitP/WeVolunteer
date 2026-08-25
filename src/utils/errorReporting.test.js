@@ -220,3 +220,60 @@ describe('the caps that stop one bug becoming thousands of rows', () => {
     expect(MAX_REPORTS_PER_LOAD).toBeGreaterThan(0);
   });
 });
+
+/**
+ * The correlation id, and why the reporter is allowed to echo one back.
+ *
+ * Every other field the server needs — `source`, `release`, `status`,
+ * `fingerprint`, `user_hash` — is assigned server-side and ignored when a client
+ * sends it, because a report claiming `source: 'server'` would escape the
+ * client-group ceiling. `requestId` is the single exception, and it is safe for
+ * the opposite reason: the SERVER minted it and handed it back on
+ * `X-Request-Id`, so a client echoing it can at worst point at a request that
+ * already exists.
+ *
+ * It is what joins a browser crash to the API call that caused it, to the access
+ * record for that call, and to the error row — see docs/operations/betterstack.md §5.
+ */
+describe('the request id that threads a crash to its API call', () => {
+  const sentBody = () => JSON.parse(globalThis.fetch.mock.calls[0][1].body);
+
+  const apiFailure = (requestId) => Object.assign(new Error('Server error'), {
+    name: 'ApiError', requestId,
+  });
+
+  it('sends the id when the error came from a failed API call', () => {
+    reportClientError(apiFailure('b3f1c2d4-0000-4a1b-9c3d-1122334455aa'), { kind: 'crash' });
+    expect(sentBody().requestId).toBe('b3f1c2d4-0000-4a1b-9c3d-1122334455aa');
+  });
+
+  it('omits it for a crash with no failed request behind it', () => {
+    reportClientError(new Error('Cannot read properties of null'), { kind: 'crash' });
+    expect(sentBody().requestId).toBeUndefined();
+  });
+
+  /**
+   * Shape-checked before it is sent. This runs on an error path; a value that is
+   * not a plain id is not worth a second failure, and the server re-checks it
+   * anyway because the intake is unauthenticated.
+   */
+  it('refuses anything that is not identifier-shaped', () => {
+    for (const bad of ['leo.chen@example.com', 'id with spaces', '<script>', 'x'.repeat(200), 42, {}]) {
+      __resetReporter();
+      globalThis.fetch.mockClear();
+      reportClientError(apiFailure(bad), { kind: 'crash' });
+      expect(sentBody().requestId, String(bad)).toBeUndefined();
+    }
+  });
+
+  it('never reads anything else off the error object', () => {
+    const err = apiFailure('b3f1c2d4-0000-4a1b-9c3d-1122334455aa');
+    err.data = { email: 'leo.chen@example.com', password: 'hunter2' };
+    err.status = 500;
+    reportClientError(err, { kind: 'crash' });
+    const body = sentBody();
+    expect(body).not.toHaveProperty('data');
+    expect(body).not.toHaveProperty('status');
+    expect(JSON.stringify(body)).not.toContain('hunter2');
+  });
+});

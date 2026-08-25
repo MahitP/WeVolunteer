@@ -142,26 +142,26 @@ describe('a shift you are not allowed to take', () => {
     organizationName: 'Robotics Club',
   };
 
-  const request = () => screen.getByRole('button', { name: /Request/i });
+  const selectBtn = () => screen.getByRole('button', { name: /^Select$/i });
 
   it('offers the shift on an ordinary event', () => {
     draw(withShifts);
-    expect(request()).toBeEnabled();
+    expect(selectBtn()).toBeEnabled();
   });
 
   it('offers it on a members-only event to a member', () => {
     draw({ ...membersOnly, viewerIsMember: true });
-    expect(request()).toBeEnabled();
+    expect(selectBtn()).toBeEnabled();
   });
 
   it('refuses it on a members-only event to somebody who is not a member', () => {
     draw({ ...membersOnly, viewerIsMember: false });
-    expect(request()).toBeDisabled();
+    expect(selectBtn()).toBeDisabled();
   });
 
   it('refuses it to somebody the organization has banned', () => {
     draw({ ...withShifts, viewerBan: { banned: true, reason: 'Repeatedly no-showed shifts.' } });
-    expect(request()).toBeDisabled();
+    expect(selectBtn()).toBeDisabled();
   });
 
   it('does NOT read an ABSENT viewerIsMember as "not a member"', () => {
@@ -183,11 +183,110 @@ describe('a shift you are not allowed to take', () => {
       audience: 'organization', organizationId: 'org-1', organizationName: 'Robotics Club',
     };
     draw({ ...withShifts, audience, organizationId, organizationName });
-    expect(request()).toBeEnabled();
+    expect(selectBtn()).toBeEnabled();
   });
 
   it('drops the how-selection-works note, which is addressed to an applicant', () => {
     draw({ ...membersOnly, viewerIsMember: false });
     expect(screen.queryByText(/Choose the shifts you want/i)).toBeNull();
+  });
+});
+
+/* ── The four words a shift row can say, and what each of them promises ───── */
+
+/**
+ * ── The bug ──
+ *
+ * The unselected state said "Request" and the selected one said "Selected".
+ * Those are the same verb in two tenses, so pressing the button read as
+ * "requested" — the past tense of the act named on its face — while the actual
+ * request still sat unsent behind a "Send application" button further down the
+ * page. Somebody who ticked their shifts and closed the tab had applied for
+ * nothing and had been told, in the only words on the row, that they had.
+ *
+ * These cases pin the two vocabularies apart:
+ *
+ *   local, unsent    Select / Selected      driven by `selectedSlots`
+ *   sent, on record  Awaiting decision …    driven by `mine`, from the server
+ *
+ * and the last case is the one that matters most: a reload drops
+ * `selectedSlots` (component state) and re-derives `mine` from the API, so the
+ * post-reload render is the honest one by construction.
+ */
+describe('the shift row before an application exists', () => {
+  const withMine = (status) => ({
+    ...NO_OP,
+    eventApps: [{ id: 'app-1', slotId: 'slot-1', userId: 'stu-1', status }],
+  });
+
+  it('offers "Select", not the name of the act the page has not performed', () => {
+    draw(withShifts);
+    expect(screen.getByRole('button', { name: /^Select$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Request$/ })).toBeNull();
+  });
+
+  it('says "Selected" once the shift is in the local selection', () => {
+    render(<EventShiftsTab event={withShifts} {...NO_OP} selectedSlots={['slot-1']} />);
+    expect(screen.getByRole('button', { name: /^Selected$/ })).toBeInTheDocument();
+  });
+
+  it('reports selection to assistive technology as a toggle, not a submission', () => {
+    render(<EventShiftsTab event={withShifts} {...NO_OP} selectedSlots={['slot-1']} />);
+    expect(screen.getByRole('button', { name: /^Selected$/ })).toHaveAttribute('aria-pressed', 'true');
+    draw(withShifts);
+    expect(screen.getByRole('button', { name: /^Select$/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  /**
+   * Selecting must not, on its own, produce the control that gives a place up.
+   * Withdraw belongs to an application that exists; offering it here would
+   * confirm the very impression the wording change exists to remove.
+   */
+  it('offers no Withdraw while the selection is still local', () => {
+    render(<EventShiftsTab event={withShifts} {...NO_OP} selectedSlots={['slot-1']} />);
+    expect(screen.queryByRole('button', { name: /Withdraw|Release/ })).toBeNull();
+  });
+
+  it('shows the submit control only once something is selected', () => {
+    draw(withShifts);
+    expect(screen.queryByRole('button', { name: /Send application/ })).toBeNull();
+    render(<EventShiftsTab event={withShifts} {...NO_OP} selectedSlots={['slot-1']} />);
+    expect(screen.getByRole('button', { name: /Send application for 1 shift/ })).toBeInTheDocument();
+  });
+
+  /* ── After the application is really on record ── */
+
+  it('replaces Select with "Awaiting decision" and a Withdraw button', () => {
+    render(<EventShiftsTab event={withShifts} {...withMine('pending')} />);
+    expect(screen.getByText('Awaiting decision')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Withdraw$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Select(ed)?$/ })).toBeNull();
+  });
+
+  it('says "You\'re confirmed" and offers Release once accepted', () => {
+    render(<EventShiftsTab event={withShifts} {...withMine('accepted')} />);
+    expect(screen.getByText("You're confirmed")).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Release$/ })).toBeInTheDocument();
+  });
+
+  /**
+   * The reload case, stated directly: a stale local selection cannot outrank the
+   * server's answer. `selectedSlots` is passed alongside a real application to
+   * prove the `mine` branch wins even when both are present — which is the state
+   * the component briefly holds between a successful submit and the refetch.
+   */
+  it('lets the server\'s answer win over a stale local selection', () => {
+    render(<EventShiftsTab event={withShifts} {...withMine('pending')} selectedSlots={['slot-1']} />);
+    expect(screen.getByText('Awaiting decision')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Selected$/ })).toBeNull();
+  });
+
+  /**
+   * A withdrawn application is not an application. The row must return to the
+   * offer, or somebody who changed their mind can never change it back.
+   */
+  it('returns to "Select" after the application is withdrawn', () => {
+    render(<EventShiftsTab event={withShifts} {...withMine('withdrawn')} />);
+    expect(screen.getByRole('button', { name: /^Select$/ })).toBeInTheDocument();
   });
 });

@@ -594,14 +594,21 @@ CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
-      category TEXT CHECK(category IN ('School', '5K', 'Food Pantry', 'Fundraiser', 'Other')) NOT NULL,
+      /* The vocabulary and the reasoning behind it live in
+         server/eventCategories.js. Spelled out here rather than interpolated,
+         because the stored DDL of a freshly booted database is what
+         bin/generate-postgres-schema.mjs reads to derive the PostgreSQL schema
+         — and because server/db.categoryVocabulary.test.js asserts that this
+         list, the module's list and migration 057's list are three spellings of
+         one thing. */
+      category TEXT CHECK(category IN ('School', 'Tutoring', 'Youth Programs', 'Food Pantry', 'Housing & Shelter', 'Seniors', 'Health', 'Environment', 'Animals', '5K', 'Sports', 'Arts & Culture', 'Fundraiser', 'Donation Drive', 'Administrative', 'Other')) NOT NULL,
       location TEXT NOT NULL,
       application_deadline TEXT NOT NULL,
       organizer_id TEXT NOT NULL,
       status TEXT CHECK(status IN ('open', 'closed', 'completed', 'cancelled')) DEFAULT 'open',
       auto_approve INTEGER DEFAULT 0,
       selection_summary TEXT,
-      created_at TEXT NOT NULL, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone',
+      created_at TEXT NOT NULL, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
       FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -1358,38 +1365,70 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 `;
 
 /**
- * The migration version this schema already embodies.
+ * The migration version the DDL above embodies.
  *
- * A PostgreSQL database is created at the destination, not walked to it, so its
- * `schema_migrations` is seeded as though all ${LATEST_MIGRATION_VERSION} had run. Anything
- * that later asks "which migrations are outstanding" then gets the right answer
- * instead of trying to replay fifty-five SQLite table rebuilds.
+ * A PostgreSQL database created from this file starts at the destination rather
+ * than being walked to it, so nothing in the registry is outstanding on it.
+ *
+ * ── This is NOT the baseline for an existing database ──
+ *
+ * It moves with every regeneration, which is correct for "what does this DDL
+ * contain" and catastrophic as an answer to "what has the deployed database
+ * already had applied". A database provisioned before a migration was written
+ * does not have that migration, however new this constant is. That question is
+ * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
+ * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 56;
+export const LATEST_MIGRATION_VERSION = 58;
 
 /**
- * Creates the schema on an empty PostgreSQL database.
+ * Creates the schema on a PostgreSQL database, and brings an existing one up to
+ * date.
  *
- * Idempotent: every statement is `IF NOT EXISTS` or `CREATE OR REPLACE`, so a
- * re-run against a database that already has the schema is a no-op rather than
- * an error. That matters because this runs at boot, and a boot that fails on
- * the second start is worse than one that fails on the first.
+ * Idempotent: every statement in the DDL is `IF NOT EXISTS` or
+ * `CREATE OR REPLACE`, so a re-run against a database that already has the
+ * schema is a no-op rather than an error. That matters because this runs at
+ * boot, and a boot that fails on the second start is worse than one that fails
+ * on the first.
+ *
+ * ── Idempotent is exactly why the migrations below are needed ──
+ *
+ * `CREATE TABLE IF NOT EXISTS` against a table that already exists does not
+ * reconcile it — it skips it. So every schema change made after a deployment
+ * was provisioned (a widened CHECK, a new column, a new index) reached a NEW
+ * database through this DDL and reached the DEPLOYED one not at all, with the
+ * boot reporting success either way. `runPostgresMigrations` is the other half.
+ *
+ * ── Fresh and existing are told apart before anything is written ──
+ *
+ * Emptiness is read from `schema_migrations` BEFORE the DDL runs, because the
+ * DDL creates that table. A fresh database records every registry version as
+ * supplied-by-this-schema, so no migration is outstanding on it. An existing one
+ * records nothing, and the runner walks it forward.
+ *
+ * The previous version of this function wrote one `postgres_baseline` row at
+ * the CURRENT latest version, unconditionally. On an existing database that
+ * claimed a migration had been applied which never ran — so the bookkeeping did
+ * not merely fail to record the change, it recorded a change that never
+ * happened, and every release added another such row.
  */
 export async function applyPostgresSchema(db) {
+  /* Imported here rather than at module scope: this file is generated, and the
+     registry imports nothing from it, so a top-level import would be a cycle
+     between the schema and the migrations that describe it. */
+  const { seedPostgresBaseline, postgresIsFresh, runPostgresMigrations } =
+    await import('../migrations/index.js');
+
+  const fresh = await postgresIsFresh(db);
+
   await db.exec(POSTGRES_SCHEMA);
+
   /* SQLite-style `?` placeholders, not `$1`: every statement in this codebase
      goes through `translatePlaceholders`, which rewrites `?` into PostgreSQL's
      numbered form. Writing `$1` here bypasses the translator, which then reports
-     zero parameters and PostgreSQL answers "there is no parameter $1". The
-     version is bound twice because `?` cannot be reused. */
-  await db.prepare(
-    `INSERT INTO schema_migrations (version, name, applied_at, checksum)
-          SELECT ?, ?, ?, ?
-           WHERE NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = ?)`
-  ).run(
-    LATEST_MIGRATION_VERSION, 'postgres_baseline', new Date().toISOString(), 'baseline',
-    LATEST_MIGRATION_VERSION,
-  );
+     zero parameters and PostgreSQL answers "there is no parameter $1". */
+  if (fresh) await seedPostgresBaseline(db);
+  else await runPostgresMigrations(db);
 
   /**
    * The reserved `system-cli` actor, which the DDL above cannot carry.

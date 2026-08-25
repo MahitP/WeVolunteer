@@ -121,6 +121,10 @@ const ACTIONS = {
      to see classmates' details and write on their service records. */
   ORGANIZATION_RANK_CHANGED: ['Organization rank changed', TONES.NOTABLE],
   ORGANIZATION_ROSTER_EXPORTED: ['Organization roster exported', TONES.NOTABLE],
+  /* The one action that makes a student's service record unchangeable. NOTABLE
+     rather than routine: it is irreversible, and the trail is the only place
+     that records who did it. */
+  EVENT_HOURS_CLOSED_OUT: ['Event hours closed out', TONES.NOTABLE],
 
   /* Club moderation. All five are NOTABLE and none is GRAVE, deliberately.
      GRAVE is reserved for what a person cannot undo and cannot escape — a

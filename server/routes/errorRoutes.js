@@ -118,6 +118,31 @@ function optionalReporter(req) {
  * server-side before storage. `message`, `stack` and `kind` go through
  * redaction. `context` is filtered to an allowlist.
  */
+/**
+ * The client's `context`, plus the one server-minted value it is allowed to
+ * echo back.
+ *
+ * `requestId` joins a browser crash to the API call that caused it and to the
+ * access record for that call. The client reads it from `X-Request-Id`, which
+ * this server set — so echoing it can at worst point at a request that already
+ * exists.
+ *
+ * Shape-checked anyway, and here rather than trusting the client's own check:
+ * this endpoint is unauthenticated, so "the client validated it" means nothing.
+ * A value that is not a plain id is dropped rather than corrected, because a
+ * corrected one would be a correlation id that correlates with nothing.
+ * `safeContext` in `errorReporter.js` redacts and truncates whatever survives,
+ * as it does for every other key.
+ */
+function reportContext(body) {
+  const base = body.context && typeof body.context === 'object' && !Array.isArray(body.context)
+    ? body.context
+    : {};
+  const id = body.requestId;
+  const valid = typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
+  return valid ? { ...base, requestId: id } : base;
+}
+
 router.post('/api/errors/report', async (req, res) => {
   // Answer first, unconditionally. Nothing below can change what the client
   // receives, which is what stops a reporting failure becoming a client-visible
@@ -144,7 +169,7 @@ router.post('/api/errors/report', async (req, res) => {
       message: body.message,
       stack: body.stack,
       route: body.route,
-      context: body.context,
+      context: reportContext(body),
     });
   } catch (err) {
     // `recordError` does not throw, so this is for everything around it — a

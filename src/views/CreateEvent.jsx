@@ -6,24 +6,9 @@ import TagInput from '../components/common/TagInput';
 import TagSuggestions from '../components/common/TagSuggestions';
 import { normaliseTag } from '../eventTags';
 import DatePicker from '../components/common/DatePicker';
+import { CATEGORY_GROUPS } from '../eventCategories';
 import { api } from '../utils/api';
 import { can } from '../authz';
-const CATEGORIES = [{
-  value: 'School',
-  label: 'School project'
-}, {
-  value: '5K',
-  label: '5K run / athletics'
-}, {
-  value: 'Food Pantry',
-  label: 'Food pantry'
-}, {
-  value: 'Fundraiser',
-  label: 'Fundraiser'
-}, {
-  value: 'Other',
-  label: 'Other community service'
-}];
 export default function CreateEvent({
   onSubmitEvent,
   addToast,
@@ -86,7 +71,28 @@ export default function CreateEvent({
     description: '',
     instructions: '',
     location: { location: '', address: null, latitude: null, longitude: null },
-    applicationDeadline: '',
+    /**
+     * The deadline is stored as a day and a time of day, not as one
+     * `datetime-local` string.
+     *
+     * The field used to be a native `<input type="datetime-local">` — the last
+     * browser-chrome date control on this form, and the one nobody could style,
+     * theme, or open without typing six digits into a segmented spinner. The
+     * day now comes from `DatePicker`, the same control every other date on the
+     * platform uses, and the time from the `<input type="time">` this form
+     * already uses for shift start and end.
+     *
+     * `applicationDeadline` is derived from the pair below rather than stored
+     * alongside them, so the two halves cannot drift out of step with the value
+     * that is actually submitted.
+     *
+     * 5pm rather than midnight: an organizer who never touches the time gets a
+     * deadline at the end of a working afternoon, which is what "applications
+     * close on the 12th" is usually taken to mean. Midnight on the 12th would
+     * silently close them a day earlier than that reading.
+     */
+    deadlineDate: '',
+    deadlineTime: '17:00',
     autoApprove: false,
     organizationId: '',
     /* `everyone` unless the organizer says otherwise, which is what every event
@@ -140,6 +146,26 @@ export default function CreateEvent({
       onDate: dates[0]
     }));
   }, [dates, shift.onDate]);
+  /**
+   * The deadline as one local `YYYY-MM-DDTHH:mm`, or `''` while either half is
+   * missing. This is the only place the two halves are joined, and every reader
+   * below — validation, the payload, the preview — goes through it.
+   */
+  const applicationDeadline = form.deadlineDate && form.deadlineTime
+    ? `${form.deadlineDate}T${form.deadlineTime}`
+    : '';
+  /**
+   * The latest day the deadline may fall on: the first day the event runs.
+   *
+   * The rule itself is `deadline <= first shift start`, which is finer than a
+   * day and is checked in full by `validate()` and again by the server. This is
+   * the day-level half of it, handed to the picker so the days AFTER the event
+   * are not offered at all — a deadline that closes applications weeks after the
+   * shift has been worked is not a mistake worth letting somebody make and then
+   * explaining to them. Empty until the organizer has said when the event runs,
+   * because before that there is nothing to be after.
+   */
+  const deadlineMaxDay = dates.length > 0 ? dates[0] : '';
   const set = (name, value) => {
     setForm(prev => ({
       ...prev,
@@ -150,6 +176,20 @@ export default function CreateEvent({
       [name]: ''
     }));
   };
+  /**
+   * The deadline's two halves both report their mistakes under one key.
+   *
+   * `set` clears `errors[name]`, and neither half is named `applicationDeadline`
+   * — so editing either one left the refusal it had just fixed sitting on
+   * screen. One writer for both, clearing the key the message is actually filed
+   * under.
+   */
+  const setDeadlinePart = (name, value) => {
+    setForm(prev => ({ ...prev, [name]: value }));
+    if (errors.applicationDeadline) setErrors(prev => ({ ...prev, applicationDeadline: '' }));
+  };
+  const setDeadlineDate = (iso) => setDeadlinePart('deadlineDate', iso);
+  const setDeadlineTime = (hhmm) => setDeadlinePart('deadlineTime', hhmm);
   const addDate = () => {
     if (!dateInput) return addToast('Pick a date first.', 'error');
     if (dates.includes(dateInput)) return addToast('That date is already on the list.', 'info');
@@ -217,14 +257,18 @@ export default function CreateEvent({
     if (!form.description.trim()) next.description = 'Tell volunteers what they\'ll be doing';
     const locText = typeof form.location === 'string' ? form.location : form.location?.location;
     if (!locText?.trim()) next.location = 'Add a location';
-    if (!form.applicationDeadline) next.applicationDeadline = 'Set an application deadline';
+    /* Named separately, because "you have not set it" and "you set the day and
+       not the hour" are different mistakes and only the second one has a field
+       already half-filled in front of the reader. */
+    if (!form.deadlineDate) next.applicationDeadline = 'Set an application deadline';
+    else if (!form.deadlineTime) next.applicationDeadline = 'Add the time applications close';
     if (slots.length === 0) next.slots = 'Add at least one shift before publishing';
     if (orgRequired && !form.organizationId) {
       next.organizationId = 'Choose the organization this event is for';
     }
-    if (form.applicationDeadline && slots.length > 0) {
+    if (applicationDeadline && slots.length > 0) {
       const first = new Date([...slots].sort((a, b) => a.startDatetime.localeCompare(b.startDatetime))[0].startDatetime);
-      if (new Date(form.applicationDeadline) >= first) {
+      if (new Date(applicationDeadline) >= first) {
         next.applicationDeadline = 'The deadline has to be before the first shift starts';
       }
     }
@@ -251,7 +295,7 @@ export default function CreateEvent({
         address: loc.address || null,
         latitude: loc.latitude != null ? loc.latitude : null,
         longitude: loc.longitude != null ? loc.longitude : null,
-        applicationDeadline: new Date(form.applicationDeadline).toISOString(),
+        applicationDeadline: new Date(applicationDeadline).toISOString(),
         autoApprove: form.autoApprove,
         attendeeVisibility: form.attendeeVisibility,
         /* Empty string means "no organization" — the server takes null or an
@@ -302,26 +346,49 @@ export default function CreateEvent({
               {errors.title && <span className="field-error"><AlertCircle size={12} />{errors.title}</span>}
             </div>
 
-            <div className="field-row">
-              <div className="field s-535b39">
-                <label htmlFor="ce-cat">Category</label>
-                <select id="ce-cat" className="select" value={form.category} onChange={e => set('category', e.target.value)}>
-                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
-                {/* Category is the fixed five-value taxonomy the Impact Dashboard
-                    aggregates on and the Auto Select draw reads; tags are the
-                    open vocabulary beside it. Kept adjacent so the difference is
-                    visible: one is a choice, the other is free text. */}
-              </div>
-              <div className="field s-535b39">
-                <label>Location</label>
-                <LocationPicker
-                  value={form.location}
-                  onChange={(loc) => set('location', loc)}
-                  datetime={form.startDatetime}
-                  error={errors.location}
-                />
-              </div>
+            {/**
+              * Category and Location each get the full width of the form.
+              *
+              * They were a two-column `.field-row`, which gave the category
+              * select about 190px — narrow enough that "Other community
+              * service" was clipped when the list was five words long, and
+              * unusable now it is sixteen with group headings. Neither field
+              * gained anything from sharing a row: the location control is a
+              * search box with a results list under it, and pairing a
+              * single-line select with it never lined up anyway.
+              *
+              * Below 700px `.field-row` already collapsed to one column, so this
+              * is the layout the phone has always had — the desktop now agrees
+              * with it.
+              *
+              * Category remains what it always was: ONE fixed value, the thing
+              * the Impact Dashboard aggregates on and the Auto Select draw
+              * reads. Tags are the open vocabulary beside it, and they are kept
+              * adjacent so the difference stays visible — one is a choice from a
+              * list, the other is free text.
+              */}
+            <div className="field s-535b39">
+              <label htmlFor="ce-cat">Category</label>
+              <select id="ce-cat" className="select" value={form.category} onChange={e => set('category', e.target.value)}>
+                {CATEGORY_GROUPS.map(({ group, categories }) => (
+                  <optgroup key={group} label={group}>
+                    {categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              <span className="field-hint">
+                The one thing this event mostly is. Add tags below for everything else it also is.
+              </span>
+            </div>
+
+            <div className="field s-535b39">
+              <label>Location</label>
+              <LocationPicker
+                value={form.location}
+                onChange={(loc) => set('location', loc)}
+                datetime={form.startDatetime}
+                error={errors.location}
+              />
             </div>
 
             <TagInput
@@ -358,10 +425,48 @@ export default function CreateEvent({
               {errors.description && <span className="field-error"><AlertCircle size={12} />{errors.description}</span>}
             </div>
 
+            {/**
+              * Applications close — the app's own date control, not the
+              * browser's.
+              *
+              * `openOnClick` because on this field the calendar IS the way in:
+              * the answer is a day two or three weeks out, which is a glance and
+              * a click rather than eight keystrokes. Typing still works, and the
+              * calendar button is still there for the keyboard.
+              *
+              * `min` is today, `max` is the first day the event runs. Between
+              * them there is no day left that would produce the inverted
+              * deadline this field used to accept without complaint.
+              */}
             <div className="field">
-              <label htmlFor="ce-deadline">Applications close</label>
-              <input id="ce-deadline" type="datetime-local" className="input" value={form.applicationDeadline} aria-invalid={!!errors.applicationDeadline} onChange={e => set('applicationDeadline', e.target.value)} />
-              {errors.applicationDeadline ? <span className="field-error"><AlertCircle size={12} />{errors.applicationDeadline}</span> : <span className="field-hint">Must be before your first shift starts.</span>}
+              <div className="field-row">
+                <div className="field s-535b39">
+                  <DatePicker
+                    id="ce-deadline"
+                    label="Applications close"
+                    value={form.deadlineDate}
+                    onChange={setDeadlineDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    max={deadlineMaxDay || undefined}
+                    error={errors.applicationDeadline || ''}
+                    openOnClick
+                  />
+                </div>
+                <div className="field s-535b39">
+                  <label htmlFor="ce-deadline-time">Closing time</label>
+                  <input
+                    id="ce-deadline-time"
+                    type="time"
+                    className="input"
+                    value={form.deadlineTime}
+                    aria-invalid={!!errors.applicationDeadline}
+                    onChange={e => setDeadlineTime(e.target.value)}
+                  />
+                </div>
+              </div>
+              {!errors.applicationDeadline && (
+                <span className="field-hint">Must be before your first shift starts.</span>
+              )}
             </div>
 
             <div className="field">

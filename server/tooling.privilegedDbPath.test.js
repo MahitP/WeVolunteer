@@ -41,6 +41,54 @@ vi.setConfig({ testTimeout: 20000 });
  */
 
 const ROOT = path.resolve(__dirname, '..');
+
+/**
+ * The `node_modules` Node would actually resolve from, found rather than assumed.
+ *
+ * ── Why `path.join(ROOT, 'node_modules')` is not it ──
+ *
+ * The copy below lives in the system temp directory, outside the repository, so
+ * Node's upward search for a package starts and ends there — it cannot reach the
+ * real tree by walking up. The symlink is what supplies it, and it pointed at
+ * `ROOT/node_modules` unconditionally.
+ *
+ * That is only the dependency tree in a plain checkout. It is NOT one when the
+ * tree is hoisted above `ROOT`, which happens for an ordinary reason: a **git
+ * worktree**. `<repo>/.claude/worktrees/<name>` has its own `ROOT` and no
+ * packages under it — Node finds them by walking up to the main checkout — so
+ * `ROOT/node_modules` is either absent or, as here, a directory holding nothing
+ * but Vite's cache. The symlink then resolved to an empty tree and the spawned
+ * script died on `Cannot find package 'pg'` before reaching any behaviour this
+ * file is about.
+ *
+ * The failure was indistinguishable from the defect under test: both produce a
+ * run with no sentinel in its output. So the suite reported a database-safety
+ * regression that did not exist, on any machine using a worktree.
+ *
+ * Walking up from `ROOT` and probing for a package the copied scripts genuinely
+ * need is the same search Node performs, and it gives the right answer for a
+ * checkout, a worktree, and a hoisted workspace alike.
+ */
+function dependencyTree() {
+  /* `pg` and `bcryptjs` are both real dependencies of `bin/grant-ownership.mjs`'s
+     import graph, so a tree containing them is a tree that can run it. Probing on
+     a named package rather than on the directory existing is the whole point —
+     the broken case had a `node_modules` directory that was simply empty. */
+  const PROBES = ['pg', 'bcryptjs'];
+  let dir = ROOT;
+  for (;;) {
+    const candidate = path.join(dir, 'node_modules');
+    if (PROBES.every(pkg => existsSync(path.join(candidate, pkg)))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(
+    `No node_modules containing [${PROBES.join(', ')}] above ${ROOT}. `
+    + 'Run `npm ci` — these cases spawn a copy of bin/ and server/ in a temp '
+    + 'directory, which needs a real dependency tree symlinked into it.'
+  );
+}
 const SCRIPTS = [
   'bin/grant-ownership.mjs',
   'bin/revoke-ownership.mjs',
@@ -281,7 +329,7 @@ describe('privileged CLI database resolution', () => {
       const skip = (src) => /\.test\.[cm]?js$|\.db(-wal|-shm)?$/.test(src);
       cpSync(path.join(ROOT, 'bin'), path.join(dir, 'bin'), { recursive: true, filter: (s) => !skip(s) });
       cpSync(path.join(ROOT, 'server'), path.join(dir, 'server'), { recursive: true, filter: (s) => !skip(s) });
-      symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
+      symlinkSync(dependencyTree(), path.join(dir, 'node_modules'));
       /* Without it every server/*.js is parsed as CommonJS, because "type":
          "module" lives in package.json — and the copy then fails on its first
          import rather than on the behaviour under test. */

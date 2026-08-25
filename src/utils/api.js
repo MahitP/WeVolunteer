@@ -17,12 +17,21 @@ const STORAGE_KEYS = {
  * there is no HTTP status to report.
  */
 export class ApiError extends Error {
-  constructor(message, { status = 0, data = null, isNetworkError = false } = {}) {
+  constructor(message, { status = 0, data = null, isNetworkError = false, requestId = null } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.data = data;
     this.isNetworkError = isNetworkError;
+    /**
+     * The server's `X-Request-Id` for the request that failed, when there was
+     * one — the thread from this failure to the backend's own record of it.
+     *
+     * `null` for a request that never reached the server (offline, DNS), which
+     * is honest: there is no server-side record of something the server never
+     * saw. Nothing renders this; it exists so `reportClientError` can send it.
+     */
+    this.requestId = requestId;
   }
 }
 
@@ -35,6 +44,25 @@ export class ApiError extends Error {
  * "Request failed (429)" in front of students, which tells them nothing about
  * what happened or what to do next.
  */
+/**
+ * The correlation id the server put on this response, if any.
+ *
+ * Set by the first middleware in `server/app.js`, so it is present on every
+ * response the application produced — including the ones produced by middleware
+ * that refused the request. Absent when something between the browser and the
+ * app answered instead (a captive portal, a proxy error page), which is itself
+ * worth knowing: no id means no server-side record to go and find.
+ *
+ * Wrapped because `Headers.get` is unavailable on the hand-rolled response
+ * objects some tests pass in, and a missing id must never break the error path
+ * that is already handling a failure.
+ */
+function requestIdOf(response) {
+  try {
+    return response?.headers?.get?.('X-Request-Id') ?? null;
+  } catch { return null; }
+}
+
 function messageForStatus(status) {
   if (status === 429) return 'Too many attempts. Please wait a few minutes and try again.';
   if (status === 401) return 'Your session has expired. Please sign in again.';
@@ -159,7 +187,8 @@ async function apiFetch(endpoint, options = {}) {
   if (!response.ok) {
     throw new ApiError(data?.error || messageForStatus(response.status), {
       status: response.status,
-      data
+      data,
+      requestId: requestIdOf(response)
     });
   }
 
@@ -194,7 +223,7 @@ async function apiFetch(endpoint, options = {}) {
   if (!parsedJson && response.status !== 204) {
     throw new ApiError(
       'The server sent a response we could not read. Check your connection and try again.',
-      { isNetworkError: true, status: response.status }
+      { isNetworkError: true, status: response.status, requestId: requestIdOf(response) }
     );
   }
 
@@ -729,6 +758,18 @@ export const api = {
   submitAttendance: async (eventId, attendanceMap, reason, hoursMap) => apiFetch(`/api/events/${eventId}/attendance`, {
     method: 'POST',
     body: JSON.stringify({ attendanceMap, reason, hoursMap })
+  }),
+
+  /**
+   * Makes the credited hours for an event permanent. One-way: there is no
+   * matching reopen call, because there is no reopen route.
+   *
+   * Only meaningful once the event is `completed` — the server refuses it
+   * otherwise, so the UI offers it only then rather than explaining a refusal
+   * afterwards.
+   */
+  closeOutHours: async (eventId) => apiFetch(`/api/events/${eventId}/hours/close-out`, {
+    method: 'POST'
   }),
 
   // ── Check-in ────────────────────────────────────

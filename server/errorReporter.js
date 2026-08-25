@@ -22,6 +22,41 @@ import { CLIENT_ROUTE_PATTERNS, UNKNOWN_ROUTE } from './clientRoutes.js';
 
 export const REDACTED = '[redacted]';
 
+/**
+ * Forwards a recorded error to Better Stack, if it is configured.
+ *
+ * ── Why the import is lazy ──
+ *
+ * This module's header states its boundary: `node:crypto` and `clientRoutes.js`
+ * (plain data), and nothing else — which is what lets a test drive it against a
+ * throwaway file and what keeps it out of a cycle with `app.js`. A top-level
+ * import of `telemetry.js` would break that claim, and `telemetry.js` imports
+ * `redactMessage` from HERE, so it would also be a cycle.
+ *
+ * A failure to load leaves telemetry permanently off for the process and
+ * changes nothing else — the row is already written by the time this runs.
+ */
+let telemetryModule = null;
+/* Started at module load rather than on first use, so the resolution is done
+   long before a request is served and no process ever loses its FIRST error to
+   a cold import. Fire-and-forget: a failure leaves telemetry off and changes
+   nothing else. The dynamic form is what breaks the cycle — by the time this
+   promise settles, both modules have finished evaluating. */
+import('./telemetry.js')
+  .then((m) => { telemetryModule = m; })
+  .catch(() => { telemetryModule = null; });
+
+function emitErrorTelemetry(fields) {
+  try {
+    if (!telemetryModule?.logEvent) return;
+    telemetryModule.logEvent('error', 'error.recorded', {
+      ...fields,
+      errorType: fields.kind,
+      level: 'error',
+    });
+  } catch { /* never let reporting the error become the error */ }
+}
+
 /** Evidence kept per problem. Beyond this the oldest rows are dropped. */
 export const MAX_EVENTS_PER_GROUP = 50;
 
@@ -89,7 +124,16 @@ const SOURCES = Object.freeze(['server', 'client', 'worker']);
  */
 const CONTEXT_KEYS = Object.freeze([
   'route', 'method', 'statusCode', 'migrationVersion',
-  'jobId', 'eventId', 'slotId', 'component', 'boundary'
+  'jobId', 'eventId', 'slotId', 'component', 'boundary',
+  /**
+   * The correlation id of the request this failed in, when there was one.
+   *
+   * Safe by construction: a v4 UUID this server generated in `app.js` and
+   * handed back on `X-Request-Id`. It names no person and carries no meaning
+   * outside this system — which is exactly why it can be the thread from a
+   * browser crash report to the access record to this row.
+   */
+  'requestId'
 ]);
 
 /* ── Redaction ─────────────────────────────────────────────────────────── */
@@ -512,6 +556,31 @@ export async function recordError(db, event = {}) {
          )
        WHERE fingerprint = ?
     `).run(fp, fp);
+
+    /**
+     * Telemetry, LAST and only on the success path.
+     *
+     * After the row is written, so a telemetry problem cannot cost the evidence
+     * — the database is the record and Better Stack is a copy of it. Only on
+     * success, so what reaches the vendor is exactly what reached the table,
+     * which is the invariant `telemetry.betterstack.test.js` asserts.
+     *
+     * Every value below has already been through this module: `message` and
+     * `kind` are redacted, `route` is a pattern or `'unknown'`, `stack` is
+     * redacted and trimmed, `userHash` is a digest. Nothing raw from `event` is
+     * forwarded, and `context` is not forwarded at all — its allowlist admits
+     * ids this module has no need to send onward.
+     */
+    emitErrorTelemetry({
+      source, kind, message, route, fingerprint: fp,
+      stack: redactStack(event.stack),
+      method: typeof event.method === 'string' ? event.method.slice(0, 10) : undefined,
+      statusCode: Number.isInteger(event.statusCode) ? event.statusCode : undefined,
+      userHash: typeof event.userHash === 'string' ? event.userHash : undefined,
+      role: typeof event.role === 'string' ? event.role : undefined,
+      release: typeof event.release === 'string' ? event.release : undefined,
+      requestId: event.context?.requestId,
+    });
 
     return { ok: true, fingerprint: fp };
   } catch (err) {

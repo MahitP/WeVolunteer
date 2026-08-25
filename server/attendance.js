@@ -26,6 +26,12 @@
  *  · Attendance is independent of application status. A volunteer who attended
  *    keeps their hours no matter what happens to their application afterwards.
  *  · Changing an existing record requires a reason and is attributed to an actor.
+ *  · Once the organizer has CLOSED THE HOURS OUT (`events.hours_closed_out_at`),
+ *    an existing record can no longer be changed at all — by anyone, including
+ *    an administrator. Corrections belong to the window between finalising and
+ *    closing out; after it the record is the school's, not the organizer's. See
+ *    the refusal in `finalizeAttendance`, and the route that sets the column for
+ *    why the lock is a deliberate act rather than a consequence of `completed`.
  */
 
 import { recordHoursChange } from './hoursLedger.js';
@@ -373,6 +379,60 @@ export async function finalizeAttendance(db, { event, attendanceMap, hoursMap, r
   const invalidHours = [];
   /* Slots whose stored times cannot produce a duration — see the refusal below. */
   const unpriceable = [];
+  /* Already-credited records this request would change on a closed-out event. */
+  const locked = [];
+
+  /**
+   * Whether the hours for this event have been closed out.
+   *
+   * ── Why this is its own column and not `status = 'completed'` ──
+   *
+   * `completed` is not a decision anybody makes. It is written by
+   * `computeEventCompletion` the instant every accepted volunteer has a record —
+   * a side effect of ticking the last checkbox. Locking on it would mean that on
+   * a single-volunteer event the very FIRST save both credits the student and
+   * freezes the number, with no moment in between in which to notice a mistyped
+   * 40. The reason field below and the hours ledger exist precisely because
+   * corrections are expected.
+   *
+   * It would also contradict a promise the product already makes out loud:
+   * `PUT /api/events/:id` refuses a completed event with "This event is complete
+   * and its details can no longer be changed. Attendance can still be
+   * corrected."
+   *
+   * So the lock is an act — `POST /api/events/:id/hours/close-out`, offered only
+   * once the event IS complete, confirmed, attributed and one-way. Everything
+   * before it stays correctable exactly as it was.
+   *
+   * A string holding WHEN rather than a boolean, so the trail can say when.
+   *
+   * ── Re-read INSIDE the transaction, not taken from `event` ──
+   *
+   * `event` was fetched by the route before the transaction opened, and between
+   * that read and this write there is a whole request's worth of time —
+   * authorization, the host check, several awaits. A close-out committing in
+   * that window would be invisible to a correction judged against the stale
+   * snapshot, and the correction would land on hours that had just been made
+   * permanent. That is the one outcome this feature exists to prevent, so it is
+   * not left to how quickly two organizers happen to click.
+   *
+   * Reading it here puts the check and the write in the same transaction, which
+   * closes the window on both engines: SQLite serialises the writer outright,
+   * and PostgreSQL's READ COMMITTED returns the value as of this statement
+   * rather than as of the route's.
+   *
+   * Falls back to the route's copy if the row cannot be read — a database that
+   * cannot answer this is not a database this should be writing hours to
+   * either, and the surrounding `try` turns any failure into a refusal rather
+   * than an unguarded write.
+   */
+  let eventClosedOut = Boolean(event.hours_closed_out_at);
+  try {
+    const fresh = await db.prepare(
+      'SELECT hours_closed_out_at FROM events WHERE id = ?'
+    ).get(event.id);
+    eventClosedOut = Boolean(fresh?.hours_closed_out_at);
+  } catch { /* keep the route's answer; see above */ }
 
   /**
    * The event may not measure service in hours at all.
@@ -414,6 +474,55 @@ export async function finalizeAttendance(db, { event, attendanceMap, hoursMap, r
     // volunteer who was never accepted and has no record cannot acquire one.
     if (app.status !== 'accepted' && !prior) {
       skipped.push({ applicationId, why: 'not_accepted' });
+      continue;
+    }
+
+    /**
+     * ── A closed-out event's credited records are final ──
+     *
+     * Decided HERE, before the shift, pricing and range checks, because on such
+     * a record the answer to all three is irrelevant: nothing can be written to
+     * it whatever they say. Left until after them, an organizer typing 12 hours
+     * onto a 4-hour shift whose hours were closed out last spring was told the
+     * number was out of range — true, and not the reason, and it invites them
+     * to try 5 instead. The reason is that the hours are closed.
+     *
+     * "Would change" rather than "was submitted": the Closeout screen seeds its
+     * checkboxes from the existing records, so every row arrives in the payload
+     * every time the tab is opened. A lock that fired on submission would make
+     * the screen unopenable on every completed event on the platform.
+     *
+     * The three ways a submission asks for a change, and nothing else counts:
+     *
+     *   · the present flag differs from what is stored
+     *   · an hours figure is supplied that differs from what is stored
+     *   · an hours figure is supplied that is not a number at all — still an
+     *     attempted write, and refused as one rather than as bad input
+     *
+     * Rows with NO stored record are untouched by this. See the note on
+     * `locked` below the loop for why that is deliberate.
+     */
+    if (eventClosedOut && prior) {
+      const supplied = hoursMap && Object.hasOwn(hoursMap, applicationId)
+        ? hoursMap[applicationId] : undefined;
+      const asksForHours = supplied !== undefined && supplied !== null && supplied !== '';
+      const suppliedHours = asksForHours ? Number(supplied) : null;
+      const changesHours = asksForHours
+        && (!Number.isFinite(suppliedHours) || suppliedHours !== prior.hours_awarded);
+
+      if (present !== prior.present || changesHours) {
+        locked.push({
+          applicationId,
+          name: app.user_name,
+          slotName: app.slot_name,
+          from: prior.present === 1 ? 'present' : 'absent',
+          to: present === 1 ? 'present' : 'absent',
+          hoursFrom: prior.hours_awarded,
+          hoursTo: asksForHours ? suppliedHours : prior.hours_awarded,
+        });
+      } else {
+        skipped.push({ applicationId, why: 'unchanged' });
+      }
       continue;
     }
 
@@ -587,6 +696,71 @@ export async function finalizeAttendance(db, { event, attendanceMap, hoursMap, r
     }
 
     planned.push({ app, prior: prior || null, present, hours, hoursOverridden });
+  }
+
+  /**
+   * ── Once the event is closed out, a credited record is final ──
+   *
+   * `events.status = 'completed'` is not a label. It is written by exactly one
+   * place — the finalise route, when `computeEventCompletion` reports that every
+   * shift has ended and every accepted volunteer has been accounted for — and
+   * once written it cannot be written back: `PATCH /api/events/:id/status`
+   * refuses a completed event outright. It is the moment the organizer's
+   * judgement about who served becomes the school's record of who served, which
+   * is also the moment a student's certificate and their hours total start being
+   * quoted to somebody outside this system.
+   *
+   * Up to that point corrections are not merely allowed, they are expected — a
+   * volunteer marked absent who was there, a shift credited at four hours that
+   * ran to two and a half. That is what the reason field below exists for, and
+   * nothing here narrows it.
+   *
+   * After it, no. The screen carried no bound at all: an organizer could reopen
+   * Closeout on an event finished last spring and move a graduating student's
+   * hours, with a one-line reason, and every downstream figure — the transcript,
+   * the certificate, the Silver Award progress bar, the Impact Dashboard — would
+   * silently follow.
+   *
+   * ── What is locked, and what is not ──
+   *
+   * Only rows that ALREADY HAVE a credited record, and only when the submission
+   * would actually change one — both decided in the loop above, where the row's
+   * stored values are already in hand. An unchanged row is still reported as
+   * `skipped: 'unchanged'`, so opening the screen on a completed event and
+   * pressing save without editing anything is a no-op rather than a refusal.
+   *
+   * A volunteer with NO record is deliberately still creditable. Completion is
+   * computed from the accepted roster at the moment it was reached, so somebody
+   * accepted afterwards has never been finalised at all; refusing them would
+   * mean a student who worked the shift can never be credited for it by anyone.
+   * Awarding them nothing is not "no takebacksies", it is a different loss.
+   *
+   * ── Why this refusal is checked FIRST ──
+   *
+   * Ahead of `invalid_hours`, `slot_unpriceable` and `shift_not_ended`, because
+   * on a locked record none of those questions has any bearing on the outcome.
+   * Reporting "that is more hours than the shift can account for" to somebody
+   * editing an event that closed last spring is true, unhelpful, and an
+   * invitation to try a smaller number.
+   *
+   * ── Why here and not only in the route ──
+   *
+   * `finalizeAttendance` is the only writer to `attendance` in the codebase, and
+   * a guard in the route is a guard on one caller. This is the floor.
+   */
+  if (locked.length > 0) {
+    return {
+      ok: false,
+      error: 'hours_locked',
+      /* Deliberately does not promise a way round it. There is no
+         administrator override path today — `admin_correction` exists in the
+         ledger's enum with no writer — and a refusal that names a remedy which
+         does not exist sends an organizer to ask for something nobody can do. */
+      message: 'The hours for this event have been closed out, so they are final. '
+        + `${locked.length} record${locked.length === 1 ? '' : 's'} would change. `
+        + 'Closing out is deliberate and cannot be undone.',
+      locked,
+    };
   }
 
   if (invalidHours.length > 0) {

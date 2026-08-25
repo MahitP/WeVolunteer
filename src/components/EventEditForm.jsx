@@ -2,25 +2,25 @@ import React, { useState } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import { isoToLocalInput } from '../utils/helpers';
 import { LocationPicker } from './location';
-const CATEGORIES = [{
-  value: 'School',
-  label: 'School'
-}, {
-  value: 'Community',
-  label: 'Community'
-}, {
-  value: 'Library',
-  label: 'Library'
-}, {
-  value: 'Environment',
-  label: 'Environment'
-}, {
-  value: 'Health',
-  label: 'Health'
-}, {
-  value: 'Civic',
-  label: 'Civic'
-}];
+import { CATEGORY_GROUPS } from '../eventCategories';
+
+/**
+ * ── This list used to be wrong, and had been since it was written ──
+ *
+ * It read `School, Community, Library, Environment, Health, Civic`. Four of
+ * those six — Community, Library, Civic, and at the time Environment and Health
+ * too — were never values this platform stores. `VALID_CATEGORIES` was
+ * `School | 5K | Food Pantry | Fundraiser | Other`, so an organizer who opened
+ * this form and changed the category to "Library" got a 400 from
+ * `PUT /api/events/:id` naming a field they had just chosen from a dropdown
+ * this app gave them. Worse, the form offered NO way back to `5K`, `Food Pantry`
+ * or `Fundraiser`: an event in one of those categories showed a select with no
+ * matching option, and the first save silently re-filed it as `School`.
+ *
+ * The fix is not a corrected literal — a corrected literal is the same bug
+ * waiting for the next vocabulary change. It is the shared module, which is also
+ * what the CHECK constraint and the server's validator are built from.
+ */
 export default function EventEditForm({
   event,
   onSave,
@@ -59,6 +59,23 @@ export default function EventEditForm({
       }
       if (Number(slot.maxSpots) <= 0) errs[`slot-${i}-maxSpots`] = 'At least one spot';
     });
+    /**
+     * The deadline cannot land after the event.
+     *
+     * `validateEventPayload` refuses this on the server and always has, so the
+     * edit could not actually SAVE an inverted pair — it just did not say so
+     * until the round trip came back, and the message arrived as a toast next to
+     * a form with nothing highlighted. The create form has checked it inline
+     * since it was written; this is the same check on the other half of the same
+     * rule, reported on the field it belongs to.
+     */
+    const starts = editSlots.map(s => Date.parse(s.startDatetime)).filter(t => !Number.isNaN(t));
+    if (editForm.applicationDeadline && starts.length > 0) {
+      const deadline = Date.parse(editForm.applicationDeadline);
+      if (!Number.isNaN(deadline) && deadline > Math.min(...starts)) {
+        errs.applicationDeadline = 'The deadline has to be on or before the first shift starts';
+      }
+    }
     setEditErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -128,7 +145,11 @@ export default function EventEditForm({
           ...f,
           category: e.target.value
         }))}>
-            {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {CATEGORY_GROUPS.map(({ group, categories }) => (
+              <optgroup key={group} label={group}>
+                {categories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </optgroup>
+            ))}
           </select>
         </div>
         <div className="field">

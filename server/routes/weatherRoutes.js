@@ -130,8 +130,36 @@ router.get('/api/weather', weatherLimiter, authenticateToken, requireCap('event.
     return res.status(400).json({ error: 'Invalid datetime' });
   }
 
-  targetDate.setMinutes(0, 0, 0);
-  const targetIso = targetDate.toISOString().slice(0, 13); // e.g. "2024-06-15T10"
+  /**
+   * The UTC hour being asked about, e.g. "2024-06-15T10".
+   *
+   * ── The bug this replaces ──
+   *
+   * It was `targetDate.setMinutes(0, 0, 0)` followed by `toISOString()`.
+   * `setMinutes` is a LOCAL-time setter and `toISOString` is UTC, so the two
+   * only agree when the server's zone is a whole number of hours from UTC. In a
+   * half-hour zone — India, Adelaide, Newfoundland, Iran, and Nepal at 45
+   * minutes — zeroing the local minutes leaves the UTC minutes at :30, and the
+   * slice below then truncates to the WRONG hour.
+   *
+   * Open-Meteo is asked with `timezone=UTC`, so `hourly.time` is a list of UTC
+   * hours on the hour. The lookup therefore matched the hour BEFORE the one
+   * requested for any request whose UTC minutes were under :30 — roughly half of
+   * them — and returned that forecast as though it were the answer. Not a 404: a
+   * confidently wrong temperature for the wrong hour, on a deployment in one of
+   * those zones. `routes.weather.test.js` catches it because its mocked series
+   * holds only the requested hour, so the miss surfaces as a 404 instead.
+   *
+   * ── Why there is no rounding step now ──
+   *
+   * There never needed to be one. `toISOString()` is UTC by definition and
+   * slicing at 13 characters IS the truncation to the hour, so the mutation was
+   * redundant as well as wrong. Removing it rather than switching to
+   * `setUTCMinutes` also leaves `targetDate` holding the instant that was
+   * actually requested, which is what the forecast-window check below should be
+   * measuring — it was previously measuring a rounded one.
+   */
+  const targetIso = targetDate.toISOString().slice(0, 13);
   
   /* Rounded once, then used for both the key and the upstream call, so the
      thing cached is exactly the thing that was asked for. */

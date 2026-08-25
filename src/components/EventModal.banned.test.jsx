@@ -10,7 +10,7 @@ import EventModal from './EventModal';
  *
  * The ban notice rendered, and the shift list rendered underneath it anyway.
  * Its per-slot buttons were `disabled`, which is not the same thing as absent:
- * a greyed-out "Request" still reads as "you could join this", and the reader is
+ * a greyed-out "Select" still reads as "you could join this", and the reader is
  * left to work out that the red box above is the reason. What was asked for, and
  * what is here now, is that the Join affordance is REPLACED by the appeal one.
  *
@@ -112,11 +112,11 @@ describe('a banned reader', () => {
     expect(screen.getByText(/Missed three shifts/i)).toBeInTheDocument();
   });
 
-  it('gets NO shift list and no Request control', () => {
+  it('gets NO shift list and no Select control', () => {
     /* THE regression. A disabled Join is still a Join. */
     show(banned);
     expect(screen.queryByText(/Morning/), 'the shift list rendered under the ban notice').toBeNull();
-    expect(screen.queryByRole('button', { name: /Request/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Select$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Send application/i })).toBeNull();
   });
 

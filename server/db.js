@@ -606,7 +606,14 @@ export function initDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT NOT NULL,
-      category TEXT CHECK(category IN ('School', '5K', 'Food Pantry', 'Fundraiser', 'Other')) NOT NULL,
+      /* The vocabulary and the reasoning behind it live in
+         server/eventCategories.js. Spelled out here rather than interpolated,
+         because the stored DDL of a freshly booted database is what
+         bin/generate-postgres-schema.mjs reads to derive the PostgreSQL schema
+         — and because server/db.categoryVocabulary.test.js asserts that this
+         list, the module's list and migration 057's list are three spellings of
+         one thing. */
+      category TEXT CHECK(category IN ('School', 'Tutoring', 'Youth Programs', 'Food Pantry', 'Housing & Shelter', 'Seniors', 'Health', 'Environment', 'Animals', '5K', 'Sports', 'Arts & Culture', 'Fundraiser', 'Donation Drive', 'Administrative', 'Other')) NOT NULL,
       location TEXT NOT NULL,
       application_deadline TEXT NOT NULL,
       organizer_id TEXT NOT NULL,
@@ -1745,9 +1752,29 @@ async function seedDatabase() {
     'event-softball',
     'Softball Tournament Snack Shack',
     'Every shift must have an adult volunteer due to cooking/grilling. The remaining slots can be taken by either high school volunteers, or additional parents. We are requesting that each family signs up for at least one time slot. Thank you!',
-    'Other',
+    'Sports',
     'Reichler Park',
-    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    /**
+     * BEFORE the shifts, which it was not.
+     *
+     * This read `Date.now() + 30 days` while every softball slot is seeded at
+     * `atDay(12, …)` — so the demo's flagship event advertised "applications
+     * close 5 September" above shifts that had been worked on 18 August. Every
+     * screen that shows the pair showed it: the event modal's facts panel put
+     * "When" and "Applications close" side by side and they read backwards.
+     *
+     * `validateEventPayload` has refused `deadline > first shift start` on every
+     * event created through the API since it was written. Seeding does not go
+     * through the API — it INSERTs — so it was the one writer that could produce
+     * a row the validator would have rejected, and it did.
+     *
+     * `atDay(10, 17)` is two days before the first shift, which is also what the
+     * seed is meant to DEMONSTRATE: a deadline with a plausible gap before the
+     * event, so the countdown, the Auto Select grace period and the "applications
+     * closed" state all have somewhere to happen. `server/db.seedIntegrity.test.js`
+     * now asserts the ordering for every seeded event, so this cannot come back.
+     */
+    atDay(10, 17),
     'user-org-1',
     'open',
     0,

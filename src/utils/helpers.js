@@ -85,6 +85,29 @@ export function eventPermissions(event) {
     canDelete: !completed && !hasAttendance,
     // Duplicating reads the original and writes a new event, so it stays open.
     canDuplicate: true,
+    /**
+     * Whether the hours for this event can still be made permanent.
+     *
+     * Two conditions, and they are different questions:
+     *
+     *   `completed`            every shift has ended and every accepted
+     *                          volunteer has a record, so there is a final
+     *                          roster to freeze. Closing out earlier would leave
+     *                          anybody still unmarked uncreditable for ever.
+     *   `!hoursClosedOutAt`    it has not already been done. The act is one-way;
+     *                          there is no reopen route.
+     *
+     * Note what this is NOT: `completed` on its own does not mean the hours are
+     * locked. Attendance stays correctable right up until somebody closes it
+     * out, which is why `canEditDetails` above can be false on the same event
+     * while this is true. The two lifecycles are deliberately separate — see
+     * `server/migrations/058_hours_close_out.js`.
+     *
+     * A cancelled event is excluded by construction: `status` holds one value,
+     * so it cannot be both `cancelled` and `completed`.
+     */
+    canCloseOutHours: completed && !event?.hoursClosedOutAt,
+    hoursClosedOut: !!event?.hoursClosedOutAt,
     blockedReason: completed
       ? 'This event is complete. Its details can no longer be changed.'
       : hasAttendance

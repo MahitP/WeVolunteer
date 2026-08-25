@@ -31,11 +31,17 @@
 
 import { api } from '../utils/api';
 import { can } from '../authz.js';
+import { VALID_CATEGORIES } from '../eventCategories.js';
 
 /**
- * Valid event categories from server/config.js.
+ * Valid event categories — the platform's own vocabulary, re-exported.
+ *
+ * Declared as a literal here until the list grew past five, at which point a
+ * copy is a copy that can disagree with the CHECK constraint. `runTool` sends
+ * whatever this says straight to `POST /api/events`, so a value here that the
+ * server does not admit is a 400 the model cannot explain.
  */
-export const VALID_CATEGORIES = Object.freeze(['School', '5K', 'Food Pantry', 'Fundraiser', 'Other']);
+export { VALID_CATEGORIES };
 
 /**
  * Valid student grades.
@@ -53,11 +59,30 @@ export function normalizeEventCategory(input) {
   const directMatch = VALID_CATEGORIES.find(c => c.toLowerCase() === raw.toLowerCase());
   if (directMatch) return directMatch;
 
+  /**
+   * Ordered most specific first, because several of these overlap: "animal
+   * shelter" is both an animal and a shelter, "charity 5K" is both a fundraiser
+   * and a race, and a "school food drive" is all three. Whichever line comes
+   * first wins, so the more particular reading is written above the more
+   * general one, and `School` — the broadest word in the list, matching "class"
+   * and "club" — sits near the bottom.
+   */
   const lower = raw.toLowerCase();
-  if (/\b(food|pantry|hunger|meal|soup|canned|grocer)\b/.test(lower)) return 'Food Pantry';
-  if (/\b(5k|run|race|walk|marathon|sports?|athletics?|track)\b/.test(lower)) return '5K';
-  if (/\b(school|tutor|tutoring|teach|education|class|reading|stem|math|science|club)\b/.test(lower)) return 'School';
-  if (/\b(fundrais|charity|gala|auction|benefit|donation)\b/.test(lower)) return 'Fundraiser';
+  if (/\b(food|pantry|hunger|meal|soup|kitchen|canned|grocer)\b/.test(lower)) return 'Food Pantry';
+  if (/\b(animal|animals|shelter dog|dog|dogs|cat|cats|kennel|wildlife|humane)\b/.test(lower)) return 'Animals';
+  if (/\b(homeless|shelter|housing|habitat|rebuild)\b/.test(lower)) return 'Housing & Shelter';
+  if (/\b(senior|seniors|elder|elderly|nursing|retirement|hospice)\b/.test(lower)) return 'Seniors';
+  if (/\b(blood|health|clinic|hospital|medical|first ?aid|wellness|vaccin\w*)\b/.test(lower)) return 'Health';
+  if (/\b(environment\w*|clean-?up|cleanup|litter|park|beach|river|trail|garden|tree|trees|recycl\w*|conservation)\b/.test(lower)) return 'Environment';
+  if (/\b(5k|10k|run|race|marathon|track)\b/.test(lower)) return '5K';
+  if (/\b(sports?|athletics?|coach\w*|soccer|softball|basketball|baseball|tournament)\b/.test(lower)) return 'Sports';
+  if (/\b(art|arts|music|band|choir|theat\w*|museum|gallery|festival|performance)\b/.test(lower)) return 'Arts & Culture';
+  if (/\b(drive|collection|toy|coat|clothing|canned goods|supplies)\b/.test(lower)) return 'Donation Drive';
+  if (/\b(fundrais\w*|charity|gala|auction|benefit|donation|sponsor\w*)\b/.test(lower)) return 'Fundraiser';
+  if (/\b(tutor\w*|mentor\w*|homework|literacy|reading buddy)\b/.test(lower)) return 'Tutoring';
+  if (/\b(youth|kids|children|camp|scouts?|after-?school)\b/.test(lower)) return 'Youth Programs';
+  if (/\b(office|admin\w*|filing|data entry|reception|mailing|clerical)\b/.test(lower)) return 'Administrative';
+  if (/\b(school|teach\w*|education|class|classroom|reading|stem|math|science|club)\b/.test(lower)) return 'School';
   return 'Other';
 }
 

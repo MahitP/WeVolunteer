@@ -50,7 +50,25 @@ const inflight = new Map();
 export function weatherKey(latitude, longitude, datetime) {
   const d = new Date(datetime);
   if (Number.isNaN(d.getTime())) return null;
-  d.setMinutes(0, 0, 0);
+  /**
+   * The hour is taken in UTC, and taken by SLICING rather than by rounding.
+   *
+   * This was `d.setMinutes(0, 0, 0)` before the `toISOString()` below.
+   * `setMinutes` is a local-time setter and `toISOString` is UTC, so the pair
+   * only agree where the offset is a whole number of hours. In a half-hour zone
+   * — India, Adelaide, Newfoundland, Iran, Nepal at 45 minutes — zeroing the
+   * local minutes leaves the UTC minutes at :30, and the buckets this produced
+   * were an hour wide but aligned to the local hour, not the UTC one.
+   *
+   * That breaks the promise three lines above: "the client key must be at least
+   * as fine as the server's". A bucket straddling two UTC hours is COARSER, so
+   * two shifts the server would answer differently could collapse onto one
+   * cached answer here — the badge on one event showing the other's forecast.
+   *
+   * `toISOString()` is UTC by definition and 13 characters is exactly
+   * `YYYY-MM-DDTHH`, so the slice alone is the truncation. Nothing rounds, and
+   * no local-time setter appears in this file.
+   */
   return `${Number(latitude).toFixed(3)},${Number(longitude).toFixed(3)},${d.toISOString().slice(0, 13)}`;
 }
 

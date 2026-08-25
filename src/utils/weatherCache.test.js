@@ -37,6 +37,64 @@ describe('weatherCache', () => {
       expect(a).not.toBe(b);
     });
 
+    /**
+     * ── The zone the machine happens to be in must not decide the answer ──
+     *
+     * The key was built with `d.setMinutes(0, 0, 0)` — a LOCAL-time setter —
+     * and then formatted with `toISOString()`, which is UTC. Those agree only
+     * where the offset is a whole number of hours, so the defect was invisible
+     * in UTC and in every US and European zone, and real in India, Adelaide,
+     * Newfoundland, Iran and Nepal. It was found by a suite run on a machine in
+     * `Asia/Calcutta`; on the CI box it had always passed.
+     *
+     * The cases above still only fail in one of those zones, which makes them a
+     * regression test nobody can rely on. These force the zone instead, so the
+     * rule holds wherever the suite runs.
+     *
+     * Node re-reads `process.env.TZ` for each new `Date`, so the assignment is
+     * enough; it is restored afterwards because the variable is process-wide and
+     * every later case in this worker would inherit it.
+     */
+    describe('regardless of the machine\'s timezone', () => {
+      const ZONES = [
+        'UTC',
+        'America/New_York',   // -04:00/-05:00 — whole hours, where this passed anyway
+        'Asia/Kolkata',       // +05:30
+        'Australia/Adelaide', // +09:30/+10:30
+        'America/St_Johns',   // -02:30/-03:30
+        'Asia/Kathmandu',     // +05:45
+        'Pacific/Chatham',    // +12:45/+13:45
+      ];
+
+      const inZone = (tz, fn) => {
+        const original = process.env.TZ;
+        process.env.TZ = tz;
+        try { return fn(); } finally { process.env.TZ = original; }
+      };
+
+      it.each(ZONES)('buckets on the UTC hour in %s', (tz) => {
+        inZone(tz, () => {
+          /* Every minute of one UTC hour, including the :30 and :45 boundaries
+             the broken version straddled. */
+          const keys = ['00', '05', '29', '30', '31', '45', '59'].map(
+            (mm) => weatherKey(40.386, -74.556, `2026-08-20T14:${mm}:00.000Z`),
+          );
+          expect(new Set(keys).size, `${tz} split one UTC hour into ${new Set(keys).size} keys`).toBe(1);
+          /* And it is the hour that was ASKED for, not a neighbouring one — a
+             consistently wrong bucket would satisfy the assertion above. */
+          expect(keys[0].endsWith('2026-08-20T14')).toBe(true);
+        });
+      });
+
+      it.each(ZONES)('keeps adjacent UTC hours apart in %s', (tz) => {
+        inZone(tz, () => {
+          const a = weatherKey(40.386, -74.556, '2026-08-20T14:59:00.000Z');
+          const b = weatherKey(40.386, -74.556, '2026-08-20T15:00:00.000Z');
+          expect(a).not.toBe(b);
+        });
+      });
+    });
+
     it('is null for an unparseable time rather than a key nothing can match', () => {
       expect(weatherKey(40.386, -74.556, 'whenever')).toBeNull();
     });

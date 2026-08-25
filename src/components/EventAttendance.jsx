@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Info, Users } from 'lucide-react';
+import { Info, Lock, ShieldCheck, Users } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from './common/LoadingSkeleton';
+import ConfirmDialog from './common/ConfirmDialog';
 import EmptyState from './common/EmptyState';
-import { formatHours, formatTimeRange } from '../utils/helpers';
+import { formatDay, formatHours, formatTimeRange } from '../utils/helpers';
 export default function EventAttendance({
   event,
   acceptedApps,
@@ -26,6 +27,32 @@ export default function EventAttendance({
   const [loading, setLoading] = useState(true);
   const now = new Date();
   const markableApps = acceptedApps.filter(a => a.slot?.endDatetime && new Date(a.slot.endDatetime) <= now);
+  /**
+   * The three states this screen can be in, and what each one means.
+   *
+   *   correctable   the ordinary case. Marks and hours can be changed, with a
+   *                 reason, exactly as they always could.
+   *   ready         the event is `completed` — every shift ended, every accepted
+   *                 volunteer accounted for — so the numbers can be made final.
+   *                 Still fully correctable until somebody says otherwise.
+   *   closedOut     `hours_closed_out_at` is set. Nothing here can change again.
+   *
+   * `closedOut` is read from the column, NOT from `status === 'completed'`.
+   * Completion is a side effect of ticking the last checkbox; freezing a
+   * student's service record is a decision, and the two are deliberately not
+   * the same event. See the note in `server/attendance.js`.
+   *
+   * Mirrored here so the screen does not offer an edit whose only outcome is a
+   * refusal. It is a mirror and not the rule: the server decides (409
+   * `hours_locked`), and this can only ever say the same thing earlier. See
+   * src/authz.js for why the client half of a rule is written that way round.
+   */
+  const closedOut = Boolean(event.hoursClosedOutAt);
+  const readyToCloseOut = !closedOut && event.status === 'completed';
+  /** Rows whose record is already final: an existing credit, once closed out. */
+  const isLocked = (app) => closedOut && Boolean(app.attendance);
+  const [confirmingCloseOut, setConfirmingCloseOut] = useState(false);
+  const [closingOut, setClosingOut] = useState(false);
   useEffect(() => {
     let isMounted = true;
     async function loadInitialData() {
@@ -158,6 +185,29 @@ export default function EventAttendance({
       setSubmitting(false);
     }
   };
+  /**
+   * Makes the hours permanent.
+   *
+   * Behind `ConfirmDialog` rather than `window.confirm`, matching the other
+   * deliberate actions in this app, and behind a confirmation at all because
+   * this is the only irreversible thing an organizer can do to a student's
+   * service record. `onComplete()` refetches, so the screen comes back in its
+   * locked state rather than being told to render one.
+   */
+  const closeOutHours = async () => {
+    setClosingOut(true);
+    try {
+      await api.closeOutHours(event.id);
+      addToast('Hours closed out. This event’s service records are now final.', 'success');
+      setConfirmingCloseOut(false);
+      onComplete();
+    } catch (err) {
+      addToast(err.message, 'error');
+      setConfirmingCloseOut(false);
+    } finally {
+      setClosingOut(false);
+    }
+  };
   if (loading) {
     return <LoadingSkeleton heights={[44, 44, 44]} />;
   }
@@ -175,18 +225,89 @@ export default function EventAttendance({
     const edited = hoursMap[a.id];
     return edited !== undefined && edited !== '' && Number(edited) !== a.attendance.hoursAwarded;
   }).length;
+  /**
+   * Volunteers this save would credit for the first time.
+   *
+   * The server marks an event complete once every accepted volunteer has a
+   * record, so if nobody is left over after this save, this is the save that
+   * completes it — which is what makes closing out available. Worth saying on
+   * the button rather than in a toast afterwards.
+   *
+   * Deliberately conservative: it counts against `acceptedApps`, the whole
+   * roster, not against `markableApps`. A volunteer on a shift that has not
+   * ended yet keeps the event open, and mistaking that for a close-out would
+   * put a warning in front of somebody it does not apply to.
+   */
+  const remainingAfterSave = acceptedApps.filter(a => {
+    if (a.attendance) return false;
+    return !(touchedIds.has(a.id) && markableApps.some(m => m.id === a.id));
+  }).length;
+  const wouldCompleteEvent = !closedOut && !readyToCloseOut
+    && remainingAfterSave === 0 && markedCount > 0;
+  /**
+   * How many volunteers the close-out would make permanent.
+   *
+   * Counted from stored records rather than from the checkboxes: the dialog is
+   * about what IS credited, not about what this screen would credit if it were
+   * saved. Anything unsaved is not part of the decision being confirmed.
+   */
+  const creditedCount = acceptedApps.filter(a => a.attendance?.present).length;
   return <>
       <div className="modal-body">
-        <div className="alert alert-brand s-22c500">
-          <Info size={15} className="s-d1467f" />
-          <span>
-            <span className="alert-title">Only ticked volunteers are credited</span>
-            <span className="s-734389">
-              Anyone you leave untouched keeps whatever is already recorded — nothing is set to absent
-              on your behalf. Changing a record that already exists needs a reason.
+        {/**
+          * ── Closed out: the record is the school's now, not the organizer's ──
+          *
+          * Shown INSTEAD of the "only ticked volunteers are credited" note,
+          * because that note is advice for somebody who is about to change
+          * something and nothing on this screen can change any more. The server
+          * refuses a change to an existing record with 409 `hours_locked`; this
+          * is the same sentence, said before the press rather than after it.
+          */}
+        {closedOut ? (
+          <div className="alert alert-warn s-22c500" role="status">
+            <Lock size={15} className="s-d1467f" />
+            <span>
+              <span className="alert-title">Hours for this event are final</span>
+              <span className="s-734389">
+                These hours were closed out{event.hoursClosedOutAt
+                  ? ` on ${formatDay(event.hoursClosedOutAt)}`
+                  : ''}, so they are part of each student&rsquo;s permanent record
+                and can no longer be changed &mdash; by you or by anyone else.
+              </span>
             </span>
-          </span>
-        </div>
+          </div>
+        ) : readyToCloseOut ? (
+          /**
+            * The middle state, and the one the whole design exists for.
+            *
+            * The event is complete, so the numbers CAN be made final — and they
+            * are not yet, so a mistake is still fixable. Saying both things here
+            * is what turns "no takebacksies" from a trap into a decision:
+            * whoever reads this knows the record is still theirs to correct and
+            * knows exactly which button ends that.
+            */
+          <div className="alert alert-brand s-22c500" role="status">
+            <ShieldCheck size={15} className="s-d1467f" />
+            <span>
+              <span className="alert-title">Everyone is accounted for &mdash; check the hours</span>
+              <span className="s-734389">
+                You can still correct anything below. When the numbers are right, close the
+                hours out to make them final; that cannot be undone.
+              </span>
+            </span>
+          </div>
+        ) : (
+          <div className="alert alert-brand s-22c500">
+            <Info size={15} className="s-d1467f" />
+            <span>
+              <span className="alert-title">Only ticked volunteers are credited</span>
+              <span className="s-734389">
+                Anyone you leave untouched keeps whatever is already recorded — nothing is set to absent
+                on your behalf. Changing a record that already exists needs a reason.
+              </span>
+            </span>
+          </div>
+        )}
 
         {markableApps.length === 0 ? <EmptyState icon={Users} title={acceptedApps.length === 0 ? 'No confirmed volunteers' : 'No shifts have ended yet'} message={acceptedApps.length === 0 ? 'Accept applicants first, then come back to record who attended.' : 'Hours can only be finalised once a shift is over. Use check-in during the event.'} /> : <>
             <div className="row-between row-wrap s-6cce54">
@@ -194,14 +315,17 @@ export default function EventAttendance({
                 <span className="strong">{markedCount}</span> of {markableApps.length} marked
                 {presentCount > 0 && <> · <span className="strong">{presentCount}</span> present</>}
               </span>
-              <div className="row s-65ce96">
-                <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, true)}>
-                  All present
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, false)}>
-                  All absent
-                </button>
-              </div>
+              {/* Nothing to mark in bulk when every row is final. */}
+              {!closedOut && (
+                <div className="row s-65ce96">
+                  <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, true)}>
+                    All present
+                  </button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => markAll(markableApps, false)}>
+                    All absent
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="stack-sm">
@@ -209,8 +333,9 @@ export default function EventAttendance({
             const isTouched = touchedIds.has(app.id);
             const isPresent = !!attendanceMap[app.id];
             const changesExisting = app.attendance && app.attendance.present !== isPresent;
+            const locked = isLocked(app);
             return <label key={app.id} className="check" data-checked={isTouched && isPresent ? 'true' : 'false'}>
-                    <input type="checkbox" checked={isPresent} onChange={e => setMark(app.id, e.target.checked)} />
+                    <input type="checkbox" checked={isPresent} disabled={locked} onChange={e => setMark(app.id, e.target.checked)} />
                     <span className="avatar sm">{app.volunteer?.avatar || '👤'}</span>
                     <span className="s-7b2db8">
                       <span className="check-title">{app.volunteer?.name}</span>
@@ -218,8 +343,15 @@ export default function EventAttendance({
                         {app.slot?.name} · {formatTimeRange(app.slot?.startDatetime, app.slot?.endDatetime)}
                       </span>
                     </span>
-                    {!isTouched && <span className="status status-muted">Not marked</span>}
-                    {changesExisting && <span className="status status-pending">Changes record</span>}
+                    {!isTouched && !locked && <span className="status status-muted">Not marked</span>}
+                    {changesExisting && !locked && <span className="status status-pending">Changes record</span>}
+                    {/* Says WHY the row cannot be touched, beside the row. A
+                        disabled checkbox with no explanation reads as a fault. */}
+                    {locked && (
+                      <span className="status status-muted" title="This event is closed out">
+                        <Lock size={11} aria-hidden="true" /> Final
+                      </span>
+                    )}
                     {/**
                       * The number is EDITABLE when the volunteer is marked
                       * present, and the scheduled duration is only its default.
@@ -235,7 +367,7 @@ export default function EventAttendance({
                       * inside a <label> whose click toggles the checkbox —
                       * without it, typing a number would un-mark the volunteer.
                       */}
-                    {isPresent && event.creditsHours !== false ? (
+                    {isPresent && event.creditsHours !== false && !locked ? (
                       <input
                         type="number" className="input hoursedit" min="0" max="24" step="0.25"
                         aria-label={`Hours credited to ${app.volunteer?.name}`}
@@ -255,27 +387,103 @@ export default function EventAttendance({
           })}
             </div>
 
-            {event.creditsHours !== false && (
+            {/* Not on a closed-out event: "change the number" is instructions
+                for a control that is no longer there, sitting under a banner
+                that has just said the numbers are final. */}
+            {event.creditsHours !== false && !closedOut && (
               <p className="dim small attendance-hourshint">
                 Hours default to the length of the shift. Change the number if a volunteer left
                 early or stayed on — what you enter here is what gets credited.
               </p>
             )}
 
-            {correctionCount > 0 && <div className="field s-fc751d">
+            {correctionCount > 0 && !closedOut && <div className="field s-fc751d">
                 <label htmlFor="att-reason">
                   Reason for changing {correctionCount} existing record{correctionCount !== 1 ? 's' : ''}
                 </label>
                 <input id="att-reason" className="input" value={attendanceReason} onChange={e => setAttendanceReason(e.target.value)} />
               </div>}
+
+            {/**
+              * Said before the press, and deliberately NOT as a warning.
+              *
+              * This save completes the event; it does not freeze anything. That
+              * distinction is the design: the irreversible step is a separate
+              * button, so the save an organizer performs at the end of every
+              * event stays an ordinary save. Telling them what happens next is
+              * useful; telling them it is permanent would be false, and a false
+              * warning in a routine place is how people learn to ignore the
+              * real one.
+              */}
+            {wouldCompleteEvent && (
+              <p className="dim small attendance-hourshint" role="status">
+                <ShieldCheck size={12} aria-hidden="true" />{' '}
+                This accounts for everyone, so the event will be marked complete. You can
+                still correct these hours afterwards, until you close them out.
+              </p>
+            )}
           </>}
       </div>
 
       <div className="modal-foot">
-        <button className="btn btn-ghost" onClick={onClose} disabled={submitting}>Back</button>
-        {markableApps.length > 0 && <button className="btn btn-primary" onClick={submitAttendance} disabled={submitting || markedCount === 0 || correctionCount > 0 && !attendanceReason.trim()}>
-            {submitting ? 'Saving…' : `Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
-          </button>}
+        <button className="btn btn-ghost" onClick={onClose} disabled={submitting || closingOut}>
+          {closedOut ? 'Close' : 'Back'}
+        </button>
+
+        {/* No save control at all once the hours are closed out: every row that
+            could change is final, so the only thing the button could produce is
+            a 409. */}
+        {markableApps.length > 0 && !closedOut && (
+          <button className="btn btn-secondary" onClick={submitAttendance} disabled={submitting || closingOut || markedCount === 0 || correctionCount > 0 && !attendanceReason.trim()}>
+            {submitting
+              ? 'Saving…'
+              : `Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
+          </button>
+        )}
+
+        {/**
+          * The irreversible step, and the only one on this screen.
+          *
+          * Offered only when the event is complete, because before that the
+          * roster is not finished and freezing it would leave somebody
+          * uncreditable for ever. It is the primary button at that point —
+          * closing out IS the remaining task — but it is the ONLY control here
+          * that opens a confirmation, so it cannot be reached by the muscle
+          * memory of pressing save.
+          */}
+        {readyToCloseOut && (
+          <button
+            className="btn btn-primary"
+            onClick={() => setConfirmingCloseOut(true)}
+            disabled={submitting || closingOut}
+          >
+            <Lock size={13} aria-hidden="true" /> Close out hours
+          </button>
+        )}
       </div>
+
+      {confirmingCloseOut && (
+        <ConfirmDialog
+          title="Close out hours for this event?"
+          confirmLabel="Close out hours"
+          cancelLabel="Keep them editable"
+          destructive
+          busy={closingOut}
+          onCancel={() => setConfirmingCloseOut(false)}
+          onConfirm={closeOutHours}
+        >
+          {/* Names the number and the consequence, in that order. "This cannot
+              be undone" under a count of the people it applies to is a different
+              sentence from "this cannot be undone" on its own. */}
+          <p>
+            <strong>{creditedCount} volunteer{creditedCount !== 1 ? 's' : ''}</strong> will
+            have their hours for &ldquo;{event.title}&rdquo; made permanent.
+          </p>
+          <p>
+            After this, nobody can change them &mdash; not you, and not an administrator.
+            Check the hours above first if you have not already.
+          </p>
+        </ConfirmDialog>
+      )}
     </>;
 }

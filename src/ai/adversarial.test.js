@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ask } from './assistant.js';
 import { TOOLS, TOOL_NAMES, runTool, normalizeEventCategory, VALID_CATEGORIES } from './tools.js';
+/* The server's own list, imported directly rather than restated, so this file
+   cannot drift from the CHECK constraint it is asserting agreement with. */
+import { VALID_CATEGORIES as SERVER_CATEGORIES } from '../../server/eventCategories.js';
 import { checkRole, abilitiesFor, INTENT_CAPABILITY } from './roles.js';
 import {
   createDraft,
@@ -82,14 +85,57 @@ describe('architectural invariants & single source of truth', () => {
     expect(studentAbilities).toContain('find opportunities');
   });
 
-  it('normalizes event categories to server VALID_CATEGORIES', () => {
-    expect(VALID_CATEGORIES).toEqual(['School', '5K', 'Food Pantry', 'Fundraiser', 'Other']);
-    expect(normalizeEventCategory('Food Drive')).toBe('Food Pantry');
-    expect(normalizeEventCategory('pantry volunteering')).toBe('Food Pantry');
-    expect(normalizeEventCategory('Charity 5K Race')).toBe('5K');
-    expect(normalizeEventCategory('Tutoring Club')).toBe('School');
-    expect(normalizeEventCategory('Gala benefit')).toBe('Fundraiser');
-    expect(normalizeEventCategory('unknown category')).toBe('Other');
+  /**
+   * ── The invariant, restated after the vocabulary grew ──
+   *
+   * This asserted the five values as a literal, which made it a copy of the
+   * vocabulary rather than a check on it: the day the list changed, the test
+   * failed for being out of date rather than for anything being wrong. What
+   * actually matters is that the client's list IS the server's list — the model
+   * puts this string straight into `POST /api/events`, and a value the CHECK
+   * constraint does not admit is a 400 the model cannot explain.
+   *
+   * So it is compared against the shared module now. The original five are
+   * asserted separately, because those are the values rows already carry and
+   * losing one is a data problem rather than a naming one.
+   */
+  it('offers exactly the categories the server admits', () => {
+    expect(VALID_CATEGORIES).toEqual(SERVER_CATEGORIES);
+    for (const original of ['School', '5K', 'Food Pantry', 'Fundraiser', 'Other']) {
+      expect(VALID_CATEGORIES).toContain(original);
+    }
+  });
+
+  it('normalizes free text onto a category the server admits', () => {
+    const cases = {
+      'Food Drive': 'Food Pantry',
+      'pantry volunteering': 'Food Pantry',
+      'Charity 5K Race': '5K',
+      'Gala benefit': 'Fundraiser',
+      /* Reads as a school activity and is one — but "tutoring" is the more
+         particular answer, and the vocabulary now has a word for it. */
+      'Tutoring Club': 'Tutoring',
+      'river cleanup': 'Environment',
+      'animal shelter help': 'Animals',
+      'blood drive': 'Health',
+      'nursing home visits': 'Seniors',
+      'winter coat collection': 'Donation Drive',
+      'unknown category': 'Other',
+    };
+    for (const [input, expected] of Object.entries(cases)) {
+      expect(normalizeEventCategory(input), `"${input}"`).toBe(expected);
+    }
+  });
+
+  /** Whatever it answers, it must be storable. That is the whole contract. */
+  it('never invents a category the server would refuse', () => {
+    const inputs = [
+      '', null, undefined, 'Ballooning', 'DROP TABLE events', '   ', 'сад', '5',
+      'a food and animal and school and fundraiser event',
+    ];
+    for (const input of inputs) {
+      expect(VALID_CATEGORIES, `"${String(input)}"`).toContain(normalizeEventCategory(input));
+    }
   });
 });
 

@@ -79,6 +79,16 @@ import { AlertCircle, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
  * @param {string}   [props.describedBy]    caller's `aria-describedby`, kept alongside this component's own
  * @param {string}   [props.placeholder]
  * @param {string}   [props.locale]         overrides the ambient locale; tests pin it
+ * @param {boolean}  [props.openOnClick]    clicking the text box opens the calendar
+ *
+ * ── Why `openOnClick` is opt-in rather than the behaviour ──
+ *
+ * It is the right default for a field whose answer is a date a few weeks away,
+ * where the calendar is the tool and typing is the fallback — the event
+ * application deadline is exactly that. It is the wrong default for a date of
+ * birth, where typing is the ONLY humane route (see the note above about 560
+ * clicks) and a calendar appearing under the caret on every click is noise in
+ * front of the field a fourteen-year-old has to fill in. So the caller says.
  */
 
 /* ── Calendar arithmetic ─────────────────────────────────────────────────── */
@@ -239,6 +249,7 @@ export default function DatePicker({
   describedBy = '',
   placeholder = 'YYYY-MM-DD',
   locale,
+  openOnClick = false,
 }) {
   const reactId = useId();
   const inputId = id || `dp-${reactId}`;
@@ -255,11 +266,22 @@ export default function DatePicker({
   /** Bumped only by the actions that should MOVE the caret into the grid, so
    *  choosing a month from the select does not yank focus out of the select. */
   const [focusTick, setFocusTick] = useState(0);
+  /**
+   * Whether the caret was moved INTO the popup when it opened.
+   *
+   * True for every route that existed before `openOnClick`: the toggle button,
+   * and the keyboard. False only for a popup opened by clicking the text box,
+   * where the caret stays in the text box on purpose. It decides three things
+   * that were previously constants — whether the open effect grabs focus,
+   * whether the popup claims `aria-modal`, and where focus is returned to.
+   */
+  const [focusInside, setFocusInside] = useState(true);
 
   const rootRef = useRef(null);
   const popRef = useRef(null);
   const gridRef = useRef(null);
   const toggleRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => { setText(value); }, [value]);
 
@@ -314,21 +336,42 @@ export default function DatePicker({
 
   /* ── Opening and closing ───────────────────────────────────────────────── */
 
-  const openPopup = () => {
+  /**
+   * @param {object}  [opts]
+   * @param {boolean} [opts.takeFocus=true]  move the caret into the day grid.
+   *
+   * `takeFocus` exists for `openOnClick`. Pressing the calendar button is a
+   * request to USE the calendar, so focus belongs in the grid — that is the
+   * ARIA pattern and it is what a keyboard user expects. Clicking the text box
+   * is not: the caret is already where the person put it, and yanking it into
+   * the grid would make a control that looks and behaves like a text field
+   * impossible to type into. So a click-opened popup is offered rather than
+   * entered, and `open` alone no longer implies focus is inside it — which is
+   * why `aria-modal` is conditional below.
+   */
+  const openPopup = ({ takeFocus = true } = {}) => {
     if (disabled) return;
     const start = clampIso(parseIso(value) ? value : startOfRange(min, max), min, max);
     setView(initialView(value, min, max));
     setFocusedIso(start);
-    setFocusTick(t => t + 1);
+    if (takeFocus) setFocusTick(t => t + 1);
+    setFocusInside(takeFocus);
     setOpen(true);
   };
 
   /** Always the way out: the trigger is where focus came from, so it is where
-   *  focus goes back to. Dropping it on `<body>` strands a keyboard user. */
+   *  focus goes back to. Dropping it on `<body>` strands a keyboard user.
+   *
+   *  Which trigger depends on how it opened — the toggle for a button-opened
+   *  popup, the text box for a click-opened one. Sending focus to the toggle
+   *  after a click-opened popup would move the caret OUT of a field somebody is
+   *  in the middle of typing in, which is the same class of theft `takeFocus`
+   *  exists to avoid. */
   const closePopup = useCallback((restoreFocus = true) => {
     setOpen(false);
-    if (restoreFocus) toggleRef.current?.focus();
-  }, []);
+    if (!restoreFocus) return;
+    (focusInside ? toggleRef : inputRef).current?.focus();
+  }, [focusInside]);
 
   const commit = (iso) => {
     if (!isSelectable(iso)) return;
@@ -337,9 +380,12 @@ export default function DatePicker({
     closePopup();
   };
 
-  /* Focus follows the roving tabindex, but only when something asked it to. */
+  /* Focus follows the roving tabindex, but only when something asked it to.
+     `focusInside` is the guard for a click-opened popup: `open` flipping true is
+     itself a dependency, so without it the effect would grab the caret on the
+     one path that must not. */
   useEffect(() => {
-    if (!open) return;
+    if (!open || !focusInside) return;
     const el = gridRef.current?.querySelector(`[data-dp-iso="${focusedIso}"]`);
     el?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -456,6 +502,7 @@ export default function DatePicker({
 
       <div className="dp-control">
         <input
+          ref={inputRef}
           id={inputId}
           name={name}
           type="text"
@@ -468,8 +515,21 @@ export default function DatePicker({
           disabled={disabled}
           aria-invalid={error ? 'true' : undefined}
           aria-describedby={describedByIds || undefined}
+          aria-haspopup={openOnClick ? 'dialog' : undefined}
+          aria-expanded={openOnClick ? open : undefined}
           onChange={onTextChange}
           onBlur={onTextBlur}
+          /* Opt-in, and only opens — never closes. A second click lands inside a
+             field whose caret the reader is placing, and closing the calendar
+             out from under that is not what they asked for; the toggle, Escape
+             and an outside click all still close it. */
+          onClick={openOnClick ? () => { if (!open) openPopup({ takeFocus: false }); } : undefined}
+          /* Escape belongs to whatever has focus. The popup's own handler covers
+             the case where focus is inside it; this covers the click-opened case
+             where focus is still in the text box. */
+          onKeyDown={openOnClick ? (e) => {
+            if (e.key === 'Escape' && open) { e.stopPropagation(); closePopup(); }
+          } : undefined}
         />
         <button
           ref={toggleRef}
@@ -489,7 +549,17 @@ export default function DatePicker({
             ref={popRef}
             className="dp-pop"
             role="dialog"
-            aria-modal="true"
+            /**
+             * Claimed only when focus is actually inside.
+             *
+             * `aria-modal="true"` tells a screen reader that everything outside
+             * this element is inert. That is true of a popup entered from the
+             * toggle, whose Tab cycle is trapped — and false of one opened by
+             * clicking the text box, where the caret is deliberately still in
+             * the field OUTSIDE the dialog. Asserting it there would hide the
+             * field the reader is typing in from their own screen reader.
+             */
+            aria-modal={focusInside ? 'true' : undefined}
             aria-label="Choose a date"
             onKeyDown={onPopupKeyDown}
           >

@@ -467,6 +467,10 @@ router.get('/api/events', authenticateToken, async (req, res) => {
           && ['organizer', 'admin', 'super_admin'].includes(event.organizer_role),
         organizerSchool: event.organizer_school || '',
         status: event.status,
+        /* When the organizer closed the hours out, or null while they are
+           still correctable. The client uses it to stop offering an edit whose
+           only outcome is a 409; the rule itself is `finalizeAttendance`'s. */
+        hoursClosedOutAt: event.hours_closed_out_at || null,
         hasAttendance: withAttendance.has(event.id),
         autoApprove: event.auto_approve === 1,
         attendeeVisibility: event.attendee_visibility || 'accepted',
@@ -710,6 +714,10 @@ router.get('/api/events/:id', authenticateToken, async (req, res) => {
         organizerId: event.organizer_id,
         organizerName: event.organizer_name,
         status: event.status,
+        /* When the organizer closed the hours out, or null while they are
+           still correctable. The client uses it to stop offering an edit whose
+           only outcome is a 409; the rule itself is `finalizeAttendance`'s. */
+        hoursClosedOutAt: event.hours_closed_out_at || null,
         autoApprove: event.auto_approve === 1,
         creditsHours: event.credits_hours !== 0,
         organizationId: event.organization_id || null,
