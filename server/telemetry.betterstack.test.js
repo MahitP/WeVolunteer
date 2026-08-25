@@ -618,6 +618,96 @@ describe('what an audit action tells the vendor', () => {
     expect(result.id, 'the audit row is what matters and it must still be written').toBeTruthy();
     expect(calls).toHaveLength(1);
   });
+
+  /**
+   * The same call with telemetry ON and the vendor unreachable — the state a
+   * real deployment is in during a Better Stack outage, and the one where a
+   * missing guard would surface as privileged actions failing.
+   *
+   * `audit_log` is the most consequential table in the schema: a suspension that
+   * appears to fail gets retried, and an operator who cannot suspend an account
+   * during an incident has a much worse problem than a missing log line.
+   */
+  it('writes the audit row even with telemetry enabled and the vendor down', async () => {
+    const prev = { ...process.env };
+    process.env.WEV_TELEMETRY_TEST_SINK = '1';
+    process.env.BETTERSTACK_SOURCE_TOKEN = 'audit-token';
+    process.env.BETTERSTACK_INGESTING_HOST = 'http://127.0.0.1:1';  // nothing listens
+    __resetTelemetrySink();
+
+    try {
+      const { recordAudit } = await import('./auditLog.js');
+      const calls = [];
+      const fakeDb = {
+        prepare: () => ({ run: async (...args) => { calls.push(args); return { changes: 1 }; } }),
+      };
+
+      const started = Date.now();
+      const result = await recordAudit(fakeDb, {
+        adminId: 'admin-1', action: 'ACCOUNT_SUSPENDED',
+        targetUserId: 'user-77', details: 'Suspended Chris Vale',
+      });
+
+      expect(result.id).toBeTruthy();
+      expect(calls).toHaveLength(1);
+      /* And it did not wait on the wire: the pulse is queued, not delivered. */
+      expect(Date.now() - started, 'recordAudit waited for the vendor').toBeLessThan(1000);
+    } finally {
+      process.env = prev;
+      __resetTelemetrySink();
+    }
+  });
+
+  /**
+   * What actually goes out, read off the wire rather than off the return value.
+   * The queued record is where `details` would appear if the pulse were ever
+   * widened, and this is the assertion that would fail if it were.
+   */
+  it('puts only the action name on the wire, never the details or the target', async () => {
+    const prev = { ...process.env };
+    const received = [];
+    const stub = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try { received.push(...JSON.parse(body)); } catch { /* not ours */ }
+        res.writeHead(202).end('{}');
+      });
+    });
+    stub.listen(0, '127.0.0.1');
+    await once(stub, 'listening');
+
+    process.env.WEV_TELEMETRY_TEST_SINK = '1';
+    process.env.BETTERSTACK_SOURCE_TOKEN = 'audit-token';
+    process.env.BETTERSTACK_INGESTING_HOST = `http://127.0.0.1:${stub.address().port}`;
+    __resetTelemetrySink();
+
+    try {
+      const { recordAudit } = await import('./auditLog.js');
+      await recordAudit(
+        { prepare: () => ({ run: async () => ({ changes: 1 }) }) },
+        {
+          adminId: 'admin-1', action: 'ACCOUNT_SUSPENDED', targetUserId: 'user-77',
+          details: 'Suspended Chris Vale (chris.vale@lincolnhigh.k12.il.us) for repeated no-shows',
+        },
+      );
+      await drainTelemetry();
+
+      const pulse = received.find((r) => r.event === 'security.action');
+      expect(pulse, 'no security pulse was sent').toBeTruthy();
+      expect(pulse.operation).toBe('ACCOUNT_SUSPENDED');
+
+      const serialised = JSON.stringify(received);
+      for (const forbidden of ['Chris Vale', 'chris.vale', 'lincolnhigh', 'user-77', 'admin-1', 'no-shows']) {
+        expect(serialised, `"${forbidden}" reached the vendor`).not.toContain(forbidden);
+      }
+    } finally {
+      process.env = prev;
+      __resetTelemetrySink();
+      stub.close();
+      await once(stub, 'close').catch(() => {});
+    }
+  });
 });
 
 /* ── The shutdown drain ─────────────────────────────────────────────────────
