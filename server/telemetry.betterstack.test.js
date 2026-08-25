@@ -162,6 +162,111 @@ describe('what a telemetry record may contain', () => {
       expect(logEvent('info', 'e', { requestId: bad }), bad).not.toHaveProperty('requestId');
     }
   });
+
+  /**
+   * The id fields are the one place this module does NOT redact — redaction
+   * would eat the hex run that is the whole point of a fingerprint. So the shape
+   * check is the only thing standing between an id field and its contents, and
+   * these are the values that look like ids and are not.
+   *
+   * The lengths matter as much as the characters. Every id this system produces
+   * fits in 64 (sha256 hex); a longer value is not one, and truncating it to fit
+   * would keep a readable prefix of whatever it actually was.
+   */
+  it('refuses a credential wearing the shape of an id', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiJ9'
+      + '.eyJlbWFpbCI6Imxlby5jaGVuQGV4YW1wbGUub3JnIiwicm9sZSI6Im93bmVyIn0'
+      + '.Xb0hMHhKQ1FhZG1pbg';
+    /* Every character in a JWT is inside the id class, so only the explicit
+       refusal keeps this out. */
+    expect(/^[A-Za-z0-9_.:-]+$/.test(jwt), 'the fixture is not JWT-shaped').toBe(true);
+
+    for (const field of ['requestId', 'fingerprint', 'userHash', 'instance']) {
+      const record = logEvent('info', 'e', { [field]: jwt });
+      /* `instance` always has a real per-boot value, so the check is that the
+         caller's value did not replace it — not that the field is absent. */
+      expect(record[field], `${field} carried a JWT`).not.toBe(jwt);
+      expect(JSON.stringify(record)).not.toContain('eyJlbWFpbCI6');
+    }
+
+    /* Short ones too — the length limit is not what stops this. */
+    expect(logEvent('info', 'e', { requestId: 'aa.bb.cc' })).not.toHaveProperty('requestId');
+  });
+
+  it('rejects an over-long id rather than truncating it into the record', () => {
+    const sixtyFour = 'a'.repeat(64);
+    expect(logEvent('info', 'e', { fingerprint: sixtyFour }).fingerprint).toBe(sixtyFour);
+
+    /* Ninety-two characters: comfortably longer than any id this system makes,
+       and short enough that a laxer limit would have let it through whole. */
+    const tooLong = `wev_session_${'b'.repeat(80)}`;
+    expect(tooLong.length).toBeGreaterThan(64);
+    expect(tooLong.length).toBeLessThan(128);
+
+    const record = logEvent('info', 'e', { requestId: tooLong });
+    expect(record).not.toHaveProperty('requestId');
+    expect(JSON.stringify(record)).not.toContain('wev_session');
+  });
+
+  /** The real ids all still fit, so the tightened limit costs nothing. */
+  it('still accepts every identifier this system actually produces', () => {
+    const record = logEvent('info', 'e', {
+      requestId: 'b3f1c2d4-0000-4a1b-9c3d-1122334455aa',  // randomUUID, 36
+      fingerprint: 'c'.repeat(64),                         // sha256 hex
+      userHash: 'd'.repeat(32),                            // half of one
+      instance: 'i-1a2b3c4d',                              // per-boot
+    });
+    expect(record.requestId).toBeTruthy();
+    expect(record.fingerprint).toHaveLength(64);
+    expect(record.userHash).toHaveLength(32);
+    expect(record.instance).toBe('i-1a2b3c4d');
+  });
+
+  /**
+   * The allowlist is matched exactly. A near-miss key is a different key, and
+   * treating `Message` as `message` would be the denylist's failure mode
+   * reintroduced through a case-insensitive comparison.
+   */
+  it('does not match an allowed name loosely', () => {
+    const record = logEvent('info', 'e', {
+      Message: 'josé.garcía@lincolnhigh.k12.il.us',
+      ROUTE: '/api/users?email=leo.chen@example.com',
+      'message ': 'trailing space',
+      requestid: 'not-the-field',
+      userhash: 'nor-this',
+    });
+    const serialised = JSON.stringify(record);
+    expect(serialised).not.toContain('lincolnhigh');
+    expect(serialised).not.toContain('leo.chen');
+    expect(serialised).not.toContain('trailing space');
+  });
+
+  /** Keys that are not data at all. */
+  it('cannot be used to reach the record\'s prototype', () => {
+    const record = logEvent('info', 'e', JSON.parse(
+      '{"__proto__":{"polluted":true},"constructor":{"x":1},"toString":"nope","message":"fine"}',
+    ));
+    expect(record.message).toBe('fine');
+    expect(record).not.toHaveProperty('polluted');
+    expect({}).not.toHaveProperty('polluted');
+    expect(typeof record.toString).toBe('function');
+  });
+
+  /**
+   * A field that throws when read. `logEvent` promises never to throw, and this
+   * is the shape that would break that promise from inside the allowlist rather
+   * than outside it — so the record is abandoned, and the caller is not told,
+   * because the caller is an error handler.
+   */
+  it('abandons the record rather than throwing when a field explodes', () => {
+    const hostile = {};
+    Object.defineProperty(hostile, 'message', {
+      enumerable: true,
+      get() { throw new Error('boom'); },
+    });
+    expect(() => logEvent('error', 'e', hostile)).not.toThrow();
+    expect(logEvent('error', 'e', hostile)).toBeNull();
+  });
 });
 
 /* ── Structure ─────────────────────────────────────────────────────────────── */

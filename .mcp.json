@@ -1,0 +1,52 @@
+{
+  "$comment": [
+    "Project-scoped MCP servers for WeVolunteer. Committed deliberately, so the",
+    "restricted configuration is the default a developer gets rather than",
+    "something each person has to remember to apply.",
+    "",
+    "NO CREDENTIALS HERE. Better Stack authenticates by browser OAuth on first",
+    "use; Claude Code stores the resulting token outside the repository. A Better",
+    "Stack API token must never be added to this file.",
+    "",
+    "X-MCP-Tools-Only is an ALLOWLIST, and it is DEFENCE IN DEPTH — NOT the",
+    "security boundary. The boundary is the Better Stack ROLE of the account that",
+    "authenticates here, because that is what Better Stack enforces server-side.",
+    "Three things about the header are still unverified, and each of them is a way",
+    "for it to be worth less than it looks:",
+    "",
+    "  1. Only three of these tokens (monitors, monitor, incidents) come from",
+    "     Better Stack's own documented example. The rest are inferred from the",
+    "     tool categories in their docs and are UNVERIFIED — the tool list is not",
+    "     readable without authenticating.",
+    "  2. Whether an unrecognised token is ignored (safe: fewer tools) or voids",
+    "     the header (unsafe: all tools) is not documented.",
+    "  3. Whether a token matches a tool NAME exactly or as a category PREFIX is",
+    "     not documented — and it decides whether an entry admits one read tool or",
+    "     every tool in that category, writes included.",
+    "",
+    "The singular 'monitor' from Better Stack's example is deliberately NOT in the",
+    "list below because of (3). If matching is exact it is a read tool and its",
+    "absence costs one lookup; if matching is a prefix it is the entry that admits",
+    "monitor-create and monitor-delete. Losing a lookup is an inconvenience;",
+    "handing an agent the ability to delete an alerting monitor is an outage that",
+    "nobody would be paged about. Restore it once the audit answers (3).",
+    "",
+    "To answer all three from the live service in about a minute:",
+    "",
+    "    BETTERSTACK_API_TOKEN=... node bin/betterstack-mcp-audit.mjs",
+    "",
+    "It only ever sends initialize and tools/list — it never calls a tool. Record",
+    "what it finds in docs/operations/betterstack.md, and until then do not let",
+    "Claude Code authenticate here as a Better Stack Admin. Run /mcp after",
+    "connecting to see which tools actually came through."
+  ],
+  "mcpServers": {
+    "betterstack": {
+      "type": "http",
+      "url": "https://mcp.betterstack.com",
+      "headers": {
+        "X-MCP-Tools-Only": "documentation,monitors,incidents,query,sources,errors,dashboards"
+      }
+    }
+  }
+}
