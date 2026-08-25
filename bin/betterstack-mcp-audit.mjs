@@ -25,8 +25,10 @@
  *
  * It issues `initialize` and `tools/list` and nothing else. `rpc()` refuses any
  * other method outright rather than as a matter of discipline — an MCP audit is
- * not a reason to run somebody's incident tooling, and a token with write scope
- * is the normal case here (see docs/operations/betterstack.md §7).
+ * not a reason to run somebody's incident tooling — and the token used here is
+ * an ADMIN token (see docs/operations/betterstack.md §7), which reaches every
+ * destructive tool Better Stack exposes. Read-only is not a courtesy in that
+ * situation; it is the only reason this script is safe to run.
  *
  * ── Usage ──
  *
@@ -183,9 +185,9 @@ async function main() {
     line('  answered, and docs/operations/betterstack.md must keep carrying');
     line('  these questions as UNKNOWN.');
     line();
-    line('  Use a token from an account with the LOWEST Better Stack role that');
-    line('  can reach the MCP server. This script only reads, but the token you');
-    line('  paste into a shell is the token that was on your clipboard.');
+    line('  This script only ever reads. Even so, the token you paste into a');
+    line('  shell is the token that was on your clipboard and is now in your');
+    line('  history — prefer a token you can revoke afterwards, and revoke it.');
     process.exitCode = 1;
     return;
   }
@@ -248,8 +250,11 @@ async function main() {
     line(`   → ${failsOpen ? 'FAILS OPEN — a typo in the header disables it'
       : 'fails closed — an unmatched name grants nothing'}`);
     if (failsOpen) {
-      line('   → treat the header as cosmetic. The Better Stack ROLE is then the');
-      line('     only boundary, and .mcp.json must say so without hedging.');
+      line('   → the header is cosmetic: a typo in it disables it silently.');
+      line('   → This project authenticates as a Better Stack ADMIN, so there is no');
+      line('     role restriction underneath to fall back on. A cosmetic header plus');
+      line('     an Admin token is NO boundary. Use a lower role for the MCP');
+      line('     connection, or leave it unconnected.');
     }
   }
   line();

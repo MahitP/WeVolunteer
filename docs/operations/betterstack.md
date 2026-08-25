@@ -295,19 +295,38 @@ claude mcp add betterstack --transport http https://mcp.betterstack.com \
   --header "X-MCP-Tools-Only: documentation,monitors,incidents,query,sources,errors,dashboards"
 ```
 
+Authenticate as the Admin account, per the decision recorded below — and read
+that section first, because it changes what the allowlist is doing.
+
 **Never** add a Better Stack API token to `.mcp.json` or to any file in this
 repository. OAuth exists precisely so there is no credential to commit. The
 token-in-a-header form documented by Better Stack is for clients that cannot do
 OAuth; Claude Code can.
 
-### The security boundary is the Better Stack ROLE, not the header
+### The role is Admin, so the header is now the whole boundary
 
-Read this before relying on the allowlist.
+**Decision, 2026-08-26: Claude Code authenticates here as a Better Stack Admin.**
+That is the account owner's call and it is recorded rather than argued with, but
+it inverts the design of everything below, so read this section before touching
+the allowlist.
 
-`X-MCP-Tools-Only` is **defence in depth**. The boundary is the Better Stack
-role of the account Claude Code authenticates as, because that is the only part
-Better Stack enforces server-side. Three things stop the header being enough,
-and each of them is a way for it to be worth less than it looks:
+Ordinarily the boundary is the Better Stack **role**, because that is the part
+Better Stack enforces server-side, and `X-MCP-Tools-Only` is only defence in
+depth on top of it. With an Admin credential there is no server-side restriction
+left to be in depth *of*: Admin reaches everything, including billing, team
+membership and API tokens. **The header is now the only thing standing between
+an assistant and every destructive tool Better Stack exposes.**
+
+Two consequences follow, and neither is optional:
+
+- The three open questions below stop being academic. They were "how much is
+  this extra layer worth"; they are now "does the only layer work at all".
+  **Run the audit before connecting** — see the next subsection.
+- The allowlist must not be widened casually. Any entry added is an entry an
+  Admin token can act through.
+
+Three things stop the header being enough on its own, and each of them is a way
+for it to be worth less than it looks:
 
 1. Of the tokens in `.mcp.json`, only `monitors`, `monitor` and `incidents` come
    from Better Stack's own documented example [documented]. The rest are
@@ -346,19 +365,36 @@ Record what it finds here with the date, moving each item from **[owner action]*
 to **[proven]** — these are observations of a live service, and a service can
 change.
 
-Better Stack's roles, and what each costs:
+Better Stack's roles, for the record and for anyone revisiting the decision:
 
 | Role | Reaches | Trade-off |
 |---|---|---|
-| **Admin** | everything, incl. billing, org settings, API tokens | **Do not use for this.** The header would be the only thing between an assistant and deleting monitoring. |
-| **Team lead** / **Responder** | monitors, incidents, on-call, status pages, sources, dashboards, errors | Gets the full workflow below — and can also modify and delete those things. |
-| **Member** | log sources, live tail, dashboards, errors | Safest. **Cannot** reach monitors, incidents, on-call or status pages, so "are any monitors down?" stops working. Still permits dashboard edits. |
+| **Admin** ← *in use* | everything, incl. billing, org settings, API tokens | Nothing is withheld server-side. The allowlist header is the entire boundary. |
+| **Team lead** / **Responder** | monitors, incidents, on-call, status pages, sources, dashboards, errors | The full workflow below — and can also modify and delete those things. |
+| **Member** | log sources, live tail, dashboards, errors | Narrowest. **Cannot** reach monitors, incidents, on-call or status pages, so "are any monitors down?" stops working. Still permits dashboard edits. |
 
-There is **no true read-only role** outside the Enterprise plan's custom roles.
+There is **no true read-only role** outside the Enterprise plan's custom roles,
+which is the reason a lower role was not simply a free win — Member still edits
+dashboards, and Responder still deletes monitors. Admin differs in degree rather
+than in kind, and it keeps the monitor and incident questions working.
 
-**Recommendation:** authenticate as a **Member** unless the monitor and incident
-questions are genuinely needed day to day; if they are, use **Responder** and
-treat the allowlist as the mitigation it is. Either way, not Admin.
+**What compensates, given the choice made:**
+
+1. The allowlist stays as narrow as it can be while answering the questions in
+   §7 — and the singular `monitor` stays OUT of it until question (3) is
+   answered. Under Admin that entry is the difference between reading a monitor
+   and deleting one.
+2. The audit is run **before** first connection, not after, and its answers are
+   recorded here.
+3. `/mcp` is checked after connecting, to see which tools actually arrived
+   rather than which ones were asked for.
+4. If the audit shows the header **fails open**, the honest conclusion is that
+   an Admin-authenticated MCP has no boundary at all. At that point either use a
+   lower role for this connection or do not connect it — a header that a typo
+   disables is not a control.
+
+Nothing about this changes the application: the MCP is an operator tool and
+WeVolunteer never calls it.
 
 ### Who can see what — this changes the privilege model
 
@@ -376,6 +412,15 @@ That is a decision worth making deliberately rather than discovering. Keep the
 team small, review it when it changes, and remember §4's known limit: redaction
 does not cover personal names, and a name can reach an error message through
 free text nobody expected.
+
+**And the roster is now editable through the same credential.** Admin reaches
+team management, so if a team-management tool is among those the allowlist lets
+through, an assistant holding that credential could add a member — which, by the
+paragraph above, grants error visibility this application reserves for its owner.
+No such tool is in the allowlist by name, but the allowlist is matched by a
+mechanism nobody has verified yet (§7, question 3). This is the single most
+consequential thing the audit settles, and the reason to run it before the first
+connection rather than after.
 
 ### Which capabilities are enabled, and why
 

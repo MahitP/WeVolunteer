@@ -191,7 +191,10 @@ describe('bin/betterstack-mcp-audit.mjs', () => {
     const out = await audit(url);
 
     expect(out).toContain('FAILS OPEN');
-    expect(out).toContain('treat the header as cosmetic');
+    expect(out).toContain('the header is cosmetic');
+    /* And it says what that means for THIS project's chosen role, rather than
+       leaving the reader to work out that an Admin token has nothing under it. */
+    expect(out).toContain('NO boundary');
   });
 
   it('checks that an invalid bearer token is refused', async () => {
