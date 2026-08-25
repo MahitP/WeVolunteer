@@ -46,13 +46,40 @@ Any text you place in the "Instructions" field of your event is securely display
 1. Once the event has ended, go to the **Closeout** tab.
 2. Review the final attendance list.
 3. Click **Award Hours** to finalize the roster.
-4. **Important:** Completing the event locks the roster. It protects the event from accidental deletion and ensures students receive their official hour certificates.
+4. Once every shift has ended and every confirmed volunteer has been accounted
+   for, the event is marked **Complete**. That protects it from accidental
+   deletion and releases students' official hour certificates. **It does not
+   freeze the hours** — see Closing Out below.
 
 ### Correcting Attendance Records
 If you make a mistake (e.g., someone left early and earned 1 hour instead of 2):
 1. Go to the **Closeout** tab.
-2. Even after the event is completed, you can edit a student's hours.
+2. Change the mark or the number, and give a reason for the change.
 3. Changes automatically update the student's dashboard and regenerate their certificate.
+
+You can do this at any time before you close the hours out, including after the
+event is marked Complete. Every change is recorded against your name.
+
+### Closing Out the Hours
+When the numbers are right, press **Close out hours** on the Closeout tab.
+
+- It is only offered once the event is Complete, so nobody can be left
+  uncredited by it.
+- You will be asked to confirm, and told how many volunteers it affects.
+- **It cannot be undone.** After this, nobody can change those hours — not you,
+  and not an administrator.
+
+That permanence is the point: it is what makes a WeVolunteer certificate worth
+quoting to a scholarship committee. Take the extra minute to check the hours
+first — there is no rush, and an event left un-closed stays correctable.
+
+Your dashboard lists finished events whose hours are still open, under **"Ready
+when you are"**. It is a reminder, not a warning: nothing is wrong with an event
+sitting there, and the hours are credited and visible to students either way.
+
+> **Two different "close" actions.** *Close sign-ups* stops new applications
+> arriving and can be reversed. *Close out hours* permanently locks credited
+> service hours and cannot.
 
 ### Viewing Volunteer History
 Your Organizer Dashboard gives you a complete historical view of all events you have hosted and the students who helped make them possible.

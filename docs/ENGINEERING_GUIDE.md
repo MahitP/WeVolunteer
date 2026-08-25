@@ -1281,6 +1281,35 @@ first thing nobody thought of; an allowlist fails closed. `password`,
 `newEmail` and `challengeId` are not on it and therefore cannot be stored,
 whatever a caller believes it is passing.
 
+#### These records also leave the building
+
+Since v1.3, the same four decisions govern a second destination. When
+`BETTERSTACK_SOURCE_TOKEN` and `BETTERSTACK_INGESTING_HOST` are set,
+`server/telemetry.js` sends a structured record to Better Stack for every error
+`recordError` captures, plus a sampled access log, lifecycle events and the
+audit action names. The rule it is built around is one line:
+
+> **Better Stack may hold exactly what `error_events` may hold, and nothing
+> more.**
+
+That is why this subsection's bar was reused rather than a new one written: it
+has been reviewed twice, by people probing the redactor with realistic PII.
+
+The consequence for anyone editing this area: **widening `CONTEXT_KEYS`, or
+relaxing `redactMessage`, now also widens what goes to a third party.** A field
+added here for a good local reason — "it would help to store the search term" —
+is a field posted to a vendor whose team roster is not this application's
+permission model. `error.read` is `SUPER_ONLY`; the Better Stack team is not.
+
+Telemetry itself is a separate allowlist in `server/telemetry.js` and cannot
+carry a key it does not name, so the failure mode is not automatic. It is
+narrower than that and worth stating plainly: a value that reaches an
+already-allowed field goes out with it.
+
+See [`docs/operations/betterstack.md`](operations/betterstack.md) for what is
+sent, what is never sent, the delivery guarantees, and the operator decisions
+the integration forces.
+
 #### Groups, events, fingerprints
 
 An **error group** is one *problem*. An **error event** is one *occurrence* of
@@ -1590,6 +1619,48 @@ future rebuild is expected to copy its structure:
 Anything that cannot meet that bar is not an automatic startup migration.
 `server/migrate_usernames.js` is a standalone one-off with test coverage; that
 remains the pattern for a change too risky to run unattended.
+
+**Path 3 — the same registry, on PostgreSQL.** A PostgreSQL database is created
+at the destination rather than walked to it: `applyPostgresSchema` runs
+`server/db/postgresSchema.js`, which is *generated* from a fully-migrated SQLite
+database. That is right for a new database and does nothing for an existing one,
+because every statement in the generated file is `CREATE TABLE IF NOT EXISTS`.
+
+So migrations run on PostgreSQL too, under two rules:
+
+- **`POSTGRES_BASELINE_VERSION`** (in `server/migrations/index.js`) is the last
+  migration whose effect a deployed PostgreSQL database already has from the
+  generated DDL. It is **frozen**, not derived — it is a fact about databases
+  already out in the world, and deriving it from the registry would tell every
+  deployment that a change it never received is already applied. Everything at or
+  below it is SQLite-only history and never runs on PostgreSQL.
+- **Every migration above it must export `postgres: { up: async (db) => … }`**
+  alongside its SQLite `up`. `runPostgresMigrations` throws at boot if one does
+  not, and `server/migrations.postgres.test.js` fails the build before that.
+  Refusing is deliberate: a skipped schema change is a production constraint
+  violation on a value development accepts.
+
+The two halves are usually different, and should be. `057_widen_event_categories`
+is a create-copy-drop-rename rebuild on SQLite (which cannot `ALTER` a `CHECK`)
+and four lines of `ALTER TABLE` on PostgreSQL (which can). Porting the workaround
+would be a longer route to the same schema.
+
+Bookkeeping is shared. A database that was empty when the schema was applied
+records every registry version with checksum `'baseline'` — the DDL already
+contained them, so there is no source to hash and the drift check skips those
+rows. A database that was not empty records nothing new, and the runner walks it
+forward, writing real checksums.
+
+Run the PostgreSQL suites with a live server:
+
+```
+TEST_POSTGRES_URL=postgres://…/db npm test
+TEST_POSTGRES_URL=postgres://…/db npm run test:postgres
+```
+
+Without the variable the PostgreSQL cases report as **skipped**, never as passed,
+and the engine-independent guards (including the "every migration has a
+PostgreSQL implementation" ratchet) still run.
 
 ### 8.4 Health checks
 
