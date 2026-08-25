@@ -133,7 +133,7 @@ router.post('/api/events/:id/attendance', authenticateToken, requireCapAny(['att
            this is the transition that moves an event out of the default
            `listable` scope a student browses. It is NOT the hours close-out,
            which is a separate lifecycle and deliberately not indexed at all. */
-        await markEventDirty(tx, eventId, { reason: 'completed' });
+        await markEventDirty(tx, eventId);
         outcome.eventCompleted = true;
       }
     });

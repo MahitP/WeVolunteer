@@ -289,8 +289,6 @@ describe('keeping the index in step with the database', () => {
   it('keeps an event pending when the vendor refuses the batch', async () => {
     const id = await createEvent({ title: 'Vendor is down' });
 
-    const { upsertRecords } = await import('./search/pineconeClient.js');
-    void upsertRecords;
     /* Point the client at a dead port for one drain. */
     const good = process.env.PINECONE_INDEX_HOST;
     process.env.PINECONE_INDEX_HOST = 'http://127.0.0.1:1';
@@ -486,6 +484,21 @@ describe('when Pinecone is having a bad day', () => {
 /* ── Recommendations ──────────────────────────────────────────────────────── */
 
 describe('recommendations', () => {
+  /**
+   * A client that asks for suggestions without naming a page size still gets the
+   * explanation — the bare-array shape has nowhere to put it.
+   */
+  it('answers in the envelope shape even with no limit', async () => {
+    await createEvent({ title: 'Envelope without a limit' });
+    await drain();
+
+    const res = await srv.call('GET', '/api/events?recommended=true', undefined, student);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body), 'a recommendation lost its explanation').toBe(false);
+    expect(res.body.recommendation?.text).toBeTruthy();
+    expect(res.body.events).toBeInstanceOf(Array);
+  });
+
   it('answers a brand-new student with real opportunities', async () => {
     await createEvent({ title: 'Cold start candidate' });
     await drain();

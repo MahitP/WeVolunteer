@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 import {
   shouldUseSemantic, buildPineconeFilter, rrfFuse, shouldRerank,
@@ -270,4 +272,86 @@ describe('when Pinecone is unavailable', () => {
     expect(res.ids).toEqual([]);
     expect(res.durationMs).toBeLessThan(5000);
   }, 15000);
+});
+
+
+/**
+ * What telemetry is allowed to know about a search.
+ *
+ * `docs/operations/pinecone.md` claims that search text never leaves this
+ * application through telemetry. That is a privacy claim about free text typed
+ * by minors into a school platform, and a claim of that kind should be asserted
+ * on the wire rather than argued from the source.
+ *
+ * Both sinks are pointed at loopback stubs: Pinecone answers a search, and
+ * Better Stack receives whatever the search decided to report.
+ */
+describe('what a search tells telemetry', () => {
+  it('reports the shape of the search and never its text', async () => {
+    const QUERY = 'help autistic children with reading at lincoln elementary';
+    const delivered = [];
+
+    const pinecone = createServer((req, res) => {
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+          .end(JSON.stringify({ result: { hits: [{ _id: 'event:abc', _score: 0.9 }] } }));
+      });
+    });
+    pinecone.listen(0, '127.0.0.1');
+    await once(pinecone, 'listening');
+
+    const betterstack = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => { body += c; });
+      req.on('end', () => {
+        try { delivered.push(...JSON.parse(body)); } catch { /* not ours */ }
+        res.writeHead(202).end('{}');
+      });
+    });
+    betterstack.listen(0, '127.0.0.1');
+    await once(betterstack, 'listening');
+
+    const prev = { ...process.env };
+    try {
+      process.env.WEV_PINECONE_TEST_SINK = '1';
+      process.env.PINECONE_API_KEY = 'k';
+      process.env.PINECONE_INDEX_HOST = `http://127.0.0.1:${pinecone.address().port}`;
+      process.env.PINECONE_NAMESPACE = 'test';
+      process.env.WEV_TELEMETRY_TEST_SINK = '1';
+      process.env.BETTERSTACK_SOURCE_TOKEN = 'telemetry-token';
+      process.env.BETTERSTACK_INGESTING_HOST = `http://127.0.0.1:${betterstack.address().port}`;
+
+      __resetPineconeConfig();
+      __resetPineconeClient();
+      const sink = await import('./telemetrySink.js');
+      sink.__resetTelemetrySink();
+
+      const res = await semanticCandidates(QUERY, { scope: 'listable' });
+      expect(res.ok, 'the stub search did not succeed, so nothing was reported').toBe(true);
+
+      await sink.drainTelemetry();
+
+      const record = delivered.find((r) => r.event === 'pinecone.search');
+      expect(record, 'the search reported nothing at all').toBeTruthy();
+
+      /* The shape: enough to answer "is search slow" and "is it failing". */
+      expect(record.operation).toBe('discover');
+      expect(record.outcome).toBe('ok');
+      expect(typeof record.durationMs).toBe('number');
+
+      /* And not one word of what the student was looking for. */
+      const serialised = JSON.stringify(delivered);
+      for (const fragment of ['autistic', 'lincoln', 'elementary', 'reading', QUERY]) {
+        expect(serialised, `"${fragment}" reached the telemetry vendor`).not.toContain(fragment);
+      }
+    } finally {
+      process.env = prev;
+      __resetPineconeConfig();
+      __resetPineconeClient();
+      (await import('./telemetrySink.js')).__resetTelemetrySink();
+      pinecone.close(); await once(pinecone, 'close').catch(() => {});
+      betterstack.close(); await once(betterstack, 'close').catch(() => {});
+    }
+  }, 20000);
 });

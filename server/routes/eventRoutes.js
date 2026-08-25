@@ -198,12 +198,22 @@ const EVENTS_WARN_THRESHOLD = 400;
  */
 router.get('/api/events', authenticateToken, async (req, res) => {
   try {
-    const paginated = req.query.limit !== undefined;
+    /**
+     * `recommended=true` always answers in the envelope shape.
+     *
+     * The bare-array response is kept for callers written before pagination
+     * existed, and it has nowhere to put the explanation that makes a
+     * recommendation a recommendation rather than a list. A client asking for
+     * suggestions without a `limit` would otherwise get the events and silently
+     * lose the "because you saved …" that justifies them.
+     */
+    const paginated = req.query.limit !== undefined || req.query.recommended != null;
 
     let limit = null;
     let offset = 0;
     if (paginated) {
-      const rawLimit = Number(req.query.limit);
+      /* A recommendation with no stated limit gets a screenful. */
+      const rawLimit = req.query.limit === undefined ? 12 : Number(req.query.limit);
       const rawOffset = Number(req.query.offset ?? 0);
       if (!Number.isFinite(rawLimit) || rawLimit < 1) {
         return res.status(400).json({ error: '`limit` must be a positive integer.', field: 'limit' });
@@ -1071,7 +1081,7 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
      * because a search index must never be able to roll back the creation of an
      * event. `markEventDirty` is one local upsert and cannot throw.
      */
-    await markEventDirty(db, eventId, { reason: 'create' });
+    await markEventDirty(db, eventId);
 
     /**
      * Tell the organization's members, in one pass, after the commit.
@@ -1405,7 +1415,7 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
          block to hang it from and the mark is idempotent: a rolled-back edit
          leaves an event queued for a re-index that will compute the same hash it
          already has and send nothing. */
-      await markEventDirty(tx, eventId, { reason: 'update' });
+      await markEventDirty(tx, eventId);
 
       // 2. Differential sync slots.
       //
@@ -1715,7 +1725,7 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
        completed history a district accumulates, and how a cancelled event stops
        being offered at all. `shouldIndex` turns the cancelled case into a
        deletion when the queue drains. */
-    await markEventDirty(db, eventId, { reason: 'status' });
+    await markEventDirty(db, eventId);
 
     // Calling off an event is the one change every confirmed volunteer must
     // hear about immediately — they may have arranged a ride around it.

@@ -301,6 +301,11 @@ figure is in the Pinecone console; this is for spotting a runaway first.
 second one, so a suggestion is an ordinary listing in a different order and
 cannot show anything a browse would not [proven].
 
+It always answers in the envelope shape (`{ events, recommendation, pagination,
+… }`), even without a `limit`. The bare-array response kept for pre-pagination
+callers has nowhere to put the explanation, and a recommendation without its
+"because you saved …" is just a list [proven].
+
 Signals: favourites, applications, attendance. All of them already exist because
 the product needs them; **no view, click or search is tracked for this**.
 
@@ -425,5 +430,6 @@ mocked `fetch`.
 | `search.eventDocument.test.js` | ids, embedded text, metadata, hash, the privacy omissions |
 | `search.discoverSearch.test.js` | when to call the vendor, filters, fusion, the rerank budget |
 | `search.eventQuery.test.js` | how candidates enter the SQL, the relevance sort, fail-closed |
-| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization |
+| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization, recommendations |
+| `search.discoverSearch.test.js` (telemetry block) | that a student's search text never reaches the telemetry vendor |
 | `BrowseEvents.relevanceSort.test.jsx` | the one control this adds, and its accessibility |

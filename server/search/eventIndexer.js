@@ -39,6 +39,7 @@ import { logEvent } from './../telemetry.js';
 import {
   buildRecord, contentHash, shouldIndex, vectorIdFor, eventIdFromVectorId,
 } from './eventDocument.js';
+import { tagsForEvents } from './../eventTags.js';
 import { upsertRecords, deleteRecords, indexStats } from './pineconeClient.js';
 import { pineconeEnabled, UPSERT_BATCH_SIZE, DOCUMENT_VERSION } from './pineconeConfig.js';
 
@@ -58,16 +59,29 @@ const EVENT_SELECT = `
   SELECT e.id, e.title, e.description, e.category, e.location, e.status,
          e.audience, e.organization_id, e.application_deadline,
          org.name AS organization_name,
-         (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS min_start,
-         (SELECT GROUP_CONCAT(et.tag) FROM event_tags et WHERE et.event_id = e.id) AS tag_list
+         (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS min_start
     FROM events e
     LEFT JOIN organizations org ON org.id = e.organization_id
 `;
 
-/** Splits the aggregated tag column back into keys. */
-function rowExtras(row) {
+/**
+ * Tags come from `tagsForEvents`, not from an aggregate in the query above.
+ *
+ * The first version used `GROUP_CONCAT(et.tag)`, which is SQLite-only —
+ * PostgreSQL spells it `string_agg`. It failed on PostgreSQL, and it failed
+ * *quietly*: `syncPending` catches a query error and reports it as `failed`, so
+ * the symptom was an index that simply never filled rather than an exception
+ * anybody would see. The whole PostgreSQL half of the integration suite caught
+ * it at once.
+ *
+ * The fix is not a dialect helper. `eventTags.js` already has a batched,
+ * dialect-safe lookup that the events route uses for exactly this — one query
+ * for the whole batch, no aggregate, and one fewer place where the two engines
+ * are spelled differently.
+ */
+function rowExtras(row, tagsByEvent) {
   return {
-    tags: String(row?.tag_list ?? '').split(',').map((t) => t.trim()).filter(Boolean),
+    tags: (tagsByEvent[row.id] ?? []).map((t) => t.tag).filter(Boolean),
     organizationName: row?.organization_name ?? null,
     startsAt: row?.min_start ?? null,
   };
@@ -85,8 +99,12 @@ function rowExtras(row) {
  *
  * Safe to call for an event that does not exist, an unchanged event, or twice in
  * one request. Never throws.
+ *
+ * It takes no "reason" argument. One was tried and removed: nothing read it, so
+ * it was documentation pretending to be a parameter, and the call sites say why
+ * they are marking far better than a string literal could.
  */
-export async function markEventDirty(db, eventId, { reason = 'write' } = {}) {
+export async function markEventDirty(db, eventId) {
   if (!eventId) return;
   try {
     const now = new Date().toISOString();
@@ -101,7 +119,6 @@ export async function markEventDirty(db, eventId, { reason = 'write' } = {}) {
   } catch {
     /* A search index that misses an update is a stale search result. It is not a
        reason to fail the write that produced it, and `reconcile` finds it. */
-    void reason;
   }
 }
 
@@ -245,12 +262,29 @@ export async function syncPending(db, { limit = UPSERT_BATCH_SIZE, dryRun = fals
   } catch (err) {
     result.failed = 1;
     result.reason = `query_${err?.name || 'error'}`;
+    /**
+     * Said out loud, because this one hides.
+     *
+     * A failure to SELECT the pending batch is not a vendor problem — it is a
+     * bug in this application's own SQL, and it fails every event at once. It
+     * was found exactly this way: `GROUP_CONCAT` is SQLite-only, so on
+     * PostgreSQL the query threw, the throw was recorded as `failed`, and the
+     * only visible symptom was a search index that never filled. Anything that
+     * can make the whole corpus silently unsearchable should be a log line, not
+     * a counter.
+     */
+    logEvent('error', 'pinecone.upsert', {
+      operation: 'sync', outcome: 'failed', reason: result.reason, count: 0,
+    });
     return result;
   }
   result.considered = rows.length;
   if (!rows.length) return result;
 
   const stored = await hashesFor(db, rows.map((r) => r.id));
+  /* One query for the whole batch, beside the hashes — never one per event,
+     which on a 50,000-event backfill would be 50,000 extra round trips. */
+  const tagsByEvent = await tagsForEvents(db, rows.map((r) => r.id));
 
   /* Three piles: send it, remove it, or leave it alone. */
   const toUpsert = [];
@@ -258,7 +292,7 @@ export async function syncPending(db, { limit = UPSERT_BATCH_SIZE, dryRun = fals
   const unchanged = [];
 
   for (const row of rows) {
-    const extras = rowExtras(row);
+    const extras = rowExtras(row, tagsByEvent);
     if (!shouldIndex(row)) {
       toDelete.push(row.id);
       continue;
