@@ -1,5 +1,16 @@
 # Better Stack: telemetry and the MCP server
 
+> **Traces and metrics are documented separately**, in
+> [`observability.md`](observability.md). This document covers the LOG wire —
+> `telemetrySink.js`, the HTTP ingestion API, the field allowlist — and the MCP
+> operator tooling. The OpenTelemetry half shares this source and this token but
+> is a different pipeline with different failure modes and its own cost
+> controls, and merging the two documents would bury both.
+>
+> The short version of the split: OpenTelemetry JavaScript marks Logs
+> "Development" while Traces and Metrics are Stable, so the reviewed log
+> boundary described below was kept rather than replaced.
+
 Two separate things that share a vendor, and the distinction matters:
 
 - **Telemetry** is how the *product* reports on itself — a batched HTTPS POST

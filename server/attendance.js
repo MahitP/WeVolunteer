@@ -36,6 +36,7 @@
 
 import { recordHoursChange } from './hoursLedger.js';
 import { MAX_SLOT_HOURS } from './validation.js';
+import { withSpan } from './observability/spans.js';
 
 /**
  * The check-in table, as a database created from scratch gets it.
@@ -372,6 +373,26 @@ export async function getCheckins(db, eventId) {
  * Caller is responsible for wrapping this in a transaction.
  */
 export async function finalizeAttendance(db, { event, attendanceMap, hoursMap, reason, actor, now }) {
+  /**
+   * Given a span because this is where service hours become real.
+   *
+   * Everything downstream of it — a student's transcript, a certificate, the
+   * hours ledger's parity check — is derived from what this function writes, so
+   * "the hours are wrong" is always ultimately a question about one of these
+   * calls. It is also the longest single database interaction in the
+   * application: a transaction over every attendee on the event, with a ledger
+   * write each.
+   *
+   * No attendee count, no event id, no actor. `wev.count` exists on the
+   * allowlist and is deliberately not passed: the number of attendees on an
+   * event at a named school at a named time is closer to identifying than it
+   * looks, and the aggregate is already in `wev.business.operations`.
+   */
+  return withSpan('attendance.finalize', { component: 'attendance' }, () =>
+    finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, reason, actor, now }));
+}
+
+async function finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, reason, actor, now }) {
   const entries = Object.entries(attendanceMap || {});
   const planned = [];
   const skipped = [];

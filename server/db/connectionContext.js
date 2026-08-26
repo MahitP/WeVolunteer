@@ -46,8 +46,50 @@
  * handlers whose atomicity rests on never awaiting between a read and its write.
  * That is phase 8 and no plumbing avoids it. This removes one specific obstacle —
  * the un-poolable transaction — and nothing else.
+ *
+ * ── Why the database metric is taken HERE and not around every statement ──
+ *
+ * The obvious place for "how slow is the database" is the statement, and it is
+ * the wrong one on this codebase for two reasons that both point the same way.
+ *
+ * The engine that actually runs in production is `node:sqlite`, for which no
+ * OpenTelemetry instrumentation exists — so statement timing would have to be
+ * hand-rolled into the proxy below, which means an allocation and two clock
+ * reads on every one of the 656 `db.prepare` call sites, against statements that
+ * complete in microseconds. The proxy's own indirection was measured at 1.4% and
+ * judged worth it; this would be a multiple of that for a number whose useful
+ * form — a percentile — the HTTP histogram already carries.
+ *
+ * It would also mean wrapping the object `prepare()` returns, and the note on
+ * `defineProperty` below is a record of what happens when this proxy stops
+ * returning exactly what the connection returns: six tests broke silently,
+ * observing zero calls and unmocked behaviour rather than failing.
+ *
+ * A transaction is the right granularity instead. It is where the contention,
+ * the lock waits and the rollbacks are, it happens once per mutating request
+ * rather than hundreds of times, and it is the same seam on both engines — so
+ * the metric keeps meaning the same thing after the PostgreSQL switch, where
+ * `@opentelemetry/instrumentation-pg` additionally provides per-statement spans
+ * for free.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+/**
+ * The one import besides `node:async_hooks`, and it is chosen to keep the
+ * property the header above claims.
+ *
+ * `metrics.js` reaches exactly two things: the OpenTelemetry **API** (a no-op
+ * package until an SDK is registered) and `telemetrySink.js`, which imports
+ * nothing at all. So nothing can reach back to `db.js` through it and the "every
+ * module may depend on this one" property is intact — which is why the metric is
+ * imported statically here rather than through the lazy `import()` dance
+ * `auditLog.js` and `errorReporter.js` need for `telemetry.js`.
+ *
+ * A SPAN is deliberately not created here. `spans.js` pulls in the redaction
+ * chain, and a transaction already runs inside the HTTP span that caused it —
+ * what was missing was the population view, not another bar on a waterfall that
+ * is sampled at 2% anyway.
+ */
+import { recordDbOperation } from '../observability/metrics.js';
 
 const storage = new AsyncLocalStorage();
 
@@ -178,6 +220,9 @@ export function transactionOn(handle, fn) {
      normal case — most callers hand over the module-global `db`. */
   const connection = concreteConnection(handle);
 
+  const startedAt = Date.now();
+  let failed = false;
+
   connection.exec('BEGIN');
   try {
     const result = withConnection(connection, fn);
@@ -227,9 +272,31 @@ export function transactionOn(handle, fn) {
     connection.exec('COMMIT');
     return result;
   } catch (err) {
+    failed = true;
     try { connection.exec('ROLLBACK'); } catch { /* already rolled back */ }
     throw err;
+  } finally {
+    /* `recordDbOperation` is a no-op until the meter provider exists and
+       swallows its own errors, so this cannot become a reason a transaction
+       appears to fail. */
+    recordDbOperation({
+      operation: 'transaction', engine: engineOf(connection),
+      durationMs: Date.now() - startedAt, failed,
+    });
   }
+}
+
+/**
+ * Which engine a connection is, in the two values the metric label allows.
+ *
+ * Asked of the connection rather than read from `db.js`'s `ENGINE` export,
+ * because importing `db.js` from here is the cycle this module exists outside
+ * of. `beginTransaction` is the method the PostgreSQL adapter has and
+ * `DatabaseSync` does not, which is the same test `runInTransaction` below
+ * already uses to choose its transaction strategy.
+ */
+function engineOf(connection) {
+  return typeof connection?.beginTransaction === 'function' ? 'postgres' : 'sqlite';
 }
 
 /**
@@ -297,6 +364,10 @@ export async function runInTransaction(handle, fn) {
      shares that connection rather than opening one somewhere else. */
   const sqlitePath = target === defaultConnection ? defaultConnectionPath : null;
 
+  const engine = engineOf(target);
+  const startedAt = Date.now();
+  let failed = false;
+
   const tx = typeof target.beginTransaction === 'function'
     ? await target.beginTransaction()
     : await (await import('./sqliteTransaction.js')).beginSqliteTransaction(sqlitePath, target);
@@ -306,10 +377,16 @@ export async function runInTransaction(handle, fn) {
     await tx.commit();
     return result;
   } catch (err) {
+    failed = true;
     if (!tx.settled) {
       try { await tx.rollback(); } catch {}
     }
     throw err;
+  } finally {
+    recordDbOperation({
+      operation: 'transaction', engine,
+      durationMs: Date.now() - startedAt, failed,
+    });
   }
 }
 
