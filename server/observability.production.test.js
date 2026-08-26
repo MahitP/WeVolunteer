@@ -63,7 +63,30 @@ startOtel({
 // Imported AFTER the line above, exactly as app.js is in server.js.
 const { default: express } = await import('express');
 
+const { currentTraceIds } = await import(${JSON.stringify(path.join(HERE, 'observability/correlation.js'))});
+
 const app = express();
+
+/*
+ * The shape of app.js's correlation middleware, reproduced exactly.
+ *
+ * What is being tested is whether the OpenTelemetry context is still active
+ * inside a res.on('finish') listener, because that is where logHttpRequest
+ * runs -- and if it is not, every access-log record is written without a trace
+ * id, and the join between the two signals silently does not exist for the
+ * highest-volume log this application produces.
+ *
+ * (No backticks in this comment: it lives inside a template literal.)
+ */
+let correlation = null;
+app.use((req, res, next) => {
+  const inMiddleware = currentTraceIds();
+  res.on('finish', () => {
+    correlation = { inMiddleware, inFinish: currentTraceIds() };
+  });
+  next();
+});
+
 app.get('/api/events/:id', (req, res) => res.json({ ok: true }));
 const server = app.listen(0, '127.0.0.1');
 await new Promise((r) => server.once('listening', r));
@@ -78,6 +101,7 @@ await new Promise((r) => setTimeout(r, 500));
 const snapshot = otelSnapshot() ?? {};
 await shutdownOtel();
 process.stdout.write('SNAPSHOT:' + JSON.stringify(snapshot) + '\\n');
+process.stdout.write('CORRELATION:' + JSON.stringify(correlation ?? {}) + '\\n');
 server.close();
 process.exit(0);
 `;
@@ -185,6 +209,34 @@ describe('under a real node process, not vite-node', () => {
     expect(text).not.toContain('url.query');
     expect(text).not.toContain('url.path');
     expect(text).not.toContain('client.address');
+  });
+
+  /**
+   * ── Why this is asserted in the subprocess and not in the harness ──
+   *
+   * Measured, in Vitest: BOTH captures come back empty, in the middleware body
+   * as well as in the finish listener — the same vite-node module-loading
+   * artifact that hides the Express spans. Read there, it looks exactly like a
+   * broken correlation, and softening it to "{} is fine" would have written the
+   * bug into the test.
+   *
+   * In a real process the context survives to `finish`, which is what makes the
+   * access-log record joinable to its trace. That is the claim
+   * `docs/operations/observability.md` makes, so it is asserted where it can be
+   * asserted honestly.
+   */
+  it('carries the trace context into res.on(finish), where the access log runs', () => {
+    const correlation = JSON.parse(output.match(/CORRELATION:(\{.*\})/)?.[1] ?? '{}');
+    expect(correlation.inFinish?.traceId, 'no trace id at finish — every access-log record would be unjoinable')
+      .toMatch(/^[0-9a-f]{32}$/);
+    expect(correlation.inFinish?.spanId).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('reports the SAME trace inside the handler and at finish', () => {
+    /* A different trace id at the two points would be worse than none: the log
+       record would join to a trace that is not the request it describes. */
+    const correlation = JSON.parse(output.match(/CORRELATION:(\{.*\})/)?.[1] ?? '{}');
+    expect(correlation.inMiddleware?.traceId).toBe(correlation.inFinish?.traceId);
   });
 
   it('reported the ESM hook as registered', () => {

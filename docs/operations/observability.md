@@ -345,6 +345,22 @@ exporter retries up to five times — "bounded per attempt" is not "bounded", an
 that pushes past `TimeoutStopSec` turns a graceful stop into a `SIGKILL`,
 discarding exactly the cleanup the sequence exists to perform.
 
+### Trace context and the access log
+
+`logHttpRequest` runs inside `res.on('finish')`, which raised a fair question:
+does the OpenTelemetry context still exist there, or is every access-log record
+written without a trace id?
+
+**Measured, in a real process: it survives**, and the ids at `finish` are the
+same ones as in the middleware body [proven]. So the highest-volume log this
+application produces is joinable to its trace.
+
+Worth recording because the harness says otherwise: under Vitest **both**
+captures come back empty — in the middleware body as well as the listener — for
+the same vite-node reason the Express spans go missing. Read there it looks
+exactly like a broken correlation, and the honest response was to assert it in
+the subprocess suite rather than to soften it into something that passes.
+
 ### The ESM problem
 
 **Measured:** with the SDK registered the ordinary way, a request through Express
@@ -450,7 +466,36 @@ afternoon.
 
 ---
 
-## 12. What remains unproven
+## 12. Mutation testing
+
+```
+node bin/otel-mutation-check.mjs            # all 27, ~15 minutes
+node bin/otel-mutation-check.mjs redaction  # by name
+```
+
+Every **[proven]** label in this document means a test asserts the behaviour
+*and* that test has been shown to fail when the behaviour is removed. The
+harness removes one guarantee at a time — the test gate, the sample rate, the
+budget, each memory bound, each redaction rule, the shutdown deadline, the
+cardinality caps, the propagation refusal, the ESM hook — and reports any that
+the suite fails to notice.
+
+**Current result: 27 of 27 caught.**
+
+Two survived on the first run, and both were defects in the *tests*:
+
+- The inbound-`traceparent` test searched the wire for the trace id as **hex**.
+  OTLP encodes `trace_id` as 16 raw bytes, so the hex string could never have
+  appeared whatever the code did — the assertion was unfalsifiable. Rewritten to
+  search the raw bytes.
+- The shutdown-deadline mutation had left the timeout branch in the race, so it
+  had not actually removed the deadline. A faulty mutation is its own kind of
+  false comfort, and is why the harness is in the repository rather than
+  something that was run once.
+
+---
+
+## 13. What remains unproven
 
 Stated plainly, because the labels above are worthless if this section is empty
 when it should not be.
