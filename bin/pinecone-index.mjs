@@ -31,6 +31,7 @@
  */
 import process from 'node:process';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -62,11 +63,44 @@ const SERVER_DIR = path.join(REPO_ROOT, 'server');
  */
 function normaliseDbPath() {
   const raw = process.env.WEV_DB_PATH;
-  if (!raw || path.isAbsolute(raw)) return;
-  if ((process.env.DATABASE_ENGINE || 'sqlite').toLowerCase() === 'postgres') return;
-  process.env.WEV_DB_PATH = path.resolve(SERVER_DIR, raw);
+  if (!raw) return null;
+  if ((process.env.DATABASE_ENGINE || 'sqlite').toLowerCase() === 'postgres') return null;
+  const resolved = path.isAbsolute(raw) ? raw : path.resolve(SERVER_DIR, raw);
+  process.env.WEV_DB_PATH = resolved;
+  return resolved;
 }
-normaliseDbPath();
+
+/**
+ * Refuse a database that is not there, rather than creating one.
+ *
+ * `node:sqlite` creates an absent file, so every wrong path is a silent success:
+ * an empty database, a backfill of zero events, and an exit code of 0. That is
+ * the failure `bin/resolveDb.mjs` answers with "a refusal rather than a new
+ * file", and it happened twice during the first live run of these commands —
+ * once from the repository root and once from a git worktree, each time leaving
+ * a stray empty database behind.
+ *
+ * Resolving the path correctly was necessary and not sufficient: a correct rule
+ * still points at nothing when the file genuinely is not there. So the tool
+ * stops and says which path it tried.
+ */
+function assertDatabaseExists(resolved) {
+  if (!resolved || existsSync(resolved)) return true;
+  line('That database does not exist:');
+  line('');
+  line(`    ${resolved}`);
+  line('');
+  line('  WEV_DB_PATH is resolved against server/, matching bin/resolveDb.mjs.');
+  line('  Nothing was created — node:sqlite would happily have made an empty');
+  line('  database here and reported a successful backfill of zero events.');
+  line('');
+  line('  Point WEV_DB_PATH at the database you mean, as an absolute path if');
+  line('  you are running from a git worktree.');
+  process.exitCode = 1;
+  return false;
+}
+
+const RESOLVED_DB = normaliseDbPath();
 
 const [, , rawCommand, ...args] = process.argv;
 const command = String(rawCommand ?? '').toLowerCase();
@@ -156,6 +190,8 @@ async function main() {
     line('Usage: node bin/pinecone-index.mjs <setup|backfill|reindex|reconcile|stats> [--dry-run] [--remove-orphans]');
     return;
   }
+
+  if (!assertDatabaseExists(RESOLVED_DB)) return;
 
   const { config, client, indexer, doc, db } = await load();
 
