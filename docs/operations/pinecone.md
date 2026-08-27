@@ -304,6 +304,61 @@ Measured top-1 scores that fixed it:
 corpus or embedding model moves it. Two regression tests pin it, and removing
 the filter fails them.
 
+## 6c. Similar opportunities — the one capability added after launch
+
+`GET /api/events?similarTo=<eventId>` — "opportunities like this one", another
+**mode of the list endpoint**, not a second one.
+
+**It costs no embedding tokens.** Pinecone's integrated search endpoint accepts
+`query.id`, which queries with the vector a record already has [documented, API
+2026-04]. The expensive half was paid for when the event was indexed, so the only
+charge is read units, on a request a student made by opening one event. It runs
+on demand — never on a timer, never during a browse.
+
+Nothing new reaches the vendor: an event id this application already owns goes
+out, candidate ids come back, and the authoritative query decides the rest. The
+source event is dropped from its own results — it is trivially the record most
+similar to itself. With no candidates it **fails closed**: "what is like this?"
+answered with the whole table is not an answer.
+
+Scoped to `listable`. `openOnly` is deliberately not forced, unlike
+recommendations: this is a lateral browse, and an event whose sign-ups have
+closed is still worth seeing beside the one you are reading.
+
+## 6d. Why contentless events are not indexed
+
+`shouldIndex` requires a description of at least `MIN_DESCRIPTION_CHARS` (20).
+That is a filter against placeholders, not a quality bar — the records it exists
+to exclude had descriptions of **three and six characters**.
+
+Measured on the live pilot index, 2026-08-28:
+
+| Query | Top hit | Score |
+|---|---|---|
+| `zzzqqxnonexistenttopicxyz` | a placeholder titled "Event" | **0.2922** |
+| `zzzqqxnonexistenttopicxyz` | (second) placeholder | 0.2796 |
+| "helping at a sports event" (genuine) | best match | 0.2823 |
+| `zzzqqxnonexistenttopicxyz` | a properly described event | 0.1021 |
+
+A placeholder outscored a real query. That is not a threshold problem and cannot
+be fixed by raising the floor: a near-empty passage embeds into a generic region
+of the space and therefore sits close to everything, including random
+characters. Such a record is a permanent false-positive generator.
+
+Excluding it costs nothing anybody wants — the lexical half is SQL and still
+matches the title, description, location and organizer exactly, so the event
+stays findable by its words. It also saves an embedding and its storage.
+`reconcile` applies the same rule, importing the same constant, so it does not
+report permanent drift for events the index is correct to be without.
+
+**A caveat worth stating.** After removing the two worst placeholders, the pilot
+corpus still returns one candidate for gibberish, because only **one** event in
+it is `listable` — with a single candidate, "nearest neighbour" is trivially that
+one. On the 16-event validation corpus, where every event had a real
+description, nonsense topped out at 0.1058 against a 0.15 floor. This is a
+small-corpus artefact, not a design flaw, and the durable answer is corpus size
+and description quality rather than threshold tuning.
+
 ## 7. Failure behaviour
 
 | Failure | What a student sees |
@@ -494,6 +549,6 @@ mocked `fetch`.
 | `search.eventDocument.test.js` | ids, embedded text, metadata, hash, the privacy omissions |
 | `search.discoverSearch.test.js` | when to call the vendor, filters, fusion, the rerank budget |
 | `search.eventQuery.test.js` | how candidates enter the SQL, the relevance sort, fail-closed |
-| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization, recommendations |
+| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization, recommendations, similar events |
 | `search.discoverSearch.test.js` (telemetry block) | that a student's search text never reaches the telemetry vendor |
 | `BrowseEvents.relevanceSort.test.jsx` | the one control this adds, and its accessibility |

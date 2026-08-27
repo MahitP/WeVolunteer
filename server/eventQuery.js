@@ -136,12 +136,28 @@ export function parseEventFilters(query = {}) {
      * the list, so anything outside it does not belong. One flag rather than two
      * code paths, so both go through the same predicates.
      */
-    restrictToSemanticIds: false
+    restrictToSemanticIds: false,
+    /**
+     * "Show me opportunities like this one" — an event id, not a row filter.
+     *
+     * Parsed here because, like `recommended`, it names a MODE rather than a
+     * result: the caller is asking about an event it can already see, and the
+     * events it gets back are chosen by the index and then filtered by the same
+     * predicates as any other listing.
+     */
+    similarTo: null
   };
 
   const bool = (v) => v === 'true' || v === '1' || v === true;
 
   if (query.recommended != null) out.recommended = bool(query.recommended);
+
+  /* An id, bounded and shape-checked. It is looked up in the index, never
+     interpolated into SQL — `semanticIdParams` binds every id it is given. */
+  if (query.similarTo != null && String(query.similarTo).trim()) {
+    const raw = String(query.similarTo).trim();
+    if (/^[A-Za-z0-9_-]{1,64}$/.test(raw)) out.similarTo = raw;
+  }
 
   if (query.q != null && String(query.q).trim()) out.q = String(query.q).trim().slice(0, 200);
   if (query.category && query.category !== 'All') out.category = String(query.category);

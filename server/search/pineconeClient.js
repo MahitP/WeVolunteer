@@ -304,6 +304,54 @@ export async function searchRecords({ text, topK, filter = null, fields = ['_id'
   };
 }
 
+/**
+ * Searches using a record ALREADY IN THE INDEX as the query.
+ *
+ * ── Why this is the one Pinecone feature worth adding ──
+ *
+ * The stored vector is reused as the query, so this costs **no embedding
+ * tokens at all** — the expensive half of a semantic search was already paid
+ * for when the event was indexed. It is the only capability found in the
+ * exploration that makes the corpus more useful without making it more
+ * expensive: no second index, no new namespace, no per-user vectors, no extra
+ * metadata, and nothing new sent to the vendor beyond an event id this
+ * application already owns.
+ *
+ * Documented on the integrated-embedding search endpoint as `query.id`
+ * (Pinecone API 2026-04, read 2026-08-28). It is supported only for indexes
+ * with integrated embedding, which is what `create-index-for-model` built.
+ *
+ * Charged in read units like any query. It runs on demand — a student opening
+ * one event — never on a timer and never during a browse.
+ */
+export async function searchByRecordId({ recordId, topK, filter = null, fields = ['_id'] }) {
+  const cfg = pineconeConfig();
+  if (!cfg.enabled) return { ok: false, reason: 'disabled', hits: [] };
+  if (!recordId) return { ok: false, reason: 'no_record_id', hits: [] };
+
+  const base = await indexHost();
+  if (!base) return { ok: false, reason: 'no_host', hits: [] };
+
+  const query = { id: recordId, top_k: topK };
+  if (filter && Object.keys(filter).length) query.filter = filter;
+
+  const res = await pineconeFetch(
+    `${base}/records/namespaces/${encodeURIComponent(cfg.namespace)}/search`,
+    { body: JSON.stringify({ query, fields }), timeoutMs: SEARCH_TIMEOUT_MS },
+  );
+  if (!res.ok) return { ...res, hits: [] };
+
+  usage.searches++;
+  const hits = Array.isArray(res.body?.result?.hits) ? res.body.result.hits : [];
+  return {
+    ok: true,
+    hits: hits.map((h) => ({
+      id: String(h?._id ?? ''),
+      score: Number(h?._score ?? 0),
+    })).filter((h) => h.id),
+  };
+}
+
 /** Removes records by id. Used when an event stops being searchable. */
 export async function deleteRecords(ids) {
   const cfg = pineconeConfig();

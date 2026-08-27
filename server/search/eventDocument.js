@@ -251,5 +251,54 @@ function sortedMetadata(meta) {
  */
 export function shouldIndex(event) {
   if (!event?.id) return false;
-  return event.status !== 'cancelled';
+  if (event.status === 'cancelled') return false;
+  return hasSearchableContent(event);
+}
+
+/**
+ * The minimum description an event needs before a vector of it is worth having.
+ *
+ * Twenty characters, and deliberately far below anything a person would write.
+ * This is a filter against PLACEHOLDERS, not a quality bar for organizers: the
+ * records it exists to exclude had descriptions of three and six characters.
+ * A terse but real description — "Pack boxes of groceries." — must pass, so the
+ * floor sits well under it.
+ *
+ * Exported because `reconcile` has to apply the same rule in SQL; a second
+ * spelling of it would make the reconciler report permanent drift for events it
+ * is correct to skip.
+ */
+export const MIN_DESCRIPTION_CHARS = 20;
+
+/**
+ * Does this event have enough text for a semantic vector to mean anything?
+ *
+ * ── Measured, not assumed ──
+ *
+ * The pilot corpus contains three events titled "Event" with descriptions of 6,
+ * 3 and 70 characters. Queried live, the two emptiest were the TOP hits for
+ * `zzzqqxnonexistenttopicxyz` — scoring 0.2922 and 0.2796, higher than a
+ * genuine query ("helping at a sports event", 0.2823) scored against anything.
+ * The two real events scored 0.1021 and 0.0680 for the same gibberish, which is
+ * correct.
+ *
+ * That is not a threshold problem and cannot be fixed by raising the floor: a
+ * near-empty passage embeds into a generic region of the space, so it sits close
+ * to *everything*, including random characters. Such a record is a permanent
+ * false-positive generator for every query the corpus ever receives.
+ *
+ * Excluding it costs nothing anybody wants. The lexical half of Discover is SQL
+ * and still matches the title, description, location and organizer exactly — so
+ * a poorly-described event remains findable by its words. What it stops being is
+ * an answer to questions it has nothing to do with.
+ *
+ * It also saves quota twice over: no embedding tokens for a record with no
+ * meaning, and no storage holding it.
+ *
+ * The title is not part of the test. Titles are names — "Event", "Chess Club" —
+ * and a short one says nothing about whether the event is described. The
+ * description is where the meaning lives, and it is the field this is about.
+ */
+export function hasSearchableContent(event) {
+  return String(event?.description ?? '').trim().length >= MIN_DESCRIPTION_CHARS;
 }

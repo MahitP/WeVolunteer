@@ -39,6 +39,10 @@ let searchHits = [];
 /* Scores the stub attaches to its hits. Default is comfortably above
    MIN_SEMANTIC_SCORE; a test lowers it to exercise the floor. */
 let searchScore = 0.9;
+/* Every search request body the stub received, so a test can prove HOW the
+   query was expressed — text (which costs embedding tokens) or record id
+   (which does not). */
+let searchRequests = [];
 let searchStatus = 200;
 let searchDelayMs = 0;
 let searchBody = null;
@@ -65,6 +69,7 @@ beforeAll(async () => {
       }
 
       if (req.url.endsWith('/search')) {
+        try { searchRequests.push(JSON.parse(body)); } catch { /* not ours */ }
         const send = () => {
           if (searchStatus !== 200) return reply(searchStatus, { message: 'nope' });
           if (searchBody !== null) { res.writeHead(200).end(searchBody); return; }
@@ -117,6 +122,7 @@ beforeEach(() => {
   deleted.length = 0;
   searchHits = [];
   searchScore = 0.9;
+  searchRequests = [];
   searchStatus = 200;
   searchDelayMs = 0;
   searchBody = null;
@@ -474,6 +480,105 @@ describe('Pinecone proposes, the database disposes', () => {
     );
     expect(res.status).toBe(200);
     expect(listFor(res.body).map((e) => e.id)).not.toContain(hidden);
+  });
+});
+
+/* ── "Opportunities like this one" ─────────────────────────────────────────── */
+
+describe('similar events', () => {
+  /**
+   * The feature exists because it is the one capability that makes the corpus
+   * more useful WITHOUT making it more expensive: Pinecone is queried with the
+   * vector the event already has, so no text is embedded and no tokens are
+   * spent. This asserts that at the wire, because "it costs nothing" is the
+   * entire justification and a later refactor to a text query would be silent.
+   */
+  it('queries by record id, never by text, so nothing is embedded', async () => {
+    const source = await createEvent({ title: 'The source event' });
+    const other = await createEvent({ title: 'Another event' });
+    await drain();
+
+    searchHits = [other];
+    const res = await srv.call('GET', `/api/events?limit=20&similarTo=${source}`, undefined, student);
+    expect(res.status).toBe(200);
+
+    const query = searchRequests.at(-1)?.query ?? {};
+    expect(query.id, 'the search was not made by record id').toBe(`event:${source}`);
+    expect(query.inputs, 'text was sent, which would cost embedding tokens').toBeUndefined();
+  });
+
+  it('returns the similar events', async () => {
+    const source = await createEvent({ title: 'Source' });
+    const like = await createEvent({ title: 'Similar one' });
+    await drain();
+
+    searchHits = [like];
+    const res = await srv.call('GET', `/api/events?limit=20&similarTo=${source}`, undefined, student);
+    expect(listFor(res.body).map((e) => e.id)).toContain(like);
+  });
+
+  /** An event is trivially the record most similar to itself. */
+  it('never returns the event you asked about', async () => {
+    const source = await createEvent({ title: 'Source excluded' });
+    const like = await createEvent({ title: 'Genuinely similar' });
+    await drain();
+
+    searchHits = [source, like];
+    const res = await srv.call('GET', `/api/events?limit=20&similarTo=${source}`, undefined, student);
+    const ids = listFor(res.body).map((e) => e.id);
+    expect(ids, 'the source event was returned as similar to itself').not.toContain(source);
+    expect(ids).toContain(like);
+  });
+
+  /**
+   * Fails closed. "What is like this?" answered with the entire table is not an
+   * answer, and it is the failure mode a restricted query must never have.
+   */
+  it('returns nothing rather than everything when there are no candidates', async () => {
+    await createEvent({ title: 'Should not appear' });
+    const source = await createEvent({ title: 'Lonely event' });
+    await drain();
+
+    searchHits = [];
+    const res = await srv.call('GET', `/api/events?limit=50&similarTo=${source}`, undefined, student);
+    expect(res.status).toBe(200);
+    expect(listFor(res.body), 'an empty candidate list widened into the whole corpus').toHaveLength(0);
+  });
+
+  /** Weak neighbours are not "similar", for the same reason a weak search hit is not a match. */
+  it('discards candidates below the similarity floor', async () => {
+    const source = await createEvent({ title: 'Source with weak neighbours' });
+    const weak = await createEvent({ title: 'Barely related' });
+    await drain();
+
+    searchHits = [weak];
+    searchScore = 0.05;
+
+    const res = await srv.call('GET', `/api/events?limit=20&similarTo=${source}`, undefined, student);
+    expect(listFor(res.body).map((e) => e.id)).not.toContain(weak);
+  });
+
+  /** A candidate is still only a candidate. */
+  it('cannot surface a cancelled event as similar', async () => {
+    const source = await createEvent({ title: 'Source for cancelled' });
+    const cancelled = await createEvent({ title: 'Cancelled neighbour' });
+    await drain();
+    await srv.call('PATCH', `/api/events/${cancelled}/status`, { status: 'cancelled' }, organizer);
+
+    searchHits = [cancelled];
+    const res = await srv.call('GET', `/api/events?limit=20&similarTo=${source}`, undefined, student);
+    expect(listFor(res.body).map((e) => e.id)).not.toContain(cancelled);
+  });
+
+  /** An unknown or hostile id is refused by the parser, so it reaches nothing. */
+  it('ignores a malformed similarTo', async () => {
+    const res = await srv.call(
+      'GET', "/api/events?limit=20&scope=listable&similarTo=';DROP TABLE events;--", undefined, student,
+    );
+    expect(res.status).toBe(200);
+    /* Parsed away entirely, so this is an ordinary browse rather than a
+       restricted query that fails closed. */
+    expect(Array.isArray(listFor(res.body))).toBe(true);
   });
 });
 

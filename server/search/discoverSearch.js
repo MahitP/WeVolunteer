@@ -28,11 +28,11 @@
  * which is a complete answer, not a degraded one. Discover with no Pinecone is
  * WeVolunteer as it shipped for a year.
  */
-import { searchRecords, rerank } from './pineconeClient.js';
+import { searchRecords, searchByRecordId, rerank } from './pineconeClient.js';
 import {
   pineconeEnabled, pineconeConfig, SEARCH_TOP_K, RERANK_MONTHLY_BUDGET, MIN_SEMANTIC_SCORE,
 } from './pineconeConfig.js';
-import { eventIdFromVectorId, TEXT_FIELD } from './eventDocument.js';
+import { eventIdFromVectorId, vectorIdFor, TEXT_FIELD } from './eventDocument.js';
 import { logEvent } from './../telemetry.js';
 
 /**
@@ -197,6 +197,59 @@ export function rrfFuse(lists, { k = 60 } = {}) {
   return [...scores.entries()]
     .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])))
     .map(([id]) => id);
+}
+
+/**
+ * Events like this one, using the vector the event already has.
+ *
+ * ── Why this costs nothing to embed ──
+ *
+ * `searchByRecordId` queries with the stored vector rather than with text, so
+ * the embedding was paid for once, when the event was indexed. A "similar
+ * opportunities" list is therefore the cheapest useful thing that can be built
+ * on this corpus: read units only, on demand, with nothing new sent to the
+ * vendor but an event id this application already owns.
+ *
+ * ── Still only candidates ──
+ *
+ * Returns ids, like every other function here. They go back through the same
+ * authoritative query, so a similar event that has been cancelled, filled or
+ * filtered out is removed by the predicates that always remove it. The source
+ * event is dropped from its own results, which Pinecone would otherwise return
+ * first — it is, trivially, the record most similar to itself.
+ */
+export async function similarEventCandidates(eventId, filters = {}, { topK = 12 } = {}) {
+  const started = Date.now();
+  if (!pineconeEnabled()) {
+    return { ok: false, ids: [], reason: 'disabled', durationMs: 0 };
+  }
+  if (!eventId) return { ok: false, ids: [], reason: 'no_event', durationMs: 0 };
+
+  const res = await searchByRecordId({
+    recordId: vectorIdFor(eventId),
+    /* One extra, because the source event occupies a slot in its own results. */
+    topK: topK + 1,
+    filter: buildPineconeFilter(filters),
+  });
+
+  const durationMs = Date.now() - started;
+  logEvent(res.ok ? 'info' : 'warn', 'pinecone.search', {
+    operation: 'similar',
+    durationMs,
+    count: res.hits?.length ?? 0,
+    outcome: res.ok ? 'ok' : 'failed',
+    reason: res.ok ? undefined : res.reason,
+  });
+
+  if (!res.ok) return { ok: false, ids: [], reason: res.reason, durationMs };
+
+  const ids = res.hits
+    .filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE)
+    .map((h) => eventIdFromVectorId(h.id))
+    .filter((id) => id && id !== eventId)
+    .slice(0, topK);
+
+  return { ok: true, ids, durationMs };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
