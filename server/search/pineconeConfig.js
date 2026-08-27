@@ -155,6 +155,45 @@ export const UPSERT_BATCH_SIZE = 90;
 export const SEARCH_TOP_K = Number(process.env.PINECONE_TOP_K ?? 60);
 
 /**
+ * The similarity a candidate must reach before it is considered a match at all.
+ *
+ * ── The defect this exists for ──
+ *
+ * A vector index always returns the K NEAREST records. It has no concept of
+ * "nothing matched" — ask it about gibberish and it hands back the least
+ * dissimilar events it has, with low scores it does not otherwise complain
+ * about. Because the read path is
+ *
+ *     (title/description/... LIKE @q  OR  e.id IN (candidates))
+ *
+ * those low-scoring candidates satisfied the predicate on their own, so a search
+ * for something the corpus does not contain returned the ENTIRE corpus. That is
+ * worse than an empty result: it reads as a search that ignored the question.
+ *
+ * The stub could not reveal it — a stub returns exactly the hits the test names.
+ * It showed up on the first live query against the real service.
+ *
+ * ── Why 0.15 ──
+ *
+ * Measured against the live index (llama-text-embed-v2, cosine, 16 events,
+ * 2026-08-28), top-1 scores were:
+ *
+ *     relevant queries    0.2585 – 0.5057   (worst: "families who cannot
+ *                                            afford groceries")
+ *     nonsense / off-topic 0.0124 – 0.1058  (best:  "zzzqqxnonexistenttopicxyz")
+ *
+ * 0.15 sits in that gap with roughly 40% headroom below and 70% above. It also
+ * trims the tail of genuinely relevant queries, whose tenth hit scores around
+ * 0.01 — those were never matches, and dropping them makes the result better
+ * rather than smaller.
+ *
+ * Configurable because it is a measurement, not a law: a different corpus or a
+ * different embedding model moves it, and an operator who changes either should
+ * re-measure rather than inherit this number on faith.
+ */
+export const MIN_SEMANTIC_SCORE = Number(process.env.PINECONE_MIN_SCORE ?? 0.15);
+
+/**
  * Whether the integration is switched on at all.
  *
  * Off unless a key AND an index name are present, and off in tests unless a test

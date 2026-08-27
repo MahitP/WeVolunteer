@@ -256,6 +256,54 @@ corpus dirty (what `reindex` does) and asserts nothing is sent.
 
 ---
 
+## 6b. Measured against the live service — 2026-08-28
+
+Everything above was designed against Pinecone's documentation and tested
+against a loopback stub. This section is what the real service actually did, on
+a Starter account, index `wevolunteer-discover-v1`, 16 events.
+
+| | |
+|---|---|
+| Index host | `…-sd4aq5c.svc.aped-4627-b74a.pinecone.io` |
+| Dimension | **1024** (llama-text-embed-v2 default) |
+| Ready on creation | yes; `setup` is idempotent — a second run reports "already exists" |
+| Search latency, warm | **311–445 ms** (median 379) [proven] |
+| Search latency, cold | **~3.2 s** on the first query after the index scales to zero [proven] |
+| Backfill | 16 events, 16 upserted, 0 failed; ~111 embedding tokens |
+| Re-run of backfill | 0 upserted [proven] |
+| Full reindex after `markAllDirty` | 0 upserted, all unchanged [proven] |
+
+**The cold start is why `SEARCH_TIMEOUT_MS` stays at 1200 ms.** Warm queries
+finish in well under half of it. The first query after an idle period does not,
+and is abandoned in favour of the database search — which is the designed
+behaviour, not a defect: a student should not wait three seconds for a page that
+the substring search can answer in eleven milliseconds. The next query is warm.
+Raising the timeout to catch the cold start would make every genuinely slow
+request pay for it.
+
+### The similarity floor, and the defect that produced it
+
+A vector index returns the K **nearest** records. It has no concept of "nothing
+matched" — ask it about gibberish and it returns the least dissimilar events it
+holds. Because the read path is `(… LIKE @q OR e.id IN (candidates))`, those
+candidates satisfied the predicate by themselves, so **a search for something the
+corpus does not contain returned the entire corpus**.
+
+The stub could not reveal this: a stub returns exactly the hits a test names. It
+appeared on the first live nonsense query.
+
+Measured top-1 scores that fixed it:
+
+| Query kind | Top-1 score |
+|---|---|
+| Relevant (5 queries) | 0.2585 – 0.5057 |
+| Nonsense / off-topic (5 queries) | 0.0124 – 0.1058 |
+
+`MIN_SEMANTIC_SCORE` is **0.15**, in the gap, and is configurable via
+`PINECONE_MIN_SCORE` because it is a measurement rather than a law — a different
+corpus or embedding model moves it. Two regression tests pin it, and removing
+the filter fails them.
+
 ## 7. Failure behaviour
 
 | Failure | What a student sees |
@@ -392,6 +440,22 @@ npm run pinecone:reconcile -- --remove-orphans
 **"This database has no event_search_index table."** Migration 059 has not run
 against that database. Boot the server once, or check the path printed above the
 message is the one you meant.
+
+The pilot database was at migration **56** when this was first run live, so it
+predates 057, 058 and 059 and cannot be indexed until it is migrated. 057 is a
+destructive `events` rebuild with six guards; migrating a live database holding
+real records is an operator decision with its own runbook, not something the
+indexing tooling should do on its way past.
+
+**A relative `WEV_DB_PATH` and the wrong database.** `.env` here says
+`../pilot.db`, which is relative to `server/`. The `pinecone:*` npm scripts run
+from the repository root, where the same string means one level ABOVE the
+repository — and inside a git worktree it means `.claude/worktrees/pilot.db`.
+`node:sqlite` creates a database that is not there, so the first live `setup`
+silently created an empty one and would have reported a perfectly successful
+backfill of zero events. `bin/pinecone-index.mjs` now resolves a relative value
+against `server/`, the same rule `bin/resolveDb.mjs` uses, and prints the
+absolute path it settled on. Check that line on every run.
 
 **Search results are stale.** `npm run pinecone:reconcile`. If `missing` is
 non-zero, `npm run pinecone:backfill`.

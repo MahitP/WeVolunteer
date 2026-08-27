@@ -36,6 +36,9 @@ let srv, db, organizer, student;
 const upserted = [];
 const deleted = [];
 let searchHits = [];
+/* Scores the stub attaches to its hits. Default is comfortably above
+   MIN_SEMANTIC_SCORE; a test lowers it to exercise the floor. */
+let searchScore = 0.9;
 let searchStatus = 200;
 let searchDelayMs = 0;
 let searchBody = null;
@@ -66,7 +69,7 @@ beforeAll(async () => {
           if (searchStatus !== 200) return reply(searchStatus, { message: 'nope' });
           if (searchBody !== null) { res.writeHead(200).end(searchBody); return; }
           reply(200, {
-            result: { hits: searchHits.map((id, i) => ({ _id: `event:${id}`, _score: 1 - i / 100, fields: {} })) },
+            result: { hits: searchHits.map((id, i) => ({ _id: `event:${id}`, _score: searchScore - i / 1000, fields: {} })) },
             usage: { read_units: 5, embed_total_tokens: 8 },
           });
         };
@@ -113,6 +116,7 @@ beforeEach(() => {
   upserted.length = 0;
   deleted.length = 0;
   searchHits = [];
+  searchScore = 0.9;
   searchStatus = 200;
   searchDelayMs = 0;
   searchBody = null;
@@ -404,6 +408,49 @@ describe('Pinecone proposes, the database disposes', () => {
     searchHits = [id];
     const res = await srv.call('GET', '/api/events?limit=50&q=anything at all&category=Food Pantry&scope=listable', undefined, student);
     expect(listFor(res.body).map((e) => e.id)).not.toContain(id);
+  });
+
+  /**
+   * ── The live-validation defect, pinned ──
+   *
+   * A vector index returns the K NEAREST records; it has no notion of "nothing
+   * matched". Ask the real service about gibberish and it returns the least
+   * dissimilar events with low scores. Because a candidate id satisfies the
+   * text predicate on its own, the first live run of a nonsense query returned
+   * the ENTIRE corpus — a search that reads as though it ignored the question.
+   *
+   * The stub could not show this on its own: a stub returns exactly the hits a
+   * test names, at whatever score it chooses. So the score is now part of the
+   * fixture, and this is the case that would have caught it.
+   */
+  it('discards candidates that are not actually similar', async () => {
+    const id = await createEvent({ title: 'Weakly similar event' });
+    await drain();
+
+    /* What the live service returns for a query the corpus cannot answer:
+       real ids, real records, scores far below the floor. */
+    searchHits = [id];
+    searchScore = 0.08;
+
+    const res = await srv.call(
+      'GET', '/api/events?limit=50&scope=listable&q=zzzqqxnonexistenttopicxyz', undefined, student,
+    );
+    expect(res.status).toBe(200);
+    expect(listFor(res.body).map((e) => e.id),
+      'a low-scoring candidate was treated as a match').not.toContain(id);
+  });
+
+  it('keeps candidates that are genuinely similar', async () => {
+    const id = await createEvent({ title: 'Strongly similar event' });
+    await drain();
+
+    searchHits = [id];
+    searchScore = 0.42;   // comfortably above the measured nonsense ceiling
+
+    const res = await srv.call(
+      'GET', '/api/events?limit=50&scope=listable&q=a real question about volunteering', undefined, student,
+    );
+    expect(listFor(res.body).map((e) => e.id)).toContain(id);
   });
 
   /** Nor invent an event that was never in the database. */

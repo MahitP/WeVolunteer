@@ -30,6 +30,43 @@
  * script here; see `bin/resolveDb.mjs` for why that matters.
  */
 import process from 'node:process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SERVER_DIR = path.join(REPO_ROOT, 'server');
+
+/**
+ * Resolve a relative WEV_DB_PATH against `server/`, not against the cwd.
+ *
+ * ── The incident, for the second time ──
+ *
+ * `.env` here says `WEV_DB_PATH=../pilot.db`, and its comment explains why:
+ * relative to `server/`, which is the cwd the dev and start scripts run from.
+ * These npm scripts run from the REPOSITORY ROOT, where the same string means
+ * one level above the repository — and from a git worktree it means
+ * `.claude/worktrees/pilot.db`.
+ *
+ * `node:sqlite` creates a database that is not there, so the first live run of
+ * `pinecone:setup` silently created an empty one and would have reported a
+ * perfectly successful backfill of zero events into a real Pinecone index.
+ * That is precisely the failure `bin/resolveDb.mjs` records from 2026-08:
+ * "an operator would run it, read Successfully granted ownership, sign in, and
+ * still not be an owner".
+ *
+ * `resolveDb.mjs` already had the right rule (`path.resolve(SERVER_DIR, value)`)
+ * and these commands did not go through it, because the indexer needs the
+ * dual-engine handle from `server/db.js` rather than a raw SQLite one. So the
+ * rule is applied here instead, BEFORE `server/db.js` is imported — that module
+ * reads the variable at import time.
+ */
+function normaliseDbPath() {
+  const raw = process.env.WEV_DB_PATH;
+  if (!raw || path.isAbsolute(raw)) return;
+  if ((process.env.DATABASE_ENGINE || 'sqlite').toLowerCase() === 'postgres') return;
+  process.env.WEV_DB_PATH = path.resolve(SERVER_DIR, raw);
+}
+normaliseDbPath();
 
 const [, , rawCommand, ...args] = process.argv;
 const command = String(rawCommand ?? '').toLowerCase();
@@ -101,7 +138,7 @@ function databaseTarget() {
   const configured = process.env.WEV_DB_PATH;
   return configured
     ? `sqlite ${configured}`
-    : 'sqlite server/wevolunteer.db  ← WEV_DB_PATH is unset; is that the database you meant?';
+    : `sqlite ${path.join(SERVER_DIR, 'wevolunteer.db')}  ← WEV_DB_PATH is unset; is that the database you meant?`;
 }
 
 function banner(status) {

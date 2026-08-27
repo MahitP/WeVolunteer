@@ -30,7 +30,7 @@
  */
 import { searchRecords, rerank } from './pineconeClient.js';
 import {
-  pineconeEnabled, pineconeConfig, SEARCH_TOP_K, RERANK_MONTHLY_BUDGET,
+  pineconeEnabled, pineconeConfig, SEARCH_TOP_K, RERANK_MONTHLY_BUDGET, MIN_SEMANTIC_SCORE,
 } from './pineconeConfig.js';
 import { eventIdFromVectorId, TEXT_FIELD } from './eventDocument.js';
 import { logEvent } from './../telemetry.js';
@@ -154,8 +154,18 @@ export async function semanticCandidates(query, filters = {}, { topK = SEARCH_TO
 
   if (!res.ok) return { ok: false, ids: [], reason: res.reason, durationMs };
 
-  const ids = res.hits.map((h) => eventIdFromVectorId(h.id)).filter(Boolean);
-  return { ok: true, ids, durationMs };
+  /**
+   * Weak candidates are discarded, and this is load-bearing.
+   *
+   * A vector index has no "no results" — it returns the K nearest records
+   * whatever the distance. Since a candidate id satisfies the read path's text
+   * predicate on its own, an unfiltered list turned a search for something the
+   * corpus does not contain into a listing of the whole corpus. See
+   * `MIN_SEMANTIC_SCORE` for the measurement behind the floor.
+   */
+  const strong = res.hits.filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE);
+  const ids = strong.map((h) => eventIdFromVectorId(h.id)).filter(Boolean);
+  return { ok: true, ids, durationMs, considered: res.hits.length };
 }
 
 /**
