@@ -13,7 +13,7 @@ import { resolveOtelConfig, OTEL_DEFAULTS } from './observability/otelConfig.js'
 
 const CREDS = {
   BETTERSTACK_SOURCE_TOKEN: 'test-token-not-a-real-one',
-  BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+  BETTERSTACK_INGESTING_HOST: 's2716518.eu-central-1a.betterstackdata.com',
 };
 
 describe('resolveOtelConfig — the test gate', () => {
@@ -54,10 +54,10 @@ describe('resolveOtelConfig — credentials and host', () => {
 
   it('accepts a bare host and a full URL alike', () => {
     const bare = resolveOtelConfig(CREDS);
-    const full = resolveOtelConfig({ ...CREDS, BETTERSTACK_INGESTING_HOST: 'https://s2708227.eu-central-1a.betterstackdata.com' });
+    const full = resolveOtelConfig({ ...CREDS, BETTERSTACK_INGESTING_HOST: 'https://s2716518.eu-central-1a.betterstackdata.com' });
     expect(bare.tracesUrl).toBe(full.tracesUrl);
-    expect(bare.tracesUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/traces');
-    expect(bare.metricsUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/metrics');
+    expect(bare.tracesUrl).toBe('https://s2716518.eu-central-1a.betterstackdata.com/v1/traces');
+    expect(bare.metricsUrl).toBe('https://s2716518.eu-central-1a.betterstackdata.com/v1/metrics');
   });
 
   it('builds the signal paths without doubling a slash', () => {
@@ -187,7 +187,7 @@ describe('the configuration path from process.env to the exporter', () => {
   it('reads process.env when no env object is passed', () => {
     setEnv({
       BETTERSTACK_SOURCE_TOKEN: 'synthetic-not-a-real-token-value',
-      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      BETTERSTACK_INGESTING_HOST: 's2716518.eu-central-1a.betterstackdata.com',
       WEV_OTEL_TEST_SINK: '1',
     });
 
@@ -203,7 +203,7 @@ describe('the configuration path from process.env to the exporter', () => {
        application must boot and serve; telemetry simply stays off. */
     setEnv({
       BETTERSTACK_SOURCE_TOKEN: '',
-      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      BETTERSTACK_INGESTING_HOST: 's2716518.eu-central-1a.betterstackdata.com',
       WEV_OTEL_TEST_SINK: '1',
     });
     expect(resolveOtelConfig().reason).toBe('not_configured');
@@ -215,11 +215,11 @@ describe('the configuration path from process.env to the exporter', () => {
        the only symptom would be an empty dashboard. */
     setEnv({
       BETTERSTACK_SOURCE_TOKEN: 'synthetic-not-a-real-token-value',
-      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      BETTERSTACK_INGESTING_HOST: 's2716518.eu-central-1a.betterstackdata.com',
       WEV_OTEL_TEST_SINK: '1',
     });
     const config = resolveOtelConfig();
-    expect(config.tracesUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/traces');
-    expect(config.metricsUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/metrics');
+    expect(config.tracesUrl).toBe('https://s2716518.eu-central-1a.betterstackdata.com/v1/traces');
+    expect(config.metricsUrl).toBe('https://s2716518.eu-central-1a.betterstackdata.com/v1/metrics');
   });
 });

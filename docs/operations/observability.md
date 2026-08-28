@@ -462,14 +462,119 @@ afternoon.
 | A specific slow request has no trace | Expected at 2%. Failures and >1s requests are always kept; an ordinary 300ms request usually is not. Use the metrics histogram for the population view and the log record for that request. |
 | Traces stopped part-way through the day | The daily span budget. Check `budget_remaining` on `wev.telemetry.traces`, and the journal for the one-line warning. |
 | Better Stack bill is not $0 | Check `OTEL_TRACE_SAMPLE_RATE` first — it is the one knob that turns this into a paid service. Then metric cardinality: a new label carrying an identifier. |
+| Live Tail shows blank `url`, `path`, `client_ip` | Expected, and it is the privacy control working — see §12. Those attributes are stripped. Edit the source's live-tail pattern to use `http.route`, `http.request.method`, `http.response.status_code`. |
+| Nothing arrives after rotating the token | Check the ingesting host. Rotating by creating a NEW source gives a NEW host, and the old one is stale — see §12. Read the authoritative value off the source itself. |
 | Metrics missing after a restart | The reader exports every 60s and once on shutdown; a process that died without a clean stop loses at most one interval. |
 
 ---
 
-## 12. Mutation testing
+## 12. Live verification against the real Better Stack account
+
+Run on **2026-08-28** against source `WeVolunteer` (id `2716518`, platform
+`open_telemetry`, cluster `eu-central-1a`, table `wevolunteer_2`), using a
+freshly rotated source token. Re-runnable:
 
 ```
-node bin/otel-mutation-check.mjs            # all 27, ~15 minutes
+node --env-file-if-exists=.env bin/betterstack-live-check.mjs
+```
+
+### PROVEN — demonstrated against the real account
+
+| Check | Evidence |
+|---|---|
+| The rotated source token is valid | `POST /` → **HTTP 202 Accepted** |
+| Better Stack accepts our OTLP traces | `POST /v1/traces` → **HTTP 200 OK** (protobuf + gzip, bearer token) |
+| Better Stack accepts our OTLP metrics | `POST /v1/metrics` → **HTTP 200 OK** |
+| The source is configured for OpenTelemetry | API reports `platform: open_telemetry` |
+| Retention is on free-plan terms | API reports `logs_retention: 3`, `metrics_retention: 30` |
+| Ingestion is not paused | API reports `ingesting_paused: false` |
+| The application boots with telemetry on | `[telemetry] Better Stack enabled.` / `[otel] Traces and metrics enabled (sampling 0.02, budget 200000 spans/day).` |
+| Logs delivered under real traffic | 494 requests; `telemetrySink`'s `warnOnce` never fired |
+| Traces **and metrics** delivered under real traffic | Re-run with `WEV_OTEL_DIAG=debug`: 518 SDK diagnostic lines, `OTLPExportDelegate items to be sent` for both signals, **zero** export-failure lines |
+| `WEV_OTEL_DIAG=debug` does not leak the credential | Verbose log searched for the literal token and for `Authorization`/`Bearer`: all absent |
+| Graceful shutdown flushes both pipelines | SIGTERM → full sequence → **exit 0 in 2.4s** |
+| The token never appears in output | server log searched for the literal token: absent |
+
+The 494 requests were deliberately minimal, and read-only apart from one login
+and three client error reports:
+
+| Count | Request | Result |
+|---|---|---|
+| 400 | `GET /api/events` authenticated | 200 |
+| 20 | `GET /api/events?search=…` (Discover) | 200 |
+| 20 | `GET /api/events` unauthenticated | 401 |
+| 40 | `GET /api/events/tags` | 200 |
+| 10 | `GET /api/does-not-exist-*` | 404 |
+| 1 | `POST /api/auth/login` | 200 |
+| 3 | `POST /api/errors/report` | 202 |
+
+**Neither the sample rate nor the span budget was changed to make the run
+visible.** At 2% the expected yield is roughly ten traces; the connectivity
+check reaches the pipeline deterministically by using its own always-keep rule
+for errors instead of turning a cost control off.
+
+**Why the run was done twice.** The first pass claimed "no delivery failure"
+on the strength of the server log — but `otel.js` calls `diag.disable()` unless
+`WEV_OTEL_DIAG=debug`, so OTel export failures during that run would have been
+**silent**, and the absence of errors proved nothing about traces or metrics. It
+proved only that the LOG sink was healthy, which has its own `warnOnce`. The run
+was repeated with diagnostics on to get evidence rather than an inference.
+
+That asymmetry is worth remembering when diagnosing: the log wire reports its own
+failures to the journal by design; the OTLP wire does not, unless asked.
+
+### OWNER ACTION — the half that needs the dashboard
+
+Acceptance at the ingest boundary is what can be proven from here. That the
+records are *queryable* needs a read path, and the v1 query API was
+decommissioned in August 2024; the current one requires a ClickHouse connection
+credential that does not exist on this account (`GET /api/v1/connections`
+returned an empty list). Creating one is an account change and was not done
+unasked.
+
+To confirm, search the source for either nonce printed by the live check, or for
+`event:lifecycle.live_check`.
+
+### The stale ingesting host — a real finding
+
+The host supplied for this work, `s2708227.eu-central-1a.betterstackdata.com`,
+belonged to the **previous** source, which no longer exists. Rotating the
+credential had created a NEW source (`2716518`) with its own host,
+`s2716518.eu-central-1a.betterstackdata.com`. Configuration has been corrected
+to the authoritative value read back from the API.
+
+Both names resolve to the same two addresses (`195.63.225.49/50`) and posting to
+the old one with the new token still returned 202/200, so Better Stack evidently
+routes by bearer token rather than by hostname and nothing was lost. That is a
+convenience, not a contract: **take the ingesting host from the source itself
+after any rotation**, because a value that merely happens to work is not a value
+to configure.
+
+### Live Tail will show empty `url`, `path` and `client_ip` columns
+
+The source's default live-tail pattern is:
+
+```
+{message} {span.attributes.http\.url AS url}
+          {span.attributes.http\.target::truncate(40) AS path}
+          {span.attributes.http\.client_ip AS client_ip}
+```
+
+Those three attributes are exactly the ones `spanAttributes.js` strips — the
+full URL with its query string, the real path, and the client IP address. So
+those columns will be blank, and **that is the privacy control working, seen
+from the dashboard**, not a broken integration.
+
+Do not "fix" it by allowlisting those attributes. Edit the live-tail pattern
+instead; `http.route`, `http.request.method` and `http.response.status_code` are
+present and are what this application deliberately sends.
+
+---
+
+## 13. Mutation testing
+
+```
+node bin/otel-mutation-check.mjs            # all 30, ~15 minutes
 node bin/otel-mutation-check.mjs redaction  # by name
 ```
 
@@ -480,7 +585,15 @@ budget, each memory bound, each redaction rule, the shutdown deadline, the
 cardinality caps, the propagation refusal, the ESM hook — and reports any that
 the suite fails to notice.
 
-**Current result: 27 of 27 caught.**
+**Current result: 30 of 30 caught** (re-run 2026-08-28).
+
+The three added for the live work all target the configuration path, because
+that is where a silent failure would have been invisible: `resolveOtelConfig`
+and `startOtel` both defaulting to `process.env`, and the OTLP trace endpoint
+path. The second of those SURVIVED when first written — no test proved the
+default that `bootstrap.js` actually depends on — and the production suite was
+changed to pass its configuration through a real `process.env` and call
+`startOtel()` with no argument, which is the path that ships.
 
 Two survived on the first run, and both were defects in the *tests*:
 
@@ -495,30 +608,35 @@ Two survived on the first run, and both were defects in the *tests*:
 
 ---
 
-## 13. What remains unproven
+## 14. What remains unproven
 
 Stated plainly, because the labels above are worthless if this section is empty
-when it should not be.
+when it should not be. Two entries here were resolved by the live run on
+2026-08-28 and have moved to §12; what is left is what is genuinely still open.
 
-- **[owner action] Nothing has ever been sent to the real Better Stack
-  account.** Every test in this repository runs against a loopback stub. The
-  token supplied for this work was exposed in a chat transcript and was treated
-  as compromised, so it was deliberately not used; no rotated token was present
-  in the environment. Until an end-to-end run happens with a live token, "Better
-  Stack accepts these payloads" is **[inferred]**, not proven.
-- **[inferred] OTLP/protobuf is what Better Stack wants.** Their documentation
-  specifies HTTP/protobuf and the exporters here send
-  `application/x-protobuf` (verified in the installed exporter source), gzip,
-  to `/v1/traces` and `/v1/metrics` with a bearer token — exactly as documented.
-  But the endpoint has never answered us.
-- **[inferred] The 500 bytes/span figure** behind the budget arithmetic is an
-  estimate. The real number can only be measured against the real account, and
-  it moves the table in §2 proportionally. The daily span budget bounds the
-  worst case regardless of what the true figure is — that is why the ceiling is
-  counted in spans and not in bytes.
-- **[inferred] Free-plan usage cannot be read from here.** Better Stack's usage
-  and billing pages need account access.
+- **[owner action] That the records are QUERYABLE has not been checked from
+  here.** Better Stack returned 202/200 and the source is configured correctly,
+  which proves acceptance at the ingest boundary — the thing that was previously
+  entirely unproven. Reading the rows back needs a ClickHouse connection
+  credential that does not exist on the account, and creating one is an account
+  change. Confirm in the dashboard by searching for the live-check nonce.
+- **[inferred] The ~500 bytes/span figure** behind the budget arithmetic in §2
+  is still an estimate. The observed OTLP payloads were ~330 bytes for a
+  one-span request before gzip, but a single span carries the whole resource
+  block, so that overstates the marginal cost of a span in a full batch and the
+  true figure needs a populated account to measure. The daily span budget bounds
+  the worst case regardless of what it turns out to be — which is exactly why
+  the ceiling is counted in spans rather than in bytes.
+- **[inferred] Free-plan usage figures cannot be read from here.** The API
+  exposes source configuration (retention, platform, pause state) but not
+  consumption against the allowance. The usage page needs account access.
 - **[proven, but narrow] Express instrumentation** is proven in a subprocess
   running a two-route Express app, not the full application. The mechanism under
-  test — module patching and import order — is identical, but the full app has
-  not been observed producing Express spans.
+  test — module patching and import order — is identical, and the full
+  application has now been observed booting with the SDK enabled and serving 494
+  live requests without a delivery failure; but no assertion has been made
+  against an Express span produced by the real route table.
+- **[not tested] PostgreSQL.** No server was available, so the PostgreSQL
+  application and migration suites did not run, and `instrumentation-pg` has
+  never produced a span outside its own tests. Production runs SQLite today, so
+  this gates the engine migration rather than this integration.
