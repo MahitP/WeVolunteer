@@ -36,7 +36,7 @@ import { spawn } from 'node:child_process';
 import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,64 +47,112 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * imported BEFORE anything that pulls in Express, because ES imports are
  * evaluated in source order and a patch installed afterwards patches nobody.
  */
-function programSource() {
-  return `
-import { startOtel, shutdownOtel, otelSnapshot } from ${JSON.stringify(path.join(HERE, 'observability/otel.js'))};
-
-/*
- * Called with NO ARGUMENT, exactly as bootstrap.js calls it.
+/**
+ * The application module: statically imports express, exactly as `app.js` does.
  *
- * The configuration reaches it through the child's real process.env, set by the
- * spawn below. An explicit env object here would have tested the resolver and
- * NOT the thing production depends on -- the (env = process.env) default. That
- * default surviving a mutation is what prompted this: break it and the
- * application boots, logs "not_configured", serves every request correctly, and
- * sends nothing at all.
+ * It has to be a SEPARATE FILE. Put `import express` in the main program and it
+ * is hoisted above every statement there, so express evaluates before
+ * `startOtel()` has registered the instrumentations and nothing — not even the
+ * loader preload — can help. `server.js` does not have that shape: it imports
+ * `app.js`, and express is evaluated as a dependency of that module, after the
+ * bootstrap module's body has run. This mirrors that.
  */
-startOtel();
+function appModuleSource() {
+  return `
+import express from 'express';
+import { currentTraceIds } from ${JSON.stringify(path.join(HERE, 'observability/correlation.js'))};
 
-// Imported AFTER the line above, exactly as app.js is in server.js.
-const { default: express } = await import('express');
-
-const { currentTraceIds } = await import(${JSON.stringify(path.join(HERE, 'observability/correlation.js'))});
-
-const app = express();
+export const app = express();
 
 /*
- * The shape of app.js's correlation middleware, reproduced exactly.
+ * app.js's correlation middleware, reproduced -- and registered BEFORE the
+ * route, which is where app.js registers it. Registered after, Express never
+ * reaches it for a matched route and the capture below stays null.
  *
- * What is being tested is whether the OpenTelemetry context is still active
- * inside a res.on('finish') listener, because that is where logHttpRequest
- * runs -- and if it is not, every access-log record is written without a trace
- * id, and the join between the two signals silently does not exist for the
- * highest-volume log this application produces.
+ * What it tests: whether the OpenTelemetry context is still active inside a
+ * res.on('finish') listener, because that is where logHttpRequest runs. If it
+ * is not, every access-log record is written without a trace id and the join
+ * between logs and traces silently does not exist.
  *
  * (No backticks in this comment: it lives inside a template literal.)
  */
-let correlation = null;
+export const captured = {};
 app.use((req, res, next) => {
   const inMiddleware = currentTraceIds();
   res.on('finish', () => {
-    correlation = { inMiddleware, inFinish: currentTraceIds() };
+    captured.correlation = { inMiddleware, inFinish: currentTraceIds() };
   });
   next();
 });
 
-app.get('/api/events/:id', (req, res) => res.json({ ok: true }));
+/*
+ * A route TABLE, not a route.
+ *
+ * Express walks its stack looking for a match and the instrumentation names a
+ * span for every layer walked, so router-layer noise only becomes visible once
+ * there are routes that do NOT match. With a single route the mutation that
+ * re-enables ROUTER spans survived, because there was nothing for Express to
+ * walk past. These eight unmatched routers are what make the exclusion testable.
+ */
+const routers = [
+  '/api/organizations', '/api/external-hours', '/api/oauth/providers',
+  '/api/admin/persona-preview', '/api/issues/categories', '/api/webhooks/resend',
+  '/api/auth/demo-accounts', '/api/users/by-username/:username',
+];
+for (const p of routers) {
+  const r = express.Router();
+  r.get('/', (req, res) => res.json({ ok: true }));
+  app.use(p, r);
+}
+
+const events = express.Router();
+events.get('/:id', (req, res) => res.json({ ok: true }));
+app.use('/api/events', events);
+`;
+}
+
+/**
+ * The main program, mirroring `server.js`'s import order exactly:
+ *
+ *     import './observability/bootstrap.js';   // starts the SDK
+ *     import { app } from './app.js';          // pulls in express
+ *
+ * Both static, both in that order.
+ */
+function programSource(appPath) {
+  return `
+/*
+ * The bootstrap module, FIRST -- exactly as server.js imports it.
+ *
+ * It must be a side-effect import and not a startOtel() call, because a call is
+ * a statement and every static import in this file is hoisted above it. An
+ * earlier version of this test did call startOtel() here and measured nothing:
+ * the SDK started after express had already been evaluated, so not even the
+ * http instrumentation applied and spansExported was 0. That is the same class
+ * of ordering mistake bootstrap.js exists to prevent, reproduced in the test
+ * that was supposed to catch it.
+ *
+ * bootstrap.js calls startOtel() with no argument, so this also exercises the
+ * (env = process.env) default that production depends on.
+ */
+import ${JSON.stringify(path.join(HERE, 'observability/bootstrap.js'))};
+import { shutdownOtel, otelSnapshot } from ${JSON.stringify(path.join(HERE, 'observability/otel.js'))};
+
+import { app, captured } from ${JSON.stringify(appPath)};
+import { once } from 'node:events';
+
 const server = app.listen(0, '127.0.0.1');
-await new Promise((r) => server.once('listening', r));
+await once(server, 'listening');
 const port = server.address().port;
 
 await fetch('http://127.0.0.1:' + port + '/api/events/42?email=chris.vale@school.org&q=123%20Maple%20St')
   .then((r) => r.json());
 
 await new Promise((r) => setTimeout(r, 500));
-// Captured BEFORE the shutdown: shutdownOtel() clears the state the snapshot
-// reads, so asking afterwards returns null and the assertions would be vacuous.
 const snapshot = otelSnapshot() ?? {};
 await shutdownOtel();
 process.stdout.write('SNAPSHOT:' + JSON.stringify(snapshot) + '\\n');
-process.stdout.write('CORRELATION:' + JSON.stringify(correlation ?? {}) + '\\n');
+process.stdout.write('CORRELATION:' + JSON.stringify(captured.correlation ?? {}) + '\\n');
 server.close();
 process.exit(0);
 `;
@@ -142,41 +190,67 @@ afterAll(async () => {
 
 let output = '';
 
+/**
+ * Runs the program above in a real `node`, optionally with the loader preload.
+ *
+ * `preload` is the whole experiment. `--import ./observability/register.mjs`
+ * installs the ESM hook before the module graph is loaded; without it the hook
+ * arrives after express has already been read, and the Express instrumentation
+ * applies to nothing.
+ */
+async function runSubprocess({ preload }) {
+  /* Written inside the repository tree so that bare specifiers such as
+     `express` and `@opentelemetry/*` resolve against its node_modules. */
+  const suffix = `${process.pid}-${preload ? 'pre' : 'raw'}`;
+  const appPath = path.join(HERE, `zz-otel-app-${suffix}.mjs`);
+  const programPath = path.join(HERE, `zz-otel-subprocess-${suffix}.mjs`);
+  writeFileSync(appPath, appModuleSource());
+  writeFileSync(programPath, programSource(appPath));
+
+  /* `pathToFileURL`, not a bare path: Node treats --import as a URL, and this
+     repository lives under a directory with spaces in it, which a raw path
+     cannot survive. Passing the wrong thing here fails SILENTLY — the flag is
+     accepted, the hook never loads, and Express is simply not instrumented,
+     which is the same invisible failure this whole suite exists to catch. */
+  const args = preload
+    ? ['--import', pathToFileURL(path.join(HERE, 'observability/register.mjs')).href, programPath]
+    : [programPath];
+
+  let out = '';
+  try {
+    const child = spawn(process.execPath, args, {
+      cwd: path.dirname(HERE),
+      /* A clean environment: no VITEST, which is what lets the SDK start, and
+         no inherited Better Stack credentials. The configuration reaches
+         startOtel() through this, which is the production path. */
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        NODE_ENV: 'test',
+        WEV_OTEL_TEST_SINK: '1',
+        BETTERSTACK_SOURCE_TOKEN: 'stub-token-not-a-real-credential',
+        BETTERSTACK_INGESTING_HOST: `http://127.0.0.1:${stub.address().port}`,
+        OTEL_TRACE_SAMPLE_RATE: '1',
+        OTEL_TRACE_DAILY_SPAN_BUDGET: '100000',
+        TELEMETRY_SERVICE_NAME: 'wevolunteer-subprocess',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.stdout.on('data', (d) => { out += d.toString(); });
+    child.stderr.on('data', (d) => { out += d.toString(); });
+
+    const [code] = await once(child, 'exit');
+    expect(code, `subprocess failed:\n${out}`).toBe(0);
+  } finally {
+    try { rmSync(programPath, { force: true }); } catch { /* best effort */ }
+    try { rmSync(appPath, { force: true }); } catch { /* best effort */ }
+  }
+  return out;
+}
+
 describe('under a real node process, not vite-node', () => {
   beforeAll(async () => {
-    /* Written inside the repository tree so that bare specifiers such as
-       `express` and `@opentelemetry/*` resolve against its node_modules. */
-    const programPath = path.join(HERE, `zz-otel-subprocess-${process.pid}.mjs`);
-    writeFileSync(programPath, programSource());
-
-    try {
-      const child = spawn(process.execPath, [programPath], {
-        cwd: path.dirname(HERE),
-        /* A clean environment: no VITEST, which is what lets the SDK start, and
-           no inherited Better Stack credentials. */
-        env: {
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
-          NODE_ENV: 'test',
-          /* The real configuration surface: process.env in a real process, with
-             no VITEST set — which is what lets the SDK start at all. */
-          WEV_OTEL_TEST_SINK: '1',
-          BETTERSTACK_SOURCE_TOKEN: 'stub-token-not-a-real-credential',
-          BETTERSTACK_INGESTING_HOST: `http://127.0.0.1:${stub.address().port}`,
-          OTEL_TRACE_SAMPLE_RATE: '1',
-          OTEL_TRACE_DAILY_SPAN_BUDGET: '100000',
-          TELEMETRY_SERVICE_NAME: 'wevolunteer-subprocess',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      child.stdout.on('data', (d) => { output += d.toString(); });
-      child.stderr.on('data', (d) => { output += d.toString(); });
-
-      const [code] = await once(child, 'exit');
-      expect(code, `subprocess failed:\n${output}`).toBe(0);
-    } finally {
-      try { rmSync(programPath, { force: true }); } catch { /* best effort */ }
-    }
+    output = await runSubprocess({ preload: true });
   }, 60000);
 
   function wire() {
@@ -184,12 +258,18 @@ describe('under a real node process, not vite-node', () => {
   }
 
   it('exported spans from the subprocess', () => {
+    /* `output` is attached to the failure message so a broken subprocess is
+       diagnosable from the test report rather than by re-running it by hand. */
     expect(received.length, output).toBeGreaterThan(0);
   });
 
+
   it('instrumented EXPRESS, which is the claim Vitest cannot test', () => {
-    /* The exact regression: without the in-process `module.register()` in
-       otel.js, this string is absent and the HTTP span alone still arrives. */
+    /* The exact regression, and it reached production once: without the
+       `--import` preload this string is absent and the HTTP span alone still
+       arrives, with no error anywhere. Found by querying the live Better Stack
+       account and noticing 31 of 31 automatic spans came from
+       instrumentation-http. */
     expect(wire()).toContain('request handler');
   });
 
@@ -204,6 +284,14 @@ describe('under a real node process, not vite-node', () => {
   it('produced more than one span, so the trace is a waterfall not a bar', () => {
     const snapshot = JSON.parse(output.match(/SNAPSHOT:(\{.*\})/)?.[1] ?? '{}');
     expect(snapshot.spansExported).toBeGreaterThan(1);
+  });
+
+  it('did NOT produce router-layer spans, which scaled with the route table', () => {
+    /* MEASURED live before this was excluded: 494 requests produced 196 spans,
+       168 of them `router - /api/...` for routes nobody called — the span count
+       scaled with the SIZE OF THE ROUTE TABLE rather than with the request.
+       Excluding ROUTER took the same workload to 23 spans. */
+    expect(wire()).not.toContain('router - ');
   });
 
   it('did NOT produce a span per middleware, which would be most of the budget', () => {
@@ -263,5 +351,63 @@ describe('under a real node process, not vite-node', () => {
   it('reported the ESM hook as registered', () => {
     const snapshot = JSON.parse(output.match(/SNAPSHOT:(\{.*\})/)?.[1] ?? '{}');
     expect(snapshot.esmHook).toBe(true);
+  });
+});
+
+/**
+ * The regression this whole file was rewritten for.
+ *
+ * ── What happened ──
+ *
+ * The integration shipped believing an in-process `module.register()` removed
+ * the need for a CLI flag. A subprocess test agreed, because it loaded express
+ * with a DYNAMIC `await import()`. `server.js` loads it statically, and ES
+ * modules are loaded graph-wide before any of them are evaluated — so the hook
+ * arrived after express's source had been read and the Express instrumentation
+ * applied to nothing.
+ *
+ * Nothing errored. Every request produced one span named `GET` instead of four
+ * named `GET /api/events/:id`. It was found by querying the live Better Stack
+ * account: 31 of 31 automatic spans came from `instrumentation-http`, none from
+ * `instrumentation-express`.
+ *
+ * So the flag is required after all, and these two cases are what keep it
+ * honest: the positive case above proves it works WITH the preload, and this
+ * one proves the failure is real WITHOUT it — and, more importantly, that the
+ * application says so out loud instead of degrading silently.
+ */
+describe('without the --import preload', () => {
+  let bare = '';
+  let bareWire = '';
+
+  beforeAll(async () => {
+    received.length = 0;
+    bare = await runSubprocess({ preload: false });
+    bareWire = received.map(r => r.text).join(' ');
+  }, 60000);
+
+  it('does NOT instrument Express — the flag is load-bearing, not decorative', () => {
+    expect(bareWire).not.toContain('request handler');
+    expect(bareWire).not.toContain('middleware -');
+  });
+
+  it('loses the route pattern, which is the visible symptom', () => {
+    /* The span still exists and is still exported; it is just named `GET` and
+       carries no http.route. That is why this was invisible for so long. */
+    expect(bareWire.length).toBeGreaterThan(0);
+    expect(bareWire).not.toContain('/api/events/:id');
+  });
+
+  it('reports the hook as NOT preloaded', () => {
+    const snapshot = JSON.parse(bare.match(/SNAPSHOT:(\{.*\})/)?.[1] ?? '{}');
+    expect(snapshot.esmHook).toBe(false);
+  });
+
+  it('WARNS at boot, so a deployment that loses the flag finds out', () => {
+    /* The answer to the original objection. A load-bearing flag is acceptable
+       when its absence is loud; it is not acceptable when its absence is a
+       quietly worse dashboard. */
+    expect(bare).toContain('the ESM loader hook was not preloaded');
+    expect(bare).toContain('--import ./server/observability/register.mjs');
   });
 });

@@ -204,18 +204,23 @@ const MUTATIONS = [
     replace: "  /* mutated: not allowlisted */",
     tests: ["server/observability.integration.test.js"],
   },
-  {
-    name: "ESM: the in-process loader hook is removed",
-    file: "server/observability/otel.js",
-    find: "    register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);",
-    replace: "    /* mutated: no hook */",
-    tests: ["server/observability.production.test.js"],
-  },
+  /*
+   * REMOVED: "the in-process loader hook is removed".
+   *
+   * It SURVIVED, and the survival was correct. otel.js used to call
+   * module.register() itself as a "fallback"; removing it changed nothing any
+   * test could see, because nothing in this application dynamically imports an
+   * instrumented package. The call was deleted rather than the mutation
+   * weakened — see ensurePatched() for why it was also actively harmful.
+   *
+   * The guarantee moved to register.mjs and is covered by the two "ESM preload"
+   * mutations below, both of which are killed.
+   */
   {
     name: "express: middleware spans are re-enabled",
     file: "server/observability/otel.js",
-    find: "      ignoreLayersType: [ExpressLayerType.MIDDLEWARE],",
-    replace: "      /* mutated: middleware spans on */",
+    find: "      ignoreLayersType: [ExpressLayerType.MIDDLEWARE, ExpressLayerType.ROUTER],",
+    replace: "      ignoreLayersType: [ExpressLayerType.ROUTER],",
     tests: ["server/observability.production.test.js"],
   },
   {
@@ -259,6 +264,27 @@ const MUTATIONS = [
     find: "    tracesUrl: new URL('/v1/traces', base).toString(),",
     replace: "    tracesUrl: new URL('/v1/trace', base).toString(),",
     tests: ["server/observability.config.test.js"],
+  },
+  {
+    name: "ESM preload: the --import hook is not detected, so a lost flag is silent",
+    file: "server/observability/register.mjs",
+    find: "globalThis[Symbol.for('wevolunteer.otel.esmHookPreloaded')] = true;",
+    replace: "/* mutated: no marker */",
+    tests: ["server/observability.production.test.js"],
+  },
+  {
+    name: "ESM preload: the hook is not registered at all",
+    file: "server/observability/register.mjs",
+    find: "register('@opentelemetry/instrumentation/hook.mjs', import.meta.url, {\n  data: { include: INSTRUMENTED_PACKAGES },\n});",
+    replace: "/* mutated: no hook */",
+    tests: ["server/observability.production.test.js"],
+  },
+  {
+    name: "express: router-layer spans are re-enabled (88% more trace volume)",
+    file: "server/observability/otel.js",
+    find: "      ignoreLayersType: [ExpressLayerType.MIDDLEWARE, ExpressLayerType.ROUTER],",
+    replace: "      ignoreLayersType: [ExpressLayerType.MIDDLEWARE],",
+    tests: ["server/observability.production.test.js"],
   },
 ];
 

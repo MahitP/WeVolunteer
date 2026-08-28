@@ -48,6 +48,12 @@ done
 # on its own would fire constantly, and a hook that cries wolf gets bypassed with
 # --no-verify and then protects nothing (see the note at the top of this file).
 #
+# There are THREE Better Stack credentials, not one, and all four names below
+# are listed because a scanner that knows about the write token and not the read
+# ones protects the cheaper secret. The ClickHouse connection password reads
+# every log, span and metric in the account; the username is listed too because
+# it is half of a Basic credential and is equally useless to leak.
+#
 # Anchoring on `BETTERSTACK_SOURCE_TOKEN=` instead catches the way a real token
 # actually gets committed — pasted into a source file, a test, a script or an
 # env file — while a placeholder passes, because every placeholder and fixture in
@@ -64,6 +70,8 @@ xox[baprs]-[A-Za-z0-9-]{10,}
 -----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----
 BETTERSTACK_SOURCE_TOKEN[[:space:]]*[=:][[:space:]]*.?[A-Za-z0-9]{20,}
 BETTERSTACK_API_TOKEN[[:space:]]*[=:][[:space:]]*.?[A-Za-z0-9]{20,}
+BETTERSTACK_QUERY_PASSWORD[[:space:]]*[=:][[:space:]]*.?[A-Za-z0-9]{20,}
+BETTERSTACK_QUERY_USERNAME[[:space:]]*[=:][[:space:]]*.?[A-Za-z0-9]{20,}
 '
 
 for f in $staged; do

@@ -109,8 +109,12 @@ describe('a real request through the real app', () => {
     expect(otelSnapshot().spansExported).toBeGreaterThan(0);
   });
 
-  it('registered the ESM loader hook', () => {
-    expect(otelSnapshot().esmHook).toBe(true);
+  it('reports the ESM hook as NOT preloaded under Vitest', () => {
+    /* See the same assertion in observability.integration.test.js. `esmHook`
+       tracks the --import preload specifically, which Vitest does not pass, and
+       which is the only thing that instruments a statically imported express.
+       The preloaded case lives in observability.production.test.js. */
+    expect(otelSnapshot().esmHook).toBe(false);
   });
 
   /**

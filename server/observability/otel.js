@@ -32,7 +32,7 @@
  * makes that work — the same mechanism, and the same reasoning, as the comment
  * at the top of `server.js` about `preflight.js`.
  *
- * ── The ESM problem, and why there is no required CLI flag ──
+ * ── The ESM problem, and the flag that turned out to be required ──
  *
  * MEASURED, not assumed: with `NodeTracerProvider` registered the ordinary way,
  * a request through Express produced exactly ONE span — the `http` one. Express
@@ -41,19 +41,34 @@
  * through `Module.prototype.require`, so the patch never applies.
  *
  * The documented fix is a loader hook on the command line
- * (`--import @opentelemetry/instrumentation/hook.mjs`). That was rejected: it
- * puts a load-bearing flag in `package.json`'s start script AND in the systemd
- * unit, and a deployment that loses one of them gets a server that starts,
- * serves, reports traces, and is quietly missing every Express span. This
- * repository has a name for that failure mode — a thing that "starts, serves,
- * and is wrong" — and avoids it.
+ * (`--import`). It was first rejected here on the grounds that a load-bearing
+ * flag in `package.json` AND the systemd unit is a flag a deployment can lose,
+ * degrading silently into a server that "starts, serves, and is wrong".
+ * `module.register()` from inside this module appeared to do the same job
+ * without a flag, and a subprocess test confirmed it.
  *
- * `module.register()` does the same job from inside the process. Because this
- * module is evaluated before `app.js`, Express has not been imported yet when
- * the hook goes in, so the patch lands. Verified: the same request then produced
- * four spans, and the HTTP span's name improved from `GET` to `GET /probe/:id`.
+ * ── That was wrong, and the real account is what proved it ──
+ *
+ * The subprocess test loaded Express with a DYNAMIC `await import('express')`.
+ * `server.js` loads it STATICALLY, through `import { app } from './app.js'`, and
+ * ES modules are LOADED graph-wide before any of them are EVALUATED. So express's
+ * source was already read by the time this module's body ran, and
+ * `import-in-the-middle` — which transforms source at load time — had nothing
+ * left to transform. The in-process call worked in the test and did nothing in
+ * production.
+ *
+ * Nothing errored. The symptom was one span per request named `GET` instead of
+ * four named `GET /api/events/:id`, and it was found only by querying the live
+ * Better Stack account: 31 of 31 automatic spans came from
+ * `instrumentation-http` and none from `instrumentation-express`.
+ *
+ * So the flag is used after all — and the original objection is answered where
+ * it should have been answered in the first place, by making its absence LOUD
+ * rather than by avoiding it. `register.mjs` leaves a marker, this module checks
+ * for it, and a boot without the preload prints a warning naming the exact
+ * command to fix it. The in-process `register()` is kept as a fallback for
+ * modules imported dynamically later.
  */
-import { register } from 'node:module';
 import { diag, DiagLogLevel, metrics, trace, propagation } from '@opentelemetry/api';
 import { W3CTraceContextPropagator } from '@opentelemetry/core';
 import { resourceFromAttributes } from '@opentelemetry/resources';
@@ -124,22 +139,52 @@ let state = null;
  */
 let patching = null;
 
+/**
+ * Whether `register.mjs` ran via `--import`, i.e. BEFORE the module graph loaded.
+ *
+ * ── Why this distinction is the whole point ──
+ *
+ * Calling `module.register()` from here works for a module imported
+ * DYNAMICALLY and does nothing for one imported STATICALLY, because ES modules
+ * are loaded graph-wide before any of them are evaluated —
+ * `import-in-the-middle` transforms source at load time, and by the time this
+ * function runs, `express` has already been read.
+ *
+ * `server.js` imports `app.js` statically. So the in-process call below is a
+ * fallback that covers dynamic imports, and the `--import` preload is what
+ * actually instruments Express. Reporting them separately is what makes a
+ * missing flag visible.
+ */
+function esmHookPreloaded() {
+  try {
+    return globalThis[Symbol.for('wevolunteer.otel.esmHookPreloaded')] === true;
+  } catch { return false; }
+}
+
+/**
+ * ── Why this does NOT call `module.register()` ──
+ *
+ * It used to, as a "fallback for dynamically imported modules". Mutation testing
+ * killed the idea: removing the call changed nothing any test could observe,
+ * because nothing in this application dynamically imports an instrumented
+ * package — `grep` finds no dynamic import of `express` or `pg` anywhere in
+ * `server/`. It was covering a case that does not exist.
+ *
+ * Worse, it registered the hook UNSCOPED, without the `include` allowlist that
+ * `register.mjs` passes. So the one thing it could still have done was
+ * re-introduce the boot crash it was written after: rewriting an application
+ * module and exposing the `app.js` ↔ `checkinLimiters.js` circular import.
+ *
+ * A fallback that protects nothing and can only cause the failure it was added
+ * to prevent is not a fallback. The hook is installed in exactly one place now —
+ * `register.mjs`, via `--import` — and its absence is reported rather than
+ * silently patched over.
+ */
 function ensurePatched() {
   if (patching) return patching;
 
-  let esmHook = true;
-  try {
-    /* Before anything below imports an instrumented module, and before `app.js`
-       is evaluated. A failure is not fatal: `http` is a core module and is
-       hooked by a different mechanism that works without this, so the cost is
-       the Express spans and nothing else. */
-    register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
-  } catch {
-    esmHook = false;
-  }
-
   const disable = registerInstrumentations({ instrumentations: buildInstrumentations() });
-  patching = { esmHook, disable };
+  patching = { esmHook: esmHookPreloaded(), disable };
   return patching;
 }
 
@@ -190,22 +235,41 @@ function buildInstrumentations() {
 
     new ExpressInstrumentation({
       /**
-       * Middleware spans are off.
+       * Only REQUEST_HANDLER spans are kept. Middleware and router layers are
+       * both off, and the second one is not a mere optimisation.
        *
-       * Measured on a bare Express app: a single request produced three
-       * express spans, two of which were `query` and `expressInit` — framework
-       * bookkeeping. This application stacks a dozen middlewares (helmet,
-       * compression, cors, cookie-parser, the body parser, several rate
-       * limiters, authentication), so keeping them would mean roughly fifteen
-       * spans per request instead of three, for a waterfall that is mostly
-       * sub-millisecond bars nobody reads.
+       * ── What ROUTER layers actually produced ──
        *
-       * The two things worth naming inside a request — authentication and the
-       * business operation — are named explicitly through `spans.js`, where
-       * they get stable names rather than whatever a middleware function
-       * happens to be called.
+       * MEASURED against the live account, on 494 requests: express emitted
+       * **182 spans**, and the top of the histogram was
+       *
+       *     router - /api/webhooks/resend         14
+       *     router - /api/admin/persona-preview   14
+       *     router - /api/organizations           14
+       *
+       * — fourteen each, for routes that were never requested. Express walks its
+       * router stack looking for a match and the instrumentation names a span
+       * for every layer it walks, so the span count per request scales with the
+       * SIZE OF THE ROUTE TABLE rather than with what the request did. On this
+       * application that was roughly eighteen spans per trace, of which one was
+       * the handler that actually ran.
+       *
+       * Three problems at once: it is most of the trace volume the free-plan
+       * budget exists to protect, it buries the useful span in a waterfall of
+       * routes nobody called, and it grows every time a route is added.
+       *
+       * MIDDLEWARE is off for the plainer version of the same reason. This
+       * application stacks a dozen (helmet, compression, cors, cookie-parser,
+       * the body parser, several rate limiters, authentication) and they are
+       * sub-millisecond bars nobody reads. The two things worth naming inside a
+       * request — authentication and the business operation — are named
+       * explicitly through `spans.js`, where they get stable names rather than
+       * whatever a middleware function happens to be called.
+       *
+       * What survives is `request handler - /api/events/:id`: the one express
+       * span that says what the request did.
        */
-      ignoreLayersType: [ExpressLayerType.MIDDLEWARE],
+      ignoreLayersType: [ExpressLayerType.MIDDLEWARE, ExpressLayerType.ROUTER],
     }),
 
     new PgInstrumentation({
@@ -422,7 +486,14 @@ function startEnabled(config, env) {
 
   if (!esmHook) {
     try {
-      console.warn('[otel] ESM loader hook could not be registered; Express spans will be missing. HTTP spans are unaffected.');
+      console.warn(
+        '[otel] WARNING: the ESM loader hook was not preloaded, so Express is NOT instrumented.\n'
+        + '       Traces will show one span named "GET" instead of "GET /api/events/:id",\n'
+        + '       and no middleware or handler spans at all. Nothing else is affected.\n'
+        + '       Fix: start the server with\n'
+        + '         node --import ./server/observability/register.mjs server/server.js\n'
+        + '       (npm start and deploy/wevolunteer.service already do this.)'
+      );
     } catch { /* nothing left */ }
   }
 

@@ -125,9 +125,19 @@ describe('startOtel', () => {
     expect(otelStatus().enabled).toBe(true);
   });
 
-  it('registers the ESM loader hook, without which Express spans are lost', () => {
+  it('reports the ESM hook as NOT preloaded, because Vitest does not preload it', () => {
+    /* `esmHook` means "register.mjs ran via --import, before the module graph
+       was loaded" — not "module.register() was called". The distinction is the
+       one that cost a production defect: the in-process call works for a
+       DYNAMIC import and does nothing for a static one, which is what
+       `server.js` uses.
+       
+       Vitest does not pass --import, so false is the correct answer here and a
+       `true` would mean the flag had stopped meaning anything. The preloaded
+       case is covered in `observability.production.test.js`, which spawns a real
+       node both ways. */
     startAgainstStub();
-    expect(otelSnapshot().esmHook).toBe(true);
+    expect(otelSnapshot().esmHook).toBe(false);
   });
 
   it('is a no-op when called twice', () => {

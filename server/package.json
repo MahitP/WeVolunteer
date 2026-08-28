@@ -7,8 +7,8 @@
   },
   "main": "server.js",
   "scripts": {
-    "start": "node --env-file-if-exists=../.env server.js",
-    "dev": "DEMO_MODE=true nodemon --env-file-if-exists=../.env server.js",
+    "start": "node --import ./observability/register.mjs --env-file-if-exists=../.env server.js",
+    "dev": "DEMO_MODE=true nodemon --import ./observability/register.mjs --env-file-if-exists=../.env server.js",
     "verify:hours": "node --env-file-if-exists=../.env verifyHours.js"
   },
   "dependencies": {
