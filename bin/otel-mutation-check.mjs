@@ -286,6 +286,27 @@ const MUTATIONS = [
     replace: "      ignoreLayersType: [ExpressLayerType.MIDDLEWARE],",
     tests: ["server/observability.production.test.js"],
   },
+  {
+    name: "metrics: the instrumentation's duplicate http histogram is not dropped",
+    file: "server/observability/otel.js",
+    find: "        aggregation: { type: AggregationType.DROP },",
+    replace: "        aggregation: { type: AggregationType.SUM },",
+    tests: ["server/observability.production.test.js"],
+  },
+  {
+    name: "metrics: the hard cardinality ceiling is removed",
+    file: "server/observability/otel.js",
+    find: "export const METRIC_CARDINALITY_LIMIT = 500;",
+    replace: "export const METRIC_CARDINALITY_LIMIT = 2000000;",
+    tests: ["server/observability.metrics.test.js"],
+  },
+  {
+    name: "metrics: temporality reverted to cumulative (empties the histograms)",
+    file: "server/observability/otel.js",
+    find: "export const METRIC_TEMPORALITY = 'delta';",
+    replace: "export const METRIC_TEMPORALITY = 'cumulative';",
+    tests: ["server/observability.metrics.test.js"],
+  },
 ];
 
 const filter = process.argv[2];

@@ -61,6 +61,7 @@ function appModuleSource() {
   return `
 import express from 'express';
 import { currentTraceIds } from ${JSON.stringify(path.join(HERE, 'observability/correlation.js'))};
+import { recordHttpRequest } from ${JSON.stringify(path.join(HERE, 'observability/metrics.js'))};
 
 export const app = express();
 
@@ -81,6 +82,11 @@ app.use((req, res, next) => {
   const inMiddleware = currentTraceIds();
   res.on('finish', () => {
     captured.correlation = { inMiddleware, inFinish: currentTraceIds() };
+    /* app.js records the HTTP metric from this same listener. Without it the
+       only http.server.request.duration in the payload would be the
+       instrumentation's, and the duplicate-metric assertion would be testing
+       the absence of both rather than the removal of one. */
+    recordHttpRequest({ method: req.method, route: '/api/events/:id', statusCode: res.statusCode, durationMs: 5 });
   });
   next();
 });
@@ -348,6 +354,26 @@ describe('under a real node process, not vite-node', () => {
     expect(wire()).toContain('wevolunteer-subprocess');
   });
 
+  it('emits ONE http.server.request.duration, not two', () => {
+    /* FOUND live: the metric had 16 series where it should have had 8.
+       `instrumentation-http` emits its own histogram under the same name with
+       `http.response.status_code`, `url.scheme` and `network.protocol.version`
+       — doubling the series count of the most-used instrument and reinstating
+       the exact status_code cardinality metrics.js deliberately avoids.
+       A View drops the instrumentation's copy; ours is the one with a bounded
+       route label and a status CLASS.
+
+       This has to be asserted here rather than in the in-harness suites,
+       because the duplicate only exists once a real HTTP request has been
+       served. */
+    const metrics = received.filter(r => r.url === '/v1/metrics').map(r => r.text).join(' ');
+    expect(metrics.length, 'no metrics reached the stub').toBeGreaterThan(0);
+    expect(metrics).toContain('http.server.request.duration');
+    expect(metrics).toContain('http.response.status_class');
+    expect(metrics, 'the instrumentation duplicate is back').not.toContain('http.response.status_code');
+    expect(metrics, 'the instrumentation duplicate is back').not.toContain('network.protocol.version');
+  });
+
   it('reported the ESM hook as registered', () => {
     const snapshot = JSON.parse(output.match(/SNAPSHOT:(\{.*\})/)?.[1] ?? '{}');
     expect(snapshot.esmHook).toBe(true);
@@ -393,9 +419,14 @@ describe('without the --import preload', () => {
 
   it('loses the route pattern, which is the visible symptom', () => {
     /* The span still exists and is still exported; it is just named `GET` and
-       carries no http.route. That is why this was invisible for so long. */
-    expect(bareWire.length).toBeGreaterThan(0);
-    expect(bareWire).not.toContain('/api/events/:id');
+       carries no http.route. That is why this was invisible for so long.
+       
+       Scoped to the TRACE payloads: the metric carries a route label of its
+       own, from app.js's middleware, and it is present either way — including
+       it here would test the metric rather than the instrumentation. */
+    const spans = received.filter(r => r.url === '/v1/traces').map(r => r.text).join(' ');
+    expect(spans.length, 'no spans reached the stub at all').toBeGreaterThan(0);
+    expect(spans).not.toContain('/api/events/:id');
   });
 
   it('reports the hook as NOT preloaded', () => {

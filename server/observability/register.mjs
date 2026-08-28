@@ -41,22 +41,32 @@ import { register } from 'node:module';
  * ── What happened without it ──
  *
  * Registered unscoped, `import-in-the-middle` rewrites EVERY ES module in the
- * process, this application's own included. That rewrite changes how a module's
- * bindings are initialised, and `server/checkinLimiters.js` imports
- * `limitHandler` from `app.js` while `app.js` imports it back — a circular
- * import that works today only because of the exact order Node happens to
- * evaluate the two in. Rewritten, the order changes and the boot dies:
+ * process, this application's own included. That rewrite turns a hoisted
+ * function declaration into an assigned binding, which put `limitHandler` in the
+ * temporal dead zone and killed the boot outright:
  *
  *     ReferenceError: Cannot access 'limitHandler' before initialization
+ *         at server/checkinLimiters.js:149
  *
- * That is a latent fragility in the application rather than a bug in the hook,
- * and it is worth fixing on its own. But an observability feature must not be
- * able to stop the server from starting, and "instrument express" never needed
- * permission to rewrite the whole codebase.
+ * The cause was two circular imports — `checkinLimiters.js` and
+ * `reportLimiter.js` both took `limitHandler` from `app.js`, which reaches them
+ * again through its route imports. Those cycles have since been broken:
+ * `limitHandler` lives in `rateLimitResponse.js` now, and the tree boots under
+ * an unscoped rewrite (verified).
  *
- * So the hook is scoped to the two packages there are instrumentations for.
- * Application modules are left exactly as Node would have loaded them, which
- * also means this file cannot change the behaviour of any code in `server/`.
+ * ── So why is the allowlist still here ──
+ *
+ * Because it was never only a workaround. Three reasons outlast the bug:
+ *
+ *   · **Blast radius.** "Instrument express" does not need permission to rewrite
+ *     the application's own modules, and a telemetry feature that can alter the
+ *     semantics of `server/` is a telemetry feature that can break it. Scoped,
+ *     this file cannot change the behaviour of any code in `server/` at all.
+ *   · **The next cycle.** The two that existed were found by accident, by a boot
+ *     crash. Nothing prevents a third being introduced, and the allowlist means
+ *     the next one is an ordinary latent bug rather than a failed deploy.
+ *   · **Cost.** Rewriting two packages is cheaper than rewriting every module in
+ *     the process, on every boot.
  *
  * `pg` is listed even though SQLite is the engine in production: the
  * PostgreSQL migration is the direction of travel, and a package that is never

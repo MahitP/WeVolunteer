@@ -17,13 +17,17 @@
  * is exactly the thing the design makes invisible. This script asks directly,
  * and reports what Better Stack said.
  *
- * ── What it does NOT do ──
+ * ── It also reads the data back, and that is the point ──
  *
- * It does not read anything back out of Better Stack. Confirming that a record
- * is queryable in the dashboard needs a Better Stack API token, which is a
- * different credential from the source token and is not required to run the
- * application. This reports acceptance at the ingest boundary; seeing the data
- * in the dashboard is the operator's half.
+ * Acceptance and queryability are different claims, and the gap between them has
+ * hidden three real defects on this integration: Express silently uninstrumented,
+ * router spans at 88% of trace volume, and a histogram that stored nothing
+ * because it was cumulative. Every one of them returned HTTP 200 on the way in.
+ *
+ * So section 4b searches for the run's own nonce through the SQL API. That needs
+ * a third credential — a ClickHouse HTTP connection, which is free and separate
+ * from both the source token and the API token. Without it the script still runs
+ * and says loudly that the read-back was skipped.
  *
  * ── Secrecy ──
  *
@@ -191,6 +195,65 @@ if (failures.length === 0) {
 const succeeded = diagLines.filter(([, t]) => /export succeeded|Export succeeded/i.test(t));
 if (succeeded.length) console.log(`Successful exports reported: ${succeeded.length}`);
 
+/* ── 4b. Read it back ─────────────────────────────────────────────────────
+ *
+ * The half that HTTP 202/200 cannot prove.
+ *
+ * Acceptance at the ingest boundary and queryability are different claims, and
+ * the difference has hidden three real defects on this integration: Express
+ * silently uninstrumented, router spans at 88% of trace volume, and a histogram
+ * that stored nothing because it was cumulative. Every one of them returned 200
+ * on the way in.
+ *
+ * Needs the ClickHouse connection (Integrations -> SQL API). Skipped, loudly,
+ * when it is not configured — a check that quietly does nothing is worse than
+ * one that says it was skipped.
+ */
+section('4b. Reading it back (SQL API)');
+
+const qHost = String(process.env.BETTERSTACK_QUERY_HOST || '').trim();
+const qUser = String(process.env.BETTERSTACK_QUERY_USERNAME || '').trim();
+const qPass = String(process.env.BETTERSTACK_QUERY_PASSWORD || '').trim();
+
+let queryable = null;
+if (!qHost || !qUser || !qPass) {
+  console.log('SKIPPED — no query credentials.');
+  console.log('  Create one: Better Stack -> Integrations -> SQL API -> Connect ClickHouse HTTP client,');
+  console.log('  then set BETTERSTACK_QUERY_HOST / _USERNAME / _PASSWORD.');
+  console.log('  Without it this script can prove Better Stack ACCEPTED the data, not that it is queryable.');
+} else {
+  /* Both tables: recent rows live in remote(), older ones in the S3 archive.
+     Querying only one returns zero while the data sits in the other, which
+     looks exactly like broken ingestion. */
+  const table = String(process.env.BETTERSTACK_QUERY_TABLE || 't583346_wevolunteer_2');
+  const q = `SELECT count() n FROM (
+      SELECT raw FROM remote(${table}_logs)
+      UNION ALL SELECT raw FROM s3Cluster(primary, ${table}_s3) WHERE _row_type = 1
+    ) WHERE raw LIKE '%${nonce}%' FORMAT JSONEachRow`;
+
+  /* Ingestion is not instant. Poll rather than guess a sleep. */
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      const res = await fetch(`https://${qHost}/`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Basic ' + Buffer.from(`${qUser}:${qPass}`).toString('base64'),
+          'Content-Type': 'plain/text',
+        },
+        body: q,
+        signal: AbortSignal.timeout(30_000),
+      });
+      const found = Number(JSON.parse((await res.text()).trim() || '{}').n ?? 0);
+      if (found > 0) { queryable = found; break; }
+    } catch { /* transient; retry */ }
+    process.stdout.write(`  not indexed yet (attempt ${attempt}/10)\r`);
+    await new Promise((r) => setTimeout(r, 15_000));
+  }
+  console.log(queryable
+    ? `\nFOUND — ${queryable} log record(s) carrying the nonce are queryable.`
+    : '\nNOT FOUND after ~2.5 minutes. Better Stack accepted the data; it is not queryable yet.');
+}
+
 /* ── 5. Verdict ──────────────────────────────────────────────────────────── */
 
 section('5. Verdict');
@@ -200,10 +263,7 @@ const otlpOk = failures.length === 0 && flush.flushed;
 console.log(`logs   (HTTP ingestion) : ${logsOk ? 'ACCEPTED' : 'NOT ACCEPTED'}`);
 console.log(`traces (OTLP /v1/traces) : ${otlpOk ? 'no failure reported' : 'PROBLEM — see above'}`);
 console.log(`metrics(OTLP /v1/metrics): ${otlpOk ? 'no failure reported' : 'PROBLEM — see above'}`);
-console.log(
-  `\nNow confirm in the Better Stack dashboard. Search for:  ${nonce}`
-  + '\nAcceptance at the ingest boundary is what this script can prove;'
-  + '\nthat the records are queryable is the half only the dashboard shows.',
-);
+console.log(`queryable (read back)     : ${queryable ? `YES — ${queryable} record(s)` : (queryable === null ? 'SKIPPED (no query credentials)' : 'NOT YET')}`);
+console.log(`\nnonce: ${nonce}`);
 
 process.exit(logsOk && otlpOk ? 0 : 1);

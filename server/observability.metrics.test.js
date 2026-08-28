@@ -8,6 +8,7 @@
  * cost money here.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { METRIC_CARDINALITY_LIMIT, METRIC_TEMPORALITY } from './observability/otel.js';
 import {
   normaliseRoute, statusClass, normaliseDbOperation, recordHttpRequest,
   recordDbOperation, recordBusinessOperation, BUSINESS_OPERATIONS, METRIC_BOUNDS,
@@ -148,5 +149,45 @@ describe('the latency buckets', () => {
        always-keep line; a histogram that could not resolve it would make the
        three signals disagree about what slow means. */
     expect(METRIC_BOUNDS.LATENCY_BUCKETS).toContain(1000);
+  });
+});
+
+describe('the hard cardinality ceiling', () => {
+  /**
+   * A guard on the NUMBER, because that is the cost control.
+   *
+   * `normaliseRoute` bounds the labels this codebase produces. This bounds the
+   * ones it does not: an instrumentation added later, a semantic convention that
+   * grows an attribute, a label nobody reviewed. Better Stack bills metrics by
+   * retained size and retained size is series count, so an unbounded limit is an
+   * unbounded bill — which is why raising it should have to change this line.
+   */
+  it('is set, and is far below anything expensive', () => {
+    expect(METRIC_CARDINALITY_LIMIT).toBeGreaterThan(200);
+    expect(METRIC_CARDINALITY_LIMIT).toBeLessThanOrEqual(2000);
+  });
+
+  it('leaves room for the ~150 series this application actually produces', () => {
+    /* Comfortably above the real figure, so the ceiling never truncates normal
+       operation — it only stops an explosion. */
+    expect(METRIC_CARDINALITY_LIMIT).toBeGreaterThan(3 * METRIC_BOUNDS.MAX_DISTINCT_ROUTES);
+  });
+});
+
+describe('metric temporality', () => {
+  /**
+   * A guard on the VALUE, because cumulative silently empties the histograms.
+   *
+   * Measured: under cumulative, `http.server.request.duration` had 4 non-zero
+   * rows out of 2,742 in the real account, because a cumulative datapoint needs
+   * a predecessor to be meaningful and most exports here are a short-lived
+   * process's single shutdown flush. Under delta the same run reported 420 / 20
+   * / 40 / 10 exactly as served.
+   *
+   * Metrics are the only signal covering 100% of traffic — traces are sampled at
+   * 2% — so this is the setting that decides whether that claim is true.
+   */
+  it('is delta, so a short-lived process still reports what it served', () => {
+    expect(METRIC_TEMPORALITY).toBe('delta');
   });
 });

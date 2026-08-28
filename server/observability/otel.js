@@ -77,9 +77,10 @@ import {
 } from '@opentelemetry/semantic-conventions';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { BatchSpanProcessor, SamplingDecision } from '@opentelemetry/sdk-trace-base';
-import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { MeterProvider, PeriodicExportingMetricReader, AggregationType } from '@opentelemetry/sdk-metrics';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
+import { AggregationTemporalityPreference } from '@opentelemetry/exporter-metrics-otlp-http';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { ExpressInstrumentation, ExpressLayerType } from '@opentelemetry/instrumentation-express';
@@ -114,6 +115,40 @@ const EXPORT_TIMEOUT_MS = 5000;
  * `shutdownOtel`.
  */
 const SHUTDOWN_DEADLINE_MS = 5000;
+
+/**
+ * The hard ceiling on distinct attribute combinations per instrument.
+ *
+ * Exported so a test can assert the NUMBER rather than the plumbing: this is a
+ * cost control, and a cost control nobody checks is a comment. `metrics.js`
+ * caps route labels at 60 and refuses identifier-shaped values, which guards the
+ * code this repository controls; this guards everything else — an
+ * instrumentation added later, a convention that grows an attribute, a label
+ * nobody reviewed. At the limit the SDK folds further combinations into an
+ * overflow series instead of growing without bound.
+ */
+export const METRIC_CARDINALITY_LIMIT = 500;
+
+/**
+ * Delta, not the OTLP default of cumulative — and this is a correctness setting,
+ * not a preference.
+ *
+ * MEASURED against the real account: under cumulative,
+ * `http.server.request.duration` had **4 non-zero rows out of 2,742**. A
+ * cumulative datapoint is a running total, so the backend must difference
+ * consecutive exports to recover an interval, and a process contributes nothing
+ * until it has exported twice. Most of this application's exports are the single
+ * flush a short-lived process makes at shutdown, and WeVolunteer restarts on
+ * every deploy. Counters survived (an absolute value needs no predecessor); the
+ * histograms did not.
+ *
+ * After switching, the same 494-request run reported exactly what it served:
+ * 420 requests on `/api/events` 2xx, 20 4xx, 40 on `/api/events/tags`, 10 404s.
+ *
+ * Exported so a test asserts the VALUE. Reverting this to cumulative silently
+ * empties the only signal that covers 100% of traffic.
+ */
+export const METRIC_TEMPORALITY = 'delta';
 
 let state = null;
 
@@ -444,6 +479,34 @@ function startEnabled(config, env) {
     compression: 'gzip',
     timeoutMillis: EXPORT_TIMEOUT_MS,
     concurrencyLimit: 1,
+
+    /**
+     * DELTA, not the OTLP default of cumulative.
+     *
+     * ── Measured, against the real account ──
+     *
+     * Under cumulative, a histogram datapoint is a running total, and the
+     * backend has to difference consecutive exports to recover what happened in
+     * an interval. A process therefore contributes NOTHING until it has
+     * exported twice — and `http.server.request.duration` came back with 4
+     * non-zero rows out of 2,742 across a day of runs, because most of this
+     * application's exports are the single flush a short-lived process makes on
+     * shutdown. The counters (`wev.http.refusals`) survived, because an absolute
+     * value needs no predecessor; the histograms did not.
+     *
+     * That is the wrong way round for this design. Metrics are the only signal
+     * covering 100% of traffic — traces are sampled at 2% — so a metric that
+     * silently loses its first interval undermines the thing it exists for, and
+     * WeVolunteer restarts on every deploy.
+     *
+     * Delta sends what happened since the last export, so each export stands on
+     * its own: a process that lives for ninety seconds reports its ninety
+     * seconds. The cost is that a dropped export loses that interval rather than
+     * being healed by the next cumulative value — which this pipeline already
+     * accepts everywhere else, and says so: telemetry is sampled, not
+     * guaranteed.
+     */
+    temporalityPreference: AggregationTemporalityPreference.DELTA,
   });
 
   /**
@@ -460,7 +523,59 @@ function startEnabled(config, env) {
     exportTimeoutMillis: EXPORT_TIMEOUT_MS,
   });
 
-  const meterProvider = new MeterProvider({ resource, readers: [metricReader] });
+  const meterProvider = new MeterProvider({
+    resource,
+    readers: [metricReader],
+
+    /**
+     * Views, and both of them are cost controls.
+     *
+     * ── 1. The duplicate `http.server.request.duration` ──
+     *
+     * FOUND by querying the live account: that metric had **16 series, not 8**.
+     * Half were ours — `http.route` and `http.response.status_class`, the
+     * low-cardinality shape §4 is careful about — and half came from
+     * `instrumentation-http`, which emits its OWN histogram under the SAME name
+     * carrying `http.response.status_code`, `url.scheme` and
+     * `network.protocol.version`.
+     *
+     * So the semantic-convention metric was silently doubling the series count
+     * of the most-used instrument in the system, and reintroducing the exact
+     * status_code cardinality this application decided against — the cardinality
+     * controls in `metrics.js` were being undone by a dependency's defaults.
+     * Two histograms sharing one name is also simply wrong for a dashboard:
+     * every query has to know which half it is looking at.
+     *
+     * Ours is kept because it is the one with a bounded route label and a
+     * status CLASS. The instrumentation's is dropped rather than renamed: a
+     * renamed duplicate is still paid for every export, for ever.
+     */
+    views: [
+      {
+        instrumentName: '*',
+        meterName: '@opentelemetry/instrumentation-http',
+        aggregation: { type: AggregationType.DROP },
+      },
+
+      /**
+       * ── 2. A hard ceiling on series, whatever anybody adds ──
+       *
+       * `metrics.js` caps route labels at 60 and refuses identifier-shaped
+       * values, but that is a guard on the code this repository controls. This
+       * is the guard on everything else: an instrumentation added later, a
+       * semantic convention that grows an attribute, a label nobody reviewed.
+       *
+       * At the limit the SDK folds further combinations into an overflow series
+       * rather than growing without bound, so the worst case is a slightly less
+       * precise dashboard instead of a bill. 500 is far above the ~150 series
+       * this application actually produces and far below anything expensive.
+       */
+      {
+        instrumentName: '*',
+        aggregationCardinalityLimit: METRIC_CARDINALITY_LIMIT,
+      },
+    ],
+  });
   metrics.setGlobalMeterProvider(meterProvider);
 
   initMetrics();
