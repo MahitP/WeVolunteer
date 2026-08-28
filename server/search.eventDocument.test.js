@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   vectorIdFor, eventIdFromVectorId, buildEmbedText, buildMetadata, buildRecord,
-  contentHash, shouldIndex, TEXT_FIELD,
+  contentHash, shouldIndex, hasSearchableContent, TEXT_FIELD,
 } from './search/eventDocument.js';
 
 /**
@@ -267,5 +267,58 @@ describe('what belongs in the index at all', () => {
   it('refuses a row with no id', () => {
     expect(shouldIndex({ status: 'open' })).toBe(false);
     expect(shouldIndex(null)).toBe(false);
+  });
+
+  /**
+   * ── Contentless events are noise vectors, measured on the real corpus ──
+   *
+   * The pilot database held three events titled "Event" with descriptions of 6,
+   * 3 and 70 characters. Queried against the live index, the two emptiest were
+   * the TOP hits for `zzzqqxnonexistenttopicxyz`, scoring 0.2922 and 0.2796 —
+   * higher than a genuine query scored against anything. The two properly
+   * described events scored 0.1021 and 0.0680 for the same gibberish.
+   *
+   * A near-empty passage embeds into a generic region and therefore sits close
+   * to everything. No similarity floor separates that from a real match, because
+   * the placeholder outscores real queries. The record has to stay out of the
+   * index instead — the SQL half still finds it by its words.
+   */
+  it('refuses an event with no real description', () => {
+    expect(shouldIndex(eventRow({ description: '' }))).toBe(false);
+    expect(shouldIndex(eventRow({ description: '   ' }))).toBe(false);
+    expect(shouldIndex(eventRow({ description: 'TBD' }))).toBe(false);
+    expect(shouldIndex(eventRow({ description: 'n/a' }))).toBe(false);
+    /* The real placeholders that prompted this: 3 and 6 characters. */
+    expect(shouldIndex(eventRow({ description: '...' }))).toBe(false);
+  });
+
+  it('indexes an event that is briefly but genuinely described', () => {
+    expect(shouldIndex(eventRow({
+      description: 'Pack boxes of groceries for families.',
+    })), 'a real one-sentence description was excluded').toBe(true);
+  });
+
+  /**
+   * The TITLE is deliberately not part of the test. A title is a name, and a
+   * short one says nothing about whether the event is described — the pilot
+   * corpus proves both directions, with a well-described event titled "Event"
+   * and placeholders sharing the same title.
+   */
+  it('judges the description, not the title', () => {
+    expect(shouldIndex(eventRow({
+      title: 'Event',
+      description: 'Sort donated winter coats by size before the distribution day.',
+    }))).toBe(true);
+    expect(shouldIndex(eventRow({
+      title: 'A Very Descriptive And Appealing Volunteer Opportunity Title',
+      description: '.',
+    }))).toBe(false);
+  });
+
+  it('exposes the content test on its own, so callers can explain a skip', () => {
+    expect(hasSearchableContent({ description: 'x'.repeat(20) })).toBe(true);
+    expect(hasSearchableContent({ description: 'x'.repeat(19) })).toBe(false);
+    expect(hasSearchableContent({})).toBe(false);
+    expect(hasSearchableContent(null)).toBe(false);
   });
 });

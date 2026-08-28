@@ -18,7 +18,7 @@ import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibili
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
 import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder, semanticIdParams } from '../eventQuery.js';
-import { shouldUseSemantic, semanticCandidates } from '../search/discoverSearch.js';
+import { shouldUseSemantic, semanticCandidates, similarEventCandidates } from '../search/discoverSearch.js';
 import { markEventDirty, removeEventFromIndex } from '../search/eventIndexer.js';
 import { recommendationsFor, explanationText } from '../search/recommendations.js';
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
@@ -284,6 +284,34 @@ router.get('/api/events', authenticateToken, async (req, res) => {
      * restricted and the caller gets soonest-first open opportunities, which is
      * a good answer rather than an empty one.
      */
+    /**
+     * ── "Opportunities like this one" ──
+     *
+     * Another MODE of this endpoint, for the same reason recommendations are:
+     * the hundred lines of serialisation below, and every filter and ban check
+     * above them, are the things a related-events list must not reimplement.
+     *
+     * It costs no embedding tokens. `similarEventCandidates` queries with the
+     * vector the event already has, so the only charge is read units, on a
+     * request a student made by opening one event.
+     *
+     * Scoped to `listable`: a completed or cancelled event is not a "similar
+     * opportunity", it is history. `openOnly` is deliberately NOT forced —
+     * unlike a recommendation, this is a lateral browse, and an event whose
+     * sign-ups have closed is still worth seeing next to the one you are
+     * reading.
+     */
+    if (filters.similarTo) {
+      filters.scope = 'listable';
+      const similar = await similarEventCandidates(filters.similarTo, filters);
+      /* Fail closed. With no candidates this must return nothing, not the whole
+         listable table — the caller asked "what is like this", and "everything"
+         is not an answer to that. */
+      filters.semanticIds = similar.ids;
+      filters.restrictToSemanticIds = true;
+      if (similar.ids.length && filters.sort === 'soonest') filters.sort = 'relevance';
+    }
+
     let recommendation = null;
     if (filters.recommended) {
       /**

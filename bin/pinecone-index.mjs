@@ -30,6 +30,77 @@
  * script here; see `bin/resolveDb.mjs` for why that matters.
  */
 import process from 'node:process';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SERVER_DIR = path.join(REPO_ROOT, 'server');
+
+/**
+ * Resolve a relative WEV_DB_PATH against `server/`, not against the cwd.
+ *
+ * ── The incident, for the second time ──
+ *
+ * `.env` here says `WEV_DB_PATH=../pilot.db`, and its comment explains why:
+ * relative to `server/`, which is the cwd the dev and start scripts run from.
+ * These npm scripts run from the REPOSITORY ROOT, where the same string means
+ * one level above the repository — and from a git worktree it means
+ * `.claude/worktrees/pilot.db`.
+ *
+ * `node:sqlite` creates a database that is not there, so the first live run of
+ * `pinecone:setup` silently created an empty one and would have reported a
+ * perfectly successful backfill of zero events into a real Pinecone index.
+ * That is precisely the failure `bin/resolveDb.mjs` records from 2026-08:
+ * "an operator would run it, read Successfully granted ownership, sign in, and
+ * still not be an owner".
+ *
+ * `resolveDb.mjs` already had the right rule (`path.resolve(SERVER_DIR, value)`)
+ * and these commands did not go through it, because the indexer needs the
+ * dual-engine handle from `server/db.js` rather than a raw SQLite one. So the
+ * rule is applied here instead, BEFORE `server/db.js` is imported — that module
+ * reads the variable at import time.
+ */
+function normaliseDbPath() {
+  const raw = process.env.WEV_DB_PATH;
+  if (!raw) return null;
+  if ((process.env.DATABASE_ENGINE || 'sqlite').toLowerCase() === 'postgres') return null;
+  const resolved = path.isAbsolute(raw) ? raw : path.resolve(SERVER_DIR, raw);
+  process.env.WEV_DB_PATH = resolved;
+  return resolved;
+}
+
+/**
+ * Refuse a database that is not there, rather than creating one.
+ *
+ * `node:sqlite` creates an absent file, so every wrong path is a silent success:
+ * an empty database, a backfill of zero events, and an exit code of 0. That is
+ * the failure `bin/resolveDb.mjs` answers with "a refusal rather than a new
+ * file", and it happened twice during the first live run of these commands —
+ * once from the repository root and once from a git worktree, each time leaving
+ * a stray empty database behind.
+ *
+ * Resolving the path correctly was necessary and not sufficient: a correct rule
+ * still points at nothing when the file genuinely is not there. So the tool
+ * stops and says which path it tried.
+ */
+function assertDatabaseExists(resolved) {
+  if (!resolved || existsSync(resolved)) return true;
+  line('That database does not exist:');
+  line('');
+  line(`    ${resolved}`);
+  line('');
+  line('  WEV_DB_PATH is resolved against server/, matching bin/resolveDb.mjs.');
+  line('  Nothing was created — node:sqlite would happily have made an empty');
+  line('  database here and reported a successful backfill of zero events.');
+  line('');
+  line('  Point WEV_DB_PATH at the database you mean, as an absolute path if');
+  line('  you are running from a git worktree.');
+  process.exitCode = 1;
+  return false;
+}
+
+const RESOLVED_DB = normaliseDbPath();
 
 const [, , rawCommand, ...args] = process.argv;
 const command = String(rawCommand ?? '').toLowerCase();
@@ -101,7 +172,7 @@ function databaseTarget() {
   const configured = process.env.WEV_DB_PATH;
   return configured
     ? `sqlite ${configured}`
-    : 'sqlite server/wevolunteer.db  ← WEV_DB_PATH is unset; is that the database you meant?';
+    : `sqlite ${path.join(SERVER_DIR, 'wevolunteer.db')}  ← WEV_DB_PATH is unset; is that the database you meant?`;
 }
 
 function banner(status) {
@@ -119,6 +190,8 @@ async function main() {
     line('Usage: node bin/pinecone-index.mjs <setup|backfill|reindex|reconcile|stats> [--dry-run] [--remove-orphans]');
     return;
   }
+
+  if (!assertDatabaseExists(RESOLVED_DB)) return;
 
   const { config, client, indexer, doc, db } = await load();
 

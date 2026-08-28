@@ -2391,6 +2391,12 @@ because the *trigger* and the *constraint* are the parts worth keeping.
   considers searchable means changing what gets embedded, and a field that
   changes on every read will silently re-embed the corpus.
 
+One capability was added after the live validation, and it is the shape to copy
+if more are ever considered: **"opportunities like this one"** queries Pinecone
+with the vector an event already has (`query.id`), so it costs no embedding
+tokens at all. Reusing vectors already paid for is the only kind of Pinecone
+feature that makes this corpus more useful without making it more expensive.
+
 See [`docs/operations/pinecone.md`](operations/pinecone.md).
 
 ### 10.8 Sequencing

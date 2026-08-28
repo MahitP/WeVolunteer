@@ -6,7 +6,9 @@ import {
   shouldUseSemantic, buildPineconeFilter, rrfFuse, shouldRerank,
   rerankBudgetState, __resetRerankBudget, semanticCandidates,
 } from './search/discoverSearch.js';
-import { resolvePineconeConfig, __resetPineconeConfig, pineconeEnabled } from './search/pineconeConfig.js';
+import {
+  resolvePineconeConfig, __resetPineconeConfig, pineconeEnabled, MIN_SEMANTIC_SCORE,
+} from './search/pineconeConfig.js';
 import { __resetPineconeClient } from './search/pineconeClient.js';
 
 /**
@@ -173,6 +175,19 @@ describe('the metadata filter', () => {
     expect(serialised).not.toContain('user');
     expect(filter).not.toHaveProperty('audience');
     expect(filter).not.toHaveProperty('viewer');
+  });
+});
+
+describe('the similarity floor', () => {
+  /**
+   * Measured against the live index on 2026-08-28 (llama-text-embed-v2,
+   * cosine): relevant queries scored 0.2585–0.5057 at rank 1, nonsense and
+   * off-topic queries 0.0124–0.1058. The floor has to sit between those two
+   * bands or it either lets gibberish through or throws away real matches.
+   */
+  it('sits between the measured nonsense and relevant score bands', () => {
+    expect(MIN_SEMANTIC_SCORE).toBeGreaterThan(0.1058);
+    expect(MIN_SEMANTIC_SCORE).toBeLessThan(0.2585);
   });
 });
 

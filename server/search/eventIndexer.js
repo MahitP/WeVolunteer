@@ -38,6 +38,7 @@
 import { logEvent } from './../telemetry.js';
 import {
   buildRecord, contentHash, shouldIndex, vectorIdFor, eventIdFromVectorId,
+  MIN_DESCRIPTION_CHARS,
 } from './eventDocument.js';
 import { tagsForEvents } from './../eventTags.js';
 import { upsertRecords, deleteRecords, indexStats } from './pineconeClient.js';
@@ -440,17 +441,31 @@ export async function backfill(db, {
 export async function reconcile(db, { removeOrphans = false } = {}) {
   const report = { missing: 0, orphaned: 0, removed: 0, indexedRecords: null, dbEvents: 0 };
 
+  /**
+   * "Missing" means an event that SHOULD be indexed and is not.
+   *
+   * The content rule has to be spelled here too, or the reconciler reports
+   * permanent drift for every placeholder event — a number that never reaches
+   * zero teaches an operator to ignore it, which is worse than not reporting it
+   * at all. `MIN_DESCRIPTION_CHARS` is imported rather than repeated so the two
+   * cannot drift apart. `LENGTH(TRIM(...))` is the same on both engines.
+   */
   const missing = await db.prepare(`
     SELECT COUNT(*) AS c
       FROM events e
       LEFT JOIN event_search_index si ON si.event_id = e.id
      WHERE e.status <> 'cancelled'
+       AND LENGTH(TRIM(COALESCE(e.description, ''))) >= ${MIN_DESCRIPTION_CHARS}
        AND (si.event_id IS NULL OR si.state <> 'indexed' OR si.doc_version <> @docVersion)
   `).get({ docVersion: DOCUMENT_VERSION });
   report.missing = Number(missing?.c ?? 0);
 
+  /* The denominator uses the same rule, so "5 of 5 indexed" means what it says
+     rather than counting events the index is right to be without. */
   const total = await db.prepare(
-    `SELECT COUNT(*) AS c FROM events WHERE status <> 'cancelled'`,
+    `SELECT COUNT(*) AS c FROM events
+      WHERE status <> 'cancelled'
+        AND LENGTH(TRIM(COALESCE(description, ''))) >= ${MIN_DESCRIPTION_CHARS}`,
   ).get();
   report.dbEvents = Number(total?.c ?? 0);
 

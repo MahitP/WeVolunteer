@@ -19,7 +19,7 @@ import { describe, it, expect, vi } from 'vitest';
 vi.setConfig({ testTimeout: 20000 });
 
 import { execFileSync } from 'child_process';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -177,5 +177,74 @@ describe('verifyHours.js operates on the database WEV_DB_PATH names', () => {
     rmSync(dir, { recursive: true, force: true });
 
     expect(failed || /MISMATCH|FAIL/i.test(out), `tampering went undetected:\n${out}`).toBe(true);
+  });
+});
+
+/**
+ * `bin/pinecone-index.mjs` and the database it opens.
+ *
+ * ── Two live incidents, both the same shape ──
+ *
+ * `.env` carries `WEV_DB_PATH=../pilot.db`, which is relative to `server/` — the
+ * cwd the dev and start scripts use. The `pinecone:*` npm scripts run from the
+ * REPOSITORY ROOT, where that string means one level above the repository, and
+ * from a git worktree it means `.claude/worktrees/pilot.db`.
+ *
+ * `node:sqlite` creates a database that is not there. So the first live run of
+ * `pinecone:setup` silently created an empty one, and a backfill against it
+ * would have embedded nothing, reported "0 failed", and exited 0 — the same
+ * silent-wrong-database failure `bin/resolveDb.mjs` records.
+ *
+ * Resolving correctly was necessary and not sufficient: a correct rule still
+ * points at nothing when the file genuinely is absent. Both halves are asserted
+ * here.
+ */
+describe('the Pinecone CLI opens the database an operator meant', () => {
+  const CLI = path.join(ROOT, 'bin', 'pinecone-index.mjs');
+
+  const run = (env) => {
+    try {
+      return execFileSync(process.execPath, [CLI, 'stats'], {
+        cwd: ROOT, stdio: 'pipe', encoding: 'utf8',
+        env: { ...process.env, JWT_SECRET: 'x'.repeat(48), ...env },
+      });
+    } catch (err) {
+      return String(err.stdout || '') + String(err.stderr || '');
+    }
+  };
+
+  /** The refusal. Nothing is created, and the path tried is named. */
+  it('refuses a database that does not exist instead of creating one', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'wev-pinecone-missing-'));
+    const missing = path.join(dir, 'not-there.db');
+
+    const out = run({ WEV_DB_PATH: missing });
+
+    expect(out).toMatch(/does not exist/i);
+    expect(out).toContain(missing);
+    expect(existsSync(missing), 'the CLI created the database it was pointed at').toBe(false);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * And a relative value resolves against `server/`, the same rule
+   * `bin/resolveDb.mjs` applies — NOT against the cwd, which for these scripts
+   * is the repository root.
+   */
+  it('resolves a relative WEV_DB_PATH against server/, not the cwd', () => {
+    /* A unique name per run. A leftover from an earlier run — this test creates
+       nothing, but a broken build might — would otherwise make the assertion
+       fail for a reason that has nothing to do with the code under test. */
+    const probe = `wev-relative-probe-${Date.now()}.db`;
+    const out = run({ WEV_DB_PATH: `../${probe}` });
+
+    /* server/../ is the repository root, so that is where it must have looked —
+       and it must have refused, since nothing is there. */
+    expect(out).toContain(path.join(ROOT, probe));
+    expect(existsSync(path.join(ROOT, probe)),
+      'the CLI created the database it was pointed at').toBe(false);
+    expect(existsSync(path.join(path.dirname(ROOT), probe)),
+      'it resolved against the cwd and created a file outside the repository').toBe(false);
   });
 });

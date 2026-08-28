@@ -256,6 +256,109 @@ corpus dirty (what `reindex` does) and asserts nothing is sent.
 
 ---
 
+## 6b. Measured against the live service — 2026-08-28
+
+Everything above was designed against Pinecone's documentation and tested
+against a loopback stub. This section is what the real service actually did, on
+a Starter account, index `wevolunteer-discover-v1`, 16 events.
+
+| | |
+|---|---|
+| Index host | `…-sd4aq5c.svc.aped-4627-b74a.pinecone.io` |
+| Dimension | **1024** (llama-text-embed-v2 default) |
+| Ready on creation | yes; `setup` is idempotent — a second run reports "already exists" |
+| Search latency, warm | **311–445 ms** (median 379) [proven] |
+| Search latency, cold | **~3.2 s** on the first query after the index scales to zero [proven] |
+| Backfill | 16 events, 16 upserted, 0 failed; ~111 embedding tokens |
+| Re-run of backfill | 0 upserted [proven] |
+| Full reindex after `markAllDirty` | 0 upserted, all unchanged [proven] |
+
+**The cold start is why `SEARCH_TIMEOUT_MS` stays at 1200 ms.** Warm queries
+finish in well under half of it. The first query after an idle period does not,
+and is abandoned in favour of the database search — which is the designed
+behaviour, not a defect: a student should not wait three seconds for a page that
+the substring search can answer in eleven milliseconds. The next query is warm.
+Raising the timeout to catch the cold start would make every genuinely slow
+request pay for it.
+
+### The similarity floor, and the defect that produced it
+
+A vector index returns the K **nearest** records. It has no concept of "nothing
+matched" — ask it about gibberish and it returns the least dissimilar events it
+holds. Because the read path is `(… LIKE @q OR e.id IN (candidates))`, those
+candidates satisfied the predicate by themselves, so **a search for something the
+corpus does not contain returned the entire corpus**.
+
+The stub could not reveal this: a stub returns exactly the hits a test names. It
+appeared on the first live nonsense query.
+
+Measured top-1 scores that fixed it:
+
+| Query kind | Top-1 score |
+|---|---|
+| Relevant (5 queries) | 0.2585 – 0.5057 |
+| Nonsense / off-topic (5 queries) | 0.0124 – 0.1058 |
+
+`MIN_SEMANTIC_SCORE` is **0.15**, in the gap, and is configurable via
+`PINECONE_MIN_SCORE` because it is a measurement rather than a law — a different
+corpus or embedding model moves it. Two regression tests pin it, and removing
+the filter fails them.
+
+## 6c. Similar opportunities — the one capability added after launch
+
+`GET /api/events?similarTo=<eventId>` — "opportunities like this one", another
+**mode of the list endpoint**, not a second one.
+
+**It costs no embedding tokens.** Pinecone's integrated search endpoint accepts
+`query.id`, which queries with the vector a record already has [documented, API
+2026-04]. The expensive half was paid for when the event was indexed, so the only
+charge is read units, on a request a student made by opening one event. It runs
+on demand — never on a timer, never during a browse.
+
+Nothing new reaches the vendor: an event id this application already owns goes
+out, candidate ids come back, and the authoritative query decides the rest. The
+source event is dropped from its own results — it is trivially the record most
+similar to itself. With no candidates it **fails closed**: "what is like this?"
+answered with the whole table is not an answer.
+
+Scoped to `listable`. `openOnly` is deliberately not forced, unlike
+recommendations: this is a lateral browse, and an event whose sign-ups have
+closed is still worth seeing beside the one you are reading.
+
+## 6d. Why contentless events are not indexed
+
+`shouldIndex` requires a description of at least `MIN_DESCRIPTION_CHARS` (20).
+That is a filter against placeholders, not a quality bar — the records it exists
+to exclude had descriptions of **three and six characters**.
+
+Measured on the live pilot index, 2026-08-28:
+
+| Query | Top hit | Score |
+|---|---|---|
+| `zzzqqxnonexistenttopicxyz` | a placeholder titled "Event" | **0.2922** |
+| `zzzqqxnonexistenttopicxyz` | (second) placeholder | 0.2796 |
+| "helping at a sports event" (genuine) | best match | 0.2823 |
+| `zzzqqxnonexistenttopicxyz` | a properly described event | 0.1021 |
+
+A placeholder outscored a real query. That is not a threshold problem and cannot
+be fixed by raising the floor: a near-empty passage embeds into a generic region
+of the space and therefore sits close to everything, including random
+characters. Such a record is a permanent false-positive generator.
+
+Excluding it costs nothing anybody wants — the lexical half is SQL and still
+matches the title, description, location and organizer exactly, so the event
+stays findable by its words. It also saves an embedding and its storage.
+`reconcile` applies the same rule, importing the same constant, so it does not
+report permanent drift for events the index is correct to be without.
+
+**A caveat worth stating.** After removing the two worst placeholders, the pilot
+corpus still returns one candidate for gibberish, because only **one** event in
+it is `listable` — with a single candidate, "nearest neighbour" is trivially that
+one. On the 16-event validation corpus, where every event had a real
+description, nonsense topped out at 0.1058 against a 0.15 floor. This is a
+small-corpus artefact, not a design flaw, and the durable answer is corpus size
+and description quality rather than threshold tuning.
+
 ## 7. Failure behaviour
 
 | Failure | What a student sees |
@@ -393,6 +496,22 @@ npm run pinecone:reconcile -- --remove-orphans
 against that database. Boot the server once, or check the path printed above the
 message is the one you meant.
 
+The pilot database was at migration **56** when this was first run live, so it
+predates 057, 058 and 059 and cannot be indexed until it is migrated. 057 is a
+destructive `events` rebuild with six guards; migrating a live database holding
+real records is an operator decision with its own runbook, not something the
+indexing tooling should do on its way past.
+
+**A relative `WEV_DB_PATH` and the wrong database.** `.env` here says
+`../pilot.db`, which is relative to `server/`. The `pinecone:*` npm scripts run
+from the repository root, where the same string means one level ABOVE the
+repository — and inside a git worktree it means `.claude/worktrees/pilot.db`.
+`node:sqlite` creates a database that is not there, so the first live `setup`
+silently created an empty one and would have reported a perfectly successful
+backfill of zero events. `bin/pinecone-index.mjs` now resolves a relative value
+against `server/`, the same rule `bin/resolveDb.mjs` uses, and prints the
+absolute path it settled on. Check that line on every run.
+
 **Search results are stale.** `npm run pinecone:reconcile`. If `missing` is
 non-zero, `npm run pinecone:backfill`.
 
@@ -430,6 +549,6 @@ mocked `fetch`.
 | `search.eventDocument.test.js` | ids, embedded text, metadata, hash, the privacy omissions |
 | `search.discoverSearch.test.js` | when to call the vendor, filters, fusion, the rerank budget |
 | `search.eventQuery.test.js` | how candidates enter the SQL, the relevance sort, fail-closed |
-| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization, recommendations |
+| `search.integration.test.js` | create/update/delete/status, backfill, reconcile, outage, authorization, recommendations, similar events |
 | `search.discoverSearch.test.js` (telemetry block) | that a student's search text never reaches the telemetry vendor |
 | `BrowseEvents.relevanceSort.test.jsx` | the one control this adds, and its accessibility |
