@@ -2,7 +2,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'crypto';
 
 import { DEMO_MODE } from './config.js';
-import { limitHandler } from './app.js';
+import { limitHandler } from './rateLimitResponse.js';
 
 /**
  * Rate limits for check-in codes and for scanning them.
