@@ -13,6 +13,7 @@ import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
+import { limitHandler } from './rateLimitResponse.js';
 
 import authRoutes from './routes/authRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
@@ -493,33 +494,6 @@ app.use(express.json({ limit: '100kb' }));
 // Populates req.cookies for authenticateToken. Mounted before the routers and
 // before the rate limiters so every downstream handler sees the same shape.
 app.use(cookieParser());
-
-/**
- * Builds the 429 response for a limiter.
- *
- * express-rate-limit's default is `text/plain` "Too many requests, please try
- * again later." The client parses every error body as JSON, so that default
- * left it with nothing to show and it fell back to printing the raw status —
- * students hitting the login limiter were told "Request failed (429)", which
- * explains neither what happened nor what to do.
- *
- * Every limited response is now JSON in the same `{ error }` shape as the rest
- * of the API, carries `code: 'rate_limited'` so a caller can branch on it, and
- * states the wait in minutes derived from the limiter's own window.
- */
-export function limitHandler(message) {
-  return (req, res) => {
-    const resetAt = req.rateLimit?.resetTime;
-    const minutes = resetAt
-      ? Math.max(1, Math.ceil((new Date(resetAt) - Date.now()) / 60000))
-      : 15;
-    res.status(429).json({
-      error: `${message} Please try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`,
-      code: 'rate_limited',
-      retryAfterMinutes: minutes
-    });
-  };
-}
 
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

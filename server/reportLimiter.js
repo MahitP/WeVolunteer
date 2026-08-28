@@ -30,7 +30,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'crypto';
 
 import { DEMO_MODE } from './config.js';
-import { limitHandler } from './app.js';
+import { limitHandler } from './rateLimitResponse.js';
 
 /**
  * Twenty a day. Enough that no honest student meets it — the queue's own
