@@ -59,9 +59,34 @@ describe('an account can hold the complete collection', () => {
    * credited hours and enough consecutive months to clear the top tier of both
    * progressions, plus hosted events for the leadership pair.
    */
+  /**
+   * One shift per calendar month, counting back from this month.
+   *
+   * ── Why not `now - i * 30 days` ──
+   *
+   * That is what this did, and it is date-dependent in a way that fails roughly
+   * a few days a year. Thirty days is not a calendar month, so the steps drift;
+   * February is 28 days, so a 30-day step can jump **over it entirely**. On
+   * 2026-08-28 the twenty-six steps covered 2024-08 → 2026-08 but skipped
+   * 2026-02, which breaks the streak in half: eighteen consecutive months, then
+   * six. "Consistency/24 Month Streak" is then unearnable and the completeness
+   * assertion fails, on a fixture bug rather than on anything the evaluator did.
+   *
+   * `setUTCMonth(m - i)` steps real months, so the run is contiguous whatever
+   * the date is. Day 15 is chosen to stay clear of both ends: the 31st does not
+   * exist in every month, and the 1st can slip into the previous month once a
+   * timezone is applied.
+   */
+  const monthsBack = (i) => {
+    const d = new Date();
+    d.setUTCDate(15);
+    d.setUTCHours(12, 0, 0, 0);
+    d.setUTCMonth(d.getUTCMonth() - i);
+    return d;
+  };
+
   const buildHistory = async () => {
     const now = Date.now();
-    const MONTH = 30 * 86400000;
     const tmplEvent = await db.prepare('SELECT * FROM events LIMIT 1').get();
     const tmplSlot = await db.prepare('SELECT * FROM slots LIMIT 1').get();
     const tmplApp = await db.prepare('SELECT * FROM applications LIMIT 1').get();
@@ -76,7 +101,7 @@ describe('an account can hold the complete collection', () => {
     };
 
     for (let i = 0; i < 26; i += 1) {
-      const at = new Date(now - i * MONTH).toISOString();
+      const at = monthsBack(i).toISOString();
       const ev = `own-ev-${i}`; const sl = `own-sl-${i}`; const ap = `own-ap-${i}`;
       /* 'open', not 'active' — the events CHECK constraint is
          ('open','closed','completed','cancelled'), and 'active' fails it. */
