@@ -47,18 +47,21 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
  * imported BEFORE anything that pulls in Express, because ES imports are
  * evaluated in source order and a patch installed afterwards patches nobody.
  */
-function programSource(stubPort) {
+function programSource() {
   return `
 import { startOtel, shutdownOtel, otelSnapshot } from ${JSON.stringify(path.join(HERE, 'observability/otel.js'))};
 
-startOtel({
-  WEV_OTEL_TEST_SINK: '1',
-  BETTERSTACK_SOURCE_TOKEN: 'stub-token-not-a-real-credential',
-  BETTERSTACK_INGESTING_HOST: 'http://127.0.0.1:${stubPort}',
-  OTEL_TRACE_SAMPLE_RATE: '1',
-  OTEL_TRACE_DAILY_SPAN_BUDGET: '100000',
-  TELEMETRY_SERVICE_NAME: 'wevolunteer-subprocess',
-});
+/*
+ * Called with NO ARGUMENT, exactly as bootstrap.js calls it.
+ *
+ * The configuration reaches it through the child's real process.env, set by the
+ * spawn below. An explicit env object here would have tested the resolver and
+ * NOT the thing production depends on -- the (env = process.env) default. That
+ * default surviving a mutation is what prompted this: break it and the
+ * application boots, logs "not_configured", serves every request correctly, and
+ * sends nothing at all.
+ */
+startOtel();
 
 // Imported AFTER the line above, exactly as app.js is in server.js.
 const { default: express } = await import('express');
@@ -144,14 +147,26 @@ describe('under a real node process, not vite-node', () => {
     /* Written inside the repository tree so that bare specifiers such as
        `express` and `@opentelemetry/*` resolve against its node_modules. */
     const programPath = path.join(HERE, `zz-otel-subprocess-${process.pid}.mjs`);
-    writeFileSync(programPath, programSource(stub.address().port));
+    writeFileSync(programPath, programSource());
 
     try {
       const child = spawn(process.execPath, [programPath], {
         cwd: path.dirname(HERE),
         /* A clean environment: no VITEST, which is what lets the SDK start, and
            no inherited Better Stack credentials. */
-        env: { PATH: process.env.PATH, HOME: process.env.HOME, NODE_ENV: 'test' },
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          NODE_ENV: 'test',
+          /* The real configuration surface: process.env in a real process, with
+             no VITEST set — which is what lets the SDK start at all. */
+          WEV_OTEL_TEST_SINK: '1',
+          BETTERSTACK_SOURCE_TOKEN: 'stub-token-not-a-real-credential',
+          BETTERSTACK_INGESTING_HOST: `http://127.0.0.1:${stub.address().port}`,
+          OTEL_TRACE_SAMPLE_RATE: '1',
+          OTEL_TRACE_DAILY_SPAN_BUDGET: '100000',
+          TELEMETRY_SERVICE_NAME: 'wevolunteer-subprocess',
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       child.stdout.on('data', (d) => { output += d.toString(); });
@@ -237,6 +252,12 @@ describe('under a real node process, not vite-node', () => {
        record would join to a trace that is not the request it describes. */
     const correlation = JSON.parse(output.match(/CORRELATION:(\{.*\})/)?.[1] ?? '{}');
     expect(correlation.inMiddleware?.traceId).toBe(correlation.inFinish?.traceId);
+  });
+
+  it('took its configuration from process.env, the way bootstrap.js does', () => {
+    /* `startOtel()` was called with no argument; the only way this service name
+       reached the payload is the `env = process.env` default. */
+    expect(wire()).toContain('wevolunteer-subprocess');
   });
 
   it('reported the ESM hook as registered', () => {

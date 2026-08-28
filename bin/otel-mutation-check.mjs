@@ -239,6 +239,27 @@ const MUTATIONS = [
     replace: "    compression: 'none',\n    timeoutMillis: EXPORT_TIMEOUT_MS,\n    /* The SDK's own bound on simultaneous in-flight exports.",
     tests: ["server/observability.integration.test.js"],
   },
+  {
+    name: "config path: resolveOtelConfig stops defaulting to process.env",
+    file: "server/observability/otelConfig.js",
+    find: "export function resolveOtelConfig(env = process.env) {",
+    replace: "export function resolveOtelConfig(env = {}) {",
+    tests: ["server/observability.config.test.js"],
+  },
+  {
+    name: "config path: startOtel stops defaulting to process.env",
+    file: "server/observability/otel.js",
+    find: "export function startOtel(env = process.env) {",
+    replace: "export function startOtel(env = {}) {",
+    tests: ["server/observability.production.test.js"],
+  },
+  {
+    name: "endpoints: the OTLP traces path is wrong",
+    file: "server/observability/otelConfig.js",
+    find: "    tracesUrl: new URL('/v1/traces', base).toString(),",
+    replace: "    tracesUrl: new URL('/v1/trace', base).toString(),",
+    tests: ["server/observability.config.test.js"],
+  },
 ];
 
 const filter = process.argv[2];

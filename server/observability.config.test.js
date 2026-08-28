@@ -8,7 +8,7 @@
  * production account and burns somebody's quota, silently); adding a second wire
  * to the same vendor is only safe if the second wire obeys the same rule.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { resolveOtelConfig, OTEL_DEFAULTS } from './observability/otelConfig.js';
 
 const CREDS = {
@@ -145,5 +145,81 @@ describe('resolveOtelConfig — the credential never appears in a URL', () => {
     expect(config.tracesUrl).not.toContain(CREDS.BETTERSTACK_SOURCE_TOKEN);
     expect(config.metricsUrl).not.toContain(CREDS.BETTERSTACK_SOURCE_TOKEN);
     expect(config.token).toBe(CREDS.BETTERSTACK_SOURCE_TOKEN);
+  });
+});
+
+describe('the configuration path from process.env to the exporter', () => {
+  /**
+   * ── The refactor this exists to catch ──
+   *
+   * Every other test in this file passes `resolveOtelConfig` an explicit `env`
+   * object, which proves the resolver reads what it is given and proves nothing
+   * about where production gets it from. `bootstrap.js` calls `startOtel()` with
+   * NO argument, so the whole integration rests on one default parameter —
+   * `startOtel(env = process.env)` — and on `resolveOtelConfig(env = process.env)`
+   * underneath it.
+   *
+   * Change either default, or introduce a config module that forgets to forward
+   * the variable, and the application would boot, log "not_configured", serve
+   * every request perfectly, and send nothing. Nothing would fail. That is
+   * exactly the class of silent breakage this repository keeps naming, so the
+   * default is pinned rather than assumed.
+   *
+   * No real credential is involved: the value below is synthetic and hyphenated,
+   * which is also the shape the secret scanner deliberately lets past.
+   */
+  const SAVED = {};
+  const VARS = ['BETTERSTACK_SOURCE_TOKEN', 'BETTERSTACK_INGESTING_HOST', 'WEV_OTEL_TEST_SINK'];
+
+  afterEach(() => {
+    for (const key of VARS) {
+      if (SAVED[key] === undefined) delete process.env[key];
+      else process.env[key] = SAVED[key];
+      delete SAVED[key];
+    }
+  });
+
+  function setEnv(values) {
+    for (const key of VARS) SAVED[key] = process.env[key];
+    for (const [key, value] of Object.entries(values)) process.env[key] = value;
+  }
+
+  it('reads process.env when no env object is passed', () => {
+    setEnv({
+      BETTERSTACK_SOURCE_TOKEN: 'synthetic-not-a-real-token-value',
+      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      WEV_OTEL_TEST_SINK: '1',
+    });
+
+    /* Called with NO argument, which is how bootstrap.js calls startOtel. */
+    const config = resolveOtelConfig();
+
+    expect(config.enabled, 'resolveOtelConfig() no longer defaults to process.env').toBe(true);
+    expect(config.token).toBe('synthetic-not-a-real-token-value');
+  });
+
+  it('reports not_configured from process.env when the token is blank', () => {
+    /* The state the environment file ships in, before a token is pasted. The
+       application must boot and serve; telemetry simply stays off. */
+    setEnv({
+      BETTERSTACK_SOURCE_TOKEN: '',
+      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      WEV_OTEL_TEST_SINK: '1',
+    });
+    expect(resolveOtelConfig().reason).toBe('not_configured');
+  });
+
+  it('derives both Better Stack OTLP signal endpoints from the ingesting host', () => {
+    /* The paths Better Stack documents. Pinned because a typo here is invisible
+       from inside the application: the exporter would post to a 404 for ever and
+       the only symptom would be an empty dashboard. */
+    setEnv({
+      BETTERSTACK_SOURCE_TOKEN: 'synthetic-not-a-real-token-value',
+      BETTERSTACK_INGESTING_HOST: 's2708227.eu-central-1a.betterstackdata.com',
+      WEV_OTEL_TEST_SINK: '1',
+    });
+    const config = resolveOtelConfig();
+    expect(config.tracesUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/traces');
+    expect(config.metricsUrl).toBe('https://s2708227.eu-central-1a.betterstackdata.com/v1/metrics');
   });
 });
