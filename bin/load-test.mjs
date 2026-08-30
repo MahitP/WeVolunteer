@@ -286,23 +286,85 @@ const LATENCY_PROXY_SOURCE = `
   };
 
   const server = net.createServer((client) => {
+    client.setNoDelay(true);
     const upstream = net.connect({ host, port });
-    const pipeDelayed = (from, to) => {
-      let nextRelease = 0;
+    upstream.setNoDelay(true);
+
+    /*
+     * ONE timer chain per direction, not one timer per chunk.
+     *
+     * The first two versions of this scheduled an independent setTimeout per
+     * chunk. Both corrupted the stream, and both looked like application
+     * defects rather than instrument defects:
+     *
+     *   - Independent timers can fire out of order when the delays differ, and
+     *     TCP never delivers out of order. PostgreSQL desynchronised and the
+     *     harness reported a 500 and then "fetch failed".
+     *   - Closing the peer with destroy() discarded whatever was still queued,
+     *     truncating a message mid-row. pg-protocol then read a length prefix
+     *     out of the middle of a payload and threw
+     *     ERR_OUT_OF_RANGE "offset ... Received -16777187", which is an
+     *     uncaughtException and takes the whole server down.
+     *
+     * A single chain removes the class of bug rather than another instance of
+     * it: chunks are appended to a queue with a monotonically non-decreasing
+     * release time and released by one recursive timer, so FIFO is structural.
+     * The close is sequenced by the same chain, so it cannot overtake data that
+     * has not been written yet.
+     */
+    const link = (from, to) => {
+      const queue = [];
+      let releaseAt = 0;
+      let running = false;
+      let finished = false;
+      let closing = null; // 'end' | 'destroy'
+
+      const settle = () => {
+        if (closing === 'end') { if (to.writable) to.end(); }
+        else if (closing === 'destroy') to.destroy();
+      };
+
+      const pump = () => {
+        if (!queue.length) {
+          running = false;
+          if (finished) settle();
+          return;
+        }
+        running = true;
+        setTimeout(() => {
+          const item = queue.shift();
+          if (!to.destroyed && to.writable) to.write(item.chunk);
+          pump();
+        }, Math.max(0, queue[0].at - Date.now()));
+      };
+
       from.on('data', (chunk) => {
-        const now = Date.now();
-        const release = Math.max(now + halfDelay(), nextRelease);
-        nextRelease = release;
-        setTimeout(() => { if (!to.destroyed) to.write(chunk); }, Math.max(0, release - now));
+        releaseAt = Math.max(Date.now() + halfDelay(), releaseAt);
+        queue.push({ chunk, at: releaseAt });
+        if (!running) pump();
       });
+
+      /* A clean FIN: flush everything, then half-close. */
+      from.on('end', () => { finished = true; closing = 'end'; if (!running) settle(); });
+
+      /* An abrupt close with no FIN. Without this the peer socket leaks, and a
+         proxy that leaks connections eventually stops accepting new ones — which
+         surfaced later and elsewhere as the pool's own "timeout exceeded when
+         trying to connect". 'closing' is only upgraded when 'end' never ran, so
+         the graceful path still owns the close when there was one. */
       from.on('close', () => {
-        const drain = Math.max(0, nextRelease - Date.now()) + base + jitter * 5 + 50;
-        setTimeout(() => to.destroy(), drain);
+        finished = true;
+        if (!closing) closing = 'destroy';
+        if (!running) settle();
       });
-      from.on('error', () => to.destroy());
+
+      from.on('error', () => { finished = true; closing = 'destroy'; if (!running) settle(); });
     };
-    pipeDelayed(client, upstream);
-    pipeDelayed(upstream, client);
+
+    link(client, upstream);
+    link(upstream, client);
+    client.on('error', () => upstream.destroy());
+    upstream.on('error', () => client.destroy());
   });
 
   server.listen(0, '127.0.0.1', () => parentPort.postMessage({ port: server.address().port }));
