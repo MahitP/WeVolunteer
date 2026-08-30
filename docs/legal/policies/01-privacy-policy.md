@@ -62,7 +62,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
+**Version 1.1 · Last updated 2026-08-30** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as
@@ -344,7 +344,26 @@ WeVolunteer runs on a small number of outside services. Here is all of them:
 | **OpenRouteService** | Event coordinates, and your position blurred to about 110 metres | Working out a rough driving time to an event. It is told nothing that identifies you, and your position is never stored |
 | **CARTO** | **Your IP address**, when a map is shown | Loading the map images. It does not receive your name or account — see below |
 | **Amplitude** — **only if you switched analytics on** | How you use the app, and a recording of your screen with the text hidden | Finding what is confusing or broken. **Off unless you turn it on**; see the [Cookie and Tracking Notice](/legal/cookie-and-tracking-notice) |
+| **Upstash** | A scrambled one-way code standing for your account or your network, and event weather and address lookups. **Never your name, email, messages, hours, or where you are** | Counting failed sign-in attempts so nobody can guess your password, and remembering weather and map lookups so we ask those services less often. See the note below this table |
 | **Our hosting provider** — not yet chosen. See the note below this table | Stores the database | Running the service |
+
+**About Upstash.** Upstash gives us a short-term memory that survives a restart. Two things go
+in it, and nothing else.
+
+The first is a counter of failed sign-in attempts. To count them without storing who you are, we
+turn your account — or your network address — into a **scrambled one-way code** first. The code
+cannot be turned back into your email or your address. Upstash sees the code and a number, and
+both are deleted automatically within about fifteen minutes. It is what stops somebody sitting
+there guessing your password.
+
+The second is the weather forecast and the address lookups for **events**, so we do not have to
+ask those services the same question repeatedly. Those are about places, not people. Your own
+location is **never** sent to Upstash — the driving-time estimate deliberately does not use it,
+for the reason given under [Your device location](#your-device-location) below.
+
+Upstash never receives your name, your email address, your messages, your volunteer hours, or
+your certificates. Those live in our own database. The Upstash servers we use are currently in
+**India**; if we move them before launch we will update this row and the date at the top.
 
 **About the hosting provider.** WeVolunteer has not launched yet and the company that will host
 the production server has not been chosen. We are not going to name one here before it is true.
@@ -404,11 +423,14 @@ If we change something that matters, we will tell you in the app before it takes
 not by quietly editing this page. The "last updated" date at the top always reflects the
 current version.
 
-**This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
-replace it we keep the version it replaced, and you can email
-**privacy@wevolunteers.org** for any previous version and the dates it applied. Every
-version is stored with a content fingerprint, so a copy you receive can be checked against the
-one your account accepted.
+**This is version 1.1.** The change from version 1.0 was to add **Upstash** to the list of other
+companies involved, and to explain what it holds — a scrambled counter of failed sign-in
+attempts, and event weather and address lookups. Nothing else changed, and nothing about what we
+collect from you changed.
+
+We keep every version we replace, and you can email **privacy@wevolunteers.org** for any previous
+version and the dates it applied. Every version is stored with a content fingerprint, so a copy
+you receive can be checked against the one your account accepted.
 
 ## Contact
 

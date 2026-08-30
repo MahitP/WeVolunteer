@@ -413,7 +413,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
     // Someone who has just proved control of their mailbox and chosen a new
     // password should not then meet a lockout earned by whoever was guessing.
     // One call now covers both identifiers, because the bucket is per account.
-    clearLoginFailuresForUser(row.user_id);
+    await clearLoginFailuresForUser(row.user_id);
 
     res.json({ success: true });
   } catch (err) {
@@ -677,7 +677,7 @@ router.post('/api/auth/confirm-email-change', async (req, res) => {
     // it gets a working session — otherwise confirming from a phone would leave
     // them signed out everywhere with no explanation.
     await issueSession(res, user, fresh.token_version);
-    clearLoginFailuresForUser(fresh.id);
+    await clearLoginFailuresForUser(fresh.id);
 
     res.json({ success: true, user, emailVerified: true });
   } catch (err) {

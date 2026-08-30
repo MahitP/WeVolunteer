@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 66 tables, 96 indexes, 20 triggers
+ * Contents: 66 tables, 97 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -1169,6 +1169,9 @@ CREATE INDEX IF NOT EXISTS idx_usercaps_user ON user_capabilities(user_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_nocase ON users(email COLLATE nocase);
 
+CREATE INDEX IF NOT EXISTS idx_users_leaderboard
+      ON users(role, leaderboard_opt_in);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE nocase) WHERE username IS NOT NULL;
@@ -1404,7 +1407,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 59;
+export const LATEST_MIGRATION_VERSION = 60;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

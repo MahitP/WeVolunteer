@@ -3,28 +3,49 @@ import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { DEMO_MODE } from '../config.js';
 import rateLimit from 'express-rate-limit';
+import { createLookupCache } from '../redis/lookupCache.js';
+import { reserveSharedUpstreamSlot } from '../redis/upstreamThrottle.js';
 
 const router = express.Router();
 
-// --- In-memory cache ---
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+/**
+ * The address cache: in-process first, Redis behind it.
+ *
+ * ── Why this one earns a network round trip ──
+ *
+ * The alternative to a hit is a request to Nominatim, which this application is
+ * permitted to make at most once per second IN TOTAL (see below), and whose
+ * operators can withdraw that permission from every school at once. The
+ * in-process tier answers repeats for free; Redis exists for the one thing it
+ * cannot do — survive a deploy. Emptying a five-hundred-entry cache on every
+ * release and re-warming it at one request per second is minutes of avoidable
+ * pressure against somebody else's published policy.
+ *
+ * ── What is stored, and what is not ──
+ *
+ * The value is a normalised list of public places. The key is the query
+ * somebody typed, and it is HASHED before it reaches Redis — a keyspace listing
+ * on a vendor console should not be a list of the addresses this district
+ * searched for. The route is gated on `geocode.use`, which students do not
+ * hold, so these are organizers looking up event venues rather than anybody
+ * looking up a home.
+ *
+ * Twenty-four hours rather than the one hour this cache used to keep. An
+ * address does not move, and the shorter TTL was chosen when the cache was
+ * process-local and died on every restart anyway.
+ */
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_CACHE = 500;
-const cache = new Map();
+const addressCache = createLookupCache({ domain: 'geocode', ttlMs: CACHE_TTL, maxLocal: MAX_CACHE });
 
-function getCached(key) {
-  const entry = cache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL) { cache.delete(key); return null; }
-  return entry.data;
+/** Test seam: drops the in-process tier between cases. */
+export function __clearGeocodeCache() {
+  addressCache.__clearLocal();
 }
 
-function setCache(key, data) {
-  // LRU: evict oldest when full
-  if (cache.size >= MAX_CACHE) {
-    const oldest = cache.keys().next().value;
-    cache.delete(oldest);
-  }
-  cache.set(key, { data, ts: Date.now() });
+/** Counters for the operator status panel. No queries, no keys. */
+export function geocodeCacheStats() {
+  return addressCache.stats();
 }
 
 // --- Rate limiter ---
@@ -167,7 +188,7 @@ router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocod
 
   // Include location bias in cache key if present
   const cacheKey = query.toLowerCase() + (hasLoc ? `|${lat},${lon}` : '');
-  const cached = getCached(cacheKey);
+  const cached = await addressCache.get(cacheKey);
   if (cached) {
     return res.json({ results: cached, cached: true });
   }
@@ -191,8 +212,27 @@ router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocod
     }
 
     /* After the cache check, so a hit never waits, and before the fetch, so
-       nothing reaches Nominatim faster than its policy allows. */
-    const waitMs = reserveUpstreamSlot();
+       nothing reaches Nominatim faster than its policy allows.
+
+       Two reservations, and BOTH must grant. The process-local one is
+       unchanged and remains the only one that exists without Redis. The shared
+       one extends the same guarantee across restarts and across instances,
+       which is what the policy actually asks for — it is an obligation on this
+       application, not on this process. Taking the longer of the two waits is
+       the conservative direction: over-throttling costs a caller a second,
+       while under-throttling risks OSM blocking the User-Agent for every
+       school at once. */
+    const localWaitMs = reserveUpstreamSlot();
+    const sharedWaitMs = localWaitMs === null
+      ? null
+      : await reserveSharedUpstreamSlot({
+        name: 'nominatim',
+        intervalMs: NOMINATIM_MIN_INTERVAL_MS,
+        maxWaitMs: NOMINATIM_MAX_WAIT_MS,
+      });
+    const waitMs = localWaitMs === null || sharedWaitMs === null
+      ? null
+      : Math.max(localWaitMs, sharedWaitMs);
     if (waitMs === null) {
       return res.status(429).json({
         error: 'Address lookup is busy right now. Try again in a moment.',
@@ -245,7 +285,7 @@ router.get('/api/geocode', geocodeLimiter, authenticateToken, requireCap('geocod
       longitude: parseFloat(item.lon)
     }));
 
-    setCache(cacheKey, results);
+    await addressCache.set(cacheKey, results);
     res.json({ results });
   } catch (err) {
     if (err.name === 'AbortError') {

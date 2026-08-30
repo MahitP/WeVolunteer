@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
 import { DEMO_MODE } from '../config.js';
+import { createLookupCache } from '../redis/lookupCache.js';
 
 const router = express.Router();
 
@@ -23,24 +24,39 @@ const router = express.Router();
  */
 const COORD_PRECISION = 2;
 
-// --- In-memory cache ---
+/**
+ * The forecast cache: in-process first, Redis behind it.
+ *
+ * ── Why this one is worth a network round trip when a database query is not ──
+ *
+ * The alternative to a hit here is not a 0.4 ms query; it is a request to
+ * api.open-meteo.com, which is somebody else's server and somebody else's
+ * capacity. The in-process tier still answers the common case — many students
+ * opening the same event — at zero cost, and Redis exists for the one thing it
+ * cannot do: survive a deploy. Without it, every release re-fetches every
+ * forecast anybody looks at.
+ *
+ * ── Why there is no privacy question here, unlike travel time ──
+ *
+ * The key is a coordinate rounded to two decimal places (~1.1 km, see
+ * COORD_PRECISION above) and a UTC hour. At that resolution it is a record of
+ * neighbourhoods and not of people, it is derived from an EVENT's published
+ * location rather than from a user, and the same value is returned to everyone.
+ * `routes/travelRoutes.js` is the opposite case on every one of those points,
+ * and is deliberately not a caller here.
+ */
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const MAX_CACHE = 1000;
-const cache = new Map();
+const forecastCache = createLookupCache({ domain: 'weather', ttlMs: CACHE_TTL, maxLocal: MAX_CACHE });
 
-function getCached(key) {
-  const entry = cache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL) { cache.delete(key); return null; }
-  return entry.data;
+/** Test seam: drops the in-process tier between cases. */
+export function __clearWeatherCache() {
+  forecastCache.__clearLocal();
 }
 
-function setCache(key, data) {
-  if (cache.size >= MAX_CACHE) {
-    const oldest = cache.keys().next().value;
-    cache.delete(oldest);
-  }
-  cache.set(key, { data, ts: Date.now() });
+/** Counters for the operator status panel. No coordinates, no keys. */
+export function weatherCacheStats() {
+  return forecastCache.stats();
 }
 
 // --- Rate limiter ---
@@ -167,8 +183,8 @@ router.get('/api/weather', weatherLimiter, authenticateToken, requireCap('event.
   const qLon = Number(longitude.toFixed(COORD_PRECISION));
 
   const cacheKey = `${qLat}_${qLon}_${targetIso}`;
-  const cached = getCached(cacheKey);
-  
+  const cached = await forecastCache.get(cacheKey);
+
   if (cached) {
     return res.json({ result: cached, cached: true });
   }
@@ -231,7 +247,7 @@ router.get('/api/weather', weatherLimiter, authenticateToken, requireCap('event.
       icon: wmo.icon
     };
 
-    setCache(cacheKey, result);
+    await forecastCache.set(cacheKey, result);
     res.json({ result });
     
   } catch (err) {

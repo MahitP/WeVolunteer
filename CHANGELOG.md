@@ -27,6 +27,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The leaderboard now returns a stable ranking.** It ordered by hours then
+  shifts and stopped, which left every exact tie to the planner. That is not
+  cosmetic underneath a 25-row limit: when the students at positions 25 and 26
+  are tied, which one is *on the board at all* was whatever the plan produced
+  that time, so somebody could drop off and reappear on refresh having done
+  nothing — and at the bottom of a board ties are the normal case, because
+  everyone on zero hours is tied with everyone else. Ties now break on the
+  account id: arbitrary, but the alternative to an arbitrary rule here is not
+  fairness, it is flicker.
+
+- **An index for the leaderboard's candidate set** (migration 060, audit
+  finding P-2). Choosing the opted-in students was a full scan of `users`;
+  `users(role, leaderboard_opt_in)` removes it on both engines. Worth naming
+  because that scan was the only thing making this endpoint look like it wanted
+  a cache — and an index is the cheaper answer by a wide margin: no second
+  source of truth, no invalidation, no vendor, and it keeps working when
+  everything else is down.
+
+- **Optional Upstash Redis, for two things and deliberately not for five.**
+  The account lockout that bounds password guessing — ten failed passwords per
+  account across every device — now shares a Redis-backed counter, along with
+  the mail, re-authentication, appeal and certificate-check limiters. A restart
+  no longer clears a lockout in progress: a deploy during a password spray used
+  to hand the attempt a fresh budget. The weather and address caches
+  gained a second tier behind their in-process one, so a deploy no longer
+  re-warms them against Nominatim's limit of one request per second *for this
+  application in total*, and the pacing reservation that honours that limit is
+  now application-wide rather than process-wide.
+
+  Entirely optional: with `UPSTASH_REDIS_REST_URL` and
+  `UPSTASH_REDIS_REST_TOKEN` unset, every limiter counts in process memory and
+  every cache lives in this process, exactly as before. Redis is never required
+  to serve a request, and when it is unreachable each caller falls back to a
+  counter it has been incrementing all along — so an outage is the previous
+  behaviour resuming, not a reset, and never a lockout.
+
+  This is also the first of the three prerequisites the Supabase/Vercel
+  assessment names for running more than one application instance.
+
+- **Three sign-in limiters were deliberately left in process memory, on a
+  measurement.** `authLimiter`, `loginLimiter` and `loginIpCeilingLimiter` were
+  the obvious things to share and were the first version of this change. They
+  sit on the busiest authentication paths and each sets
+  `skipSuccessfulRequests`, which bills a counter increment on every request and
+  a decrement on every success — so the expensive case is somebody signing in
+  *correctly*. Modelled against the free plan's 500,000 commands a month, that
+  version cost **107% of the monthly allowance at a thousand users**, before
+  anything else spent a command; the shipped scoping costs about a fifth of it.
+  What is given up is the per-device layer, which one instance already enforces
+  correctly, while the per-account layer that actually bounds guessing is the
+  one that became shared. `docs/operations/upstash.md` §7.3 shows both columns.
+
+- **What was measured and then NOT built, which is most of it.** Caching
+  database queries, Redis-backed sessions, chat in Redis, and a leaderboard
+  sorted set were each evaluated and rejected on evidence rather than taste. The
+  deciding number is in `docs/operations/postgres-scale-measurements.md`: the
+  hot queries answer in 0.3–0.5 ms at fifty times pilot scale, and an Upstash
+  round trip is far slower than that, so moving them would have made the
+  application slower while spending a metered allowance to do it. Sessions
+  already have per-session revocation in SQL; durable messages belong in the
+  relational database, where retention, deletion, export and moderation are
+  built; and a leaderboard sorted set would be a derived index able to drift
+  from the hours ledger, against INV-001, to fix a table scan that an index
+  fixes for free. `docs/operations/upstash.md` records each rejection with the
+  measurement behind it.
+
+- **The travel-time route is excluded from the shared cache on purpose**, and a
+  test fails the build if that ever changes. Its origin is a volunteer's
+  location — usually a minor's — and that module promises the coordinate is
+  "never persisted. No column, no row, nowhere." Hashing the cache key does not
+  rescue that promise, because the promise is about where the data goes rather
+  than how it is encoded. That cache stays process-local and dies with the
+  process, and every deploy paying for its first few lookups again is the price
+  of the invariant.
+
+- **`bin/upstash-redis.mjs`** — `status`, `ping`, `keys`, `validate` and
+  `purge`, with `npm run redis:status | redis:ping | redis:keys |
+  redis:validate`. `ping` prints the measured round trip beside the database
+  timings it is being compared against, so the reason no query is cached in
+  Redis is visible on the deployment rather than only in a document. `validate`
+  exercises set/get/TTL/expiry/counter/script/pipeline against a handful of keys
+  and deletes every one of them before it exits, including after a failure.
+
+- **A Redis section on the administrator system-status panel** — configured,
+  degraded, this process's command and latency counters, the plan limits, and
+  per-cache hit rates. Counts and configuration only: no key names, no key
+  contents, no identifiers, and never the token. Deliberately not on `/health`,
+  which is unauthenticated — "the shared rate-limit store is down" is knowledge
+  that the limits have fallen back to per-process.
+
 - **A Legal Center editor, for the platform owner only** (Settings → Help &
   Support → Edit Legal Center). One document at a time, its name above it, a
   preview beside it, and a version field that explains the forward-only rule in

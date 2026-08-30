@@ -168,6 +168,36 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     `);
   };
 
+  /**
+   * `users` at the shape a pre-057 deployment has it, as far as the migrations
+   * above the baseline care.
+   *
+   * ── Why this table is here at all ──
+   *
+   * The fixture used to provision `events` and nothing else, because every
+   * post-baseline migration happened to touch only `events`. Migration 060
+   * indexes `users`, and the fixture answered `relation "users" does not
+   * exist` — a failure of the stand-in, not of the migration: a real deployed
+   * database has had `users` since before any of this.
+   *
+   * Only the columns the post-baseline migrations name, plus the primary key.
+   * Restating the whole table would make this fixture a second copy of the
+   * schema that drifts, which is the reason the file gives for writing `events`
+   * out by hand rather than importing the generated one.
+   */
+  const provisionUsers = async () => {
+    await db.exec(`
+      DROP TABLE IF EXISTS users CASCADE;
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        role TEXT NOT NULL DEFAULT 'student',
+        leaderboard_opt_in INTEGER DEFAULT 0
+      );
+      INSERT INTO users (id, role, leaderboard_opt_in)
+        VALUES ('u1', 'organizer', 0), ('u2', 'student', 1);
+    `);
+  };
+
   const categoryConstraints = async () => await db.prepare(`
     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
      WHERE conrelid = 'events'::regclass AND contype = 'c'
@@ -205,6 +235,7 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     if (!live) return;
     await provisionAtBaseline();
     await provisionEvents();
+    await provisionUsers();
   });
 
   it('starts out refusing a category the widened vocabulary admits', async () => {
@@ -241,6 +272,19 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
       + " ORDER BY column_name"
     ).all();
     expect(cols.map(c => c.column_name)).toEqual(['hours_closed_out_at', 'hours_closed_out_by']);
+  });
+
+  /** 060: the leaderboard candidate index, on a database that predates it. */
+  it('adds the leaderboard candidate index', async () => {
+    await runPostgresMigrations(db);
+    const row = await db.prepare(
+      "SELECT indexdef FROM pg_indexes"
+      + " WHERE schemaname = current_schema() AND indexname = 'idx_users_leaderboard'"
+    ).get();
+
+    expect(row?.indexdef).toBeTruthy();
+    /* Both columns, in the order the migration argues for. */
+    expect(row.indexdef).toMatch(/\(role, leaderboard_opt_in\)/);
   });
 
   /** Nullable and unset, so every existing event stays correctable. */
