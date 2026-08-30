@@ -64,24 +64,46 @@ export async function walkFocus(page, max = 150) {
       /**
        * 2.4.11 Focus Not Obscured (Minimum), new at AA in WCAG 2.2.
        *
-       * header.topbar is sticky and carries a backdrop-filter, which is the
-       * classic way a focused control ends up underneath something. Sampling the
-       * centre of the focused element and asking what the browser thinks is on
-       * top is the cheapest honest test: if the answer is neither the element nor
-       * related to it, something is covering it.
+       * The criterion fails only when the focused control is **entirely** hidden.
+       * Partial obscuring is explicitly permitted at AA — that is the difference
+       * between 2.4.11 (Minimum) and 2.4.12 (Enhanced, AAA), which is the one
+       * that forbids partial.
        *
-       * An overlay with pointer-events: none is excluded — it is painted above
-       * but intercepts nothing, so it does not obscure in the sense the
-       * criterion means.
+       * The first version sampled only the CENTRE point, which is a stricter
+       * rule than the criterion states: a sticky header covering the top half of
+       * a control occludes its centre while the bottom half is plainly visible,
+       * and that passes 2.4.11. Reporting it would have been a false positive
+       * against conformant code — and header.topbar is sticky here, so it was a
+       * live risk rather than a theoretical one.
+       *
+       * So a grid of points across the box is sampled, and the control counts as
+       * obscured only when EVERY sampled point is covered by something unrelated
+       * to it. An overlay that is painted above but intercepts nothing
+       * (`pointer-events: none`) is not returned by elementFromPoint at all, so
+       * it correctly does not count.
        */
       let obscuredBy = null;
       if (r.width && r.height) {
-        const cx = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1);
-        const cy = Math.min(Math.max(r.top + r.height / 2, 1), innerHeight - 1);
-        const top = document.elementFromPoint(cx, cy);
-        if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-          obscuredBy = (top.className?.toString?.() || top.tagName).slice(0, 60);
+        const clamp = (v, max) => Math.min(Math.max(v, 1), max - 1);
+        /* Nine points: corners, edge midpoints and centre, inset slightly so a
+           1px border does not decide the result. */
+        const xs = [0.1, 0.5, 0.9].map(f => clamp(r.left + r.width * f, innerWidth));
+        const ys = [0.1, 0.5, 0.9].map(f => clamp(r.top + r.height * f, innerHeight));
+        const blockers = new Set();
+        let visibleSomewhere = false;
+        for (const x of xs) {
+          for (const y of ys) {
+            const top = document.elementFromPoint(x, y);
+            if (!top || top === el || el.contains(top) || top.contains(el)) {
+              visibleSomewhere = true;
+            } else {
+              blockers.add((top.className?.toString?.() || top.tagName).slice(0, 60));
+            }
+          }
         }
+        /* Entirely hidden only. If any sampled point reaches the control, the
+           control is at least partly visible and 2.4.11 is satisfied. */
+        if (!visibleSomewhere && blockers.size) obscuredBy = [...blockers].join(', ');
       }
 
       const name = (

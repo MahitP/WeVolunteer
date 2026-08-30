@@ -792,10 +792,15 @@ export default function Signup({ onSignupSuccess, addToast }) {
 
             <div className="field">
               <label htmlFor="su-school">{isStudent ? 'School' : 'Organization'} <span className="dim">(optional)</span></label>
+              {/* `autoComplete="organization"` — WCAG 1.3.5 Identify Input
+                  Purpose (AA). The school or organization the reader belongs to
+                  is one of the criterion's defined purposes, so it is declared
+                  rather than left for a browser to infer from `name`. */}
               <input
                 id="su-school"
                 name="organization"
                 className="input input-lg"
+                autoComplete="organization"
                 autoCapitalize="words"
                 value={form.school}
                 placeholder={isStudent ? 'e.g. Example Valley High School' : 'e.g. Example Valley Public Library'}

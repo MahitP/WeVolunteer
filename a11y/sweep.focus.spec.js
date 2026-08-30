@@ -21,7 +21,7 @@ test('every route is keyboard-navigable with a visible focus indicator', async (
   const trapped = [];
   const noStops = [];
 
-  const { unreachable } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
+  const { unreachable, unmeasured } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     const walk = await walkFocus(page);
 
     /* A page with no tab stops at all is either genuinely static or a page whose
@@ -44,11 +44,29 @@ test('every route is keyboard-navigable with a visible focus indicator', async (
     }
   });
 
-  console.log(`routes with no tab stops: ${noStops.join(', ') || 'none'}`);
   expect(unreachable, `routes that did not load:\n${unreachable.join('\n')}`).toEqual([]);
+
+  /**
+   * A route with NO tab stops is asserted, not merely printed.
+   *
+   * This used to be a `console.log`, which made the whole sweep vacuous for the
+   * worst case: a route that renders blank — a crash after the landmark appears,
+   * a stuck loading state — has no focusable elements, so `trapped`, `noRing`
+   * and `obscured` are all empty and the sweep passes cleanly on a broken page.
+   *
+   * Every signed-in route in this application has navigation, so zero tab stops
+   * means something failed to render. `/appeal/:token` used to be the one real
+   * exception and now has a way out, so there is no allowlist.
+   */
+  expect(
+    noStops,
+    'these routes have no keyboard-reachable controls at all, which usually means '
+    + `they did not render:\n${noStops.join('\n')}`
+  ).toEqual([]);
 
   /* Keyboard traps first: they are the only finding here that makes a page
      impossible rather than merely worse. */
+  expect(unmeasured, `routes that rendered an error instead of the page:\n${unmeasured.join('\n')}`).toEqual([]);
   expect(trapped, `WCAG 2.1.2 — keyboard traps:\n${trapped.join('\n')}`).toEqual([]);
   expect(noRing, `WCAG 2.4.7 — controls that focus with no visible indicator:\n${noRing.join('\n')}`).toEqual([]);
   expect(obscured, `WCAG 2.4.11 — focused controls covered by other content:\n${obscured.join('\n')}`).toEqual([]);

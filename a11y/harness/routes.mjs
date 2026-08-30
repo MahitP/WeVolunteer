@@ -17,13 +17,25 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * /organizations/:key/edit, /verify/:code, /legal/:slug, /appeal/:token.
  */
 export const FIXTURES = {
-  id: '1',
-  eventId: '1',
-  handle: 'alex',
-  key: '1',
-  code: 'DEMOCERT1',
-  slug: 'terms',
-  token: 'demo-appeal-token'
+  /* Real values from the demo seed, read out of the database rather than
+     guessed. The first version guessed — `id: '1'`, `handle: 'alex'`,
+     `code: 'DEMOCERT1'` — and none of them existed: seeded ids are strings like
+     `user-diana` and `event-softball`, and usernames are `dsorensen`,
+     `jwhitfield`. Every one of those routes still returned HTTP 200, because
+     React Router serves the shell either way, so the sweep measured a
+     "not found" panel and reported it under the real route's name. That is worse
+     than a skip: it looks like coverage. `walk.mjs` now detects it. */
+  id: 'user-diana',
+  eventId: 'event-softball',
+  handle: 'dsorensen',
+  code: 'WEV-8DLE-CNMH',
+  slug: 'terms-of-service',
+  /* No fixture is possible for these two with the demo seed: `organizations` is
+     empty, and an appeal token is minted per decision and cannot be invented.
+     Named here so the reason is recorded rather than looking like an oversight —
+     walk.mjs reports them as unmeasured, which is the honest outcome. */
+  key: 'no-seeded-organization',
+  token: 'no-seeded-appeal-token'
 };
 
 const SRC = fs.readFileSync(path.join(ROOT, 'src/routes/index.jsx'), 'utf8');

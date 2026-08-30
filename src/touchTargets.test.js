@@ -3,7 +3,14 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * WCAG 2.1 §2.5.5 guard for the controls where a small target hurts most.
+ * The 44px HOUSE RULE for the controls where a small target hurts most.
+ *
+ * Not a WCAG AA requirement, and this file used to say it was. WCAG 2.2's Level
+ * AA target-size criterion is 2.5.8 Target Size (Minimum) at 24x24 CSS px;
+ * §2.5.5 Target Size (Enhanced), which is where 44px comes from, is Level AAA.
+ * So a failure here is this project choosing to be stricter than conformance
+ * requires — worth keeping, and worth not citing as a conformance failure.
+ * `a11y/sweep.geometry.spec.js` measures the two separately for that reason.
  *
  * ── The failure this exists to prevent ──
  *

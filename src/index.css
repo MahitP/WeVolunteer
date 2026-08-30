@@ -12582,6 +12582,60 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
 }
 
 /* ==========================================================================
+   Links in running text
+   ========================================================================== */
+
+/**
+ * A link inside prose is underlined, always.
+ *
+ * WCAG 1.4.1 Use of Color (Level A): where a link is distinguished from the text
+ * around it by colour alone, the two must differ by at least 3:1. Measured here,
+ * they do not — and not marginally:
+ *
+ *   brand `#0f6b45` against muted text `#637269`  = 1.29:1
+ *   brand `#0f6b45` against body text  `#122019`  = 2.57:1
+ *
+ * So no prose link in this application was distinguishable without colour. axe
+ * reported one instance, in the Privacy panel, because its `link-in-text-block`
+ * rule only fires where it recognises a surrounding block of text — the
+ * criterion applies more widely than the rule detects, which is why this is
+ * fixed by container rather than by patching the one element that was flagged.
+ *
+ * Underlining is the technique WCAG itself gives for this, and it is applied to
+ * running-text containers only. Navigation and anything shaped like a button are
+ * excluded below: they are distinguishable by position and shape, and a rail of
+ * underlined destinations reads as a list of broken text rather than as
+ * navigation.
+ *
+ * The "Always show link underlines" preference in Settings → Accessibility is a
+ * superset of this — it underlines links everywhere, including inside cards and
+ * lists, for readers who want every link explicit. This rule is the floor that
+ * applies whether or not anybody visits that page.
+ */
+p a,
+.lead a,
+.dim a,
+.small a,
+li a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Controls and navigation that happen to sit inside prose containers are not
+   prose links. Listed after so they win. */
+p a.btn,
+.lead a.btn,
+.dim a.btn,
+.small a.btn,
+li a.btn,
+.nav a,
+.mobilenav a,
+.rail-item,
+a.btn {
+  text-decoration: none;
+}
+
+/* ==========================================================================
    Accessibility preferences — Settings → Accessibility
    ========================================================================== */
 
@@ -12654,7 +12708,17 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
  * because both resolve to the same tokens, having both on is identical to having
  * either on.
  */
-@media (prefers-contrast: more) {
+/**
+ * Guarded against `forced-colors`, which can match this query too.
+ *
+ * When a user's forced-colours theme is itself high-contrast, `prefers-contrast:
+ * more` ALSO matches — the two are not mutually exclusive. Both blocks would
+ * then apply, and this one redefines the ink tokens that the forced-colours
+ * block deliberately leaves to the user's own palette. `forced-colors: none` is
+ * the explicit "not in a forced-colours mode" value, so when the user's own
+ * colours are in charge, ours stay out of the way.
+ */
+@media (prefers-contrast: more) and (forced-colors: none) {
   :root {
     --ink-2: var(--ink);
     --ink-3: var(--ink-2);

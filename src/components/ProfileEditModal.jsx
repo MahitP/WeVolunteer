@@ -232,14 +232,25 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
 
           <div className="field">
             <label htmlFor="pf-name">Full name</label>
+            {/* `autoComplete="name"` — WCAG 1.3.5 Identify Input Purpose (AA).
+                This field collects the reader's OWN name, which is one of the
+                criterion's defined input purposes, so the purpose has to be
+                programmatically identifiable. It is also the practical half: a
+                browser or password manager can fill it, which matters most for
+                somebody using switch access or voice control, where every
+                avoided keystroke counts. */}
             <input id="pf-name" className="input" value={form.name}
+              autoComplete="name"
               onChange={e => set('name', e.target.value)} required />
           </div>
 
           <div className="field-row">
             <div className="field" style={{ marginTop: 0 }}>
               <label htmlFor="pf-school">School or organization</label>
+              {/* `organization` is the 1.3.5 purpose for the body the reader
+                  belongs to. Same reasoning as the name field above. */}
               <input id="pf-school" className="input" value={form.school}
+                autoComplete="organization"
                 placeholder="e.g. Your High School"
                 onChange={e => set('school', e.target.value)} />
             </div>

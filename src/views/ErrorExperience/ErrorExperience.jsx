@@ -1,4 +1,4 @@
-import React, { useId, useMemo } from 'react';
+import React, { useEffect, useId, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCw, ArrowLeft } from 'lucide-react';
 import { APP_NAME } from '../../config';
@@ -130,9 +130,63 @@ export default function ErrorExperience({
   const canRetry = RETRYABLE.includes(kind);
   const weight = weightFor(kind);
 
+  /**
+   * The tab's name, when this IS the page.
+   *
+   * WCAG 2.4.2 Page Titled (Level A). Measured: a student loading `/admin/roster`
+   * got a tab titled just "WeVolunteer" — eleven routes were like that. App.jsx
+   * derives the title from `PAGE_META` via the reader's role, and a route that
+   * role cannot reach has no entry, so the title fell back to the bare app name
+   * and nothing described what had happened.
+   *
+   * That matters beyond tidiness: a screen reader announces the document title on
+   * navigation, so the one moment a refusal could have been announced said only
+   * "WeVolunteer". Somebody with several tabs open also has nothing to tell them
+   * apart.
+   *
+   * Only when `standalone`, for the same reason the landmark is: rendered inside
+   * the shell (the catch-all 404) or over it (OfflineOverlay), the page's own
+   * title is the right one and this must not overwrite it.
+   */
+  useEffect(() => {
+    if (!standalone) return;
+    const previous = document.title;
+    document.title = `${title} · ${APP_NAME}`;
+    /* Restored on unmount so navigating away from an error does not leave the
+       error's title on the next page. */
+    return () => { document.title = previous; };
+  }, [standalone, title]);
+
+
   const experience = (
     <section
       className={`err err-t-${theme.id}`}
+      /**
+       * `role="alert"` — kept deliberately, pending a listening test.
+       *
+       * Measured on the 403 takeover: this container announces **68 words / 407
+       * characters** assertively on arrival, and contains **one** interactive
+       * element ("Back to my dashboard"). ARIA authoring guidance says alert
+       * content should be concise and should not contain interactive elements,
+       * so this contradicts guidance — but it is not a spec violation (no size
+       * limit is normatively defined), and the alternative is worse in a specific
+       * way: a client-side route change announces nothing on its own, and focus
+       * stays on `document.body` here, so removing this would make arriving on a
+       * refusal completely silent.
+       *
+       * Worth recording because it is a common misconception: `aria-labelledby`
+       * sets the accessible NAME and does NOT narrow what a live region
+       * announces. The whole subtree is read regardless of it.
+       *
+       * Two COUPLED findings are left for the VoiceOver pass (H-13.1), because
+       * the right fix depends on the answer and half of it is worse than neither:
+       *   - if 68 words is intolerable, scope the alert to a concise summary AND
+       *     move focus to the heading, the way Appeal.jsx already does;
+       *   - if it is acceptable, adding a focus move risks announcing twice.
+       *
+       * Do not change one without the other, and do not change either on theory
+       * alone. See docs/audits/2026-08-22-accessibility-audit.md, finding A-14.
+       */
       role="alert"
       aria-labelledby={titleId}
       /* Stable across rotation and absent from `textContent`, so routing tests

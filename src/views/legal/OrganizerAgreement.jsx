@@ -108,7 +108,7 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
   if (error && !status) {
     return (
       <main className="content stack-lg">
-        <h1>Organizer Agreement</h1>
+        <h2 className="page-title">Organizer Agreement</h2>
         <p className="alert alert-warn" role="alert">{error}</p>
       </main>
     );
@@ -125,7 +125,7 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
   if (!status.required) {
     return (
       <main className="content stack-lg">
-        <h1>Organizer Agreement</h1>
+        <h2 className="page-title">Organizer Agreement</h2>
         <p>
           This agreement applies to organizer accounts. Yours is not one, so there is
           nothing for you to accept — you can read it in the{' '}
@@ -138,7 +138,7 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
   if (status.accepted) {
     return (
       <main className="content stack-lg">
-        <h1>Organizer Agreement</h1>
+        <h2 className="page-title">Organizer Agreement</h2>
         <p className="alert alert-brand" role="status">
           <Check size={16} aria-hidden="true" /> You accepted this agreement (version {status.documents[0]?.version}).
         </p>
@@ -155,7 +155,7 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
   return (
     <main className="content stack-lg" aria-labelledby="oa-title">
       <div className="stack-sm">
-        <h1 id="oa-title">Before you can run events</h1>
+        <h2 id="oa-title" className="page-title">Before you can run events</h2>
         <p>
           {currentUser?.name ? `${currentUser.name}, your` : 'Your'} organizer account has been
           approved. One thing remains: the undertakings below are what you accept in exchange

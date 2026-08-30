@@ -46,6 +46,8 @@ export async function forEachRoute(
 ) {
   const unreachable = [];
   const redirected = [];
+  /* Answered 200 on the right path, but showed an error instead of the page. */
+  const unmeasured = [];
   const visited = [];
 
   /**
@@ -125,13 +127,57 @@ export async function forEachRoute(
         continue;
       }
 
+      /**
+       * A route that answered 200 but rendered "not found" is NOT measured.
+       *
+       * This is the failure mode a status check cannot see. React Router serves
+       * the shell for any path, so a parameterised route whose fixture does not
+       * exist in the seed returns HTTP 200, lands on exactly the requested path,
+       * and renders an error panel — which the sweep then measured and reported
+       * under the real route's name. Six of the twelve parameterised routes were
+       * in that state: the fixtures were guessed (`id: '1'`, `handle: 'alex'`)
+       * and the seed uses `user-diana` and `dsorensen`.
+       *
+       * That is worse than skipping a route, because it produces numbers that
+       * look like coverage. `ErrorExperience` sets `data-error-kind` on its
+       * container precisely so routing can be asserted without pinning copy, so
+       * that is the signal used here.
+       *
+       * Only a **404** counts as unmeasured. A 403 is a different thing entirely:
+       * it is the real page that role sees, it is reached legitimately, and it is
+       * one of the places accessibility matters most — somebody has just been
+       * stopped and needs to work out what to do. Eleven routes render a 403 for
+       * a student, and every one of them should be, and is, measured. Treating
+       * those as unmeasured would have thrown away exactly the coverage that
+       * finding A-13 (the missing landmark on error takeovers) was about.
+       *
+       * A 404 means the path or its fixture did not resolve to anything, so
+       * whatever was measured is not the page the route names.
+       */
+      /* `page.evaluate`, NOT `locator.getAttribute`. A locator action auto-waits
+         for the element to appear, and on a route that renders correctly this
+         element never will — so the first version blocked until the test timeout
+         on every healthy route and turned a 25-second sweep into a hang. A
+         synchronous read answers "is there one right now", which is the actual
+         question. */
+      const errorKind = await page.evaluate(
+        () => document.querySelector('[data-error-kind]')?.getAttribute('data-error-kind') ?? null
+      ).catch(() => null);
+      if (errorKind === '404' && !route.path.startsWith('/errors')) {
+        unmeasured.push(
+          `${route.concrete} (${pass.role.key}) -> rendered a 404, so its path or `
+          + 'fixture does not resolve and the page under this route was never measured'
+        );
+        continue;
+      }
+
       await visit(page, route, pass.role);
       visited.push(`${route.path}::${pass.role.key}`);
     }
     await ctx.close();
   }
 
-  return { unreachable, redirected, visited };
+  return { unreachable, redirected, unmeasured, visited };
 }
 
 async function signedInPasses({ browser, request, baseURL }, roles) {

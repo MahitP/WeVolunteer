@@ -17,7 +17,13 @@ test('the accessible structure of every route holds up', async ({ browser, reque
   const ambiguousLandmarks = [];
   const namelessControls = [];
 
-  const { unreachable } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
+  const titles = [];
+  const { unreachable, unmeasured } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
+    /* 2.4.2 Page Titled — Level A, and the criterion App.jsx's own comment
+       records having failed silently once: PAGE_META carried a title for every
+       route and nothing wrote it to document.title, so the guard was testing the
+       DATA and not the effect. This tests the effect. */
+    titles.push({ path: route.path, title: await page.title() });
     const structure = await page.evaluate(() => {
       const levels = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')]
         .map(h => ({ level: Number(h.tagName[1]), text: h.textContent.trim().slice(0, 40) }));
@@ -80,10 +86,20 @@ test('the accessible structure of every route holds up', async ({ browser, reque
       const nameless = [];
       for (const el of document.querySelectorAll('a[href], button, [role="button"], [role="link"]')) {
         if (!exposed(el)) continue;
+        /* The full name computation, including aria-labelledby and an image's
+           alt text. The first version checked aria-label/title/textContent only,
+           which would have reported a control named purely by aria-labelledby —
+           a legitimate, common pattern — as a 4.1.2 violation. It is the one
+           name check that gates every route, so it has to be the most complete,
+           not the least. */
+        const labelledBy = el.getAttribute('aria-labelledby');
         const name = (
           el.getAttribute('aria-label')
-          || el.getAttribute('title')
+          || (labelledBy && labelledBy.split(/\s+/)
+              .map(id => document.getElementById(id)?.textContent || '').join(' '))
           || el.textContent
+          || [...el.querySelectorAll('img[alt]')].map(i => i.getAttribute('alt')).join(' ')
+          || el.getAttribute('title')
           || ''
         ).trim();
         if (!name) nameless.push(el.outerHTML.slice(0, 110).replace(/\s+/g, ' '));
@@ -107,6 +123,20 @@ test('the accessible structure of every route holds up', async ({ browser, reque
   console.log(`\nindistinguishable duplicate landmarks (${ambiguousLandmarks.length}):\n${ambiguousLandmarks.join('\n')}`);
 
   expect(unreachable, `routes that did not load:\n${unreachable.join('\n')}`).toEqual([]);
+  expect(
+    unmeasured,
+    'these routes answered 200 on the right path but rendered an error instead of '
+    + `the page, so nothing about them was actually measured:\n${unmeasured.join('\n')}`
+  ).toEqual([]);
+
+  /* Every route's tab must be distinguishable, and none may be left as the bare
+     app name — that was the exact symptom when nothing wrote the title. */
+  const untitled = titles.filter(t => !t.title || t.title.trim() === 'WeVolunteer');
+  expect(
+    untitled.map(t => t.path),
+    `WCAG 2.4.2 — routes whose document title is missing or just the app name:\n`
+    + untitled.map(t => `${t.path} -> "${t.title}"`).join('\n')
+  ).toEqual([]);
 
   /* These two DO fail.
 
