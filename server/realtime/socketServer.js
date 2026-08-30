@@ -5,6 +5,7 @@ import cookie from 'cookie';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { isSessionRevoked } from '../utils.js';
+import { configureRealtimeAdapter } from './adapter.js';
 
 const SESSION_CHECK_INTERVAL = Number(process.env.SOCKET_SESSION_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 
@@ -125,6 +126,15 @@ export function initSocketServer(httpServer) {
   });
 
   setRealtimeServer(io);
+
+  /**
+   * The cross-instance bus, when one is configured.
+   *
+   * Awaited by `initSocketServer`'s caller through the returned promise rather
+   * than here, because `initSocketServer` is synchronous and every existing
+   * caller depends on that. See `server.js`, which awaits it before listening.
+   */
+  io.adapterReady = configureRealtimeAdapter(io);
 
   /**
    * One timer for the whole server, cleared when the server closes.

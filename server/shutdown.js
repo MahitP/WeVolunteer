@@ -34,6 +34,7 @@ import { stopExportWorker } from './workers/exportWorker.js';
 import { releaseInstanceLock, stopInstanceLockHeartbeat } from './instanceLock.js';
 import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { stopRetentionWorker } from './workers/retentionWorker.js';
+import { closeRealtimeAdapter } from './realtime/adapter.js';
 import { logLifecycle, drainTelemetry } from './telemetry.js';
 import { stopIndexWorker } from './search/indexWorker.js';
 
@@ -118,6 +119,11 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
     } catch (err) {
       console.error('[Shutdown] Socket.IO close failed:', err);
     }
+    /* The adapter's own connection pool, when one was installed. Separate from
+       the application pool by design — it needs a session-mode connection for
+       LISTEN/NOTIFY — so it is a separate thing to close, and a pool left open
+       holds the process past a graceful stop. A no-op when no adapter ran. */
+    await closeRealtimeAdapter();
   }
 
   /**

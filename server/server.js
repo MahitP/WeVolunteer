@@ -190,6 +190,22 @@ const httpServer = createServer(app);
 const io = initSocketServer(httpServer);
 
 /**
+ * The realtime adapter, awaited before this process serves anything.
+ *
+ * Awaited HERE rather than left as a floating promise, for two reasons. A
+ * rejected promise nobody handles is an unhandled rejection, which on Node ends
+ * the process with no useful message. And a misconfigured adapter must stop the
+ * boot: the failure it would otherwise produce is a cluster that looks healthy
+ * while delivering realtime events to a fraction of its users, which is not
+ * visible from inside the application.
+ *
+ * With no adapter configured — the default, and what this deployment runs — this
+ * resolves immediately and reports why it did nothing.
+ */
+const adapterState = await io.adapterReady;
+console.log(`[realtime] ${adapterState.enabled ? `adapter: ${adapterState.adapter}` : 'no adapter'} — ${adapterState.detail}`);
+
+/**
  * Bind address.
  *
  * `0.0.0.0` by default, which is what this has always done — but the deployment
