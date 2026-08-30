@@ -254,12 +254,16 @@ export async function createReport({ reporter, targetType, targetId, category, d
    */
   if (priority === 'urgent') {
     try {
-      for (const moderator of await moderatorIds(db)) {
-        await notificationService.dispatch('SYSTEM_ALERT', {
-          title: 'Urgent Safety Report',
-          body: `An urgent report requires immediate attention. Report ID: ${id}`,
-        }, moderator.id);
-      }
+      /* One broadcast, not one dispatch per moderator. SYSTEM_ALERT is a
+         MANDATORY notice, so `dispatchMany` rethrows on failure exactly as the
+         loop did — which the surrounding try/catch then treats as best-effort,
+         because the queue is the system of record and the report is already
+         filed. */
+      const moderators = await moderatorIds(db);
+      await notificationService.dispatchMany('SYSTEM_ALERT', {
+        title: 'Urgent Safety Report',
+        body: `An urgent report requires immediate attention. Report ID: ${id}`,
+      }, moderators.map(m => m.id));
     } catch (err) {
       console.error('Urgent report alert failed (the report itself is filed):', err);
     }

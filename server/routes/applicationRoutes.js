@@ -637,9 +637,10 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
           actorName: actor?.name, actorUsername: actor?.username,
           eventId: event.id, eventTitle: event.title,
         };
-        for (const friendId of recipients) {
-          await notificationService.dispatch('FRIEND_SIGNED_UP', payload, friendId, `friend-signup:${req.user.id}:${event.id}`);
-        }
+        await notificationService.dispatchMany(
+          'FRIEND_SIGNED_UP', payload, recipients,
+          () => `friend-signup:${req.user.id}:${event.id}`
+        );
       }
     } catch (err) {
       console.error('Friend signup fan-out failed:', err);
@@ -811,6 +812,10 @@ router.patch('/api/applications/bulk', authenticateToken, requireCapAny(['applic
 
     // Notifications only after the commit — see promoteFromWaitlist.
     await notifyPromotions(promotions);
+    /* A loop rather than `dispatchMany` for the reason `notifyPromotions` gives:
+       one volunteer may hold two applications to different slots of the same
+       event, and a bulk decision owes them a notice for each. `dispatchMany`
+       deduplicates its recipient list, which would drop the second. */
     for (const a of applied) {
       if (status === 'accepted') {
         await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: a.eventId, eventTitle: a.eventTitle }, a.userId);

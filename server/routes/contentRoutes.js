@@ -114,11 +114,13 @@ router.post('/api/events/:id/comments', authenticateToken, async (req, res) => {
         WHERE event_id = ? AND status IN ('accepted', 'pending')
       `).all(req.params.id);
 
-      for (const app of applicants) {
-        if (app.user_id !== req.user.id) {
-          await notificationService.dispatch('EVENT_COMMENT', { eventId: event.id, eventTitle: event.title }, app.user_id);
-        }
-      }
+      /* The commenter is filtered out of the recipient list rather than skipped
+         inside the loop: `dispatchMany` takes the list it is meant to notify. */
+      await notificationService.dispatchMany(
+        'EVENT_COMMENT',
+        { eventId: event.id, eventTitle: event.title },
+        applicants.map(a => a.user_id).filter(userId => userId !== req.user.id)
+      );
     }
 
     const created = await db.prepare(`
@@ -343,9 +345,11 @@ router.post('/api/events/:id/announcements', authenticateToken, async (req, res)
       WHERE event_id = ? AND status = 'accepted'
     `).all(req.params.id);
 
-    for (const r of recipients) {
-      await notificationService.dispatch('IMPORTANT_ANNOUNCEMENT', { eventId: event.id, eventTitle: event.title, body: body.trim().slice(0, 140) }, r.user_id);
-    }
+    await notificationService.dispatchMany(
+      'IMPORTANT_ANNOUNCEMENT',
+      { eventId: event.id, eventTitle: event.title, body: body.trim().slice(0, 140) },
+      recipients.map(r => r.user_id)
+    );
 
     const created = await db.prepare(`
       SELECT n.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role

@@ -17,7 +17,7 @@ import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabul
 import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
-import { parseEventFilters, eventQueryFragments, buildEventWhere, buildEventOrder, semanticIdParams } from '../eventQuery.js';
+import { parseEventFilters, eventQueryFragments, buildAggScope, buildEventWhere, buildEventOrder, semanticIdParams } from '../eventQuery.js';
 import { shouldUseSemantic, semanticCandidates, similarEventCandidates } from '../search/discoverSearch.js';
 import { markEventDirty, removeEventFromIndex } from '../search/eventIndexer.js';
 import { recommendationsFor, explanationText } from '../search/recommendations.js';
@@ -342,7 +342,11 @@ router.get('/api/events', authenticateToken, async (req, res) => {
       }
     }
 
-    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db });
+    /* The aggregate folds only over events that already match the event-only
+       predicates. `buildAggScope` derives that half from `buildEventWhere`
+       itself, so the two cannot describe different filters. */
+    const aggScope = buildAggScope(filters, req.user.id, db);
+    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db, aggScope });
     const { where, params } = buildEventWhere(filters, req.user.id, db);
     const order = buildEventOrder(filters.sort, filters.semanticIds);
 
@@ -1145,15 +1149,13 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
          * try/catch: a fan-out failure must roll back only the notifications,
          * never the event the organizer successfully created.
          */
-        await runInTransaction(db, async (tx) => {
-          for (const memberId of recipients) {
-            await notificationService.dispatch(
-              'ORGANIZATION_EVENT_POSTED',
-              { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
-              memberId,
-              `org-event:${eventId}`
-            );
-          }
+        await runInTransaction(db, async () => {
+          await notificationService.dispatchMany(
+            'ORGANIZATION_EVENT_POSTED',
+            { eventId, eventTitle: title, organizationName: organization.name, organizationSlug: organization.slug },
+            recipients,
+            () => `org-event:${eventId}`
+          );
         });
       } catch (err) {
         console.error('Organization fan-out failed:', err);

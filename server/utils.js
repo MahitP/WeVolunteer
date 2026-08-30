@@ -1241,49 +1241,27 @@ export function countdownPhrase(iso) {
 
 /** Notify every confirmed volunteer on an event. Returns how many were told. */
 /**
- * How many recipients are dispatched to at once.
- *
- * ── Why this is not one, and not unbounded ──
- *
- * `dispatch` costs four to five round trips per recipient: the opt-out lookup,
- * the dedupe probe, the preference read, and the two inserts. Strictly
- * sequential, that is linear in how popular the event was, and it is paid inside
- * the organizer's HTTP request. Measured with `bin/load-test.mjs --db-latency 5`
- * against 150 confirmed volunteers: **4,440 ms, 29.6 ms per recipient.**
- *
- * Unbounded `Promise.all` would be worse than the problem. The pool is ten
- * (`db/engine.js` argues that number), so a 150-way fan-out would queue 150
- * statements against it and starve every other request on the server for the
- * duration — trading one slow request for a slow everything.
- *
- * Five is half the pool: a meaningful speed-up with headroom left for the
- * traffic that is not this broadcast.
- */
-const NOTIFY_FANOUT_CONCURRENCY = Number(process.env.NOTIFY_FANOUT_CONCURRENCY) || 5;
-
-/**
  * Notifies every confirmed volunteer for an event.
  *
- * ── This must NOT be called inside a transaction ──
+ * ── Why this is one call and not a loop ──
  *
- * It dispatches several recipients concurrently, and a transaction is one
- * checked-out `pg` client which cannot serve concurrent statements. Both current
- * callers — the cancellation and the update paths in `eventRoutes.js` — do their
- * write first and then broadcast, outside any transaction, which is what makes
- * this safe.
+ * It dispatched recipients one at a time, and each dispatch cost up to five
+ * database round trips — the opt-out lookup, the dedupe probe, the preference
+ * read, and two inserts. So the organizer's request grew with how popular the
+ * event had been: measured at 4,440 ms for 150 confirmed volunteers at 5 ms of
+ * database latency. Bounding the concurrency at five brought that to 943 ms;
+ * `dispatchMany` does the whole broadcast in a fixed four statements, because
+ * every recipient of a fan-out shares the event, the payload and the rendered
+ * content.
  *
- * `transactionConcurrency.test.js` cannot catch a violation here, because it
- * scans for concurrency *lexically inside* a transaction block and this is a
- * function call away. So the constraint is stated here, where somebody moving
- * the call will read it.
+ * `dispatchMany` keeps every per-recipient decision — preferences, the global
+ * opt-out, the mandatory-notice override, deduplication and the realtime emit —
+ * by feeding the same `decideDelivery` the single path uses.
+ * `notificationDispatch.batch.test.js` runs both ways on identical fixtures and
+ * compares the rows.
  *
- * ── Why concurrency is safe between recipients ──
- *
- * Each dispatch touches a different user's rows. Deduplication is a unique index
- * on `(user_id, dedupe_key)`, so two dispatches racing for the same key produce
- * one row and one refusal rather than two rows. And `dispatch` handles its own
- * per-recipient failure: a non-mandatory notice that fails is logged and skipped,
- * so one bad recipient cannot take the broadcast down.
+ * The `sent` count is unchanged: `dispatchMany` reports the same tri-state per
+ * recipient, and only a genuine delivery counts.
  */
 export async function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = null) {
   const recipients = await db.prepare(`
@@ -1291,18 +1269,17 @@ export async function notifyConfirmedVolunteers(eventId, event, payload, dedupeK
     WHERE event_id = ? AND status = 'accepted'
   `).all(eventId);
 
-  let sent = 0;
-  for (let i = 0; i < recipients.length; i += NOTIFY_FANOUT_CONCURRENCY) {
-    const batch = recipients.slice(i, i + NOTIFY_FANOUT_CONCURRENCY);
-    const results = await Promise.all(batch.map(r => notificationService.dispatch(
-      event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null
-    )));
-    /* `dispatch` returns true when it delivered, and false or null when it
-       deduped, found no user, or failed a non-mandatory notice. The count has
-       always meant "how many were actually notified", so only `true` counts. */
-    sent += results.filter(Boolean).length;
-  }
-  return sent;
+  const outcomes = await notificationService.dispatchMany(
+    event,
+    payload,
+    recipients.map(r => r.user_id),
+    dedupeKey ? (userId) => `${dedupeKey}:${userId}` : null,
+  );
+
+  /* `dispatchMany` returns true when it delivered, and false or null when it
+     deduped, found no user, or skipped the recipient. The count has always meant
+     "how many were actually notified", so only `true` counts. */
+  return [...outcomes.values()].filter(Boolean).length;
 }
 
 /**
@@ -1467,6 +1444,21 @@ export async function promoteFromWaitlist(slotId) {
  * Deliberately separate, so it is only ever called after a commit.
  */
 export async function notifyPromotions(promotions) {
+  /**
+   * Deliberately a loop, and NOT `dispatchMany`.
+   *
+   * `dispatchMany` takes a set of RECIPIENTS and notifies each of them once — it
+   * deduplicates the id list, which is right for a broadcast and wrong here.
+   * These are per-PROMOTION notices: one volunteer can be promoted off two
+   * different slots in the same sweep, and they are owed a notification for each.
+   * Batching would silently collapse the second one.
+   *
+   * The per-dispatch cost fell anyway: `dispatch` now reads the opt-out, both
+   * preferences and the dedupe probe in one statement instead of three.
+   *
+   * `notificationDispatch.batch.test.js` pins the collapsing behaviour, so the
+   * distinction is checkable rather than a matter of memory.
+   */
   for (const p of promotions) {
     await notificationService.dispatch('WAITLIST_PROMOTED', {
       eventId: p.eventId,
