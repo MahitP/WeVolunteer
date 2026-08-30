@@ -45,7 +45,12 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createHash } from 'crypto';
 
 import { DEMO_MODE } from './config.js';
-import { limitHandler } from './app.js';
+/* `rateLimitResponse.js`, not `app.js`. This branch was cut before a579b86
+   moved `limitHandler` out to break the cycle app.js -> routes -> limiter ->
+   app.js, and importing it from app.js here would close that cycle again —
+   which `moduleCycles.test.js` refuses, and which fails at boot rather than
+   warning. Same function, forward-only import. */
+import { limitHandler } from './rateLimitResponse.js';
 
 /**
  * `APPLICATION_RATE_LIMIT` exists so a test can drive the limiter to its
