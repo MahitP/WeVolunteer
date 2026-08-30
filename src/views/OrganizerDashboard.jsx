@@ -515,6 +515,22 @@ export default function OrganizerDashboard({
           <div className="stat-value">{uniqueVolunteers}</div>
           <div className="stat-note">{acceptedApps.length} shift assignments</div>
         </div>
+        {/**
+          * Hours credited sits above Awaiting review.
+          *
+          * The first three tiles are the settled record of the programme —
+          * events running, volunteers confirmed, hours credited — and the
+          * fourth is the only one that is a job still to do. Ending on it puts
+          * the outstanding work next to the review section directly below,
+          * rather than burying it between two totals.
+          *
+          * Order only. The figures, the warning colour on an outstanding count,
+          * and everything the review section does are untouched.
+          */}
+        <div className="stat">
+          <div className="stat-label">Hours credited</div>
+          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
+        </div>
         <div className="stat">
           <div className="stat-label">Awaiting review</div>
           <div className="stat-value" style={{
@@ -522,10 +538,6 @@ export default function OrganizerDashboard({
         }}>
             {pendingApps.length}
           </div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Hours credited</div>
-          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
         </div>
       </section>
 
