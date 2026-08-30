@@ -304,7 +304,31 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
         runtimeRef.current = null;
       }
       const runtime = await createRuntime();
-      await runtime.load(model);
+      /**
+       * The load reports whether it is fetching or initialising, and this page
+       * says which.
+       *
+       * It used to call `runtime.load(model)` with nothing, so a load that had
+       * to go back to the network — a cache entry that was evicted, or one
+       * discarded as incomplete and re-fetched — spent minutes under a pill
+       * reading "Starting up" with no way to tell it apart from a hang. On the
+       * Advanced model that is nearly a gigabyte of silence. `AIStatus` has had
+       * a DOWNLOADING state the whole time and nothing was setting it.
+       *
+       * Set once, on the first callback that is genuinely mid-transfer, rather
+       * than per chunk: wllama reports every 100ms, and it also reports once
+       * with `loaded === total` for a model already on the device — announcing
+       * a download for that would be the same lie in the other direction.
+       */
+      let announcedDownload = false;
+      await runtime.load(model, {
+        onProgress: ({ loaded, total } = {}) => {
+          if (announcedDownload || !aliveRef.current) return;
+          if (!(total > 0) || loaded >= total) return;
+          announcedDownload = true;
+          setStatus(AIStatus.DOWNLOADING);
+        },
+      });
       if (!aliveRef.current) {
         await runtime.unload();
         return;

@@ -87,6 +87,44 @@ describe('what Welly is', () => {
        here rather than left for Settings to say. */
     expect(res.answer).toMatch(/on your own device/i);
   });
+
+  /**
+   * ── Naming the model that is running, not a model ──
+   *
+   * The sentence said "Qwen2.5 0.5B" whatever was loaded. Somebody who had
+   * chosen the Advanced model — which is Qwen2.5 1.5B — and asked Welly what it
+   * was running was told the name of the other one. That is the answer people
+   * ask for precisely when they are checking whether the model they picked is
+   * the model they got, so it is the worst one to have fixed.
+   */
+  it('names the model that is loaded, not always the smallest', async () => {
+    const { modelForTier } = await import('./models.js');
+    const advanced = modelForTier('advanced');
+
+    const rt = new MockRuntime();
+    await rt.load(advanced);
+    const res = await ask('what model are you running', { runtime: rt, user: STUDENT });
+
+    expect(res.answer).toMatch(/1\.5B/);
+    expect(res.answer).not.toMatch(/0\.5B/);
+  });
+
+  it('names the Balanced model when that is the one loaded', async () => {
+    const { modelForTier } = await import('./models.js');
+    const rt = new MockRuntime();
+    await rt.load(modelForTier('balanced'));
+    const res = await ask('what model are you running', { runtime: rt, user: STUDENT });
+
+    expect(res.answer).toMatch(/0\.5B/);
+    expect(res.answer).not.toMatch(/1\.5B/);
+  });
+
+  it('names no model at all when none is loaded', async () => {
+    const res = await ask('what model are you running', { user: STUDENT });
+
+    expect(res.answer).toMatch(/WeVolunteer/);
+    expect(res.answer).not.toMatch(/Qwen|SmolLM|\dB\b/);
+  });
 });
 
 describe('what this place is', () => {

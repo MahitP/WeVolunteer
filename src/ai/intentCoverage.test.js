@@ -34,6 +34,7 @@ const { routeIntent } = await import('./router.js');
 const { INTENT_CAPABILITY, checkRole } = await import('./roles.js');
 const { TOOLS } = await import('./tools.js');
 const { ask } = await import('./assistant.js');
+const { clearDraft } = await import('./confirm.js');
 import { withHours } from '../testFixtures/volunteerStats.js';
 
 /**
@@ -216,6 +217,18 @@ describe('every probe still classifies as the intent it names', () => {
 
 beforeEach(() => {
   window.localStorage.clear();
+  /**
+   * Welly's pending write state is module-level and survives between tests.
+   *
+   * That matters here more than anywhere: this file walks EVERY probe past
+   * EVERY role, and the `create_event` probe starts an event-collection
+   * conversation for the three roles that hold `event.create`. A collection
+   * left standing would read the next probe as the answer to "What's the event
+   * called?" and the walk would measure the wrong thing entirely.
+   *
+   * `clearDraft` clears both stages — see the note on it in confirm.js.
+   */
+  clearDraft();
   for (const fn of Object.values(apiMock)) {
     fn.mockReset();
     fn.mockResolvedValue({});
@@ -236,6 +249,9 @@ describe('every intent answers somebody', () => {
     it(`${intent} is reachable for at least one role`, async () => {
       const outcomes = [];
       for (const [name, user] of Object.entries(ROLES)) {
+        /* Between roles as well as between tests: the `create_event` probe
+           starts a conversation, and the next role must meet a clean Welly. */
+        clearDraft();
         const res = await ask(message, { user });
         outcomes.push({ name, answer: res.answer, intent: res.intent });
       }
@@ -252,6 +268,7 @@ describe('every intent answers somebody', () => {
     const empties = [];
     for (const [intent, message] of Object.entries(PROBES)) {
       for (const [name, user] of Object.entries(ROLES)) {
+        clearDraft();
         const res = await ask(message, { user });
         if (typeof res.answer !== 'string' || !res.answer.trim()) {
           empties.push(`${intent} / ${name}`);
@@ -278,6 +295,7 @@ describe('every intent answers somebody', () => {
     const generic = [];
     for (const [intent, message] of Object.entries(PROBES)) {
       for (const [name, user] of Object.entries(ROLES)) {
+        clearDraft();
         const res = await ask(message, { user });
         if (res.card && /^Here is what I found\.$/.test(res.answer)) {
           generic.push(`${intent} / ${name} (kind: ${res.card.kind})`);

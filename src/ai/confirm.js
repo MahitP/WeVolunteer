@@ -13,6 +13,8 @@
  * 6. After confirmation, the draft is immediately consumed (single execution).
  */
 
+import { clearEventDraft } from './eventDraft.js';
+
 const DRAFT_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 let activeDraft = null;
@@ -166,8 +168,16 @@ export function cancelDraft(draftId = null, { user = null } = {}) {
 }
 
 /**
- * Clear draft state (used for test teardown).
+ * Clear every piece of pending write state (used for test teardown).
+ *
+ * The half-finished event collection goes with it. The two are one lifecycle
+ * seen at two stages — an event being gathered, then the finished payload
+ * waiting for a yes — and a teardown that reset only the second would leave a
+ * collection alive across tests, silently swallowing the next file's messages
+ * as answers to a question nobody asked. Every existing caller of this function
+ * already means "forget what Welly was in the middle of".
  */
 export function clearDraft() {
   activeDraft = null;
+  clearEventDraft();
 }

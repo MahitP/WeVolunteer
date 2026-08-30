@@ -22,8 +22,9 @@
  */
 
 import { MODELS, modelUrl, isDigestVerified } from '../models.js';
-import { checkSize, verifyModel } from '../integrity.js';
+import { verifyModel } from '../integrity.js';
 import { createCacheManager } from './opfsBackend.js';
+import { acquireModel, cachedBytes } from './modelCache.js';
 
 /**
  * A ModelManager, built fresh per call — it holds no state worth reusing.
@@ -91,20 +92,48 @@ export async function listCachedModels() {
  * first ask a question.
  */
 export async function downloadModel(model, { onProgress, signal } = {}) {
-  const mm = await manager();
-  const entry = await mm.getModelOrDownload(
-    { url: modelUrl(model) },
-    { progressCallback: onProgress, signal },
-  );
+  await requestPersistence();
 
+  const mm = await manager();
+  /* Length-checked against the bytes on disk, and re-fetched once from a
+     cleared cache if they do not add up. See modelCache.js for why the check
+     that used to live here could not see a truncated file. */
+  const entry = await acquireModel(mm, model, { onProgress, signal });
+
+  /* The digest, for models small enough to hash. The length has already been
+     compared by `acquireModel`, which `verifyModel` also does — harmlessly, and
+     it is the call that owns the digest so it keeps doing both. */
   if (isDigestVerified(model)) {
     const blobs = await entry.open();
     await verifyModel(model, blobs);
-  } else {
-    checkSize(model, entry.size);
   }
 
-  return { bytes: entry.size };
+  return { bytes: cachedBytes(entry) };
+}
+
+/**
+ * Ask the browser to stop evicting this origin's storage.
+ *
+ * OPFS is best-effort by default: under storage pressure a browser may clear
+ * it, and the largest thing in it is the model — several hundred megabytes that
+ * would then have to be downloaded again, discovered at the moment somebody
+ * opens Welly rather than at a moment they chose.
+ *
+ * Asked for here rather than at startup because this is the one point where the
+ * request is both justified and explicable: somebody has just agreed to store
+ * most of a gigabyte on their device. Chrome grants it on engagement without a
+ * prompt, Firefox asks, and Safari refuses; a refusal is not an error and does
+ * not stop the download, because best-effort storage still works — it is only
+ * less durable.
+ */
+async function requestPersistence() {
+  try {
+    if (await navigator.storage?.persisted?.()) return true;
+    return Boolean(await navigator.storage?.persist?.());
+  } catch {
+    /* Unsupported, or refused without being asked. Neither is a reason to stop. */
+    return false;
+  }
 }
 
 /** Total bytes WeVolunteer's models occupy on this device. */

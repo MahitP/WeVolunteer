@@ -39,9 +39,10 @@
 import wasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
 
 import { AIStatus, AIRuntimeError, AIAbortError, isAbort, throwIfAborted } from './types.js';
-import { checkSize, verifyModel } from '../integrity.js';
-import { isDigestVerified, modelUrl } from '../models.js';
+import { IntegrityError, verifyModel } from '../integrity.js';
+import { isDigestVerified } from '../models.js';
 import { createCacheManager } from './opfsBackend.js';
+import { acquireModel } from './modelCache.js';
 
 /** Replies are bounded so a looping model cannot generate without end. */
 const DEFAULT_MAX_TOKENS = 512;
@@ -106,7 +107,7 @@ export class WllamaRuntime {
        * file that is not in the tarball. There is no `exports` map, so this is
        * a supported path rather than a reach into private internals.
        */
-      const { Wllama, ModelManager, ModelValidationStatus } =
+      const { Wllama, ModelManager } =
         await import('@wllama/wllama/esm/index.js');
 
       this.status = AIStatus.DOWNLOADING;
@@ -121,21 +122,24 @@ export class WllamaRuntime {
        */
       const cacheManager = await createCacheManager();
       const manager = new ModelManager({ allowOffline: true, cacheManager });
-      const cached = await manager.getModelOrDownload(
-        { url: modelUrl(model) },
-        { progressCallback: onProgress, signal },
-      );
-      throwIfAborted(signal);
 
       /**
-       * wllama's own validation compares the stored length against what the
-       * server declared, which catches a download interrupted by a closed tab.
-       * Re-downloading is the documented repair.
+       * ── Why this is not `getModelOrDownload` plus `validate()`/`refresh()` ──
+       *
+       * It was, and that pair could not repair the one thing it was there to
+       * repair. `validate()` compares the file's length against the length the
+       * SERVER declared, and `refresh()` calls a download that returns early
+       * whenever a file with that key already exists — so an interrupted
+       * download left a short file that failed validation forever and was never
+       * re-fetched. The reader saw a model that would not start, on every
+       * attempt, with no way out but Remove in Settings.
+       *
+       * Both halves of that live in `modelCache.js` now: the length comes from
+       * the bytes on disk, and a bad entry is deleted before the second
+       * attempt, which is what gets past wllama's early return.
        */
-      if (cached.validate() !== ModelValidationStatus.VALID) {
-        await cached.refresh({ progressCallback: onProgress, signal });
-        throwIfAborted(signal);
-      }
+      const cached = await acquireModel(manager, model, { onProgress, signal });
+      throwIfAborted(signal);
 
       this.status = AIStatus.LOADING;
 
@@ -160,6 +164,11 @@ export class WllamaRuntime {
        * out-of-memory failure the size threshold exists to avoid, so above it
        * the check is length only — and `models.isDigestVerified` is what the UI
        * and the AI policy read so they describe this accurately.
+       *
+       * The length check for BOTH paths has already run, in `acquireModel`,
+       * against the bytes on disk. It used to be repeated here as
+       * `checkSize(model, cached.size)`, which read the length the server
+       * declared rather than the length of the file — see modelCache.js.
        */
       if (isDigestVerified(model)) {
         const blobs = await cached.open();
@@ -167,7 +176,6 @@ export class WllamaRuntime {
         throwIfAborted(signal);
         await this._wllama.loadModel(blobs, { n_ctx: CONTEXT_TOKENS });
       } else {
-        checkSize(model, cached.size);
         await this._wllama.loadModel(cached, { n_ctx: CONTEXT_TOKENS });
       }
 
@@ -411,6 +419,54 @@ function asRuntimeError(err) {
   if (err instanceof AIRuntimeError) return err;
 
   const text = String(err?.message || err);
+
+  /**
+   * The file is present and is not the file we asked for — after a fresh
+   * download, because `acquireModel` has already thrown the first copy away and
+   * fetched again. So this is not "retry", it is "that transfer is not
+   * completing", and the sentence says which model so a reader with two
+   * installed knows which one to remove.
+   */
+  if (err instanceof IntegrityError) {
+    return new AIRuntimeError(text, {
+      userMessage:
+        'The model file on this device is incomplete, and downloading it again '
+        + 'did not finish either. Remove it in Settings and set it up once more '
+        + 'on a connection you can leave open.',
+      cause: err,
+    });
+  }
+
+  /**
+   * Out of room. A model this size can exhaust a browser's storage allowance
+   * on a nearly full device, and the write is abandoned rather than half kept
+   * — so the next step is space, not a retry.
+   */
+  if (err?.name === 'QuotaExceededError' || /quota|storage space/i.test(text)) {
+    return new AIRuntimeError(text, {
+      userMessage:
+        'There is not enough space in this browser for that model. Free some up, '
+        + 'or choose a smaller model in Settings.',
+      cause: err,
+    });
+  }
+
+  /**
+   * llama.cpp could not read the weights. Named separately from the generic
+   * failure because it has a specific and unobvious remedy — the bytes are
+   * wrong, so removing them and downloading again is the whole fix — and
+   * because the raw text is a GGUF parse message that reads as if the model
+   * itself were at fault.
+   */
+  if (/gguf|load_error|failed to load model|invalid model|magic/i.test(text)) {
+    return new AIRuntimeError(text, {
+      userMessage:
+        'That model could not be read on this device. Remove it in Settings and '
+        + 'set it up again — the copy stored here is damaged.',
+      cause: err,
+    });
+  }
+
   if (/memory|allocat|OOM/i.test(text)) {
     return new AIRuntimeError(text, {
       userMessage:

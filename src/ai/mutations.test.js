@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ask } from './assistant.js';
 import { clearDraft } from './confirm.js';
 import { api } from '../utils/api.js';
+import { collectEvent } from '../testFixtures/wellyEventDraft.js';
 
 const student = { id: 's1', role: 'student' };
 const organizer = { id: 'o1', role: 'organizer' };
@@ -144,17 +145,35 @@ describe('organizer actions and vacancy chaining', () => {
     vi.clearAllMocks();
   });
 
-  it('lets an organizer draft an event and creates upon confirmation', async () => {
-    const draftRes = await ask('create an event called "Park Restoration" at "City Park" with 15 spots', { user: organizer });
-    expect(draftRes.intent).toBe('action_request');
-    expect(draftRes.draft).toBe(true);
-    expect(draftRes.card?.kind).toBe('draft');
+  /**
+   * The whole conversation, and then the creation.
+   *
+   * This used to be two messages, because one sentence produced a draft made of
+   * invented values. It is six now — the six fields `POST /api/events` refuses
+   * without — and the properties worth holding are the same two: nothing
+   * reaches the API before an explicit confirmation, and the confirmation does
+   * reach it.
+   */
+  it('lets an organizer set an event up in conversation and creates it on confirmation', async () => {
+    const { last, answers } = await collectEvent(ask, organizer);
+
+    expect(last.draft).toBe(true);
+    expect(last.card?.kind).toBe('draft');
+    expect(last.answer).toContain(answers.title);
+    expect(last.answer).toContain(answers.location);
     expect(api.createEvent).not.toHaveBeenCalled();
 
     const confirmRes = await ask('confirm', { user: organizer });
     expect(confirmRes.intent).toBe('confirm_action');
-    expect(api.createEvent).toHaveBeenCalled();
-    expect(confirmRes.answer).toMatch(/created successfully/i);
+    expect(api.createEvent).toHaveBeenCalledTimes(1);
+
+    const sent = api.createEvent.mock.calls[0][0];
+    expect(sent.title).toBe(answers.title);
+    expect(sent.location).toBe(answers.location);
+    expect(sent.slots).toHaveLength(1);
+    expect(sent.slots[0].maxSpots).toBe(answers.spots);
+
+    expect(confirmRes.answer).toMatch(/is created/i);
   });
 
   it('refuses event creation for a student with truthful explanation', async () => {

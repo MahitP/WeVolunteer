@@ -81,10 +81,13 @@ describe('what the control reports, per configuration', () => {
       detail: /Starting up/i,
     },
     {
+      /* Distinct from "Starting up": this is the several-hundred-megabyte
+         wait, and a reader told it is downloading knows to leave the tab
+         open. See the DOWNLOADING branch in `modeFor`. */
       name: 'installed, downloading',
       props: { capability: SUPPORTED, prefs: INSTALLED, status: AIStatus.DOWNLOADING },
       label: 'Welly AI',
-      detail: /Starting up/i,
+      detail: /Downloading the model/i,
     },
     {
       name: 'ready',

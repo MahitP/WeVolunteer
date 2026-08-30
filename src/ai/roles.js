@@ -228,8 +228,17 @@ export function actionReplyFor(user, { kind = 'event' } = {}) {
   const cannotAct = "I can look things up, but I can't create or change anything myself.";
 
   if (kind === 'event') {
+    /**
+     * An organizer CAN have Welly create an event now — `eventDraft.js` gathers
+     * the details and `TOOLS.create_event` posts them — so this line is
+     * reached for them only when the request was not a create-event request at
+     * all. Saying "I can't create anything myself" to somebody who has just
+     * been offered exactly that would be false, so it says what is true of the
+     * thing they actually asked for.
+     */
     return can(user, 'event.create')
-      ? `${cannotAct} You can set one up on the Create event page — I can show you what already exists if that helps.`
+      ? 'I can set up a new event with you — just say "create an event" and I will ask for the '
+        + 'details. Editing or cancelling one already running is done from your dashboard.'
       : `${cannotAct} Creating events is something organizers do, so an organizer at your school would need to set it up. I can help you find one that already exists.`;
   }
 

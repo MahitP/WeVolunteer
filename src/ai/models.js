@@ -108,6 +108,9 @@ export const MODELS = [
     bytes: 105454144,
     sha256: 'ed5fa30c487b282ec156c29062f1222e5c20875a944ac98289dbd242e947f747',
 
+    /** The model's published name, shown when Welly is asked what it is
+        running. Read off the repository it comes from. */
+    family: 'SmolLM2',
     parameters: '135M',
     contextWindow: 8192,
     quantisation: 'Q4_K_M',
@@ -155,6 +158,7 @@ export const MODELS = [
     sha256: '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db',
 
     conversational: true,
+    family: 'Qwen2.5',
     parameters: '0.5B',
     contextWindow: 32768,
     quantisation: 'Q4_K_M',
@@ -176,6 +180,7 @@ export const MODELS = [
     sha256: '1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370',
 
     conversational: true,
+    family: 'Qwen2.5',
     parameters: '1.5B',
     contextWindow: 32768,
     quantisation: 'Q4_K_M',
