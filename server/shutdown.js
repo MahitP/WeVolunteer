@@ -106,6 +106,13 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
    * a dead socket until a timeout.
    */
   if (io) {
+    /* The shared session-invalidation sweep (`socketServer.js`) replaced a timer
+       per socket. One timer means one thing to stop, and stopping it here rather
+       than relying on `io`'s 'close' event is deliberate: the event is not
+       emitted on every Socket.IO version, and a surviving interval would hold a
+       reference to a closed server. Clearing an already-cleared timer is a
+       no-op, so doing both is safe. */
+    if (io.sessionSweepTimer) clearInterval(io.sessionSweepTimer);
     try {
       await new Promise(resolve => io.close(() => resolve()));
     } catch (err) {
