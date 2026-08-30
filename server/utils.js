@@ -1240,17 +1240,67 @@ export function countdownPhrase(iso) {
 }
 
 /** Notify every confirmed volunteer on an event. Returns how many were told. */
+/**
+ * How many recipients are dispatched to at once.
+ *
+ * ── Why this is not one, and not unbounded ──
+ *
+ * `dispatch` costs four to five round trips per recipient: the opt-out lookup,
+ * the dedupe probe, the preference read, and the two inserts. Strictly
+ * sequential, that is linear in how popular the event was, and it is paid inside
+ * the organizer's HTTP request. Measured with `bin/load-test.mjs --db-latency 5`
+ * against 150 confirmed volunteers: **4,440 ms, 29.6 ms per recipient.**
+ *
+ * Unbounded `Promise.all` would be worse than the problem. The pool is ten
+ * (`db/engine.js` argues that number), so a 150-way fan-out would queue 150
+ * statements against it and starve every other request on the server for the
+ * duration — trading one slow request for a slow everything.
+ *
+ * Five is half the pool: a meaningful speed-up with headroom left for the
+ * traffic that is not this broadcast.
+ */
+const NOTIFY_FANOUT_CONCURRENCY = Number(process.env.NOTIFY_FANOUT_CONCURRENCY) || 5;
+
+/**
+ * Notifies every confirmed volunteer for an event.
+ *
+ * ── This must NOT be called inside a transaction ──
+ *
+ * It dispatches several recipients concurrently, and a transaction is one
+ * checked-out `pg` client which cannot serve concurrent statements. Both current
+ * callers — the cancellation and the update paths in `eventRoutes.js` — do their
+ * write first and then broadcast, outside any transaction, which is what makes
+ * this safe.
+ *
+ * `transactionConcurrency.test.js` cannot catch a violation here, because it
+ * scans for concurrency *lexically inside* a transaction block and this is a
+ * function call away. So the constraint is stated here, where somebody moving
+ * the call will read it.
+ *
+ * ── Why concurrency is safe between recipients ──
+ *
+ * Each dispatch touches a different user's rows. Deduplication is a unique index
+ * on `(user_id, dedupe_key)`, so two dispatches racing for the same key produce
+ * one row and one refusal rather than two rows. And `dispatch` handles its own
+ * per-recipient failure: a non-mandatory notice that fails is logged and skipped,
+ * so one bad recipient cannot take the broadcast down.
+ */
 export async function notifyConfirmedVolunteers(eventId, event, payload, dedupeKey = null) {
   const recipients = await db.prepare(`
     SELECT DISTINCT user_id FROM applications
     WHERE event_id = ? AND status = 'accepted'
   `).all(eventId);
+
   let sent = 0;
-  
-  for (const r of recipients) {
-    if (await notificationService.dispatch(event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null)) {
-      sent++;
-    }
+  for (let i = 0; i < recipients.length; i += NOTIFY_FANOUT_CONCURRENCY) {
+    const batch = recipients.slice(i, i + NOTIFY_FANOUT_CONCURRENCY);
+    const results = await Promise.all(batch.map(r => notificationService.dispatch(
+      event, payload, r.user_id, dedupeKey ? `${dedupeKey}:${r.user_id}` : null
+    )));
+    /* `dispatch` returns true when it delivered, and false or null when it
+       deduped, found no user, or failed a non-mandatory notice. The count has
+       always meant "how many were actually notified", so only `true` counts. */
+    sent += results.filter(Boolean).length;
   }
   return sent;
 }
