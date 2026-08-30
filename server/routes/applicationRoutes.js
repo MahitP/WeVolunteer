@@ -19,19 +19,98 @@ import { slotHasStarted } from '../attendance.js';
 
 const router = express.Router();
 
+/**
+ * The most applications one response may carry, paginated or not.
+ *
+ * Mirrors `EVENTS_MAX_LIMIT` in eventRoutes.js, and exists for the same reason.
+ * Until this cap, `GET /api/applications` had no `LIMIT` of any kind: an admin
+ * holding `application.read_all` was served **every application in the system**
+ * in a single response, and each row carries a volunteer's name, school, grade,
+ * bio, skills and badge list. The deployment runbook already named this endpoint
+ * as a reason not to size the host below 1 GB.
+ *
+ * 500 rows is chosen the way the events ceiling was: a realistic organizer's
+ * queue for a school year is on the order of a few hundred, so a normal caller
+ * completes in one request and pays no paging round trip, while a district-sized
+ * dataset pages instead of returning without bound.
+ */
+export const APPLICATIONS_MAX_LIMIT = 500;
+
+/**
+ * Above this many rows, an unpaginated response is logged.
+ *
+ * Not a cap — the cap is above. This is the warning that makes the ceiling
+ * visible *before* it truncates somebody's queue, which is the failure mode
+ * worth catching: the organizer screen filters and sorts client-side, so a short
+ * response does not error, it quietly shows a shorter list.
+ */
+const APPLICATIONS_WARN_THRESHOLD = 400;
+
+/**
+ * List applications, scoped to what the caller may see.
+ *
+ * Pagination is OPT-IN, exactly as on `GET /api/events`:
+ *
+ *   GET /api/applications                    -> Application[]              (legacy)
+ *   GET /api/applications?limit=50           -> { applications, pagination }
+ *   GET /api/applications?limit=50&offset=50 -> { applications, pagination }
+ *
+ * The bare array is kept because `src/utils/api.js` calls this with no
+ * parameters and the SPA treats the result as a complete local index.
+ *
+ * ── The ORDER BY is new, and it is load-bearing ──
+ *
+ * This query had no `ORDER BY` at all, so row order was whatever the engine
+ * happened to produce. That is survivable for a response that returns
+ * everything and fatal for one that pages: without a total order, `OFFSET` can
+ * show the same application twice and skip another entirely. `applied_at DESC`
+ * is the order the organizer screen wants anyway (newest first), and `a.id`
+ * breaks ties so the sequence is identical on both engines and between calls.
+ */
 router.get('/api/applications', authenticateToken, async (req, res) => {
   try {
+    const paginated = req.query.limit !== undefined;
+
+    let limit = null;
+    let offset = 0;
+    if (paginated) {
+      const rawLimit = Number(req.query.limit);
+      const rawOffset = Number(req.query.offset ?? 0);
+      if (!Number.isFinite(rawLimit) || rawLimit < 1) {
+        return res.status(400).json({ error: '`limit` must be a positive integer.', field: 'limit' });
+      }
+      if (!Number.isFinite(rawOffset) || rawOffset < 0) {
+        return res.status(400).json({ error: '`offset` must be zero or greater.', field: 'offset' });
+      }
+      // Clamped rather than rejected, matching the events endpoint: a caller
+      // asking for too much should get a valid page, not an error to handle.
+      limit = Math.min(Math.floor(rawLimit), APPLICATIONS_MAX_LIMIT);
+      offset = Math.floor(rawOffset);
+    }
+
     let rows;
     const BASE_QUERY = `
       SELECT a.*, u.name, u.avatar, u.school, u.grade, u.bio, u.skills,
              e.title as event_title,
-             s.name as slot_name, s.description as slot_description, s.start_datetime as slot_start_datetime, s.end_datetime as slot_end_datetime, s.max_spots as slot_max_spots
+             s.name as slot_name, s.description as slot_description, s.start_datetime as slot_start_datetime, s.end_datetime as slot_end_datetime, s.max_spots as slot_max_spots,
+             /* Evaluated across the whole filtered set, before LIMIT, so one
+                statement answers both "this page" and "how many in total".
+                A second COUNT query would double the work and could disagree
+                with the page under concurrent writes. */
+             COUNT(*) OVER () AS total_count
       FROM applications a
       JOIN users u ON a.user_id = u.id
       JOIN events e ON a.event_id = e.id
       JOIN slots s ON a.slot_id = s.id
     `;
-    
+
+    /* Appended to whichever scope branch is chosen below. The unpaginated form
+       still carries a LIMIT — the cap — so no branch can return without bound. */
+    const PAGE = paginated
+      ? 'ORDER BY a.applied_at DESC, a.id ASC LIMIT ? OFFSET ?'
+      : 'ORDER BY a.applied_at DESC, a.id ASC LIMIT ?';
+    const pageParams = paginated ? [limit, offset] : [APPLICATIONS_MAX_LIMIT];
+
     /**
      * The rows somebody who RUNS events may see: their own events, plus the
      * events of any organization they manage.
@@ -91,11 +170,11 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
     // default to seeing nothing, never to seeing everything.
     if (can(req.principal, 'application.read_all')) {
       // admin, and super_admin via the wildcard: every application.
-      rows = await db.prepare(BASE_QUERY).all();
+      rows = await db.prepare(`${BASE_QUERY} ${PAGE}`).all(...pageParams);
     } else if (can(req.principal, 'applicant.review')) {
       // organizer: applications to the events they host.
-      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
-        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
+      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE} ${PAGE}`)
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId, ...pageParams);
     } else if (can(req.principal, 'organization.event.manage.own')) {
       /**
        * A Student Organizer, or a student who manages a club.
@@ -109,11 +188,12 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
        * Scoped by the same rule `canRunEvent` applies: events they host, plus
        * events belonging to a club they manage.
        */
-      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE}`)
-        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId);
+      rows = await db.prepare(`${BASE_QUERY} ${ORGANIZATION_SCOPE} ${PAGE}`)
+        .all(req.principal.userId, req.principal.userId, req.principal.userId, req.principal.userId, ...pageParams);
     } else if (can(req.principal, 'application.withdraw')) {
       // student: their own applications only.
-      rows = await db.prepare(`${BASE_QUERY} WHERE a.user_id = ?`).all(req.principal.userId);
+      rows = await db.prepare(`${BASE_QUERY} WHERE a.user_id = ? ${PAGE}`)
+        .all(req.principal.userId, ...pageParams);
     } else {
       // No recognised capability (e.g. partner, deliberate correction v1.2a):
       // deny by default rather than falling through to unscoped access. Partner
@@ -122,25 +202,57 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
       rows = [];
     }
 
+    /**
+     * Everything below is scoped to the rows actually being returned.
+     *
+     * The three loads here used to read the WHOLE of `attendance` (twice) and
+     * the whole of `application_conflicts`, regardless of who was asking or how
+     * many rows came back — so a student fetching their own four applications
+     * pulled a district's entire attendance history into two `Map`s to answer
+     * it. The same correction `eventRoutes.js` already applied to its own batch
+     * loads, and for the same reason: a page should cost the page.
+     */
+    const pageUserIds = [...new Set(rows.map(r => r.user_id))];
+    const pageSlotIds = [...new Set(rows.map(r => r.slot_id))];
+    const pageAppIds = rows.map(r => r.id);
+    const marks = (ids) => ids.map(() => '?').join(',');
+
     // Batch the volunteer history lookups once instead of three queries per
     // row — organizers sort and filter on these, so they load on every view.
     const historyByUser = new Map();
-    for (const h of await db.prepare(`
-      SELECT a.user_id,
-             COALESCE(SUM(a.hours_awarded), 0) as total_hours,
-             COUNT(DISTINCT a.event_id) as completed_events,
-             MAX(s.end_datetime) as last_end
-      FROM attendance a
-      JOIN slots s ON a.slot_id = s.id
-      WHERE a.present = 1
-      GROUP BY a.user_id
-    `).all()) {
-      historyByUser.set(h.user_id, h);
+    if (pageUserIds.length > 0) {
+      for (const h of await db.prepare(`
+        SELECT a.user_id,
+               COALESCE(SUM(a.hours_awarded), 0) as total_hours,
+               COUNT(DISTINCT a.event_id) as completed_events,
+               MAX(s.end_datetime) as last_end
+        FROM attendance a
+        JOIN slots s ON a.slot_id = s.id
+        WHERE a.present = 1 AND a.user_id IN (${marks(pageUserIds)})
+        GROUP BY a.user_id
+      `).all(...pageUserIds)) {
+        historyByUser.set(h.user_id, h);
+      }
     }
 
+    /**
+     * Attendance for the page's (slot, user) pairs.
+     *
+     * Filtered on both columns rather than on the pair itself: a row is only
+     * ever read back through the `slot_id:user_id` key below, so the extra
+     * cross-product rows a two-column filter can admit are simply never looked
+     * up. Both columns are indexed (`idx_attendance_user`, `attendance(slot_id)`
+     * via its uniqueness constraint), which a row-value `IN` would not use.
+     */
     const attendanceByKey = new Map();
-    for (const a of await db.prepare('SELECT slot_id, user_id, present, hours_awarded FROM attendance').all()) {
-      attendanceByKey.set(`${a.slot_id}:${a.user_id}`, a);
+    if (pageSlotIds.length > 0 && pageUserIds.length > 0) {
+      const attRows = await db.prepare(`
+        SELECT slot_id, user_id, present, hours_awarded FROM attendance
+        WHERE slot_id IN (${marks(pageSlotIds)}) AND user_id IN (${marks(pageUserIds)})
+      `).all(...pageSlotIds, ...pageUserIds);
+      for (const a of attRows) {
+        attendanceByKey.set(`${a.slot_id}:${a.user_id}`, a);
+      }
     }
 
     /**
@@ -165,8 +277,12 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
     const participation = await participationCountsFor(db, rows.map(r => r.user_id));
 
     const conflictsByAppId = new Set();
-    for (const c of await db.prepare('SELECT application_id FROM application_conflicts').all()) {
-      conflictsByAppId.add(c.application_id);
+    if (pageAppIds.length > 0) {
+      for (const c of await db.prepare(
+        `SELECT application_id FROM application_conflicts WHERE application_id IN (${marks(pageAppIds)})`
+      ).all(...pageAppIds)) {
+        conflictsByAppId.add(c.application_id);
+      }
     }
 
     /**
@@ -291,7 +407,51 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
       };
     });
 
-    res.json(formattedApps);
+    /**
+     * Zero rows carries no window value, so an empty page reports a zero total.
+     *
+     * Correct rather than a special case, and the same reasoning `GET /api/events`
+     * records: the window function is computed per returned row, so with no rows
+     * there is nothing to read it from — and a scope matching nothing genuinely
+     * has a total of nothing.
+     */
+    const total = rows.length ? Number(rows[0].total_count) : 0;
+
+    if (!paginated && total > APPLICATIONS_WARN_THRESHOLD) {
+      console.warn(
+        `[applications] Serialised ${Math.min(total, APPLICATIONS_MAX_LIMIT)} of ${total} applications `
+        + `unpaginated for user ${req.user.id}. `
+        + `Each row carries a volunteer's name, school, grade, bio and badges; `
+        + `migrate the caller to ?limit=&offset=.`
+      );
+    }
+
+    // Says out loud when the cap actually removed rows, so a caller silently
+    // seeing a truncated queue is visible in the log rather than a mystery.
+    if (!paginated && total > APPLICATIONS_MAX_LIMIT) {
+      console.warn(
+        `[applications] TRUNCATED: ${total} applications matched but an unpaginated request is `
+        + `capped at ${APPLICATIONS_MAX_LIMIT}. The caller is missing ${total - APPLICATIONS_MAX_LIMIT} `
+        + `row(s) and must use ?limit=&offset=.`
+      );
+    }
+
+    if (!paginated) return res.json(formattedApps);
+
+    res.json({
+      applications: formattedApps,
+      pagination: {
+        total,
+        limit,
+        offset,
+        returned: formattedApps.length,
+        hasMore: offset + formattedApps.length < total,
+        // Null at the end of the list, so a caller can loop until it is null
+        // rather than doing the arithmetic itself.
+        nextOffset: offset + formattedApps.length < total ? offset + formattedApps.length : null,
+        maxLimit: APPLICATIONS_MAX_LIMIT
+      }
+    });
   } catch (error) {
     console.error('Fetch applications error:', error);
     res.status(500).json({ error: 'Internal server error fetching applications' });
