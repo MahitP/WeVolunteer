@@ -9,7 +9,8 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config.js';
+import jwt from 'jsonwebtoken';
+import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, JWT_SECRET } from './config.js';
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
@@ -595,9 +596,75 @@ export const loginIpCeilingLimiter = rateLimit({
   handler: limitHandler('Too many failed sign-in attempts from this network.'),
 });
 
+/**
+ * The blanket API limiter's key: the SESSION when there is one, the address
+ * otherwise.
+ *
+ * ── The lockout this replaces ──
+ *
+ * `apiLimiter` covers every `/api` request and had no key generator, so
+ * `express-rate-limit` keyed it on `req.ip`: 600 requests per fifteen minutes
+ * for a whole school's shared egress address. A signed-in session makes several
+ * requests per screen, so a few dozen students browsing at lunchtime exhausted
+ * the building's budget and the next person to open the app got a 429 on a
+ * request that was neither abusive nor theirs to pay for.
+ *
+ * This is the same failure, on the broadest limiter in the application, that was
+ * already found and fixed twice: `loginLimiter` was re-keyed onto `ip + account`
+ * after ten students mistyping once locked out a building, and `mailLimiter`
+ * onto the target address after a campus shared five verification emails.
+ * `apiLimiter` was the one left on a bare address.
+ *
+ * ── Why this loosens nothing ──
+ *
+ * The per-bucket number is unchanged. An anonymous caller is still bounded by
+ * address at exactly the same rate; one account is still bounded at exactly the
+ * same rate. The only behaviour that changes is that one person's browsing no
+ * longer spends another person's allowance. Nothing gains budget; a building
+ * stops losing it.
+ *
+ * ── Why the token is VERIFIED and not merely read ──
+ *
+ * Keying on an unverified cookie would let an attacker mint a fresh value per
+ * request and never share a bucket with themselves — an unlimited budget, which
+ * is worse than the defect being fixed. So the signature is checked, and
+ * anything that fails falls back to the address. That costs one HMAC on a path
+ * that is about to do considerably more work than that, and it is the same
+ * verification `authenticateToken` performs a few middlewares later.
+ *
+ * The subject is hashed for the reason `loginKeyGenerator` gives: a limiter key
+ * lives in memory and can surface in diagnostics, and these keys would otherwise
+ * be a list of who was using the application.
+ *
+ * A preauth token is deliberately NOT treated as a session. It is issued
+ * mid-sign-in, before the second factor, and `authenticateToken` refuses it as a
+ * full session; letting it name a bucket here would give the half-authenticated
+ * state an identity the rest of the application does not grant it.
+ */
+function apiLimiterKey(req, res) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (token) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      if (payload?.id && !payload.preauth) {
+        return `api:u:${createHash('sha256').update(String(payload.id)).digest('hex').slice(0, 32)}`;
+      }
+    } catch {
+      /* Expired, forged, or signed with a rotated secret. Treated as anonymous,
+         which is both correct and the safe direction: it keys on the address. */
+    }
+  }
+  return `api:ip:${ipKeyGenerator(req, res)}`;
+}
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: DEMO_MODE ? 10000 : 600,
+  /* `API_RATE_LIMIT` follows the convention the four limiters above already use
+     (`LOGIN_RATE_LIMIT`, `LOGIN_IP_CEILING`, `MAIL_RATE_LIMIT`,
+     `REAUTH_RATE_LIMIT`): a deployment that knows its own population can say so,
+     and `bin/load-test.mjs` can hold the production number while it measures. */
+  limit: Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600),
+  keyGenerator: apiLimiterKey,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   /**
@@ -1074,6 +1141,34 @@ async function probeWritable() {
 
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
+/**
+ * Connection-pool saturation, for a load run and for an operator who asks.
+ *
+ * ── Why it is behind a flag, and off by default ──
+ *
+ * `/health` is UNAUTHENTICATED, and this file already refuses to put detail on
+ * it — the 503 branches deliberately return no error text so the endpoint cannot
+ * become a filesystem oracle by echoing a path out of a SQLite message. Pool
+ * counts are not user data, but they do publish how much concurrent traffic the
+ * deployment is carrying, and that is not something an uptime monitor needs.
+ *
+ * ── Why it exists at all ──
+ *
+ * `waiting` is the number that matters and the only one nothing else reports.
+ * The pool is deliberately small (ten — see `db/engine.js` for the argument),
+ * so the failure mode under load is not an error, it is requests queueing for a
+ * client. That looks exactly like "the database got slower" from the outside,
+ * and `bin/load-test.mjs` cannot tell the two apart without this.
+ *
+ * Absent on SQLite, which has no pool, rather than reported as zeroes — a zero
+ * would read as "measured, and fine".
+ */
+function poolStats() {
+  if (process.env.HEALTH_POOL_STATS !== 'true') return {};
+  const stats = db.stats;
+  return stats ? { pool: stats } : {};
+}
+
 app.get('/health', async (req, res) => {
   let readable = false;
   try {
@@ -1106,7 +1201,10 @@ app.get('/health', async (req, res) => {
     });
   }
 
-  res.json({ status: 'ok', database: 'connected', writable: true, version: VERSION });
+  res.json({
+    status: 'ok', database: 'connected', writable: true, version: VERSION,
+    ...poolStats(),
+  });
 });
 
 app.use('/api', (req, res) => {
