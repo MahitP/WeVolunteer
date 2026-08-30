@@ -38,6 +38,7 @@ import {
   acquireInstanceLock, startInstanceLockHeartbeat, shouldRefuseBoot, describeConflict
 } from './instanceLock.js';
 import { verifyPolicyFiles } from './legalContent.js';
+import { withLease, LEASES } from './schedulerLease.js';
 
 initDatabase();
 /* Async because it writes through a transaction; see db.js. No-op outside DEMO_MODE. */
@@ -133,13 +134,35 @@ if (!lockResult.acquired) {
 }
 const lockHeartbeat = await startInstanceLockHeartbeat(db);
 
-await runNotificationSweep();
+/**
+ * The notification sweep, behind a leader lease.
+ *
+ * The lease is what keeps a second instance from running the same whole-table
+ * scan concurrently. On the single instance this deployment actually runs, the
+ * sole holder always acquires it, so nothing observable changes — see
+ * `schedulerLease.js` for why it fails OPEN rather than closed.
+ *
+ * Direct callers — an operator, a test — deliberately go to
+ * `runNotificationSweep` unleased. The lease governs the SCHEDULE, not the
+ * operation: somebody asking for a sweep by hand should get one.
+ */
+const leasedNotificationSweep = async () =>
+  (await withLease(db, LEASES.NOTIFICATION_SWEEP, () => runNotificationSweep())).result;
+
+await leasedNotificationSweep();
 
 // The handle is kept so shutdown can clear it. Previously discarded, which meant
 // the interval held the event loop open forever — a graceful stop could close the
 // listener and still never exit, so systemd would wait out its timeout and
 // SIGKILL the process, discarding the cleanup entirely.
-const sweepInterval = setInterval(runNotificationSweep, 15 * 60 * 1000);
+const sweepInterval = setInterval(() => {
+  /* `setInterval` does not await, so a rejection here would be an unhandled
+     rejection — which on Node ends the process. The same guard the notification
+     worker and the Auto Select scheduler carry, for the same reason. */
+  leasedNotificationSweep().catch((err) => {
+    console.error('[Sweep] Notification sweep failed:', err);
+  });
+}, 15 * 60 * 1000);
 
 /* Awaited: `startExportWorker` recovers exports its predecessor abandoned
    before it begins polling, and starting to serve traffic while that is still

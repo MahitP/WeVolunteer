@@ -27,6 +27,7 @@
 import { syncPending } from './eventIndexer.js';
 import { pineconeEnabled, UPSERT_BATCH_SIZE } from './pineconeConfig.js';
 import { logEvent } from './../telemetry.js';
+import { withLease, LEASES } from '../schedulerLease.js';
 
 /**
  * How often the queue is checked.
@@ -76,7 +77,17 @@ export function startIndexWorker(db) {
   if (timer || !pineconeEnabled()) return false;
   handle = db;
   stopped = false;
-  timer = setInterval(() => { void pass(); }, INTERVAL_MS);
+  /**
+   * Behind a leader lease. Unlike the other three sweeps, what a double run
+   * costs here is MONEY: a pass reconciles against Pinecone, whose Starter plan
+   * is metered at 5,000,000 embedding tokens and 500 rerank requests a month
+   * (`docs/operations/pinecone.md`). Two instances draining the same queue
+   * would spend the allowance twice over.
+   */
+  timer = setInterval(() => {
+    void withLease(db, LEASES.SEARCH_INDEX, () => pass())
+      .catch((err) => { stats.lastError = err?.name || 'error'; });
+  }, INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
   logEvent('info', 'lifecycle.search_worker', { operation: 'start', outcome: 'ok' });
   return true;

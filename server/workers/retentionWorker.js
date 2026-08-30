@@ -39,6 +39,7 @@
 import { runInTransaction } from '../db/connectionContext.js';
 import { RETAINABLE_MESSAGE_PREDICATE, userIsPartyToLiveReport } from '../evidenceHolds.js';
 import { recordError } from '../errorReporter.js';
+import { withLease, LEASES } from '../schedulerLease.js';
 
 /** Published periods. Changing one here means changing the Privacy Policy too. */
 export const RETENTION = {
@@ -493,9 +494,33 @@ export function startRetentionWorker(db) {
    * hold up the listener. The rejection cannot escape either way, because `run`
    * catches everything.
    */
-  const started = run();
+  /**
+   * Behind a leader lease, and this is the sweep that most needs one.
+   *
+   * The other three periodic jobs are idempotent by construction — a dedupe
+   * index, a confirmed run row, a pending queue. Retention DELETES. Two
+   * concurrent passes over the same expired set is the one place where "both
+   * instances did the whole scan" stops being merely wasteful.
+   *
+   * The lease fails OPEN (see `schedulerLease.js`), which is the right trade
+   * here too: a database error must not silently stop retention, because a
+   * retention period the Privacy Policy publishes and the software does not
+   * enforce is a false statement about what happens to a student's data.
+   */
+  const leasedRun = async () => (await withLease(db, LEASES.RETENTION, () => run())).result;
 
-  timer = setInterval(run, SWEEP_INTERVAL_MS);
+  const started = leasedRun();
+
+  /* `setInterval` does not await, so a rejection here would be an unhandled
+     rejection — which on Node ends the process. `run` catches everything and
+     `withLease` fails open, so this should be unreachable; relying on that
+     implicitly is exactly the assumption the notification worker's own header
+     warns about, so it is stated rather than assumed. */
+  timer = setInterval(() => {
+    leasedRun().catch((err) => {
+      console.error('[Retention] Sweep failed:', err);
+    });
+  }, SWEEP_INTERVAL_MS);
   if (typeof timer.unref === 'function') timer.unref();
   return started;
 }

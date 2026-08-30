@@ -68,6 +68,7 @@ import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
 import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
+import schedulerLeases from './061_scheduler_leases.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -392,7 +393,20 @@ export const MIGRATIONS = [
    * A new table with a foreign key to `events`, so it must run after `events`
    * exists; nothing else depends on its order. Additive on both engines.
    */
-  eventSearchIndex
+  eventSearchIndex,
+  /**
+   * 061 — leader leases for the four periodic sweeps.
+   *
+   * A standalone table with no foreign keys, so it is order-independent.
+   *
+   * Numbered 061 rather than 060 deliberately: 060 is taken by an unmerged
+   * branch, and two migrations sharing a version is refused at boot
+   * ("Duplicate migration version"). Gaps in the sequence are fine — the loader
+   * sorts and applies whatever it has not recorded — and a gap is a much
+   * cheaper thing to explain than a collision is to untangle after both have
+   * been applied somewhere.
+   */
+  schedulerLeases
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

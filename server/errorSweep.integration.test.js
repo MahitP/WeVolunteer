@@ -95,7 +95,20 @@ describe('no new scheduling machinery was introduced', () => {
     // their own start* helpers and are not created here.
     const intervals = [...src.matchAll(/setInterval\s*\(/g)].length;
     expect(intervals, 'a new setInterval appeared — the sweep must reuse the existing one').toBe(1);
-    expect(src).toContain('const sweepInterval = setInterval(runNotificationSweep');
+    expect(src).toContain('const sweepInterval = setInterval(');
+    /**
+     * The one interval must still BE the notification sweep.
+     *
+     * This used to pin the exact call `setInterval(runNotificationSweep`. The
+     * sweep now runs behind a leader lease (`schedulerLease.js`), so that
+     * spelling changed while the property this guard exists for — one timer,
+     * and it is the maintenance sweep — did not. Both halves are asserted so
+     * the check still fails if the interval is repointed at something else, or
+     * if the lease wrapper is quietly dropped and a second instance goes back to
+     * running the sweep concurrently.
+     */
+    expect(src).toContain('leasedNotificationSweep().catch(');
+    expect(src).toContain('LEASES.NOTIFICATION_SWEEP, () => runNotificationSweep()');
     // Still exactly three things to drain, and the same three.
     expect(src).toContain('intervals: [sweepInterval, lockHeartbeat, autoSelectTimer]');
     expect(src, 'server.js should not need to know the error sweep exists')
