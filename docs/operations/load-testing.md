@@ -246,7 +246,65 @@ what this measures, and what improved, is only the enqueueing.
 
 ---
 
-## 6. Soak, and connection-pool sizing
+## 6. The latency matrix
+
+All ten scenarios plus the concurrency and fan-out checks, at each profile.
+2,015 users / 1,002 events / 8,092 applications / 2,171 attendance rows / 120
+appeals, 20 connections, 6 seconds per scenario, `DATABASE_POOL_MAX=25`.
+
+**Every cell below is zero non-2xx, zero uncaught exceptions and zero preflight
+failures, and scenario F accepted exactly one of forty concurrent accepts at
+every profile.**
+
+Throughput, req/s:
+
+| id | scenario | local | same-region | pooled | distant |
+|---|---|---|---|---|---|
+| A | public browse | 362.7 | 301.5 | 130.3 | 26.7 |
+| B | authentication | 17.3 | 16.5 | 15.5 | 10.3 |
+| C | student session | 738.2 | 560.8 | 194.2 | 39.3 |
+| C2 | applications, paginated | 969.0 | 599.7 | 175.3 | 34.8 |
+| C3 | applications, legacy | 691.5 | 500.8 | 169.8 | 34.3 |
+| C4 | certificates, 80-event history | 1,241.2 | 956.8 | 314.3 | 65.3 |
+| D | organizer | 970.5 | 549.7 | 190.0 | 38.7 |
+| E | admin mix | 315.5 | 121.7 | 41.3 | 9.5 |
+| E2 | admin stats | 119.3 | 86.8 | 38.0 | 9.2 |
+| E3 | appeals queue | 749.5 | 103.3 | 36.2 | 7.3 |
+| G | fan-out to 150 volunteers | 23 ms | 75 ms | 189 ms | 745 ms |
+
+### What the matrix says
+
+**Authentication is the only scenario that barely moves** — 17.3 → 10.3 req/s
+across a 40 ms round trip. bcrypt dominates it, which is what bcrypt is for. It
+is also the reason B is the floor everywhere: at `local` it is the *slowest*
+scenario on the board.
+
+**Everything else is round-trip-bound**, and the ranking is simply how many
+statements each endpoint issues. Dividing p50 at `distant` by the 40 ms round
+trip gives the count directly:
+
+| endpoint | p50 at `distant` | ≈ round trips |
+|---|---|---|
+| certificates | 295 ms | ~7 |
+| applications (paginated) | 540 ms | ~13 |
+| appeals queue | 509 ms | ~13 |
+| admin stats | 420 ms | ~10 |
+| public browse | 702 ms | ~17 |
+
+Nothing is pathological — these are close to the floor for what each endpoint
+has to read, and they are the numbers *after* this pass. The public browse is
+the highest because it batch-loads slots, accepted counts, attendance, tags,
+bans and memberships for the page, each as its own statement.
+
+**The practical conclusion is about placement, not code.** At 40 ms the entire
+application is between 10× and 100× slower than at 3 ms, and no amount of query
+work closes that gap. Put the application in the same region as the database.
+The `distant` column exists so that the cost of not doing so is a number rather
+than an intuition.
+
+---
+
+## 7. Soak, and connection-pool sizing
 
 ### The soak
 
@@ -314,7 +372,7 @@ use the pooler.
 
 ---
 
-## 7. What the load test does not cover
+## 8. What the load test does not cover
 
 - **Real network latency to a real provider.** §5 injects a plausible constant.
   A real link has jitter, occasional retransmits, and a pooler in the path.
@@ -331,27 +389,31 @@ use the pooler.
 
 ---
 
-## 8. Performance budgets
+## 9. Performance budgets
 
-Derived from the measurements above rather than chosen in advance, and stated
-against the deployment that exists: one instance, PostgreSQL over a network.
+Derived from §6 rather than chosen in advance, and stated against the deployment
+that exists: one instance, PostgreSQL over a network in the same region,
+`DATABASE_POOL_MAX=25`.
 
 | Metric | Budget | Where it comes from |
 |---|---|---|
-| Read endpoint p50 | < 200 ms | measured 52–165 ms at 5 ms RTT |
-| Read endpoint p95 | < 400 ms | measured 65–210 ms at 5 ms RTT |
-| Sign-in p95 | < 800 ms | measured 432 ms; bcrypt dominates and is meant to |
-| Admin surface p95 | < 300 ms | measured 65–90 ms at 5 ms RTT |
-| Error rate under load | 0 non-2xx | every scenario above returned zero |
-| Capacity oversell | never | scenario F, 40 concurrent accepts, 1 seat, exactly 1 accepted |
-| Pool `waiting` after a run | 0 | measured 0 at 20 connections against a pool of 10 |
+| Read endpoint p50 | < 100 ms | measured 20–65 ms at `same-region` |
+| Read endpoint p95 | < 200 ms | measured 26–78 ms at `same-region` |
+| Sign-in p95 | < 1,000 ms | measured 850 ms; bcrypt dominates and is meant to |
+| Admin surface p95 | < 150 ms | measured 44–52 ms at `same-region` |
+| Broadcast to 150 volunteers | < 500 ms | measured 75 ms at `same-region` |
+| Error rate under load | 0 non-2xx | every cell of the matrix returned zero |
+| Capacity oversell | never | scenario F, 40 concurrent accepts, 1 seat, exactly 1 accepted, at every profile |
+| Pool `waiting` after a run | 0 | measured 0 at 20 connections against a pool of 25 |
+| Resident memory over 15 min | no upward trend | measured 164 MB → 102 MB |
+| Pending notification jobs over 15 min | no growth | measured 0 → 0 |
 
-The read-endpoint budget deliberately accommodates scenario A, the events
-browse, at 165 ms. That is the aggregate-CTE cost this pass did not restructure,
-and setting a budget it already breaches would make the budget the first thing
-anyone ignores.
+These are for the **pilot-scale corpus above** and for a same-region database.
+The `distant` column of §6 is 10–100× worse across the board and no budget here
+survives it; that is a placement decision, not a code one.
 
-Budgets are for the **pilot-scale corpus above**. The events browse query is
-linear in event count and crosses 100 ms at about 10,000 events
-([postgres-scale-measurements.md](postgres-scale-measurements.md)); these budgets
-do not survive that and are not claimed to.
+The events browse remains linear in event count. It crosses 100 ms at roughly
+10,000 events on the unfiltered default sort — see
+[postgres-scale-measurements.md](postgres-scale-measurements.md) and
+`bin/events-query-probe.mjs`. Filtered browses are now 2–9× faster than they
+were, but the unfiltered ceiling is unchanged and is not claimed to have moved.

@@ -25,6 +25,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > of the other nine changes nothing for existing users; there is still no
 > re-consent flow for signup documents.
 
+### Performance and scaling — second pass
+
+> Everything the first pass deliberately left alone, done. Each item was measured
+> before and after; the method and the full matrix are in
+> [`docs/operations/load-testing.md`](docs/operations/load-testing.md).
+
+- **A broadcast no longer costs a round trip per recipient.** `dispatch` made
+  five database round trips for every person it notified, and a fan-out was a
+  loop of it. It now makes three, and a fan-out makes four *in total* regardless
+  of audience — with the in-app content rendered once rather than N times.
+  Cancelling an event with 150 confirmed volunteers: **4,440 ms → 112 ms** at
+  5 ms of database latency. The nine-branch delivery rule, which decides whether
+  a suspended minor is told they have been suspended, lives in one function that
+  both paths feed; it was pinned by characterization tests written against the
+  old implementation *before* anything moved, and a differential suite runs every
+  case both ways and compares the rows written.
+- **The events aggregate folds over the filtered set.** It used to build the
+  earliest slot, total spots, total hours and accepted count over every event and
+  every slot in the database before the outer query discarded almost all of it.
+  At 10,000 events: a place filter **41.6 ms → 4.5 ms**, "mine" 46.0 → 9.5, a
+  text search 51.2 → 20.9, a category 44.0 → 17.5, a search matching nothing
+  51.3 → 16.1. The unfiltered default browse is unchanged, which is the number
+  that had to not move. Proved equivalent at 100 / 1,000 / 5,000 / 10,000 events
+  across sixteen filter, sort and paging combinations, comparing every returned
+  row.
+- **The certificates page and the conversations list stopped growing with the
+  user.** Certificates issued a get-or-create per completed event inside an
+  unbounded `Promise.all`; conversations had no `LIMIT` at all and decorated each
+  row with seven more queries. Both are bounded and batched.
+- **`DATABASE_POOL_MAX` is 25, not 10.** The old number was reasoned from
+  database cores, which is right for CPU-bound queries and wrong over a network
+  where a pooled client spends most of its life waiting. At a 3 ms round trip and
+  20 concurrent requests: **127 → 487 req/s, p95 481 ms → 73 ms**. The same sweep
+  on loopback is flat noise, which is why 10 looked defensible for as long as it
+  did.
+- **The client stops paying for realtime before there is a session.**
+  `socket.io-client` is loaded on demand rather than sitting in the bundle every
+  visitor downloads: eager first paint **175,020 → 162,478 bytes gzipped**. The
+  notifications bell polled every sixty seconds even while the socket was pushing
+  the same updates; it now polls only when the socket is down, and resyncs on
+  reconnect instead of waiting up to a minute for the next tick.
+- **A Socket.IO adapter seam, built and tested but switched off.** Rooms are
+  per-process, so a second instance would have delivered realtime events to
+  roughly half the connected users, silently — the one genuine multi-instance
+  blocker. `@socket.io/postgres-adapter` broadcasts over `LISTEN`/`NOTIFY`, so
+  the bus is the database that is already here: no new service, no new
+  credential. Disabled by default and the package is not even loaded; activation
+  is one environment variable. Tested with two real Socket.IO servers proving a
+  broadcast on one reaches a client attached to the other.
+
+### Deliberately measured and left alone
+
+- **Two notification loops were not batched.** `notifyPromotions` and the bulk
+  application decision are per-ROW, not per-recipient: one volunteer can be
+  promoted off two slots in the same sweep, and is owed a notice for each.
+  Batching deduplicates the recipient list and would silently collapse the
+  second. Both sites say so, and a test pins the collapsing behaviour.
+- **The rerank budget stays in process memory.** It would be N× a monthly
+  allowance across N instances, but reranking is off by default, the real ceiling
+  is the vendor's own 429, and the alternative is a database write on the read
+  path of every search.
+- **A 15-minute soak found nothing to fix.** Resident memory fell 164 MB → 102 MB
+  and the pending-job backlog stayed at zero.
+
 ### Performance and scaling
 
 > **A measured pass over the request path, with a load test to prove it.**

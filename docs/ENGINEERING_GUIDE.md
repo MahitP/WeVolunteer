@@ -2248,8 +2248,13 @@ exist so the decision is made on evidence rather than enthusiasm.
 >   to `loginLimiter` and `mailLimiter`. The STORE is still per-process, which is
 >   the part Redis would address; the cost of doing so is measured in that
 >   branch's `docs/operations/upstash.md` §7.3, which is not present here.
-> - **Socket.IO is the one genuine remaining blocker**, and it is unchanged: no
->   adapter, so rooms are per-process.
+> - **Socket.IO is no longer a blocker either.** `@socket.io/postgres-adapter`
+>   broadcasts over LISTEN/NOTIFY, so the bus is the database that is already
+>   here — no new service, and the Redis adapter was rejected on the 222 ms round
+>   trip that branch measured, which an adapter on the message path cannot
+>   afford. Built, tested with two real servers, and OFF: activation is one
+>   environment variable. The remaining piece of work for multi-instance is a
+>   shared rate-limit store, and nothing else.
 
 - **Why it may become necessary.** Several pieces of state are currently
   in-process: rate-limiter counters, the auto-select scheduler, Socket.IO
@@ -2430,6 +2435,29 @@ Like §10.9, this one has already happened, and it is recorded because the
   loopback result alone would have called a real improvement zero.
 
 See [`docs/operations/load-testing.md`](operations/load-testing.md).
+
+### 10.11 The second performance pass (adopted)
+
+Recorded for the same reason §10.10 is: the *reasons* are the part worth keeping.
+
+- **Round trips, not queries, are the unit.** Every win in this pass came from
+  removing round trips rather than from making a query cheaper. `dispatch` did
+  five per recipient; the events aggregate folded the whole table; certificates
+  did a get-or-create per event. The PostgreSQL port turned each synchronous read
+  into a network round trip and nothing had audited the serial ones.
+- **Loopback hides all of it.** `DATABASE_POOL_MAX=10` measured identically to 25
+  on a database on the same machine, and 3.8× worse at a 3 ms round trip. Any
+  measurement that matters here has to be taken against a latency profile.
+- **Characterize before you optimize.** The notification rules decide whether a
+  suspended minor learns they were suspended. They were pinned by tests written
+  against the old implementation, which then passed unchanged against the new
+  one — that, not review, is what made the rewrite safe.
+- **The instrument lied three times.** The latency proxy reordered packets,
+  truncated a message mid-row (crashing the server with an `ERR_OUT_OF_RANGE`
+  inside `pg-protocol`), and leaked sockets until the pool timed out. All three
+  presented as server-side failures under load. A harness that cannot be told
+  apart from the defect it is hunting is worse than no harness, and the `local`
+  control run is what exposed each of them.
 
 ### 10.8 Sequencing
 
