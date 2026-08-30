@@ -132,8 +132,22 @@ describe('the PostgreSQL connection settings', () => {
     expect(() => postgresConfig({})).toThrow(/VITE_/);
   });
 
-  it('defaults the pool to 10', () => {
-    expect(postgresConfig({ DATABASE_URL: URL }).max).toBe(10);
+  it('defaults the pool to 25', () => {
+    /**
+     * Raised from 10 on a measurement, not a preference.
+     *
+     * The old number was reasoned from database cores, which is the right model
+     * for CPU-bound queries and the wrong one over a network — a pooled client
+     * there spends most of its life waiting on a round trip. At a 3ms round trip
+     * and 20 concurrent requests, `bin/load-test.mjs --pool-max` measured 127
+     * req/s at 10 and 487 req/s at 25, with p95 dropping from 481ms to 73ms; the
+     * curve is flat past 25. `db/engine.js` carries the full sweep.
+     *
+     * Pinned because it is per process and the provider's ceiling is finite:
+     * Supabase's entry sizes allow 200 Supavisor clients, so 25 leaves room for
+     * eight instances and a raise needs that arithmetic redone.
+     */
+    expect(postgresConfig({ DATABASE_URL: URL }).max).toBe(25);
   });
 
   it('refuses an out-of-range or non-numeric pool size', () => {

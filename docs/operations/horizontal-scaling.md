@@ -1,8 +1,13 @@
 # Horizontal scaling
 
-**Status: one instance today, deliberately.** `server/instanceLock.js` refuses a
-second production instance and that has not changed. What changed is that the
-list of reasons it must is now short, evidenced, and written down.
+**Status: one instance today, deliberately.** Updated 2026-08-30 after the
+Socket.IO adapter work — the section that used to say realtime was the one
+genuine blocker now says it is a setting, and §3 carries a full re-audit of every
+piece of process-local state in `server/`.
+
+`server/instanceLock.js` still refuses a second production instance, and that has
+not changed. What changed is that the list of reasons it must is now short,
+evidenced, and written down.
 
 This document is the honest inventory: what is safe for multiple instances, what
 is not, and what each remaining item would cost to fix.
@@ -102,28 +107,45 @@ buy an unlimited budget. Covered by `routes.apiLimiterScope.test.js`.
 
 ## 3. What is NOT safe for multiple instances
 
-### Socket.IO has no adapter — the one genuine blocker
+### Socket.IO — the adapter now exists, and is off
 
-`realtime/socketServer.js` creates a plain `new Server(httpServer)`. Rooms are
-per-process, so with two instances `emitToUser` reaches only the clients attached
-to the instance that handled the write. Notifications, messages and read receipts
-would be delivered to roughly half the connected users, silently and
-unpredictably.
+**Was the one genuine blocker. It is now a setting.**
 
-**Deliberately not fixed here.** Every adapter needs a backing store this
-deployment does not run, and adding an unused dependency to make a document
-tidier is the infrastructure sprawl this whole pass exists to avoid. When a
-second instance is genuinely wanted, this is the first thing to build, and the
-Redis work on the `claude/wevolunteer-upstash-redis-06b1e9` branch is the natural
-home for it — with one caveat carried over from that branch's own measurements:
-it records a **222 ms warm round trip** to the database as configured, which an
-adapter sitting on the message path cannot afford. A regional database is a
-prerequisite there, not a nicety.
+`@socket.io/postgres-adapter` broadcasts over `LISTEN`/`NOTIFY`, so the bus is
+the database this application already cannot run without: no new service, no new
+credential, no new free-tier ceiling, and `pg` was already a dependency. The
+Redis adapter was rejected on a measurement — the Redis branch records a **222 ms
+warm round trip** to the Upstash database as configured, and an adapter sits on
+the message path.
 
-> **Forward reference.** `docs/operations/upstash.md` is cited below and is **not
-> present on this branch** — it lives on the Redis branch, unmerged. The figures
-> quoted from it were read there; if that branch has moved, re-read rather than
-> trusting these.
+It is **disabled by default and nothing about the current deployment changes**.
+With `REALTIME_ADAPTER` unset the package is never even imported.
+
+**Activation, when a second instance is genuinely wanted:**
+
+```
+REALTIME_ADAPTER=postgres
+REALTIME_ADAPTER_URL=postgres://…@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+**The constraint that matters, and it is easy to get wrong.** `LISTEN` holds
+state on a connection between statements. Supavisor in **transaction** mode
+(port 6543) returns the connection to the pool after every transaction, so a
+registered `LISTEN` is simply gone — no error, no notifications, and a cluster
+that looks healthy while broadcasting nothing. `DATABASE_URL` is meant to point
+at exactly that pooler, which is why `REALTIME_ADAPTER_URL` is deliberately not
+defaulted to it, and why setting the adapter without one stops the boot. Use the
+**session**-mode pooler (port 5432 on the pooler host) or a direct connection.
+
+The adapter creates its own `socket_io_attachments` table on first enabled boot,
+the way `instanceLock.js` creates its own table. It is not a migration: a
+PostgreSQL-only migration is skipped on a freshly provisioned database, because
+`applyPostgresSchema` records every registry version as already supplied.
+
+Proved rather than asserted: `realtime.adapter.test.js` starts two independent
+Socket.IO servers over a real PostgreSQL and checks that a broadcast made on one
+reaches a client attached to the other — which is precisely the delivery a second
+instance cannot do without it.
 
 ### The rate limiters' STORE is still per-process
 
@@ -137,15 +159,42 @@ between 500 and 1,000 users, and that `apiLimiter` alone would be several times
 the entire allowance. The keying fix above is orthogonal — it makes the buckets
 correct, whoever stores them.
 
-### Other process-local state, and why it is fine
+### Other process-local state, classified
+
+Re-audited after the adapter work. Every piece of module-level mutable state in
+`server/` was read and placed in one of four boxes.
 
 | State | Where | Verdict |
 |---|---|---|
-| `loginFailures` map | `routes/authRoutes.js` | per-process; N× looser with N instances. Moved to Redis on the Redis branch. |
-| `sendBuckets` | `routes/messageRoutes.js` | per-process message throttle; same class as the limiters. |
-| Legal content cache | `legalContent.js` | derived from files on disk and hash-verified at boot. Safe: every instance computes the same answer. |
-| Weather / geocode / travel caches | their route files | third-party response caches. Safe but wasteful — each instance re-warms. Handled on the Redis branch. |
-| Instance lock heartbeat | `instanceLock.js` | the thing enforcing one instance. |
+| `loginFailures` map | `routes/authRoutes.js` | **must be shared** — per-process, so N instances is N× looser. Moved to Redis on the Redis branch. |
+| `sendBuckets` | `routes/messageRoutes.js` | **must be shared** — a per-process message throttle, same class as the limiters. |
+| `express-rate-limit` stores | every limiter | **must be shared** — see below. |
+| Rerank budget (`rerankMonth`, `rerankSpent`) | `search/discoverSearch.js` | **safe today, would need attention if reranking is ever switched on.** See below. |
+| `lastBackupAlertAt` | `alerting.js` | **safe** — an alert-dedupe timestamp. N instances means up to N copies of a backup alert. Noisy, never wrong, and the alert is rare. |
+| Legal content cache | `legalContent.js` | **safe** — derived from files on disk and hash-verified at boot. Every instance computes the same answer. |
+| Weather / geocode / travel caches | their route files | **safe but wasteful** — third-party response caches; each instance re-warms its own. Handled on the Redis branch. |
+| Telemetry sink and buffers | `telemetry.js`, `telemetrySink.js` | **safe** — each instance ships its own records, which is what a per-instance access log should do. |
+| Pinecone config cache, SMTP provider handle, outbox handle | `search/pineconeConfig.js`, `emailService.js` | **safe** — connection handles and parsed config, per process by nature. |
+| Boot flags (`postgresSchemaPending`, `demoSeedPending`, `shuttingDown`) | `db.js`, `shutdown.js` | **safe** — per-process lifecycle, meaningless to share. |
+| Async-context connection (`defaultConnection`) | `db/connectionContext.js` | **safe** — the process's own database handle. |
+| Worker/scheduler timers and `isRunning` flags | the four workers | **safe now** — each instance runs its own timer, and the leader lease decides which one does the work. |
+| Socket.IO adapter pool | `realtime/adapter.js` | **safe** — one per process by construction, and its whole job is to connect them. |
+
+**The rerank budget deserves its own note**, because it is the one item whose
+classification depends on a setting. `search/discoverSearch.js` counts Pinecone
+rerank calls in memory against a monthly allowance of 500. With N instances that
+becomes N × 500 before the soft limit bites.
+
+It is still classified safe, and deliberately not moved:
+
+- Reranking is **off by default** (`PINECONE_RERANK=1` is required).
+- Its own header already accepts that a restart resets the counter, for a stated
+  reason: the alternative is a database write on the read path of every search.
+- The real ceiling is Pinecone's own 429, and a 429 degrades to the unreranked
+  order rather than failing the search.
+
+So the honest statement is: if reranking is ever enabled **and** a second
+instance is deployed, this needs a shared counter first. Not before.
 
 ---
 
@@ -153,23 +202,26 @@ correct, whoever stores them.
 
 In order, because each depends on the one before it:
 
-1. **A Socket.IO adapter**, on a store with a round trip the message path can
-   afford. Until this exists, realtime is broken across instances rather than
-   degraded.
+1. **Turn the Socket.IO adapter on** — `REALTIME_ADAPTER=postgres` plus a
+   session-mode or direct `REALTIME_ADAPTER_URL`. Built and tested; see above.
 2. **A shared rate-limit store**, with the cost table in the Redis branch's
    `docs/operations/upstash.md` §7.3 re-read against the real population — the
-   free tier does not carry `apiLimiter`.
-3. **Lift the refusal in `instanceLock.js`**, which is one line and must be last,
+   free tier does not carry `apiLimiter`. This is the remaining piece of work.
+3. **A shared rerank counter**, but only if reranking is enabled by then.
+4. **Lift the refusal in `instanceLock.js`**, which is one line and must be last,
    not first.
 
-The scheduler leases and the job queues need no further work; they are ready now.
+The scheduler leases, the job queues, the capacity guard and the realtime adapter
+need no further work; they are ready now. Step 2 is the only one that is still a
+build rather than a setting.
 
 ---
 
 ## 5. Connection pooling under multiple instances
 
-`DATABASE_POOL_MAX` is **per process**. Two instances at the default of 10 open
-20 connections, not 10. See
+`DATABASE_POOL_MAX` is **per process**, and the default is now **25** (raised
+from 10 on a measurement — see `deploy/wevolunteer.env.example` for the sweep).
+Two instances open 50 connections, not 25. See
 [postgres-cutover-and-rollback.md](postgres-cutover-and-rollback.md) for the
 provider's ceilings and how to size against them. The short version, checked
 against Supabase's compute documentation on 2026-08-30: the Nano (free) and Micro

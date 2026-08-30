@@ -174,15 +174,41 @@ export function postgresConfig(env = process.env) {
   }
 
   /**
-   * Pool size. Ten, deliberately, and not larger.
+   * Pool size, PER PROCESS.
    *
-   * This is one Node process — `instanceLock.js` enforces that — with three
-   * background workers and a scheduler. PostgreSQL does not go faster when given
-   * more concurrent connections than it has cores to serve them with, and a
-   * managed provider meters direct connections besides. If a pooler sits in
-   * front, the client-side pool competes with it rather than adding throughput.
+ * ── Measured, not reasoned ──
+ *
+ * This was 10, and the argument for it was that "PostgreSQL does not go faster
+ * when handed more concurrent connections than it has cores to serve them
+ * with". That is true of CPU-bound queries and it is the wrong model here: over
+ * a network a pooled client spends most of its life waiting on a round trip, not
+ * on database CPU, so the pool has to be sized for requests in flight rather
+ * than for cores.
+ *
+ * `bin/load-test.mjs --latency-profile same-region --soak 45 --pool-max N`, at
+ * 20 concurrent HTTP connections and a 3ms round trip:
+ *
+ *      pool    req/s     p50      p95      p99   peak waiting
+ *         5     67.7   203ms   1027ms   1164ms       19
+ *        10    127.2   120ms    481ms    526ms       17
+ *        15    269.2    56ms    161ms    194ms       13
+ *        20    403.4    37ms     97ms    106ms        9
+ *        25    486.8    29ms     73ms     80ms        5
+ *        40    501.8    24ms     58ms     64ms        0
+ *
+ * 25 takes ~97% of the achievable throughput and drops p95 by 6.6x against the
+ * old default; past it the curve is flat. With NO injected latency the same
+ * sweep is noise (863 / 1011 / 706 / 871 req/s at 10 / 20 / 30 / 50), because
+ * loopback makes the application's own event loop the bottleneck instead — which
+ * is exactly why the old number looked defensible for as long as it did.
+ *
+ * ── It still has a ceiling, and the ceiling is per process ──
+ *
+ * Supabase's Nano and Micro sizes allow 60 direct connections and 200 Supavisor
+ * pooler clients. 25 leaves room for eight instances against the pooler, or two
+ * against a direct connection — which is another reason to use the pooler.
    */
-  const max = Number(env.DATABASE_POOL_MAX ?? 10);
+  const max = Number(env.DATABASE_POOL_MAX ?? 25);
   if (!Number.isInteger(max) || max < 1 || max > 100) {
     throw new Error(`FATAL: DATABASE_POOL_MAX="${env.DATABASE_POOL_MAX}" must be an integer between 1 and 100.`);
   }

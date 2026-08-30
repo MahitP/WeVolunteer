@@ -241,13 +241,17 @@ export class PostgresTransaction extends PostgresExecutorBase {
  *
  * ── Pool sizing ──
  *
- * `max` defaults to 10. That is a deliberate number rather than a large one:
- * this application is a single Node process (`instanceLock.js` enforces it) with
- * three background workers and a scheduler, and PostgreSQL performs worse, not
- * better, when handed more concurrent connections than it has cores to serve.
- * Supabase additionally meters direct connections, and its transaction-mode
- * pooler sits in front — so a large client-side pool competes with the server's
- * own pooling rather than adding throughput.
+ * `max` defaults to 25, and the number is measured rather than argued. It was 10,
+ * on the reasoning that PostgreSQL gains nothing from more concurrent
+ * connections than it has cores — which is right for CPU-bound queries and wrong
+ * here, because over a network a pooled client spends most of its life waiting
+ * on a round trip. `db/engine.js` carries the full sweep; the short version is
+ * that at a 3ms round trip and 20 concurrent requests, raising the pool from 10
+ * to 25 took throughput from 127 to 487 req/s and p95 from 481ms to 73ms, while
+ * the same sweep on loopback is flat noise.
+ *
+ * It is still per process, and the provider's ceiling is real: Supabase's entry
+ * sizes allow 60 direct connections and 200 through Supavisor.
  *
  * ── Statement caching is left off ──
  *
@@ -260,7 +264,7 @@ export class PostgresTransaction extends PostgresExecutorBase {
 export class PostgresDatabase extends PostgresExecutorBase {
   #pool;
 
-  constructor({ connectionString, max = 10, ssl, translate, idleTimeoutMillis = 30_000, connectionTimeoutMillis = 10_000 } = {}) {
+  constructor({ connectionString, max = 25, ssl, translate, idleTimeoutMillis = 30_000, connectionTimeoutMillis = 10_000 } = {}) {
     if (!translate) throw new Error('PostgresDatabase requires a placeholder translator.');
     const pool = new Pool({ connectionString, max, ssl, idleTimeoutMillis, connectionTimeoutMillis });
 

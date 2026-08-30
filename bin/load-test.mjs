@@ -46,8 +46,8 @@
  *   --json PATH      write the raw results
  *   --label TEXT     a name for this run, printed and stored in the JSON
  */
-import { spawn } from 'node:child_process';
-import net from 'node:net';
+import { spawn, execFileSync } from 'node:child_process';
+import { Worker } from 'node:worker_threads';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -89,25 +89,70 @@ const LABEL = arg('label', 'unlabelled');
  */
 const API_LIMIT = Number(arg('api-limit', 1_000_000));
 /**
- * Milliseconds of artificial round-trip latency between the app and PostgreSQL.
+ * Synthetic database round-trip latency, as a named profile.
  *
- * ── Why this option exists ──
+ * ── Why this is not one number ──
  *
  * Loopback PostgreSQL answers in about a tenth of a millisecond, so a handler
  * that issues fourteen queries in series looks almost identical to one that
- * issues five. Production is not loopback: the database is a managed provider
- * reached over the network, and there a round trip is milliseconds. Measuring
- * round-trip reduction on loopback and reporting it as an improvement would be
- * measuring the wrong machine.
+ * issues five. Production is not loopback. Measuring round-trip reduction on
+ * loopback and reporting it as an improvement would be measuring the wrong
+ * machine — and measuring it at one fixed delay hides which endpoints degrade
+ * badly as the round trip grows.
  *
- * With `--db-latency 5`, every statement costs 5 ms more than it did, which is a
- * plausible figure for an application and a database in the same region. The
- * difference between the two runs is then the round-trip count, which is the
- * thing being changed.
+ * ── Where the numbers come from ──
  *
- * Zero (the default) means the app talks to PostgreSQL directly.
+ * These are SYNTHETIC TEST CONDITIONS, not measurements of this deployment.
+ * They are chosen to bracket what published benchmarks report for managed
+ * PostgreSQL, read 2026-08-30:
+ *
+ *   local        0 ms          the database on the same machine — the control
+ *   same-region  3 ms ± 1      managed PostgreSQL in-region averages 2.7-3.3 ms
+ *                              across AWS RDS, Azure Flexible Server and GCP
+ *   pooled       8 ms ± 4      the same, plus a pooler hop and a cross-AZ leg;
+ *                              cross-AZ synchronous replication is reported to
+ *                              add 2-3 ms on its own
+ *   distant     40 ms ± 20     application and database in different regions —
+ *                              the configuration to avoid, measured so the cost
+ *                              of drifting into it is legible rather than
+ *                              theoretical
+ *
+ * `--db-latency N` still forces a fixed delay with no jitter, which is what the
+ * earlier before/after tables were measured with and is the reproducible form.
  */
-const DB_LATENCY_MS = Number(arg('db-latency', 0));
+const LATENCY_PROFILES = {
+  local: { base: 0, jitter: 0 },
+  'same-region': { base: 3, jitter: 1 },
+  pooled: { base: 8, jitter: 4 },
+  distant: { base: 40, jitter: 20 },
+};
+
+const PROFILE_NAME = arg('latency-profile', null);
+const FIXED_LATENCY = arg('db-latency', null);
+
+const LATENCY = (() => {
+  if (FIXED_LATENCY != null) {
+    return { name: `fixed-${FIXED_LATENCY}ms`, base: Number(FIXED_LATENCY), jitter: 0 };
+  }
+  if (PROFILE_NAME) {
+    const p = LATENCY_PROFILES[PROFILE_NAME];
+    if (!p) {
+      console.error(`Unknown --latency-profile "${PROFILE_NAME}". Known: ${Object.keys(LATENCY_PROFILES).join(', ')}`);
+      process.exit(1);
+    }
+    return { name: PROFILE_NAME, ...p };
+  }
+  return { name: 'local', base: 0, jitter: 0 };
+})();
+
+/** Kept for the summary line and the JSON, where the old field name is expected. */
+const DB_LATENCY_MS = LATENCY.base;
+
+/** How long to soak, in seconds. Zero means the ordinary scenario run. */
+const SOAK_SECONDS = Number(arg('soak', 0));
+
+/** The application's connection-pool ceiling for this run. */
+const POOL_MAX = arg('pool-max', null);
 
 if (!DB_URL) {
   console.error('LOAD_DB_URL is required. Use a throwaway database:');
@@ -144,8 +189,12 @@ let child = null;
 let BASE = null;
 let latencyProxy = null;
 
+/** The child server's recent output, so a failure can say what it said. */
+const serverLogs = [];
+let serverExited = null;
+
 /**
- * A TCP proxy that delays every byte in both directions.
+ * A TCP proxy that delays every byte in both directions, on its own thread.
  *
  * Deliberately dumb: it does not parse the PostgreSQL protocol, it just holds
  * each chunk for half the configured latency before passing it on, so a
@@ -157,35 +206,107 @@ let latencyProxy = null;
  * the direct connection, because slowing down a bulk insert of half a million
  * rows measures nothing and takes all afternoon.
  */
-async function startLatencyProxy(target, delayMs) {
+async function startLatencyProxy(target, profile) {
   const { hostname, port } = new global.URL(target);
-  const half = delayMs / 2;
 
-  const server = net.createServer((client) => {
-    const upstream = net.connect({
+  /**
+   * The proxy runs on its OWN THREAD, and that is not a detail.
+   *
+   * The first version ran it inline, in the same event loop as autocannon. Under
+   * sustained load that starved: a 15-minute soak at 20 connections reported
+   * 20 req/s with 1,220 timeouts and a p99 of 1,446 ms, and the same soak with
+   * the proxy removed reported **857 req/s, p99 56 ms and zero errors**. The
+   * application was never the bottleneck — the measurement instrument was.
+   *
+   * A worker has its own event loop, so relaying packets no longer competes with
+   * generating load. It is worth stating plainly because the failure was
+   * indistinguishable from a real one: saturated pool, climbing latency, request
+   * timeouts. A harness that cannot be told apart from the defect it is looking
+   * for is worse than no harness.
+   */
+  const worker = new Worker(LATENCY_PROXY_SOURCE, {
+    eval: true,
+    workerData: {
       host: hostname || '127.0.0.1',
       port: Number(port) || 5432,
-    });
+      base: profile.base,
+      jitter: profile.jitter,
+    },
+  });
+  worker.unref();
+
+  const listenPort = await new Promise((resolve, reject) => {
+    worker.once('message', (msg) => resolve(msg.port));
+    worker.once('error', reject);
+    setTimeout(() => reject(new Error('latency proxy did not start')), 10_000);
+  });
+  latencyProxy = worker;
+
+  const proxied = new global.URL(target);
+  proxied.hostname = '127.0.0.1';
+  proxied.port = String(listenPort);
+  console.log(
+    `[load] latency profile "${profile.name}": ${profile.base}ms`
+    + (profile.jitter ? ` +/- ${profile.jitter}ms jitter` : ' (no jitter)')
+    + ' (own thread)'
+  );
+  return proxied.toString();
+}
+
+/**
+ * The proxy body, run inside a worker.
+ *
+ * Written as a string rather than a second file so the harness stays one
+ * self-contained script, the way `bin/scale-probe.mjs` is.
+ *
+ * Delay varies; ORDER cannot. An independent timer per chunk is the obvious
+ * implementation and it is wrong — with jitter, the second chunk can land before
+ * the first, which TCP never does and which desynchronises PostgreSQL's wire
+ * protocol. The first jittered run produced a 500 and then "fetch failed"
+ * exactly that way. Each chunk's release is therefore clamped to be no earlier
+ * than the previous one's.
+ */
+const LATENCY_PROXY_SOURCE = `
+  import net from 'node:net';
+  import { parentPort, workerData } from 'node:worker_threads';
+
+  const { host, port, base, jitter } = workerData;
+
+  const halfDelay = () => {
+    if (!base && !jitter) return 0;
+    let extra = 0;
+    if (jitter) {
+      const u = Math.max(Number.EPSILON, Math.random());
+      const v = Math.random();
+      const normal = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+      extra = Math.abs(normal) * (jitter / 2);
+      if (Math.random() < 0.01) extra += jitter * 5;
+    }
+    return (base + extra) / 2;
+  };
+
+  const server = net.createServer((client) => {
+    const upstream = net.connect({ host, port });
     const pipeDelayed = (from, to) => {
+      let nextRelease = 0;
       from.on('data', (chunk) => {
-        setTimeout(() => { if (!to.destroyed) to.write(chunk); }, half);
+        const now = Date.now();
+        const release = Math.max(now + halfDelay(), nextRelease);
+        nextRelease = release;
+        setTimeout(() => { if (!to.destroyed) to.write(chunk); }, Math.max(0, release - now));
       });
-      from.on('close', () => setTimeout(() => to.destroy(), half + 50));
+      from.on('close', () => {
+        const drain = Math.max(0, nextRelease - Date.now()) + base + jitter * 5 + 50;
+        setTimeout(() => to.destroy(), drain);
+      });
       from.on('error', () => to.destroy());
     };
     pipeDelayed(client, upstream);
     pipeDelayed(upstream, client);
   });
 
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  latencyProxy = server;
-
-  const proxied = new global.URL(target);
-  proxied.hostname = '127.0.0.1';
-  proxied.port = String(server.address().port);
-  console.log(`[load] injecting ${delayMs}ms of database round-trip latency`);
-  return proxied.toString();
-}
+  server.listen(0, '127.0.0.1', () => parentPort.postMessage({ port: server.address().port }));
+`;
 
 /**
  * Boots the real `server/server.js`, not an in-process Express app.
@@ -216,6 +337,7 @@ async function startServer(port, databaseUrl) {
     /* The pool numbers are the point of the exercise. */
     HEALTH_POOL_STATS: 'true',
     API_RATE_LIMIT: String(API_LIMIT),
+    ...(POOL_MAX ? { DATABASE_POOL_MAX: String(POOL_MAX) } : {}),
     /* Sweeps and workers stay ON — they are part of the load. The search
        indexer is a no-op without Pinecone credentials, which is correct: this
        must not call a vendor. */
@@ -232,12 +354,12 @@ async function startServer(port, databaseUrl) {
     cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  const logs = [];
-  child.stdout.on('data', (d) => logs.push(String(d)));
-  child.stderr.on('data', (d) => logs.push(String(d)));
+  child.stdout.on('data', (d) => { serverLogs.push(String(d)); if (serverLogs.length > 400) serverLogs.shift(); });
+  child.stderr.on('data', (d) => { serverLogs.push(String(d)); if (serverLogs.length > 400) serverLogs.shift(); });
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) {
-      console.error(`\n[load] server exited with code ${code}:\n${logs.slice(-40).join('')}`);
+      serverExited = code;
+      console.error(`\n[load] server exited with code ${code}:\n${serverLogs.slice(-40).join('')}`);
     }
   });
 
@@ -250,7 +372,7 @@ async function startServer(port, databaseUrl) {
     } catch { /* not listening yet */ }
     await new Promise(r => setTimeout(r, 250));
   }
-  console.error(`[load] server did not become healthy:\n${logs.join('')}`);
+  console.error(`[load] server did not become healthy:\n${serverLogs.join('')}`);
   throw new Error('server never became healthy');
 }
 
@@ -480,11 +602,36 @@ const cookieHeader = (cookie) => ({ Cookie: `wev_session=${cookie}` });
 async function preflight(id, requests, headers) {
   const bad = [];
   for (const r of requests) {
-    const res = await fetch(BASE + r.path, {
-      method: r.method ?? 'GET',
-      headers: { ...(headers ?? {}), ...(r.headers ?? {}) },
-      body: r.body,
-    });
+    /**
+     * One retry, and only for a TRANSPORT failure.
+     *
+     * Scenarios run back to back, and the moment after twenty connections stop
+     * hammering the server is exactly when a fresh connection can be refused
+     * while the listener's backlog drains — which surfaced as `fetch failed`
+     * killing an entire matrix run between profiles.
+     *
+     * Deliberately narrow: a retry here covers "the socket would not open", not
+     * "the server said no". A non-2xx STATUS is still recorded as a preflight
+     * failure on the first attempt, because that is the thing this check exists
+     * to catch.
+     */
+    let res = null;
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      try {
+        res = await fetch(BASE + r.path, {
+          method: r.method ?? 'GET',
+          headers: { ...(headers ?? {}), ...(r.headers ?? {}) },
+          body: r.body,
+        });
+      } catch (err) {
+        if (attempt === 1) {
+          bad.push(`${r.method ?? 'GET'} ${r.path} -> transport failure: ${err.message}`);
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    if (!res) continue;
     if (res.status < 200 || res.status >= 300) {
       const detail = (await res.text()).slice(0, 160).replace(/\s+/g, ' ');
       bad.push(`${r.method ?? 'GET'} ${r.path} -> ${res.status} ${detail}`);
@@ -511,6 +658,12 @@ async function scenario(id, name, opts) {
   process.stdout.write(`\n[${id}] ${name}\n`);
 
   const headers = opts.headers ?? {};
+
+  /* A moment for the previous scenario's connections to close before the next
+     one opens twenty more. Without it the server's listen backlog is still
+     draining when the preflight arrives. */
+  await new Promise(resolve => setTimeout(resolve, 250));
+
   if (!await preflight(id, opts.requests, headers)) return null;
 
   const run = await autocannon({
@@ -676,6 +829,141 @@ async function concurrencyScenario(cookies) {
 const tally = (arr) => arr.reduce((acc, s) => ({ ...acc, [s]: (acc[s] || 0) + 1 }), {});
 
 /**
+ * Resident set size of the child server, in megabytes.
+ *
+ * Read with `ps` because the server is a separate process — which it is on
+ * purpose, so the load generator's own memory and CPU are not being measured as
+ * the application's. Returns null rather than throwing if the process is gone.
+ */
+function childRssMb() {
+  if (!child?.pid) return null;
+  try {
+    const out = execFileSync('ps', ['-o', 'rss=', '-p', String(child.pid)], { encoding: 'utf8' });
+    const kb = Number(out.trim());
+    return Number.isFinite(kb) ? Math.round(kb / 1024) : null;
+  } catch { return null; }
+}
+
+/** Cumulative CPU seconds the child has used, for a rate between samples. */
+function childCpuSeconds() {
+  if (!child?.pid) return null;
+  try {
+    const out = execFileSync('ps', ['-o', 'time=', '-p', String(child.pid)], { encoding: 'utf8' }).trim();
+    const parts = out.split(/[:.]/).map(Number);
+    if (parts.length < 3) return null;
+    /* ps prints MM:SS.cc or HH:MM:SS.cc depending on magnitude. */
+    const [a, b, c, d] = parts;
+    return parts.length === 4 ? a * 3600 + b * 60 + c + (d || 0) / 100 : a * 60 + b + (c || 0) / 100;
+  } catch { return null; }
+}
+
+/**
+ * A sustained mixed workload, sampled while it runs.
+ *
+ * ── What a soak is for, and what it is not ──
+ *
+ * The scenario runs above answer "how fast is this endpoint". They run for
+ * seconds and cannot answer the questions that only appear over time: does
+ * memory climb and never come back, do pooled connections leak, does a queue
+ * build faster than it drains, does latency degrade as the process ages.
+ *
+ * So this drives ONE mixed workload continuously and samples the things that
+ * would move if any of those were true. It deliberately reports the trend rather
+ * than a verdict: a run that ends higher than it started is a signal to
+ * investigate, not proof of a leak, because a Node heap legitimately grows until
+ * the first major collection.
+ */
+async function soak(seconds, headers) {
+  console.log(`\n[SOAK] ${seconds}s sustained mixed workload, sampling every 10s`);
+
+  const requests = [
+    { method: 'GET', path: '/api/events?limit=20' },
+    { method: 'GET', path: '/api/applications?limit=20' },
+    { method: 'GET', path: '/api/notifications?limit=20' },
+    { method: 'GET', path: '/api/auth/me' },
+    { method: 'GET', path: '/api/certificates' },
+  ];
+  if (!await preflight('SOAK', requests, headers)) return null;
+
+  const samples = [];
+  let sampling = true;
+  const startCpu = childCpuSeconds();
+
+  const sampler = (async () => {
+    let lastCpu = startCpu;
+    while (sampling) {
+      await new Promise(r => setTimeout(r, 10_000));
+      if (!sampling) break;
+      let health = null;
+      try { health = await (await fetch(`${BASE}/health`)).json(); } catch { /* keep sampling */ }
+      let jobs = null;
+      try {
+        const [{ c }] = await q("SELECT COUNT(*)::int c FROM notification_jobs WHERE status = 'pending'");
+        jobs = c;
+      } catch { /* keep sampling */ }
+      const cpu = childCpuSeconds();
+      samples.push({
+        atSeconds: samples.length * 10 + 10,
+        rssMb: childRssMb(),
+        cpuPercent: cpu != null && lastCpu != null ? Math.round(((cpu - lastCpu) / 10) * 100) : null,
+        pool: health?.pool ?? null,
+        pendingJobs: jobs,
+      });
+      lastCpu = cpu;
+    }
+  })();
+
+  const run = await autocannon({
+    url: BASE, connections: CONNECTIONS, duration: seconds, headers, requests,
+  });
+  sampling = false;
+  await sampler;
+
+  const record = {
+    id: 'SOAK',
+    name: `${seconds}s sustained mixed workload`,
+    rps: Number(run.requests.average.toFixed(1)),
+    p50: run.latency.p50,
+    p95: run.latency.p97_5,
+    p99: run.latency.p99,
+    total: run.requests.total || 0,
+    non2xx: run.non2xx || 0,
+    errors: run.errors || 0,
+    timeouts: run.timeouts || 0,
+    samples,
+    healthy: (run.non2xx || 0) + (run.errors || 0) + (run.timeouts || 0) === 0,
+  };
+  results.push(record);
+
+  console.log(`      ${record.rps} req/s   p50=${record.p50}ms  p97.5=${record.p95}ms  p99=${record.p99}ms`
+    + `   non-2xx=${record.non2xx} errors=${record.errors} timeouts=${record.timeouts}`);
+  console.log('       at    rss     cpu   pool(total/idle/waiting)  pending jobs');
+  for (const smp of samples) {
+    const pool = smp.pool ? `${smp.pool.total}/${smp.pool.idle}/${smp.pool.waiting}` : '-';
+    console.log(
+      `      ${String(smp.atSeconds).padStart(4)}s ${String(smp.rssMb ?? '-').padStart(5)}MB `
+      + `${String(smp.cpuPercent ?? '-').padStart(5)}% ${pool.padStart(22)}  ${String(smp.pendingJobs ?? '-').padStart(6)}`
+    );
+  }
+
+  if (samples.length >= 2) {
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const growth = (last.rssMb ?? 0) - (first.rssMb ?? 0);
+    record.rssGrowthMb = growth;
+    record.poolWaitingMax = Math.max(...samples.map(x => x.pool?.waiting ?? 0));
+    record.pendingJobsGrowth = (last.pendingJobs ?? 0) - (first.pendingJobs ?? 0);
+    console.log(
+      `      RSS ${first.rssMb}MB -> ${last.rssMb}MB (${growth >= 0 ? '+' : ''}${growth}MB), `
+      + `peak pool waiting ${record.poolWaitingMax}, pending jobs ${growth >= 0 ? '' : ''}`
+      + `${first.pendingJobs} -> ${last.pendingJobs}`
+    );
+  }
+  return record;
+}
+
+
+/**
  * How long a broadcast to every confirmed volunteer takes.
  *
  * ── Why this is timed once rather than driven by autocannon ──
@@ -788,8 +1076,8 @@ async function main() {
   await refuseNonEmpty();
 
   const port = 5100 + Math.floor(Math.random() * 300);
-  const appDbUrl = DB_LATENCY_MS > 0
-    ? await startLatencyProxy(DB_URL, DB_LATENCY_MS)
+  const appDbUrl = (LATENCY.base > 0 || LATENCY.jitter > 0)
+    ? await startLatencyProxy(DB_URL, LATENCY)
     : DB_URL;
   console.log(`[load] booting the server on ${port} against ${redact(DB_URL)}…`);
   await startServer(port, appDbUrl);
@@ -807,6 +1095,12 @@ async function main() {
   const student = cookies[0].cookie;
   const organizerCookie = await login('load50@load.invalid');
   const adminCookie = await login('admin@example.gov');
+
+  if (SOAK_SECONDS > 0) {
+    await soak(SOAK_SECONDS, cookieHeader(student));
+    summarise({ counts, pool: await readPool() });
+    return;
+  }
 
   await scenario('A', 'public browse — events list, search, detail', {
     headers: cookieHeader(student),
@@ -913,12 +1207,14 @@ async function main() {
   /* Pool saturation, read after the load rather than during it: `waiting` is
      cumulative pressure and a reading taken while idle is the honest "did it
      recover" answer. */
-  let pool = null;
-  try {
-    pool = (await (await fetch(`${BASE}/health`)).json()).pool ?? null;
-  } catch { /* the summary survives without it */ }
+  summarise({ counts, pool: await readPool() });
+}
 
-  summarise({ counts, pool });
+/** Pool counts from /health, or null when the endpoint does not publish them. */
+async function readPool() {
+  try {
+    return (await (await fetch(`${BASE}/health`)).json()).pool ?? null;
+  } catch { return null; }
 }
 
 function redact(url) {
@@ -931,12 +1227,14 @@ function redact(url) {
 function summarise({ counts, pool }) {
   console.log('\n================ SUMMARY ================');
   console.log(`label=${LABEL}  users=${counts.users}  events=${counts.events}  `
-    + `applications=${counts.applications}  connections=${CONNECTIONS}  duration=${DURATION}s  `
-    + `apiLimit=${API_LIMIT}  dbLatency=${DB_LATENCY_MS}ms`);
+    + `applications=${counts.applications}  connections=${CONNECTIONS}  `
+    + `duration=${SOAK_SECONDS > 0 ? `${SOAK_SECONDS}s (soak)` : `${DURATION}s`}  `
+    + `apiLimit=${API_LIMIT}  latency=${LATENCY.name}(${LATENCY.base}+/-${LATENCY.jitter}ms)`
+    + (POOL_MAX ? `  poolMax=${POOL_MAX}` : ''));
   console.log('');
   console.log('  id   req/s      p50      p97.5      p99   non-2xx  scenario');
   for (const r of results) {
-    if (r.id === 'F' || r.id === 'G') continue;
+    if (r.id === 'F' || r.id === 'G' || r.id === 'SOAK') continue;
     console.log(
       `  ${r.id.padEnd(3)} ${String(r.rps).padStart(7)} `
       + `${String(r.p50).padStart(8)}ms ${String(r.p95).padStart(8)}ms ${String(r.p99).padStart(7)}ms `
@@ -979,7 +1277,9 @@ function summarise({ counts, pool }) {
       corpus: counts,
       settings: {
         users: USERS, events: EVENTS, duration: DURATION,
-        connections: CONNECTIONS, apiLimit: API_LIMIT, dbLatencyMs: DB_LATENCY_MS,
+        connections: CONNECTIONS, apiLimit: API_LIMIT,
+        latencyProfile: LATENCY, poolMax: POOL_MAX ? Number(POOL_MAX) : null,
+        soakSeconds: SOAK_SECONDS,
       },
       pool,
       results,
@@ -1000,9 +1300,18 @@ try {
   await main();
 } catch (err) {
   console.error('\n[load] failed:', err.message);
+  if (err.cause) console.error('[load] cause:', err.cause);
+  if (serverExited !== null) {
+    console.error(`[load] the server had already exited with code ${serverExited}.`);
+  }
+  /* The child's own output is usually the answer, and swallowing it turns every
+     transport-level failure into the same unhelpful "fetch failed". */
+  if (serverLogs.length) {
+    console.error('[load] last lines from the server:\n' + serverLogs.slice(-25).join(''));
+  }
   process.exitCode = 1;
 } finally {
   await stopServer();
   await pool.end();
-  latencyProxy?.close();
+  await latencyProxy?.terminate();
 }

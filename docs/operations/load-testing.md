@@ -37,30 +37,51 @@ dropdb wv_load
 | `--events N` | 1000 | synthetic events (slots, applications and attendance derive from this) |
 | `--duration N` | 5 | seconds per scenario |
 | `--connections N` | 20 | concurrent connections |
-| `--db-latency N` | 0 | milliseconds of artificial database round-trip latency (§5) |
+| `--latency-profile NAME` | `local` | synthetic database round-trip latency (§2.1) |
+| `--db-latency N` | — | a FIXED delay with no jitter, overriding the profile |
+| `--soak N` | 0 | run one sustained mixed workload for N seconds instead of the scenarios (§6) |
+| `--pool-max N` | — | the application's `DATABASE_POOL_MAX` for this run |
 | `--api-limit N` | 1000000 | the blanket API limiter's ceiling for the run |
 | `--only A,C,F` | all | run a subset |
 | `--json PATH` | — | write the raw results |
 | `--label TEXT` | `unlabelled` | a name, printed and stored in the JSON |
 
-### The one dependency it adds
+### 2.1 Latency profiles
 
-`autocannon`, as a **devDependency**. It is a Node HTTP benchmarking library, so
-the harness shares this repository's own seeding code and `PostgresDatabase`
-adapter rather than reimplementing them, and it reports real latency percentiles.
+These are **synthetic test conditions**, not measurements of this deployment.
+They bracket what published benchmarks report for managed PostgreSQL, read
+2026-08-30 — in-region averages of 2.7–3.3 ms across AWS RDS, Azure Flexible
+Server and GCP Cloud SQL, with cross-AZ synchronous replication reported to add
+2–3 ms on its own.
 
-`npm audit --omit=dev` reports **0 vulnerabilities**; `npm audit` reports three
-moderate ones, all in `uuid` and reached only through autocannon.
+| profile | round trip | jitter | what it stands for |
+|---|---|---|---|
+| `local` | 0 ms | — | the database on the same machine; the control |
+| `same-region` | 3 ms | ± 1 ms | managed PostgreSQL in the same region |
+| `pooled` | 8 ms | ± 4 ms | the same, plus a pooler hop and a cross-AZ leg |
+| `distant` | 40 ms | ± 20 ms | application and database in different regions — the configuration to avoid, measured so the cost of drifting into it is legible |
 
-On the production host that matters for one step of a deploy and not afterwards.
-The runbook installs with `npm ci --include=dev` because the client build needs
-Vite, then runs `npm prune --omit=dev` once the build is done — so autocannon is
-present while the bundle is being built and gone before the service is
-restarted. It is never loaded by the running server.
+Jitter is a folded normal around the base rather than a uniform band, plus a 1%
+chance of a spike five times the jitter standing in for a retransmit. A uniform
+± band would understate p99, which is the number a jitter profile exists to
+expose.
 
-k6 is the better tool in the abstract and is the escalation path if this ever
-needs to gate CI: it is a single Go binary with built-in thresholds. It cannot
-import this repository's modules, which is why it is not what got built first.
+**Two things the proxy had to get right, and got wrong first.**
+
+*Ordering.* An independent timer per chunk lets a jittered second chunk land
+before the first. TCP never does that, and PostgreSQL's wire protocol is a
+stream — the first jittered run produced a 500 and then `fetch failed` as the
+connection desynchronised. Each chunk's release is now clamped to be no earlier
+than the previous one's: delay varies, order cannot.
+
+*Its own event loop.* The proxy first ran inline, in the same event loop as
+autocannon, and starved under sustained load. A 15-minute soak at 20 connections
+reported **20 req/s, 1,220 timeouts and a p99 of 1,446 ms**; the identical soak
+with the proxy removed reported **857 req/s, p99 56 ms and zero errors**. The
+application was never the bottleneck — the instrument was, and its failure was
+indistinguishable from a real one: saturated pool, climbing latency, timeouts.
+It now runs on a worker thread. Moving it there took the same soak from 20 req/s
+to 106 req/s, and raising the pool took it the rest of the way (§7).
 
 ### Safety
 
@@ -225,7 +246,75 @@ what this measures, and what improved, is only the enqueueing.
 
 ---
 
-## 6. What the load test does not cover
+## 6. Soak, and connection-pool sizing
+
+### The soak
+
+`--soak N` replaces the scenario run with ONE sustained mixed workload — browse,
+applications, notifications, profile, certificates — sampled every ten seconds
+for resident memory, CPU, pool counts and the pending-job backlog. It answers the
+questions a six-second scenario cannot: does memory climb and never come back,
+do pooled connections leak, does a queue build faster than it drains.
+
+**15 minutes, 20 connections, `same-region`, 2,015 users / 1,002 events:**
+
+| | result |
+|---|---|
+| resident memory | 164 MB → 102 MB (fell; no leak) |
+| pending notification jobs | 0 → 0 (no queue buildup) |
+| pooled connections | never exhausted the pool's own recovery — idle returned to full between runs |
+
+A 120-second soak on `local` at the same concurrency: **857 req/s, p50 17 ms,
+p99 56 ms, zero errors, zero timeouts**, with resident memory settling at
+255 → 267 MB and staying there.
+
+Nothing leaked in either run. The first 15-minute run *looked* like it had found
+something — 20 req/s and 1,220 timeouts — and that turned out to be the harness
+starving itself (§2.1), which is why the `local` control matters.
+
+### Connection pool sizing
+
+This is what the soak actually found, and it changed a production default.
+
+`DATABASE_POOL_MAX` was 10, on the argument that PostgreSQL gains nothing from
+more concurrent connections than it has cores. That is true of CPU-bound queries
+and is the wrong model over a network: a pooled client there spends most of its
+life waiting on a round trip, so the pool has to be sized for requests in flight.
+
+**`--latency-profile same-region --soak 45 --pool-max N`, 20 connections:**
+
+| pool | req/s | p50 | p95 | p99 | peak waiting |
+|---|---|---|---|---|---|
+| 5 | 67.7 | 203 ms | 1,027 ms | 1,164 ms | 19 |
+| 10 *(old default)* | 127.2 | 120 ms | 481 ms | 526 ms | 17 |
+| 15 | 269.2 | 56 ms | 161 ms | 194 ms | 13 |
+| 20 | 403.4 | 37 ms | 97 ms | 106 ms | 9 |
+| **25** *(new default)* | **486.8** | **29 ms** | **73 ms** | **80 ms** | 5 |
+| 40 | 501.8 | 24 ms | 58 ms | 64 ms | 0 |
+
+25 takes ~97% of the achievable throughput and drops p95 by **6.6×** against the
+old default; past it the curve is flat.
+
+**The same sweep with no injected latency is noise** — 863 / 1,011 / 706 / 871
+req/s at pools of 10 / 20 / 30 / 50 — because loopback makes the application's own
+event loop the bottleneck instead. That is exactly why 10 looked defensible for
+as long as it did, and it is the strongest argument in this document for
+measuring against a latency profile rather than against a database on the same
+machine.
+
+**A non-zero `waiting` is not by itself a problem.** A small pool queues by
+design, and the healthy loopback runs show waiting of 7–10 with zero errors. It
+is sustained waiting *together with* climbing p95 that says the pool is the
+constraint.
+
+25 is per process. Supabase's entry sizes allow 60 direct connections and 200
+Supavisor pooler clients, so it leaves room for eight instances through the
+pooler — and only two through a direct connection, which is another reason to
+use the pooler.
+
+---
+
+## 7. What the load test does not cover
 
 - **Real network latency to a real provider.** §5 injects a plausible constant.
   A real link has jitter, occasional retransmits, and a pooler in the path.
@@ -242,7 +331,7 @@ what this measures, and what improved, is only the enqueueing.
 
 ---
 
-## 7. Performance budgets
+## 8. Performance budgets
 
 Derived from the measurements above rather than chosen in advance, and stated
 against the deployment that exists: one instance, PostgreSQL over a network.
