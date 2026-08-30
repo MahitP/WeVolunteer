@@ -213,7 +213,28 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The agreement between you and WeVolunteer: what you may do here, what we owe you, and how an account ends.',
     effectiveAt: '2026-08-06',
     file: '02-terms-of-service.md',
-    contentHash: 'b37cfe18ae0927a47f09445852b3a84ba2112dcffd39232b2346f94dcf5f9ab7',
+    /**
+     * Re-pinned twice in this pass, both pre-launch corrections, so 1.0 stands.
+     *
+     * First for the appeals paragraph. §9 promised an appeal is "always"
+     * reviewed by a different administrator; the Community Guidelines say the
+     * software REFUSES a self-review and there is currently one administrator,
+     * so the contract was the more-read document making a promise the
+     * operational document says cannot be kept.
+     *
+     * Then for the acceptable-use review. §4 already covered scraping, bots,
+     * probing and multi-accounting — it is where an Acceptable Use Policy would
+     * have gone, which is why no separate one was written. What it did not cover
+     * was rate-limit circumvention, deliberate disruption, exploiting a bug
+     * rather than reporting it, or malware; "overload" was one word inside
+     * another bullet. §4.1 states the automation policy, and §4.2 gives a
+     * security report somewhere to go and a promise not to punish it — neither
+     * existed anywhere in the set. §8's copyright paragraph became a procedure
+     * with a counter-notice and a repeat-infringer consequence, and says
+     * plainly that no agent is registered rather than implying a safe harbour
+     * that has not been claimed.
+     */
+    contentHash: '1b836c654ef924490c420b1dbe1f4ff2f93abb90af8edaf19cfc01791c2a8514',
     /** Presented with, and accepted by, the same control as the Terms. */
     bundledWith: null,
   },
@@ -238,7 +259,18 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
     effectiveAt: '2026-08-30',
     file: '01-privacy-policy.md',
-    contentHash: 'f05a5989e92e4a248a1956e789819c2c839b378fd91d8f914d1ede9d86a1a88a',
+    /* Re-pinned because the Auto Select disclosure was false. It said the draw
+       uses "only" total credited hours; v1.3 added the attendance term, which
+       the Volunteer Record Policy documents in full. This is the document a
+       guardian reads about automated decision-making, so of the two it was the
+       worse one to be wrong. Pre-launch correction, so 1.0 stands.
+
+       Re-pinned once more on integration: this document also gained the
+       Upstash subprocessor entry on another branch, so the published body
+       now carries both edits and hashes to neither branch's value. Computed
+       from the merged file with `hashPolicyFile`, which is what
+       `legalContent.test.js` checks it against. */
+    contentHash: '55f2e4e72aaea38942506251853224b1b4997b0a079918c36392f340b25be36d',
     bundledWith: null,
   },
   {
@@ -274,7 +306,12 @@ export const LEGAL_DOCUMENTS = [
     summary: 'How to stay safe volunteering, what an adult here should never ask you for, and how to report it when they do.',
     effectiveAt: '2026-08-06',
     file: '08-youth-safety-guidelines.md',
-    contentHash: '68c860b21099c600a0a381fdeaa8ef167cc5fad9735a3cd2ebf6413895e8eff8',
+    /* Re-pinned for the deletion deadline. Rule 6 said "when the event is over";
+       the Organizer Agreement §5 — the document that actually binds an organizer
+       — says within 30 days. This file already defers to §4 for the sharing
+       rule, so it now defers to §5 here for the same reason rather than
+       restating a deadline it does not own. Pre-launch correction, 1.0 stands. */
+    contentHash: '9e624189f900a3b700f13777f43c676cdef341ba1b756415a5973bcc74a58f54',
     bundledWith: null,
   },
   {
@@ -328,7 +365,12 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    contentHash: '2a1d059a5d26e4aef5975749bcb12ee155fffba6eff16deddfb4d74209350f71',
+    /* Re-pinned to remove a dangling clause. "Previous versions are kept at"
+       introduced a URL that had been deleted, leaving the sentence spliced into
+       the v1.0 paragraph mid-clause. 01 and 02 carry the same passage without
+       it, so the clean form already existed and this was the one file that
+       diverged. Pre-launch correction, 1.0 stands. */
+    contentHash: '58ae889d647a791533266e037668a7eeea3475697046bb3c4eed274f90e930ef',
     bundledWith: null,
   },
   {
@@ -384,6 +426,33 @@ export const LEGAL_DOCUMENTS = [
     effectiveAt: '2026-08-15',
     file: '12-ai-and-on-device-processing.md',
     contentHash: '10239aee73d74a7d20bbe75489bd3e2d365319634fcf15798757b2313adbd924',
+    bundledWith: null,
+  },
+  {
+    slug: 'accessibility-statement',
+    /**
+     * `notice` / `notice`, and it matters which.
+     *
+     * This document grants nothing and asks for nothing: it states an
+     * accessibility target, what was tested, what is known to be broken, and how
+     * to report a barrier. `scope: 'signup'` would put a checkbox in front of
+     * every new account and prompt every existing one to re-accept a document
+     * that makes no demands of them — which is both pointless and the way people
+     * learn to click through consent screens without reading them.
+     *
+     * It is also the document most likely to change often, because it names
+     * current known limitations. A `notice` can be revised without invalidating
+     * anybody's acceptance, which is the property that makes honest revision
+     * cheap enough to actually do.
+     */
+    version: '1.0',
+    title: 'Accessibility Statement',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'The accessibility standard WeVolunteer is built and tested against, what has actually been verified and how, what is known to be unfinished, and how to report a barrier.',
+    effectiveAt: '2026-08-22',
+    file: '13-accessibility-statement.md',
+    contentHash: '8a2e2f8f9dda72b997e15270529320e63334bd020284672ef20e5ef728de8726',
     bundledWith: null,
   },
 ];

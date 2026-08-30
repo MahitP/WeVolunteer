@@ -71,6 +71,26 @@ export default function ErrorExperience({
   seed,
   onRetry,
   denied,
+  /**
+   * True when this IS the page, rather than content inside one.
+   *
+   * App.jsx returns a refusal or a 404 BEFORE it builds the shell — deliberately,
+   * so a takeover reads as a page rather than as a card in a navigation frame the
+   * reader has just been told they cannot use. The consequence nobody looked at:
+   * with no shell there is no `<main>`, so this content sat in NO landmark at all.
+   * Measured on twelve routes, `#main-content` was absent and the error was a
+   * direct child of `#root`.
+   *
+   * For a screen-reader user that removes landmark navigation — one of the main
+   * ways of orienting on an unfamiliar page — on exactly the pages where somebody
+   * has just been stopped and needs to work out what to do.
+   *
+   * Left off by default because two of the callers legitimately already have a
+   * `<main>`: the catch-all 404 route renders inside the shell's, and
+   * OfflineOverlay covers an app whose shell is still mounted. Nesting a second
+   * `<main>` inside either would be worse than none.
+   */
+  standalone = false,
 }) {
   const titleId = useId();
 
@@ -110,7 +130,7 @@ export default function ErrorExperience({
   const canRetry = RETRYABLE.includes(kind);
   const weight = weightFor(kind);
 
-  return (
+  const experience = (
     <section
       className={`err err-t-${theme.id}`}
       role="alert"
@@ -193,6 +213,12 @@ export default function ErrorExperience({
       </div>
     </section>
   );
+
+  /* A plain block wrapper: `.err` keeps its own `min-height`, `max-width` and
+     centring, so nothing moves. The only thing this adds is the landmark. */
+  return standalone
+    ? <main className="err-page">{experience}</main>
+    : experience;
 }
 
 /**

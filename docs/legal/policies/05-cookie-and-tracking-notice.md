@@ -264,7 +264,8 @@ clearing your browser storage.
 ## Changes
 
 If we ever add anything that stores data on your device, we will update this page **before**
-it ships and tell you in the app. Previous versions are kept at
+it ships and tell you in the app.
+
 **This is version 1.0 — the first published version, so there are no earlier ones yet.** When we
 replace it we keep the version it replaced; email **privacy@wevolunteers.org** for any
 previous version and the dates it applied.

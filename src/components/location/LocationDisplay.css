@@ -157,8 +157,32 @@
   color: var(--ink-2);
 }
 
+/**
+ * A loading state that is still readable.
+ *
+ * This was `opacity: 0.7`, which composited "Checking the forecast" to #85b4a0
+ * on the surface behind it — 2.38:1, the lowest text contrast measured anywhere
+ * in the application. Fading text to signal "not final yet" fails the people who
+ * need the text most, and the spinner beside it already says the same thing
+ * without touching legibility.
+ */
 .weather-summary.loading {
-  opacity: 0.7;
+  /* Deliberately no `opacity` and deliberately no `color`.
+   *
+   * It was `opacity: 0.7`, which composited "Checking the forecast" to #85b4a0
+   * and measured 2.38:1 — the lowest text contrast in the application. The first
+   * attempt at a fix pinned `color: var(--ink-2)`, which was worse (1.31:1):
+   * this badge also appears inside the dashboard's next-shift card, whose panel
+   * sets `color: var(--ink-inv)` on a dark green, so a fixed DARK colour lands
+   * dark-on-green.
+   *
+   * Inheriting is what works on both surfaces, because each one already sets a
+   * foreground that contrasts with itself. The rule is kept, empty of colour, so
+   * the next person to reach for a fade here reads why not.
+   *
+   * The spinner beside the text already signals "not final yet" without touching
+   * legibility, which is what made the fade unnecessary as well as harmful.
+   */
 }
 
 .weather-icon {

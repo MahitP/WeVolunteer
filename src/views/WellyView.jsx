@@ -1179,8 +1179,25 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
                 the platform works.
               </p>
 
-              <div className="welly-suggestions-container">
-                <p className="welly-suggestions-label dim small">Try asking</p>
+              {/**
+                * A labelled group, not a heading and a loose pile of buttons.
+                *
+                * "Try asking" was a visual label only: sighted readers saw the
+                * buttons grouped under it, and assistive technology met six
+                * unrelated buttons with no indication of what they were for or
+                * how many there were. Naming the group programmatically is what
+                * makes the visible relationship a real one.
+                *
+                * Each button's accessible name is its visible label — the arrow
+                * is aria-hidden — which is what 2.5.3 Label in Name requires of
+                * a control somebody may also be addressing by voice.
+                */}
+              <div
+                className="welly-suggestions-container"
+                role="group"
+                aria-labelledby="welly-suggestions-label"
+              >
+                <p className="welly-suggestions-label dim small" id="welly-suggestions-label">Try asking</p>
                 <div className="welly-suggestions-grid">
                   {suggestions.map(({ label, prompt }) => (
                     <button

@@ -164,7 +164,7 @@ function summarise(kind, data) {
       return `I found ${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}.`;
     case 'certificate':
       return data.valid
-        ? `That certificate is valid: ${data.hours ?? 0} hours for ${data.eventTitle || 'an event'}.`
+        ? `That certificate is valid: ${data.hours ?? 0} hours for ${plainValue(data.eventTitle) || 'an event'}.`
         : 'No certificate matches that code.';
     case 'notifications':
       if (!data.total) return 'You have no recent notifications.';
@@ -172,7 +172,7 @@ function summarise(kind, data) {
     case 'profile':
       return `Profile for ${data.name || 'you'} (${data.role || 'volunteer'}) with ${data.hours || 0} verified hours.`;
     case 'event_details':
-      return `Details for ${data.title}: ${data.slots?.length || 0} shifts available.`;
+      return `Details for ${plainValue(data.title)}: ${data.slots?.length || 0} shifts available.`;
     case 'event_roster':
       return `Roster for event ${data.eventId}: ${data.total} ${data.total === 1 ? 'volunteer' : 'volunteers'} registered.`;
     case 'vacant_events':
@@ -203,7 +203,7 @@ function summarise(kind, data) {
     case 'next_shift': {
       if (!data.next) return 'You have nothing coming up that has been accepted yet.';
       const { eventTitle, slotName, startsAt, hours } = data.next;
-      const where = [eventTitle, slotName].filter(Boolean).join(' — ');
+      const where = [plainValue(eventTitle), plainValue(slotName)].filter(Boolean).join(' — ');
       const length = hours ? ` It is ${hours} ${hours === 1 ? 'hour' : 'hours'}.` : '';
       return `Your next shift is ${where || 'a shift'}${startsAt ? `, ${startsAt}` : ''}.${length}`;
     }
@@ -212,7 +212,7 @@ function summarise(kind, data) {
       if (!data.total) return 'You are not on any waitlists at the moment.';
       const first = data.items?.[0];
       const place = first?.position
-        ? ` You are number ${first.position} for ${first.eventTitle || 'the first one'}.`
+        ? ` You are number ${first.position} for ${plainValue(first.eventTitle) || 'the first one'}.`
         : '';
       return `You are waitlisted for ${data.total} ${data.total === 1 ? 'shift' : 'shifts'}.${place}`;
     }
@@ -243,7 +243,7 @@ function summarise(kind, data) {
     case 'recent_audit': {
       if (!data.total) return 'There is nothing in the audit trail yet.';
       const latest = data.items?.[0];
-      const tail = latest?.action ? ` The most recent is "${latest.action}"${latest.at ? `, ${latest.at}` : ''}.` : '';
+      const tail = latest?.action ? ` The most recent is "${plainValue(latest.action)}"${latest.at ? `, ${latest.at}` : ''}.` : '';
       return `The audit trail has ${data.total} recent ${data.total === 1 ? 'entry' : 'entries'}.${tail}`;
     }
     case 'application_withdrawn':
@@ -258,14 +258,20 @@ function summarise(kind, data) {
      * else. The date and the place are repeated because they are the two
      * things the organizer will check, and because a confirmation that names
      * them is a confirmation of the right event.
+     *
+     * The title and the location go through `plainValue` because an
+     * organizer typed them: control characters and folded whitespace are
+     * how a stored string steers the sentence it is quoted into. The date
+     * is formatted by `localDay` and the shift count is a number, so
+     * neither is text anybody supplied.
      */
     case 'event_created': {
       const when = data.startsOn || null;
-      const where = data.location ? ` at ${data.location}` : '';
+      const where = data.location ? ` at ${plainValue(data.location)}` : '';
       const shifts = data.shifts > 1 ? ` (${data.shifts} shifts)` : '';
       return when
-        ? `Done — “${data.title}” is created and open for applications, starting ${when}${where}${shifts}.`
-        : `Done — “${data.title}” is created and open for applications${where}${shifts}.`;
+        ? `Done — “${plainValue(data.title)}” is created and open for applications, starting ${when}${where}${shifts}.`
+        : `Done — “${plainValue(data.title)}” is created and open for applications${where}${shifts}.`;
     }
     default:
       return 'Here is what I found.';
@@ -410,6 +416,49 @@ const CHAT_HISTORY_TURNS = 6;
  * one thing cannot commit as another — which is the property
  * `responseQuality.test.js` pins.
  */
+/**
+ * A user-authored value, flattened to one line before it enters an answer.
+ *
+ * ── What this is defending ──
+ *
+ * Event titles, shift names and audit action strings are written by other
+ * people. `summarise()` interpolates them into the sentence Welly says, and that
+ * sentence is committed to the transcript as an ordinary assistant turn —
+ * `systemNotice` is false for a successful answer, deliberately, because
+ * `sanitizeHistory` keeps real answers so a follow-up has something to refer to.
+ *
+ * So on the next conversational turn that text is replayed into the model's
+ * context as `{ role: 'assistant', content: … }`. Attacker-authored text,
+ * wearing the assistant's role, in the instruction channel.
+ *
+ * Nothing is escalated by it: the model cannot select a tool, and every
+ * capability is checked on the server. What it can do is steer the next reply,
+ * and the reply is rendered to a minor in the voice of the assistant the app
+ * told them to trust.
+ *
+ * ── Why flattening, specifically ──
+ *
+ * Chat-template injection works by looking like structure — a blank line, then
+ * `System:` or `Assistant:` at the start of a line. Collapse every run of
+ * whitespace to a single space and that shape is unavailable: the words remain,
+ * but they are stuck mid-sentence inside a line Welly is visibly saying.
+ *
+ * The words REMAIN on purpose. A student looking at an event whose name is
+ * suspicious has to be able to read it, and an organizer who typed something odd
+ * should not have it quietly rewritten. This is not sanitisation and must not
+ * become it — `containsLink` in `prompts/welly.js` is what stops the model
+ * turning any of it into somewhere to go.
+ *
+ * Control characters go entirely. They are not content, and they are how a
+ * value smuggles line structure past a whitespace collapse.
+ */
+export function plainValue(value) {
+  if (value === null || value === undefined) return value;
+  const text = String(value);
+  /* eslint-disable-next-line no-control-regex -- the point is to remove these */
+  return text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function formatResponseText(text) {
   if (!text || typeof text !== 'string') return '';
 
@@ -1126,14 +1175,14 @@ export async function ask(
       const draft = createDraft({
         tool: 'withdraw_application',
         args: { applicationId: targetId },
-        preview: `Withdraw application for ${eventTitle || targetId}`,
-        summary: `Withdraw application for ${eventTitle || targetId}`,
+        preview: `Withdraw application for ${plainValue(eventTitle) || targetId}`,
+        summary: `Withdraw application for ${plainValue(eventTitle) || targetId}`,
         user,
       });
 
       return {
         intent,
-        answer: `Are you sure you want to withdraw your application for ${eventTitle || targetId}? Reply "confirm" to proceed or "cancel" to keep your spot.`,
+        answer: `Are you sure you want to withdraw your application for ${plainValue(eventTitle) || targetId}? Reply "confirm" to proceed or "cancel" to keep your spot.`,
         card: { kind: 'draft', data: draft },
         draft: true,
         phrasedByModel: false,
@@ -1257,8 +1306,8 @@ export async function ask(
 
       const nearest = measured[0];
       const answer = measured.length === 1
-        ? `${nearest.title} is about ${nearest.miles} ${nearest.miles === 1 ? 'mile' : 'miles'} away.`
-        : `The closest is ${nearest.title}, about ${nearest.miles} `
+        ? `${plainValue(nearest.title)} is about ${nearest.miles} ${nearest.miles === 1 ? 'mile' : 'miles'} away.`
+        : `The closest is ${plainValue(nearest.title)}, about ${nearest.miles} `
           + `${nearest.miles === 1 ? 'mile' : 'miles'} away.`;
 
       return {

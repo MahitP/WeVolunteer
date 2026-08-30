@@ -370,6 +370,46 @@ export const PLATFORM_OWNER_USERNAME = process.env.PLATFORM_OWNER_USERNAME || ''
 export const MAX_AUTO_SELECT_DRAWS = Number(process.env.MAX_AUTO_SELECT_DRAWS) || 5;
 
 /**
+ * How many distinct opportunities one student may have a pending application to.
+ *
+ * ── Why there is a limit at all ──
+ *
+ * There was none, of any kind. Applying had no rate limit beyond the blanket
+ * per-IP `/api` ceiling and no cap on outstanding state, so one account could
+ * hold an unbounded number of pending applications. Each one is a row, an
+ * organizer notification, and a fan-out notification to every friend of the
+ * applicant — the highest write-amplification path in the product.
+ *
+ * The harm is not mainly load, though. It is that a student who applies to
+ * everything is holding a place in every draw, and Auto Select's whole purpose
+ * is to spread opportunity. A bound on outstanding applications keeps the
+ * behaviour the draw assumes — that applying means you intend to go — roughly
+ * true, without needing to judge intent.
+ *
+ * ── The unit is the EVENT, not the application ──
+ *
+ * Applications are per slot (`UNIQUE(user_id, slot_id)`), so a student who takes
+ * three shifts of one festival holds three applications for one opportunity.
+ * Counting rows would treat that volunteer as though they had applied to three
+ * unrelated things and penalise exactly the commitment the platform wants. Extra
+ * shifts of something already applied to are therefore free.
+ *
+ * ── Ten ──
+ *
+ * The owner's figure, and nothing in the analysis contradicts it: ten distinct
+ * opportunities outstanding at once is already a great deal for one student, and
+ * the roadmap's own note that students cannot see applicant counts — so cannot
+ * spread applications sensibly — argues for generous rather than tight. It is
+ * env-configurable because the right number is a property of a district's
+ * volume, which this repository cannot know.
+ *
+ * Only `pending` counts, and cancelled events are excluded. The reasoning for
+ * each exclusion is in `routes.applicationLimit.test.js`, next to the case that
+ * pins it.
+ */
+export const PENDING_APPLICATION_LIMIT = Number(process.env.PENDING_APPLICATION_LIMIT) || 10;
+
+/**
  * OAuth configuration.
  *
  * SECURITY — the mock transport.

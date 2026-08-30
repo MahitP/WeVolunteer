@@ -143,7 +143,9 @@ Accepting an organizer account means accepting these rules. They are also in the
 
 5. Contact details you receive are **for running that event only**. Do not copy them into a
    personal address book, a mailing list, or another system.
-6. Delete them when the event is over.
+6. Delete them within **30 days** of the event finishing. The
+   [Organizer Agreement](/legal/organizer-agreement) §5 is the binding version of this
+   rule.
 7. Do not share them outside your own organization at all — not with other organizers, not with
    another programme, not with anyone. Inside your organization, share only what a specific
    person needs to run this event (a shift supervisor's check-in list, for example), and make

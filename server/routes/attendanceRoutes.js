@@ -10,6 +10,7 @@ import {
   issueCheckinToken, resolveCheckinToken, consumeCheckinToken, CODE_TTL_MS,
 } from '../checkinTokens.js';
 import { checkinCodeLimiter, checkinScanLimiter } from '../checkinLimiters.js';
+import { csvCell } from '../csv.js';
 import { notificationService } from '../services/notificationService.js';
 import { getOrCreateCertificateCode } from '../certificates.js';
 import { badgeService } from '../services/badgeService.js';
@@ -376,21 +377,20 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
     `).all(eventId);
 
     const calcHours = (start, end) => Math.max(0.1, Number(((new Date(end) - new Date(start)) / 3600000).toFixed(2)));
-    const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
     const csvLines = [
       'Name,Email,School,Grade,Slot,Start,End,Hours,Status,Applied At',
       ...rows.map(r => [
-        cell(r.name),
-        cell(r.email),
-        cell(r.school),
-        cell(r.grade),
-        cell(r.slot_name),
-        cell(new Date(r.start_datetime).toLocaleString()),
-        cell(new Date(r.end_datetime).toLocaleString()),
+        csvCell(r.name),
+        csvCell(r.email),
+        csvCell(r.school),
+        csvCell(r.grade),
+        csvCell(r.slot_name),
+        csvCell(new Date(r.start_datetime).toLocaleString()),
+        csvCell(new Date(r.end_datetime).toLocaleString()),
         calcHours(r.start_datetime, r.end_datetime),
         r.status,
-        cell(new Date(r.applied_at).toLocaleString())
+        csvCell(new Date(r.applied_at).toLocaleString())
       ].join(','))
     ];
 

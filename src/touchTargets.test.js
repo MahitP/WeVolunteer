@@ -82,6 +82,37 @@ describe('touch targets', () => {
     });
   });
 
+  describe('.toast button — the way out of a message covering something', () => {
+    const body = ruleFor('.toast button');
+
+    it('has a rule at all', () => {
+      /* Guards the guard, same as above: a renamed selector would make the
+         assertions below pass against null. */
+      expect(body, '.toast button is no longer declared in index.css').toBeTruthy();
+    });
+
+    it('declares a hit area of at least 44px in both directions', () => {
+      /**
+       * Measured in a real browser at 14x15px — the icon's own box, because the
+       * button had no padding and no minimum. That is under WCAG 2.2 2.5.8's
+       * 24x24 AA floor, let alone this file's 44px house rule, on the one control
+       * every user of the application reaches.
+       *
+       * Found by the browser sweep rather than by this file, which is the
+       * division of labour: a declared `min-width` is checkable here, and whether
+       * a control with NO minimum ends up big enough anyway is only answerable
+       * where layout exists.
+       */
+      expect(pxOf(body, 'min-width'), 'min-width').toBeGreaterThanOrEqual(MINIMUM);
+      expect(pxOf(body, 'min-height'), 'min-height').toBeGreaterThanOrEqual(MINIMUM);
+    });
+
+    it('centres its icon, so the target is the button and not the glyph', () => {
+      expect(body).toMatch(/align-items\s*:\s*center/);
+      expect(body).toMatch(/justify-content\s*:\s*center/);
+    });
+  });
+
   it('states the 44px floor for coarse pointers somewhere', () => {
     /* The pre-existing rule this control should always have been inside.
        Asserted so the floor cannot be deleted while individual controls keep

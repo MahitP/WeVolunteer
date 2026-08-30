@@ -87,11 +87,30 @@ router.get('/api/events/:id/comments', authenticateToken, async (req, res) => {
   }
 });
 
+/** Named so the cap and the message it produces cannot drift apart. */
+const MAX_COMMENT_LENGTH = 1000;
+
 router.post('/api/events/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { body } = req.body;
-    if (!body || !body.trim()) return res.status(400).json({ error: 'Comment cannot be empty' });
-    if (body.length > 1000) return res.status(400).json({ error: 'Comment is too long (max 1000 chars)' });
+    /**
+     * `typeof`, not just truthiness.
+     *
+     * `!body` alone let `42`, `true`, `['hi']` and `{a:1}` reach `body.trim()`,
+     * which is not a function on a number or a plain object — so the request
+     * threw, landed in the catch below, and answered 500. The server said it was
+     * broken when the request was.
+     *
+     * Same defect and same fix as the `slotId` guard in `applicationRoutes.js`
+     * and the non-string `targetId` in `reportService.js`;
+     * `routes.malformed.test.js` is where that class is asserted.
+     */
+    if (typeof body !== 'string' || !body.trim()) {
+      return res.status(400).json({ error: 'Comment cannot be empty' });
+    }
+    if (body.length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ error: `Comment is too long (max ${MAX_COMMENT_LENGTH} chars)` });
+    }
 
     const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });

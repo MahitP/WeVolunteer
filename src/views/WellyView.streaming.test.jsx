@@ -238,7 +238,13 @@ describe('what arrives on screen is what was generated', () => {
     ['multiple paragraphs', 'First paragraph.\n\nSecond paragraph.'],
     ['unicode', 'Ståle, 日本語, Привет.'],
     ['emoji', 'Nice work! 🎉 Top of your grade — ¡felicidades!'],
-    ['a URL', 'Read https://example.org/hours for the detail.'],
+    /* No URL entry. `isUsableReply` refuses a model reply naming an absolute
+       destination — see the case at the end of this block — so one cannot be
+       used to prove anything about rendering. The character-fidelity property it
+       contributed is covered by the punctuation and unicode rows above, and the
+       link RENDERING it implied is tested directly at
+       `src/components/ai/WellyMessage.test.jsx`, which is where the renderer
+       lives. */
   ];
 
   for (const [name, reply] of MATRIX) {
@@ -276,15 +282,39 @@ describe('what arrives on screen is what was generated', () => {
     expect(t.bubbles()[0].querySelector('pre code').textContent).toBe('await checkIn(id);');
   });
 
-  it('links a URL without altering the address', async () => {
+  /**
+   * A URL from the model never reaches the screen at all.
+   *
+   * This case used to queue `Read https://example.org/a_b?c=1 for the detail.`
+   * and assert the rendered `href` was unaltered. That was a test of the
+   * RENDERER driven through the model, and it is now testing a path policy
+   * closes: `isUsableReply` refuses a reply naming an absolute destination,
+   * because Welly has no source of URLs — the informational corpus is fixed
+   * application text, `summarise()` composes every deterministic answer, and
+   * getting somewhere in this app is a router navigation rather than a link the
+   * model writes. So a URL in model output is hallucinated or planted, and
+   * `WellyMessage` would render an http(s) one as a clickable anchor for a
+   * fourteen-year-old. `src/ai/indirectInjection.test.js` has the path that made
+   * it reachable.
+   *
+   * The renderer's own behaviour is unchanged and still tested, directly, at
+   * `src/components/ai/WellyMessage.test.jsx` — "renders markdown links and bare
+   * URLs, opening external ones safely". In practice nothing now feeds it a
+   * link, so that coverage is defensive; it is kept for exactly that reason.
+   */
+  it('does not put a model-supplied URL on screen at all', async () => {
     runtime.queue('Read https://example.org/a_b?c=1 for the detail.');
     const t = setup();
     await waitForReady();
     await askWelly(CHATTY);
 
     await waitFor(() => expect(t.bubbles()).toHaveLength(1));
-    expect(t.bubbles()[0].querySelector('a').getAttribute('href'))
-      .toBe('https://example.org/a_b?c=1');
+    const bubble = t.bubbles()[0];
+    expect(bubble.querySelector('a'), 'an anchor reached the transcript').toBeNull();
+    expect(bubble.textContent).not.toContain('example.org');
+    /* Replaced wholesale by the deterministic sentence rather than edited — the
+       no-post-hoc-repair invariant is unaffected by the refusal. */
+    expect(bubble.textContent.length).toBeGreaterThan(0);
   });
 });
 

@@ -19,12 +19,13 @@ is disclosure — a student must understand, before deleting, that their name pe
 couples to the age gate:** COPPA §312.10 forbids indefinite retention of a child's data, so
 indefinite certificates are lawful only while no under-13 account can exist (re-audit R-01/R-02).
 
-**The `[[NOT YET BUILT]]` block near the end is retained deliberately.** Certificate voiding is
-scheduled later in this programme; the block holds the drafted text for when it ships and blocks
-publication until then, which is correct — a document that offered the choice today would be
-describing a feature that does not exist. Whoever ships voiding removes this marker and the twin
-in [`04-data-deletion-policy.md`](/legal/data-deletion-policy) in the same pull request, and
-updates the Privacy Policy paragraph that currently states plainly that no such option exists.
+**The `[[NOT YET BUILT]]` block near the end is gone.** It held drafted text for certificate
+voiding, a feature that is not built, and blocked publication while it stayed. It is replaced
+with the true position, as is its twin in
+[`04-data-deletion-policy.md`](/legal/data-deletion-policy) — which had the worse version of the
+same problem, since its drafted text sat in the published body where a student deciding whether
+to delete their account would read it as an offer. Nothing here now blocks publication. Whoever
+ships voiding writes the text into this document, 04 and the Privacy Policy together.
 
 **One thing corrected in this pass.** "If a code does not work" listed an expired verification
 period as a possible cause, in a document whose next section says certificates never expire. It

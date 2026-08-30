@@ -35,7 +35,10 @@ import {
 } from '../organizationHours.js';
 import path from 'node:path';
 import sharp from 'sharp';
-import { receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR } from './profilePictureRoutes.js';
+import {
+  receiveAvatar, deleteUploadedFile, AVATAR_UPLOADS_DIR,
+  ALLOWED_IMAGE_FORMATS, ALLOWED_IMAGE_FORMAT_LABEL, MAX_IMAGE_INPUT_PIXELS,
+} from './profilePictureRoutes.js';
 import { notificationService } from '../services/notificationService.js';
 import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning } from '../appeals.js';
 
@@ -955,9 +958,13 @@ router.post('/api/organizations/:key/image', authenticateToken, requireCap('orga
   } catch {
     decoded = null;
   }
-  if (!decoded?.format) {
+  /* Allowlisted, not merely decodable. Same reasoning as the profile picture
+     path, and imported from it rather than restated: both handlers open-coded a
+     truthy `format` check, which is how they came to accept SVG, TIFF, AVIF and
+     HEIF while their error messages named four formats. */
+  if (!decoded?.format || !ALLOWED_IMAGE_FORMATS.includes(decoded.format)) {
     return res.status(400).json({
-      error: 'That file could not be read as an image. Choose a JPEG, PNG, WebP or GIF.',
+      error: `That file could not be read as an image. Choose a ${ALLOWED_IMAGE_FORMAT_LABEL}.`,
       code: 'unsupported_media_type',
     });
   }
@@ -966,7 +973,7 @@ router.post('/api/organizations/:key/image', authenticateToken, requireCap('orga
     const previous = (await db.prepare('SELECT image_url FROM organizations WHERE id = ?').get(row.id))?.image_url;
 
     const filename = `org-${row.id}-${Date.now()}.webp`;
-    await sharp(req.file.buffer)
+    await sharp(req.file.buffer, { limitInputPixels: MAX_IMAGE_INPUT_PIXELS })
       .resize(400, 400, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 1 } })
       .webp({ quality: 82 })
       .toFile(path.join(AVATAR_UPLOADS_DIR, filename));

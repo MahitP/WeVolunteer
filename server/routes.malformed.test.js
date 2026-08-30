@@ -117,6 +117,36 @@ describe('malformed input returns 400, not 500', () => {
     });
   });
 
+  /**
+   * The comment body had the same defect as the slot id above, found by the same
+   * kind of sweep. `!body || !body.trim()` reached `.trim()` on anything truthy
+   * that is not a string, and `.trim` is not a function on a number or a plain
+   * object — so the request threw and answered 500 for a client mistake.
+   */
+  describe('a comment body that is not a string', () => {
+    for (const [label, body] of [
+      ['a boolean', true],
+      ['a nested object', { a: { b: 1 } }],
+      ['an array', ['hello']],
+      ['a number', 12345],
+    ]) {
+      it(`rejects ${label}`, async () => {
+        const events = await srv.call('GET', '/api/events', undefined, studentToken);
+        const event = (events.body.events ?? events.body)[0];
+        const res = await srv.call('POST', `/api/events/${event.id}/comments`, { body }, studentToken);
+        expect(res.status, JSON.stringify(res.body)).toBe(400);
+      });
+    }
+
+    it('still accepts a well-formed comment (no over-tightening)', async () => {
+      const events = await srv.call('GET', '/api/events', undefined, studentToken);
+      const event = (events.body.events ?? events.body)[0];
+      const res = await srv.call('POST', `/api/events/${event.id}/comments`,
+        { body: 'Looking forward to this one.' }, studentToken);
+      expect([200, 201]).toContain(res.status);
+    });
+  });
+
   it('still accepts a well-formed event (no over-tightening)', async () => {
     const res = await srv.call('POST', '/api/events', validEvent({ title: 'Valid After Hardening' }), orgToken);
     expect(res.status).toBe(201);

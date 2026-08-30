@@ -575,6 +575,65 @@ export const authLimiter = rateLimit({
 });
 
 /**
+ * Account creation, counted — every request, not only the ones that fail.
+ *
+ * ── The hole this closes ──
+ *
+ * `/api/auth/signup` was mounted on `authLimiter`, and `authLimiter` carries
+ * `skipSuccessfulRequests: true`. A successful signup answers 201, so it was
+ * never counted, and the only ceiling on creating accounts was `apiLimiter` at
+ * 600 per 15 minutes — roughly 2,400 accounts an hour from one address, each a
+ * bcrypt hash, a user row, and a verification email to an address the CALLER
+ * chose.
+ *
+ * That last part is the amplification worth naming: signup mails whatever
+ * address it is handed, so an uncounted signup endpoint is also a mail relay
+ * aimed at whoever the caller names, spending this platform's sending
+ * reputation.
+ *
+ * This is the same defect, in the same shape, that `mailLimiter` below exists to
+ * fix. Its own comment records forgot-password as "a route that always returns
+ * 200, so skipSuccessfulRequests made it effectively unlimited". Signup was left
+ * on the limiter that has that flag, and it is the one endpoint where the
+ * mistake also writes rows.
+ *
+ * ── And the opposite failure, on the same line ──
+ *
+ * `authLimiter` allows ten FAILURES per address. A school egresses from one
+ * public address and a signup form fails for ordinary reasons — password too
+ * short, username taken, email mistyped. So the eleventh student in a building
+ * to fumble the form was refused for the rest of the window. That is the exact
+ * shared-address problem `loginIpCeilingLimiter` and `mailLimiter` were built to
+ * remove, still sitting on the one form every account passes through once.
+ *
+ * So this route leaves `authLimiter` entirely rather than being tightened. It
+ * needs a limiter that counts everything and a ceiling a campus will not meet,
+ * which are opposite changes to the two halves of what it had.
+ *
+ * ── Choosing 300, and being honest about what it does ──
+ *
+ * A two-thousand-student building rolling out over a morning is on the order of
+ * a few hundred signups per quarter hour; `loginIpCeilingLimiter` reasons the
+ * same way and lands on 200 for failures alone. 300 clears a campus and still
+ * cuts the uncounted 2,400/hour by half.
+ *
+ * But the IP figure is the least important part of this, and pretending
+ * otherwise would be the wrong record to leave. On a shared address no per-IP
+ * number can separate an attacker from a campus; this is a volume brake. What
+ * bounds abuse per identity is `mailLimiter`, which caps requests naming the
+ * same address and costs a campus nothing because a campus does not sign the
+ * same address up twice, and email verification, which leaves an unverified
+ * account inert.
+ */
+export const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.SIGNUP_RATE_LIMIT) || (DEMO_MODE ? 10000 : 300),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many accounts have been created from this network recently.'),
+});
+
+/**
  * The sign-in limiter, keyed on the DEVICE **and the account being tried**.
  *
  * ── The lockout this replaces ──
@@ -946,7 +1005,11 @@ app.use('/api/auth/login-2fa', loginIpCeilingLimiter, loginLimiter);
  * makes this endpoint cost something in aggregate.
  */
 app.use('/api/auth/login-2fa/email/send', mailIpCeilingLimiter);
-app.use('/api/auth/signup', authLimiter);
+/**
+ * Per-address first, then the network ceiling. `authLimiter` is deliberately
+ * absent — see `signupLimiter` for why its two halves were both wrong here.
+ */
+app.use('/api/auth/signup', mailLimiter, signupLimiter);
 // Both mail endpoints get the per-IP ceiling first, then the per-address limiter.
 // Order is immaterial to the outcome (both must pass) but reads in the direction of
 // broad-to-specific.
