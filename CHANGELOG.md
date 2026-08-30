@@ -27,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The leaderboard now returns a stable ranking.** It ordered by hours then
+  shifts and stopped, which left every exact tie to the planner. That is not
+  cosmetic underneath a 25-row limit: when the students at positions 25 and 26
+  are tied, which one is *on the board at all* was whatever the plan produced
+  that time, so somebody could drop off and reappear on refresh having done
+  nothing — and at the bottom of a board ties are the normal case, because
+  everyone on zero hours is tied with everyone else. Ties now break on the
+  account id: arbitrary, but the alternative to an arbitrary rule here is not
+  fairness, it is flicker.
+
+- **An index for the leaderboard's candidate set** (migration 060, audit
+  finding P-2). Choosing the opted-in students was a full scan of `users`;
+  `users(role, leaderboard_opt_in)` removes it on both engines. Worth naming
+  because that scan was the only thing making this endpoint look like it wanted
+  a cache — and an index is the cheaper answer by a wide margin: no second
+  source of truth, no invalidation, no vendor, and it keeps working when
+  everything else is down.
+
 - **Optional Upstash Redis, for two things and deliberately not for five.**
   The account lockout that bounds password guessing — ten failed passwords per
   account across every device — now shares a Redis-backed counter, along with

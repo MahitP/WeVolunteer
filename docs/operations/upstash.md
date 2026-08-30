@@ -187,10 +187,16 @@ client, in-process, faster, and without an outage that could drop a message.
 accounts, returns no school or grade, requires a session, and is `LIMIT 25`. A
 Redis sorted set would be a derived index that can drift from the hours ledger —
 against `INV-001`, the rule that credited hours are derived on read and never
-stored — to fix a scan that an index fixes for free. Two genuine defects were
-found while reading it and are logged as separate work: the tie-break is
-non-deterministic, and there is no index on `users(role, leaderboard_opt_in)`
-(audit finding P-2).
+stored — to fix a scan that an index fixes for free.
+
+Two genuine defects were found while reading it, and both are now fixed in SQL
+rather than in Redis, which is rather the point: **the scan was the only thing
+that made this endpoint look like a caching problem.** The tie-break was
+non-deterministic, so tied students reshuffled between requests and — underneath
+a `LIMIT 25` — could drop off the board entirely and reappear on refresh; the
+ordering now ends `u.id ASC`. And there was no index on
+`users(role, leaderboard_opt_in)` (audit finding P-2); migration 060 adds it on
+both engines. Covered by `server/routes.leaderboard.test.js`.
 
 **Travel time is excluded from the cache, and this is the most important
 exclusion.** `routes/travelRoutes.js` promises that a volunteer's origin — a

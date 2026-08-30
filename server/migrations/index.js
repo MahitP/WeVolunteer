@@ -68,6 +68,7 @@ import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
 import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
+import leaderboardCandidates from './060_leaderboard_candidates.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -392,7 +393,17 @@ export const MIGRATIONS = [
    * A new table with a foreign key to `events`, so it must run after `events`
    * exists; nothing else depends on its order. Additive on both engines.
    */
-  eventSearchIndex
+  eventSearchIndex,
+  /**
+   * 060 — the index behind the leaderboard's candidate set (audit finding P-2).
+   *
+   * An index and an ANALYZE, nothing else. It must run after `users` exists and
+   * after 001, which rebuilds `users` to widen a CHECK — a rebuild drops and
+   * recreates the table's indexes from its own list, so creating this one
+   * earlier would leave it silently absent afterwards. Additive on both engines
+   * and order-independent beyond that.
+   */
+  leaderboardCandidates
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
