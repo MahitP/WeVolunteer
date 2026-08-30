@@ -81,9 +81,27 @@ export default function NotificationPreferences({ addToast }) {
           <h3>Email Notifications</h3>
           <p>Receive updates and reminders directly to your inbox.</p>
         </div>
+        {/**
+          * `aria-label`, because this `<label>` names nothing.
+          *
+          * `.premium-switch` wraps only the input and the decorative
+          * `.premium-slider` span. The visible text — the `<h3>` above — is a
+          * SIBLING, outside the label, so wrapping bought no accessible name at
+          * all: this control announced as "checkbox, not checked" with nothing to
+          * say what it switched.
+          *
+          * Every toggle on this panel had the same shape, thirteen in total, so a
+          * screen-reader user met thirteen identical unnamed checkboxes and could
+          * not tell which notification any of them controlled. WCAG 4.1.2.
+          *
+          * `aria-label` rather than restructuring the markup: the visual layout
+          * deliberately separates the switch from its description, and moving the
+          * text inside the label would change the design to fix an announcement.
+          */}
         <label className="premium-switch">
           <input 
             type="checkbox" 
+            aria-label="Email notifications"
             checked={globalEmail} 
             onChange={(e) => toggleGlobalEmail(e.target.checked)} 
           />
@@ -98,7 +116,7 @@ export default function NotificationPreferences({ addToast }) {
           return (
             <div className="premium-pref-row" key={c.id}>
               <div className={`premium-pref-icon tone-${meta.tone}`} style={{ color: `var(--${meta.tone})`, background: `var(--${meta.tone}-bg)` }}>
-                <Icon size={20} />
+                <Icon size={20} aria-hidden="true" />
               </div>
               <div className="premium-pref-info">
                 <div className="premium-pref-title">{c.label}</div>
@@ -107,10 +125,15 @@ export default function NotificationPreferences({ addToast }) {
               
               <div className="premium-pref-toggles">
                 <div className="premium-pref-toggle-group">
-                  <span className="premium-pref-toggle-label"><Smartphone size={14} style={{marginBottom: 4}}/> In-App</span>
+                  <span className="premium-pref-toggle-label"><Smartphone size={14} aria-hidden="true" style={{marginBottom: 4}}/> In-App</span>
                   <label className="premium-switch">
+                    {/* The name has to carry BOTH the category and the channel:
+                        "In-App" alone repeats six times down the panel, and a
+                        screen-reader user moving between them would have no way
+                        to tell which row they were in. */}
                     <input 
                       type="checkbox" 
+                      aria-label={`${c.label} — in-app notifications`}
                       checked={isEnabled(c.id, 'inapp')} 
                       onChange={e => togglePref(c.id, 'inapp', e.target.checked)}
                     />
@@ -119,10 +142,11 @@ export default function NotificationPreferences({ addToast }) {
                 </div>
                 
                 <div className="premium-pref-toggle-group" style={{ opacity: globalEmail ? 1 : 0.5 }}>
-                  <span className="premium-pref-toggle-label"><Mail size={14} style={{marginBottom: 4}}/> Email</span>
+                  <span className="premium-pref-toggle-label"><Mail size={14} aria-hidden="true" style={{marginBottom: 4}}/> Email</span>
                   <label className="premium-switch" title={!globalEmail ? "Emails are disabled globally" : ""}>
                     <input 
                       type="checkbox" 
+                      aria-label={`${c.label} — email notifications`}
                       checked={isEnabled(c.id, 'email')} 
                       onChange={e => togglePref(c.id, 'email', e.target.checked)}
                       disabled={!globalEmail}

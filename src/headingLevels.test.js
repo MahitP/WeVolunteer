@@ -77,8 +77,15 @@ const STANDALONE = new Set([
   'views/AboutUs.jsx',
   'views/legal/LegalCenter.jsx',
   'views/legal/LegalDocument.jsx',
-  'views/legal/OrganizerAgreement.jsx',
-  'views/legal/StudentOrganizerAgreement.jsx',
+  /* The two organizer agreements are NOT here any more, and that is the point.
+     They were allowlisted as rendering outside the shell, and they do not: both
+     are in APP_ROUTES and nothing else mounts them, so the shell's `h1` was
+     already on screen and each view added a second one saying the same words.
+     Measured in a browser, /organizer-agreement announced "Organizer Agreement,
+     heading level 1" twice for every role — the exact "Settings / Settings"
+     defect this file's header describes, surviving because an allowlist entry
+     asserted something untrue. The runtime check in a11y/sweep.aria.spec.js is
+     what caught it. */
 
   /* Public, signed-out pages. */
   'views/CertificateVerification.jsx',

@@ -100,7 +100,7 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
   if (error && !status) {
     return (
       <main className="content stack-lg">
-        <h1>Student Organizer Agreement</h1>
+        <h2 className="page-title">Student Organizer Agreement</h2>
         <p className="alert alert-warn" role="alert">{error}</p>
       </main>
     );
@@ -117,7 +117,7 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
   if (!status.required) {
     return (
       <main className="content stack-lg">
-        <h1>Student Organizer Agreement</h1>
+        <h2 className="page-title">Student Organizer Agreement</h2>
         <p>
           This agreement applies to people who help run an organization. You do not at the
           moment, so there is nothing for you to accept — you can read it in the{' '}
@@ -130,7 +130,7 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
   if (status.accepted) {
     return (
       <main className="content stack-lg">
-        <h1>Student Organizer Agreement</h1>
+        <h2 className="page-title">Student Organizer Agreement</h2>
         <p className="alert alert-brand" role="status">
           <Check size={16} aria-hidden="true" /> You accepted this agreement (version {status.documents[0]?.version}).
         </p>
@@ -147,7 +147,7 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
   return (
     <main className="content stack-lg" aria-labelledby="soa-title">
       <div className="stack-sm">
-        <h1 id="soa-title">Before you help run this organization</h1>
+        <h2 id="soa-title" className="page-title">Before you help run this organization</h2>
         <p>
           {/* An em dash, not a comma. "Alex Thompson, a manager has trusted
               you" reads as an appositive — as though Alex is the manager — which

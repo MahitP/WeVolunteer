@@ -127,7 +127,7 @@ export default function DataExportCard({ addToast }) {
             <div style={{ background: 'var(--brand-tint)', padding: 'var(--s4)', borderRadius: 'var(--r-full)', display: 'inline-block', marginBottom: 'var(--s4)' }}>
               <Clock size={40} color="var(--brand)" className="spin" />
             </div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '700' }}>Preparing Export...</h2>
+            <h3 style={{ fontSize: '1.5rem', fontWeight: '700' }}>Preparing Export...</h3>
             <p className="lead" style={{ marginTop: 'var(--s3)', maxWidth: '400px', margin: 'var(--s3) auto 0' }}>
               Your data is being securely compiled into a ZIP archive.
             </p>
@@ -155,7 +155,7 @@ export default function DataExportCard({ addToast }) {
             <CheckCircle size={48} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: 'var(--s2)' }}>Your export is ready</h2>
+            <h3 style={{ fontSize: '1.25rem', marginBottom: 'var(--s2)' }}>Your export is ready</h3>
             <p className="dim">
               Generated: {new Date(job.created_at).toLocaleDateString()}
             </p>
@@ -179,9 +179,9 @@ export default function DataExportCard({ addToast }) {
             <XCircle size={48} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.25rem', marginBottom: 'var(--s2)' }}>
+            <h3 style={{ fontSize: '1.25rem', marginBottom: 'var(--s2)' }}>
               {status === 'expired' ? 'Export Expired' : 'Unable to prepare export.'}
-            </h2>
+            </h3>
             <p className="dim">
               {status === 'expired' ? 'Your previous data export has expired.' : 'Try again.'}
             </p>
@@ -202,7 +202,7 @@ export default function DataExportCard({ addToast }) {
           <div style={{ background: 'var(--brand-tint)', padding: 'var(--s4)', borderRadius: 'var(--r-full)', display: 'inline-block', marginBottom: 'var(--s4)' }}>
             <FileArchive size={40} color="var(--brand)" />
           </div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '700' }}>Download Your Data</h2>
+          <h3 style={{ fontSize: '1.5rem', fontWeight: '700' }}>Download Your Data</h3>
           <p className="lead" style={{ marginTop: 'var(--s3)', maxWidth: '400px', margin: 'var(--s3) auto 0' }}>
             Request a copy of the information WeVolunteer stores about you.
           </p>
