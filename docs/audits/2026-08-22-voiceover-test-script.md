@@ -219,6 +219,21 @@ Back as the student. Any page.
 
 ---
 
+# §7b · Notification toggles — newly fixed, worth confirming
+
+Go to **Settings → Notifications**.
+
+> Every one of these thirteen switches had **no name at all** until this pass — they announced
+> as "checkbox, not checked" with nothing to say what they controlled. Please confirm the fix.
+
+| ID | Do this | Expected | PASS if | FAIL if | Result |
+| --- | --- | --- | --- | --- | --- |
+| H-7b.1 | `Tab` to the top "Email Notifications" switch. | "Email notifications, checkbox" (or "switch"), with its state. | It has a name. | It says only "checkbox". | |
+| H-7b.2 | `Tab` through the per-category switches. | Each names **both** the category and the channel — e.g. "Shift reminders — in-app notifications". | You can tell which row and which channel you're on. | Several sound identical, so you can't tell which notification you'd be changing. | |
+| H-7b.3 | Toggle one off and on. | Each change announces the new state. | State changes are spoken. | Silence. | |
+
+---
+
 # §8 · Settings, forms and errors
 
 | ID | Do this | Expected | PASS if | FAIL if | Result |
@@ -302,16 +317,28 @@ To reach one: while signed in as the **student**, type this in the address bar:
 
 | ID | Do this | Expected | PASS if | FAIL if | Result |
 | --- | --- | --- | --- | --- | --- |
-| **H-13.1** | Load `/admin/roster` as the student and **listen without touching anything.** | *Open question.* | The announcement is useful: you learn you can't open this and what to do, in a sentence or two. | It reads the whole page at you, or takes so long you'd give up. **Estimate how many seconds it talks for.** | |
+| **H-13.1** | Load `/admin/roster` as the student and **listen without touching anything.** | *Open question.* We measured what it will read: **68 words / 407 characters**, assertively, on arrival. | The announcement is useful: you learn you can't open this and what to do. | It reads the whole page at you, or takes so long you'd give up. **Estimate how many seconds it talks for.** | |
+| H-13.1b | Straight after H-13.1, without clicking, press `Tab` once. | *Open question.* We measured that focus starts on the page body, so this should jump to the browser toolbar or the very top. | — | — | |
 | H-13.2 | Now press `Control` to stop it, then `VO`+`→` to read the page yourself. | You can read it at your own pace. | Readable. | Unreadable or it keeps re-announcing. | |
 | H-13.3 | Press `VO`+`U` and open the **Landmarks** list. | There's a "main" landmark containing the error content. | A main landmark exists. | The list is empty — the content is in no landmark. **This was a real bug we fixed, please confirm.** | |
 | H-13.4 | `Tab` through the page. | There's at least one way onward — a link or button. | You can leave without using the address bar. | Nothing to `Tab` to. | |
 | H-13.5 | Try a nonsense URL: `http://localhost:5173/does-not-exist`. Repeat H-13.1. | Same as above. | Same. | Same. | |
 
-**On H-13.1, please answer these three questions in words:**
+**On H-13.1, please answer these four questions in words:**
 1. Roughly how many seconds did VoiceOver talk before you could do anything?
 2. Did it interrupt something you were already listening to?
 3. If you were blind and hit this page ten times a day, would this help you or annoy you?
+4. After it finished, did you know what to do next?
+
+**Why your answer decides two changes, not one.** Focus is left on the page body here, so
+nothing is focused when you arrive. The two possible fixes are a pair:
+
+- **If 68 words is too much** → we scope the alert down to a short summary *and* move focus to
+  the heading, the way the appeal page already does. Both together.
+- **If it is acceptable** → we change nothing, because adding a focus move on top of an existing
+  assertive announcement risks you hearing the same thing twice.
+
+Doing half of that pair would be worse than doing neither, which is why it waited for you.
 
 ---
 

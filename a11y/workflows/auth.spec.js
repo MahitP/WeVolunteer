@@ -232,12 +232,21 @@ test('the signed-out pages reflow at 320px', async ({ browser, baseURL }) => {
   for (const path of ['/login', EMAIL_STEP, '/signup', '/welcome']) {
     await page.goto(path);
     await page.locator('main, #main-content, [role="main"]').first()
-      .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-    const wide = await page.evaluate(() => {
+      .waitFor({ state: 'visible', timeout: 15000 });
+    /* An empty document trivially has scrollWidth === clientWidth, so without
+       this the test reported "no overflow" — and passed — on a page that failed
+       to render at all. The swallowed wait above used to make that silent. */
+    const state = await page.evaluate(() => {
       const d = document.documentElement;
-      return d.scrollWidth > d.clientWidth + 1 ? d.scrollWidth : 0;
+      const main = document.querySelector('main, #main-content, [role="main"]');
+      return {
+        wide: d.scrollWidth > d.clientWidth + 1 ? d.scrollWidth : 0,
+        text: (main?.innerText || '').trim().length
+      };
     });
-    if (wide) overflowing.push(`${path} — scrollWidth ${wide} at a 320 viewport`);
+    expect(state.text, `${path} rendered no text at 320px, so its reflow result is meaningless`)
+      .toBeGreaterThan(20);
+    if (state.wide) overflowing.push(`${path} — scrollWidth ${state.wide} at a 320 viewport`);
   }
 
   await ctx.close();
