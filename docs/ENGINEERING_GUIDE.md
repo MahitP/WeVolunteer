@@ -2233,6 +2233,24 @@ exist so the decision is made on evidence rather than enthusiasm.
 
 ### 10.2 Redis adoption
 
+> **Partly overtaken by events.** Two of the three items below have been dealt
+> with without Redis, and the full inventory now lives in
+> [`docs/operations/horizontal-scaling.md`](operations/horizontal-scaling.md):
+>
+> - **The scheduler no longer double-runs.** All four periodic sweeps take a
+>   leader lease from the `scheduler_leases` table (migration 061) before
+>   running. It is the same conditional-claim idiom `instanceLock.js` and the job
+>   workers already use, it costs no new service, and it fails open.
+> - **The rate limiters' KEYS were wrong in a way Redis would not have fixed.**
+>   `apiLimiter` was keyed on the address alone, so a school shared 600 requests
+>   per quarter hour for the whole building. It is now keyed on the verified
+>   session, with the address as the fallback — the same correction already made
+>   to `loginLimiter` and `mailLimiter`. The STORE is still per-process, which is
+>   the part Redis would address; the cost of doing so is measured in that
+>   branch's `docs/operations/upstash.md` §7.3, which is not present here.
+> - **Socket.IO is the one genuine remaining blocker**, and it is unchanged: no
+>   adapter, so rooms are per-process.
+
 - **Why it may become necessary.** Several pieces of state are currently
   in-process: rate-limiter counters, the auto-select scheduler, Socket.IO
   connection state. All are correct for exactly one instance — and
@@ -2384,6 +2402,35 @@ feature that makes this corpus more useful without making it more expensive.
 
 See [`docs/operations/pinecone.md`](operations/pinecone.md).
 
+### 10.10 Load testing (adopted)
+
+Like §10.9, this one has already happened, and it is recorded because the
+*reason* is the part worth keeping.
+
+- **What was missing.** Every performance number this project had came from
+  `bin/scale-probe.mjs`, which measures SQL. Nothing measured Express, JWT
+  verification, bcrypt, capability checks, serialisation, or two requests at
+  once — which is most of what a request costs.
+- **What it found that reading the code had not.** `GET /api/certificates` took
+  **921 ms at p50** for a volunteer with eighty completed events, because it
+  issued a get-or-create per event inside a `Promise.all`. The page cost more the
+  more somebody had volunteered. Now 66 ms.
+- **And a second one.** Cancelling an event with 150 confirmed volunteers took
+  **4,440 ms**, because the fan-out dispatched them one at a time and each
+  dispatch is four to five round trips. Now 943 ms, at five at a time — half the
+  connection pool, because an unbounded fan-out would starve every other request.
+- **The trap it also found.** The first run reported 3,061 req/s at a p50 of
+  0 ms, and every response was a 401. Every scenario is now preflighted before it
+  is measured, because a published number gets believed.
+- **The measurement that needs saying twice.** Consolidating
+  `GET /api/admin/stats` from fourteen serial statements to five is worth
+  **nothing on loopback and 2.5× at 5 ms of round-trip latency**. Round-trip
+  reduction cannot be measured on a database that answers in a tenth of a
+  millisecond, so `--db-latency` injects a plausible figure. Reporting the
+  loopback result alone would have called a real improvement zero.
+
+See [`docs/operations/load-testing.md`](operations/load-testing.md).
+
 ### 10.8 Sequencing
 
 Roughly ascending cost and risk, given today's foundations:
@@ -2395,7 +2442,9 @@ Roughly ascending cost and risk, given today's foundations:
 4. **PWA, offline reads** (§10.5) — self-contained
 5. **Analytics** (§10.6) — needs a privacy design first
 6. **PostgreSQL** (§10.1) — infrastructure change
-7. **Redis** (§10.2) — arrives with multi-instance
+7. **Redis** (§10.2) — arrives with multi-instance, and is now a shorter job
+   than it was: the scheduler and the limiter keys were fixed without it, so what
+   remains is a Socket.IO adapter and a shared limiter store
 8. **Multi-district tenancy** (§10.7) — dedicated design phase, `2.0.0`
 
 This is a default ordering, not a commitment. A district requirement can

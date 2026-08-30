@@ -25,6 +25,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > of the other nine changes nothing for existing users; there is still no
 > re-consent flow for signup documents.
 
+### Performance and scaling
+
+> **A measured pass over the request path, with a load test to prove it.**
+> Every number below was measured with `bin/load-test.mjs` against a synthetic
+> corpus of 2,000 users / 1,000 events / 8,092 applications / 2,171 credited
+> attendance rows / 120 open appeals, before and after,
+> using the identical harness. Full method and caveats in
+> [`docs/operations/load-testing.md`](docs/operations/load-testing.md).
+>
+> The single most useful thing built here is the load test itself. It found a
+> defect nobody had read — a volunteer's certificates page took **921 ms** and
+> got slower the more they had volunteered — and it caught its own first result
+> being nonsense (3,061 req/s, every response a 401), which is why every scenario
+> is now preflighted before it is measured.
+
+- **`GET /api/applications` is paginated and no longer reads whole tables.**
+  It had no `LIMIT` and no `ORDER BY`, so an administrator received *every*
+  application in the system in one response — each row carrying a volunteer's
+  name, school, grade, bio and badges. Alongside it, three batch loads read the
+  whole of `attendance` (twice) and the whole of `application_conflicts` on every
+  call, whoever was asking: a student fetching their own four applications pulled
+  a district's attendance history into two `Map`s. Now `?limit=&offset=` with a
+  500-row cap, the same opt-in shape `GET /api/events` already had, with the
+  batch loads scoped to the page. **408 → 1,821 req/s; p50 48 ms → 10 ms** on
+  loopback, and the whole-table reads are gone whatever the corpus size.
+  The bare-array response every current client expects is unchanged.
+- **The moderation queue's conflict-of-interest check is batched.**
+  `GET /api/admin/appeals` re-read each appeal row it already held and then made
+  five more statements per appeal — six each, about three hundred for a
+  120-appeal queue. The nine fairness rules were not rewritten: they live in one
+  function that both the single-appeal and the whole-page loader feed, and
+  `appeals.batchedConflicts.test.js` asserts the two agree.
+  **At 5 ms of database latency: p50 1,226 ms → 58 ms, 2.7 → 68 req/s.**
+- **A volunteer's certificates page no longer costs more the more they have
+  volunteered.** It issued a get-or-create per completed event inside a
+  `Promise.all` — eighty concurrent statements per request against a pool of ten.
+  The read is batched; every rule about what a certificate *is* stays in
+  `getOrCreateCertificateCode`. **At 5 ms of database latency: p50 921 ms → 66 ms,
+  21.2 → 297 req/s.**
+- **`GET /api/admin/stats` issues five statements instead of fourteen.** Ten
+  whole-table scalars became one statement, and the two `events` rollups became
+  one grouped scan. Worth **nothing on loopback and 2.5× at 5 ms of round-trip
+  latency**, which is the point: the PostgreSQL port turned every synchronous
+  read into a network round trip and nothing had audited the serial ones.
+- **Calling off an event no longer makes the organizer wait a round trip per
+  volunteer.** The fan-out dispatched confirmed volunteers strictly one at a
+  time, and each dispatch costs four to five round trips — so the request grew
+  with how popular the event had been. It now dispatches five at a time, which is
+  half the connection pool: an unbounded `Promise.all` would queue every
+  recipient's statements against a pool of ten and starve the rest of the server,
+  trading one slow request for a slow everything. **At 5 ms of database latency,
+  150 volunteers: 4,440 ms → 943 ms**, with the same 150 in-app rows and 150
+  outbox jobs written. Email sending was already asynchronous; this is the
+  enqueueing.
+- **One session sweep instead of one timer per socket.** Every connected socket
+  ran its own five-minute interval asking two questions of the database, so the
+  cost scaled with sockets rather than people and a student with a phone and a
+  laptop paid twice. One sweep now asks both for every socket at once — two
+  statements, whatever the connection count. The disconnect rules are unchanged.
+
+### Fixed — a rate limit that locked out buildings
+
+- **`apiLimiter` was keyed on the IP address alone**, so 600 requests per fifteen
+  minutes was the budget for a whole school's shared egress address. A signed-in
+  session makes several requests per screen; a few dozen students browsing at
+  lunchtime exhausted it and the next person to open the app was refused.
+
+  This is the third time this exact failure has been found here — `loginLimiter`
+  was re-keyed after ten students mistyping once locked out a building, and
+  `mailLimiter` after a campus shared five verification emails. `apiLimiter` is
+  the broadest limiter in the application and was the one left on a bare address.
+
+  It is now keyed on the **verified** session when the request carries one, and
+  on the address otherwise. Nothing gained budget: the per-bucket number is
+  unchanged, an anonymous caller is bounded identically, and one account is
+  bounded identically. A building simply stops sharing one bucket. The token is
+  verified rather than parsed, because keying on an unverified cookie would let
+  an attacker rotate it per request and buy an unlimited budget.
+  `API_RATE_LIMIT` tunes it, documented in `deploy/wevolunteer.env.example`.
+
+### Added — the seams for a second instance, without deploying one
+
+`server/instanceLock.js` still refuses a second production instance. What changed
+is that the list of reasons it must is short, evidenced and written down in
+[`docs/operations/horizontal-scaling.md`](docs/operations/horizontal-scaling.md).
+
+- **Leader leases for the four periodic sweeps** (`server/schedulerLease.js`,
+  migration 061). The notification sweep, Auto Select, retention and the search
+  indexer each do a whole scan on a timer, and there is no row for a sweep to
+  claim, so two processes would both do the whole scan. Retention is the one that
+  matters: the other three are idempotent by construction, and retention deletes.
+  The lease is a conditional upsert — the write *is* the claim — with a bounded
+  TTL, an owner-predicated release, and **fail-open** semantics, because a
+  database hiccup must not silently stop retention. Nothing observable changes on
+  one instance: the sole holder always acquires.
+- **A guard against `Promise.all` inside a transaction**
+  (`server/transactionConcurrency.test.js`). A transaction is one checked-out
+  `pg` client and a single client cannot serve concurrent queries. This pass
+  deliberately adds parallel and batched reads elsewhere, which makes the safe
+  shape and the corrupting one differ by a single enclosing call.
+- **Connection-pool counts on `/health`**, behind `HEALTH_POOL_STATS` and off by
+  default — `/health` is unauthenticated and deliberately carries no detail.
+  `waiting` is the number nothing else reports: the pool is small on purpose, so
+  saturation looks exactly like a slow database from outside and is not.
+- **Which Supabase port to connect to, and the pool arithmetic**, documented in
+  `deploy/wevolunteer.env.example`. The code has always been built for the
+  transaction-mode pooler — named prepared statements are off precisely because a
+  pooler can change the backend under a client — and no document said so.
+
+### Deliberately not done
+
+- **No queue was added.** The three DB-backed queues already claim atomically,
+  reclaim stranded work, cap attempts and classify terminal failures. QStash's
+  free tier is 1,000 messages a day, which a single event's reminder fan-out can
+  exceed. Adding one would have been a downgrade.
+- **No new indexes.** `docs/operations/postgres-scale-measurements.md` shows zero
+  sequential scans on the hot path at 50× pilot scale; an index here would slow
+  every write and move nothing.
+- **No caching layer.** The Redis work on its own branch measured a 222 ms warm
+  round trip against queries answering in 0.3–2 ms. Caching those would be a
+  regression.
+- **The events browse aggregate CTE is unchanged.** It is linear in event count
+  and crosses 100 ms at about 10,000 events, which the pilot is nowhere near, and
+  restructuring it puts sort and pagination correctness at stake on two dialects.
+
 ### Added
 
 - **A Legal Center editor, for the platform owner only** (Settings → Help &
