@@ -29,7 +29,7 @@ import { notificationService } from '../services/notificationService.js';
 import { nullSafeEquals } from '../db/dialectSql.js';
 import {
   APPEAL_SUBJECTS, APPEAL_DECISIONS, MIN_REASONING_LENGTH,
-  validateStatement, validateReasoning, disqualifiers, allOverridable,
+  validateStatement, validateReasoning, disqualifiers, disqualifiersForMany, allOverridable,
   explainConflicts, recordAppealEvent, newAppealId, isFinal,
 } from '../appeals.js';
 
@@ -521,6 +521,21 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
    * cost of a typo here is a moderator seeing an empty queue and believing
    * there is nothing to do.
    */
+  /**
+   * The most appeals one queue response may carry.
+   *
+   * The queue had no `LIMIT`. With the default `open,reviewing` filter that is
+   * bounded by how much work is genuinely outstanding, but `?status=resolved`
+   * asks for every appeal ever decided — a set that only grows — and each row
+   * then cost six statements to annotate. Two hundred is well above any real
+   * worklist and well below the point where the screen stops being usable.
+   *
+   * A cap rather than opt-in paging, because `counts` is published alongside and
+   * is computed over the whole filtered set: the badge stays honest about the
+   * backlog, so nothing is hidden by the cap being reached.
+   */
+  const APPEALS_QUEUE_MAX = 200;
+
   const ALLOWED_STATUSES = ['open', 'reviewing', 'resolved'];
   const requested = String(req.query.status ?? '').split(',').map(s => s.trim()).filter(Boolean);
   const statuses = requested.filter(s => ALLOWED_STATUSES.includes(s));
@@ -537,8 +552,25 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
    * spending the effort. Read from `appeal_events` rather than a column on
    * `appeals`, so there is no second piece of state to keep in step.
    */
+  /**
+   * True counts for the whole filtered set, independent of the cap below.
+   *
+   * One grouped statement rather than counting the returned rows, so the badge
+   * keeps meaning "how many are waiting" even when the queue itself is capped.
+   */
+  const statusCounts = {};
+  for (const r of await db.prepare(
+    `SELECT status, COUNT(*) AS c FROM appeals WHERE status IN (${placeholders}) GROUP BY status`
+  ).all(...filter)) {
+    statusCounts[r.status] = r.c;
+  }
+
   const appeals = await db.prepare(`
     SELECT a.id, a.user_id, a.subject, a.status, a.decision, a.created_at, a.decided_at,
+           /* Read by the conflict-of-interest rules, stripped before the
+              response is built. Selecting them here is what removes the
+              per-appeal re-read of the row this query already returned. */
+           a.suspended_by_snapshot, a.report_id,
            COALESCE(u.name, 'Account since deleted') AS user_name,
            (SELECT COALESCE(cu.name, 'Account since deleted')
               FROM appeal_events e
@@ -548,8 +580,19 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
       FROM appeals a
       LEFT JOIN users u ON a.user_id = u.id
      WHERE a.status IN (${placeholders})
-     ORDER BY a.created_at ASC
-  `).all(...filter);
+     ORDER BY a.created_at ASC, a.id ASC
+     LIMIT ?
+  `).all(...filter, APPEALS_QUEUE_MAX);
+
+  /* Says so rather than truncating in silence. The counts above stay exact, so a
+     moderator can still see that more is waiting than is being shown. */
+  if ((statusCounts.open ?? 0) + (statusCounts.reviewing ?? 0) + (statusCounts.resolved ?? 0) > APPEALS_QUEUE_MAX) {
+    console.warn(
+      `[appeals] Queue capped at ${APPEALS_QUEUE_MAX} of `
+      + `${Object.values(statusCounts).reduce((a, b) => a + b, 0)} matching appeals. `
+      + 'The counts reported alongside remain exact.'
+    );
+  }
 
   /**
    * Reversals whose account has not actually been switched back on.
@@ -584,23 +627,53 @@ router.get('/api/admin/appeals', authenticateToken, requireCap('appeal.review'),
      ORDER BY a.decided_at ASC
   `).all();
 
-  // Which of these the caller may not decide, computed once so the queue can mark
-  // them rather than letting the moderator find out with a 403 after they have
-  // read the case and written their reasoning.
-  /* `Promise.all`, because the per-appeal lookup is async now. A bare `.map`
-     would hand the queue an array of promises, which serialises to `[{}, …]`. */
-  const withConflicts = await Promise.all(appeals.map(async (a) => {
-    const full = await db.prepare('SELECT * FROM appeals WHERE id = ?').get(a.id);
-    const conflicts = await disqualifiers(db, req.user.id, full);
+  /**
+   * Which of these the caller may not decide, computed once so the queue can
+   * mark them rather than letting the moderator find out with a 403 after they
+   * have read the case and written their reasoning.
+   *
+   * ── What this replaces ──
+   *
+   * It was `Promise.all(appeals.map(...))`, and inside each iteration it
+   * re-read `SELECT * FROM appeals WHERE id = ?` — a row the list query had
+   * already returned — and then called `disqualifiers()`, which issues five
+   * further statements of its own. Six statements per appeal: a fifty-appeal
+   * queue cost around three hundred, and on PostgreSQL that is three hundred
+   * network round trips to draw one screen.
+   *
+   * `disqualifiersForMany` answers the same question for the whole page in five
+   * statements total, and — this is the part that matters more than the
+   * speed — it does not reimplement any of the nine fairness rules. Both it and
+   * the single-appeal `disqualifiers()` call one `applyConflictRules`, and
+   * `appeals.batchedConflicts.test.js` asserts they agree.
+   *
+   * The re-read is gone because the list query now selects the two columns the
+   * rules actually needed (`suspended_by_snapshot`, `report_id`). They are
+   * stripped below rather than published: both are internal identifiers, and the
+   * queue payload should not grow because a query did.
+   */
+  const conflictsById = await disqualifiersForMany(db, req.user.id, appeals);
+  const withConflicts = appeals.map((row) => {
+    const { suspended_by_snapshot: _snapshot, report_id: _reportId, ...a } = row;
+    const conflicts = conflictsById.get(row.id) ?? [];
     return { ...a, conflicts, canDecide: conflicts.length === 0 };
-  }));
+  });
 
   res.json({
     appeals: withConflicts,
     pendingRemedies,
     counts: {
-      open: withConflicts.filter(a => a.status === 'open').length,
-      reviewing: withConflicts.filter(a => a.status === 'reviewing').length,
+      /**
+       * Counted over the whole filtered set, not over the page.
+       *
+       * These used to be `withConflicts.filter(...).length`, which was exact
+       * only because the query returned everything. With a cap above that, the
+       * badge would have quietly reported the cap instead of the backlog — and
+       * a queue that under-reports how much work is waiting is worse than one
+       * that is slow.
+       */
+      open: statusCounts.open ?? 0,
+      reviewing: statusCounts.reviewing ?? 0,
       // Counted separately from the queue: these are not appeals waiting to be
       // decided, they are people waiting to be let back in.
       remediesPending: pendingRemedies.length,
