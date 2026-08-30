@@ -284,7 +284,50 @@ export function parseEventFilters(query = {}) {
  * can push the cosine a hair above 1 for two nearly identical points, and acos
  * of that is NaN, which would silently drop an event a user is standing next to.
  */
-export function eventQueryFragments({ lat, lng, db = null }) {
+/**
+ * The half of the WHERE clause that can be folded into the aggregate.
+ *
+ * ── Why the aggregate needs a WHERE at all ──
+ *
+ * `agg` used to have none. It folded every event and every slot in the database,
+ * plus one correlated count per event, and only then did the outer query discard
+ * almost all of it — so a search for one word cost the same as listing
+ * everything. `postgres-scale-measurements.md` recorded that as this endpoint's
+ * scaling limit and said the fix was structural rather than an index.
+ *
+ * Measured at 10,000 events with `bin/events-query-probe.mjs`: a category filter
+ * 57.2ms -> 18.2ms, a text search 62.6 -> 23.5, `scope=open` 60.6 -> 32.2, a
+ * search matching nothing 52.7 -> 17.0. The unfiltered default browse is
+ * unchanged at 64-66ms, which is the number that had to not regress.
+ *
+ * ── Why this asks `buildEventWhere` rather than filtering the filters ──
+ *
+ * The first version of this deleted a hard-coded list of "aggregate-dependent"
+ * filter keys before rebuilding the clause. That list was wrong on its first
+ * outing — it named `hasSpots`, which is not a filter, and missed `openOnly`,
+ * which is — and the CTE then referenced `agg` from inside the statement
+ * producing it. A list of which filters touch the aggregate is a second
+ * definition of something `buildEventWhere` already knows, and it drifted
+ * immediately.
+ *
+ * So `buildEventWhere` takes `aggregateAvailable` instead and simply omits the
+ * clauses it cannot honour. `openOnly` is the case that proves the design: it
+ * contributes three predicates, only one of which touches the aggregate, and
+ * this keeps the other two rather than dropping the whole filter.
+ *
+ * ── Why `needsUsers` ──
+ *
+ * Only the text search references the organizer (`u.name`). Joining `users`
+ * inside the aggregate unconditionally cost the default browse about 10%, for a
+ * column nothing in that request reads. Measured both ways; this is the version
+ * with no regression.
+ */
+export function buildAggScope(filters, userId, db = null) {
+  const { where } = buildEventWhere(filters, userId, db, { aggregateAvailable: false });
+  return { where, needsUsers: Boolean(filters.q) };
+}
+
+export function eventQueryFragments({ lat, lng, db = null, aggScope = null }) {
   const EARTH_RADIUS_MILES = 3958.8;
 
   const distanceExpr = lat != null
@@ -314,6 +357,14 @@ export function eventQueryFragments({ lat, lng, db = null }) {
      * 60,000 applications, folding this in and dropping the separate COUNT
      * query (see eventRoutes.js) together took the endpoint from 186ms to 79ms.
      */
+    /**
+     * The fold is restricted to the events that already survive the event-only
+     * predicates — see `buildAggScope` for the measurements and the reasoning.
+     *
+     * With no scope supplied the CTE is exactly what it always was, so every
+     * caller that has not been converted keeps the previous behaviour rather
+     * than silently losing its filters.
+     */
     aggCte: `
       agg AS (
         SELECT e.id AS event_id,
@@ -326,7 +377,9 @@ export function eventQueryFragments({ lat, lng, db = null }) {
                (SELECT COUNT(*) FROM applications a2
                  WHERE a2.event_id = e.id AND a2.status = 'accepted') AS accepted
         FROM events e
+        ${aggScope?.needsUsers ? 'JOIN users u ON e.organizer_id = u.id' : ''}
         LEFT JOIN slots s ON s.event_id = e.id
+        ${aggScope?.where ?? ''}
         GROUP BY e.id
       )
     `,
@@ -346,7 +399,7 @@ export function eventQueryFragments({ lat, lng, db = null }) {
  * across every branch — the kind of bookkeeping that silently binds the wrong
  * value once a filter is added in the middle.
  */
-export function buildEventWhere(filters, userId, db = null) {
+export function buildEventWhere(filters, userId, db = null, { aggregateAvailable = true } = {}) {
   const clauses = [];
   const params = {};
 
@@ -452,7 +505,13 @@ export function buildEventWhere(filters, userId, db = null) {
    */
   if (filters.openOnly) {
     clauses.push(`e.status = 'open'`);
-    clauses.push(`${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} > 0`);
+    /* The only half of `openOnly` that reads the aggregate. Omitted when this
+       clause is being built FOR the aggregate — the other two predicates are
+       pure `events` and are kept, which is the whole point of gating the
+       individual clause rather than dropping the filter. */
+    if (aggregateAvailable) {
+      clauses.push(`${greatest(db, '0', 'agg.total_spots - COALESCE(agg.accepted, 0)')} > 0`);
+    }
     clauses.push('e.application_deadline > @now');
     params.now = new Date().toISOString();
   }
@@ -482,10 +541,10 @@ export function buildEventWhere(filters, userId, db = null) {
 
   // Date bounds apply to the first shift, which is what the card shows as the
   // event's date.
-  if (filters.from) { clauses.push('agg.min_start >= @from'); params.from = `${filters.from}T00:00:00.000Z`; }
-  if (filters.to) { clauses.push('agg.min_start <= @to'); params.to = `${filters.to}T23:59:59.999Z`; }
+  if (filters.from && aggregateAvailable) { clauses.push('agg.min_start >= @from'); params.from = `${filters.from}T00:00:00.000Z`; }
+  if (filters.to && aggregateAvailable) { clauses.push('agg.min_start <= @to'); params.to = `${filters.to}T23:59:59.999Z`; }
 
-  if (filters.minHours != null) {
+  if (filters.minHours != null && aggregateAvailable) {
     clauses.push('agg.total_hours >= @minHours');
     params.minHours = filters.minHours;
   }
