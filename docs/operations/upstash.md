@@ -2,8 +2,9 @@
 
 **Status:** implemented, optional, off by default.
 **Free-tier figures read:** 2026-08-28 (Upstash pricing and documentation).
-**Live validation against a real database:** not yet performed — see
-[Owner actions](#owner-actions).
+**Live validation against a real database:** performed 2026-08-30 — all nine
+checks passed, measurements in §1.2. Two configuration findings are open and
+are for the owner, not the code: see [Owner actions](#12-owner-actions).
 
 WeVolunteer uses Upstash Redis for two things, and deliberately not for a third
 list of things that Redis is famous for. This document is the whole picture: why
@@ -52,6 +53,45 @@ integration exists to have measured and rejected.
 
 `npm run redis:ping` prints the measured round trip beside those numbers, so the
 comparison is available on the deployment rather than only in this document.
+
+### 1.2 Measured, on the development machine, 2026-08-30
+
+First live run against a real Upstash database, from the development machine in
+California. (The endpoint hostname is deliberately not recorded here: it is not
+a credential, but it names this deployment's database and there is no reason for
+it to live in the repository.)
+
+| measurement | value |
+|---|---|
+| cold call (fresh process, full TLS handshake) | 330–460 ms |
+| **warm, in-process, median** | **222 ms** |
+| warm, in-process, min / p95 | 219 ms / 350 ms |
+| `redis:validate` average over 12 requests | 244 ms |
+
+The warm figure is the one that matters: the application is a long-lived
+process and reuses the connection, so 222 ms is what a request actually pays.
+
+**That number is roughly 500× the database queries in the table above, and it is
+paid on every sign-in attempt** — the login-failure lockout is read before the
+password is checked. It is also the strongest possible confirmation of §1.1:
+anything that reads Redis where SQL would do is a straightforward regression.
+
+**Two things about this particular database made it worse than it needs to be**,
+and both were found by the ping rather than by reading the console:
+
+- **It is in `ap-south-1` (Mumbai)**, resolved from the endpoint's DNS. From
+  California that is most of the 222 ms. A region near the application host is
+  typically 10–30 ms. Region cannot be changed after creation — it needs a new
+  database.
+- **It is a Global database, not Regional.** Upstash replicates every write to
+  each read region and bills each replication as its own command, so the
+  command model in §7.3 is optimistic by whatever the replication factor is.
+  §8.2 has always said to choose Regional; `npm run redis:ping` now says so too
+  when it detects one, because nothing else would ever report it.
+
+Both are configuration, not code. Re-measure and update this table after moving
+to a regional database near the host; if the warm figure lands in the 10–30 ms
+range, the sign-in cost stops being interesting.
 
 ---
 
@@ -259,7 +299,9 @@ promise into a 500 on `/api/auth/login`.
 
 **Use a regional database, never global.** Upstash replicates writes to read
 regions and **counts each replication as a command**, so one read region doubles
-the spend for a deployment that is one server in one place.
+the spend for a deployment that is one server in one place. The first database
+configured for this project was Global (§1.2), which is the mistake this warning
+exists for and the reason `npm run redis:ping` now detects it.
 
 ### 7.2 What this integration costs per operation
 
@@ -439,14 +481,20 @@ schema of any kind.
 
 1. **Create the Upstash database** (§8.2) and add the two variables to
    `/etc/wevolunteer/wevolunteer.env`.
-2. **Run `npm run redis:validate`** on the host and keep the output. Until that
-   has run against a real database, the live-validation step of this work is
-   unfinished — everything here has been verified against an in-process double
-   and fault injection, which proves the logic and not the vendor.
-3. **Record the measured latency** from `npm run redis:ping` in §1.1, so the
-   comparison against the 0.3–0.5 ms database figures is a measurement on this
-   deployment rather than an estimate.
-4. **Add Upstash to the Privacy Policy's subprocessor table** before it holds any
+2. **Run `npm run redis:validate` on the production host** and keep the output.
+   It has been run against a real database from the development machine
+   (2026-08-30, nine checks, all passed, every key it wrote deleted), so the
+   vendor path is proven; what is not yet proven is the same path from the host
+   that will actually serve traffic, whose region and network are different.
+3. **Recreate the database as REGIONAL, in a region near the application host.**
+   The one currently configured is Global and in `ap-south-1`; §1.2 has the
+   measurements. This is the single highest-value action on this list: it takes
+   the sign-in path from 222 ms to an expected 10–30 ms and removes an unmodelled
+   multiplier from the command spend. Region and type are both fixed at creation,
+   so it means a new database and a new pair of credentials.
+4. **Re-measure and update §1.2** with `npm run redis:ping` after that move, so
+   the table describes the deployment rather than its first attempt.
+5. **Add Upstash to the Privacy Policy's subprocessor table** before it holds any
    production traffic. It will hold hashed rate-limit keys, cached public
    forecasts and cached public address lookups — no names, no emails, no
    messages, no service history — but it is a processor and the table must be

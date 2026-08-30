@@ -60,6 +60,73 @@ async function scanPrefix(prefix, { maxBatches = 50 } = {}) {
   return { ok: true, keys: found, complete: false };
 }
 
+/**
+ * The two ways this integration is most likely to be set up wrongly, both of
+ * which are silent.
+ *
+ * `instanceLock.js` states the principle these follow: the useful thing a
+ * check does is convert a silent misconfiguration into a loud one. Neither of
+ * these breaks anything — the application works either way — and that is
+ * exactly why nothing would ever report them.
+ */
+async function advise(latencyMs) {
+  const notes = [];
+
+  /**
+   * A distant region.
+   *
+   * The login-failure lockout is read on every sign-in attempt, so this latency
+   * lands on the most-used interactive path in the application. It is the one
+   * number here that a person can feel, and choosing a region is the only lever
+   * that moves it — a nearby region is typically 10-30 ms.
+   */
+  if (Number.isFinite(latencyMs) && latencyMs > 100) {
+    notes.push([
+      `${latencyMs} ms is high, and it is paid on every sign-in attempt.`,
+      'The database region is almost certainly not near this host. A nearby',
+      'region is typically 10-30 ms. This is a database property and cannot be',
+      'changed after creation: it needs a new database in the right region.',
+    ]);
+  }
+
+  /**
+   * A Global database where a Regional one was meant.
+   *
+   * Upstash replicates every write to each read region and BILLS EACH
+   * REPLICATION AS A COMMAND, so a Global database silently multiplies the
+   * command spend that docs/operations/upstash.md §7.3 is modelled on — for a
+   * deployment that is one server in one place and gains nothing from it.
+   *
+   * Detected from the CNAME chain, which is an Upstash implementation detail
+   * rather than a documented contract, so this is advisory and never fatal:
+   * a false negative just means no note, and a false positive costs a look at
+   * the console. `dns` failures are ignored for the same reason.
+   */
+  try {
+    const dns = await import('node:dns/promises');
+    const host = new URL(redisConfig().url).hostname;
+    const chain = await dns.resolveCname(host).catch(() => []);
+    if (chain.some(name => /global/i.test(name))) {
+      notes.push([
+        'This looks like a GLOBAL database (its CNAME chain names a global',
+        'endpoint). Upstash bills each replication to a read region as its own',
+        'command, so a global database can multiply the command spend that',
+        'docs/operations/upstash.md models — for a single-server deployment',
+        'that gains nothing from the replication. A REGIONAL database is what',
+        'this integration is sized for.',
+      ]);
+    }
+  } catch { /* advisory only */ }
+
+  if (!notes.length) return;
+  line('');
+  line('Worth looking at:');
+  for (const note of notes) {
+    line('');
+    for (const l of note) line(`  ${l}`);
+  }
+}
+
 function requireEnabled() {
   const cfg = redisConfig();
   if (cfg.enabled) return true;
@@ -118,6 +185,8 @@ async function main() {
     line('For comparison, the application\'s hot database queries are 0.3-0.5 ms');
     line('(docs/operations/postgres-scale-measurements.md). That is why Redis here');
     line('caches third-party lookups and security counters, and no SQL queries.');
+
+    await advise(res.latencyMs);
     return;
   }
 
@@ -195,12 +264,34 @@ async function main() {
          somebody forgets. */
       const unique = [...new Set(created)];
       if (unique.length) {
-        const del = await redisCommand(['DEL', ...unique]);
-        line('');
-        line(`Cleaned up ${del.ok ? del.result : '?'} of ${unique.length} validation key(s).`);
+        const del = await redisCommand(['DEL', ...unique], unique.length);
+        const removed = del.ok ? Number(del.result) || 0 : 0;
+
+        /**
+         * Report what REMAINS, not what DEL returned.
+         *
+         * DEL counts keys it actually removed, and one of the keys above is
+         * created with a 150 ms expiry specifically so the run can prove an
+         * expired key is gone. It therefore expires before cleanup and DEL
+         * reports one fewer than were created — which read as "Cleaned up 4 of
+         * 5" and looked exactly like a cleanup that had failed. The authority
+         * on whether anything was left behind is a scan, so that is what is
+         * printed.
+         */
         const left = await scanPrefix(prefix);
-        if (left.ok && left.keys.length) {
+        line('');
+        const expired = unique.length - removed;
+        line(
+          `Cleanup: removed ${removed} key(s)`
+          + (expired > 0 ? `, ${expired} had already expired on its own TTL` : '')
+          + '.'
+        );
+        if (!left.ok) {
+          line('Could not confirm the keyspace is clean (scan failed). Re-run `keys` to check.');
+        } else if (left.keys.length) {
           line(`WARNING: ${left.keys.length} validation key(s) remain. Run: node bin/upstash-redis.mjs purge --yes`);
+        } else {
+          line('No validation keys remain.');
         }
       }
       const usage = redisUsage();
