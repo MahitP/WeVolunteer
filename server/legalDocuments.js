@@ -231,14 +231,14 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'privacy-policy',
-    version: '1.0',
+    version: '1.1',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
     scope: 'signup',
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
-    effectiveAt: '2026-08-06',
+    effectiveAt: '2026-08-30',
     file: '01-privacy-policy.md',
-    contentHash: '90c09ee6e52c3ff5aa3b920b6495e627a92e3830e77d1a6d6aef79369a6b4504',
+    contentHash: 'f05a5989e92e4a248a1956e789819c2c839b378fd91d8f914d1ede9d86a1a88a',
     bundledWith: null,
   },
   {

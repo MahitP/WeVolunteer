@@ -63,10 +63,13 @@ it to live in the repository.)
 
 | measurement | value |
 |---|---|
-| cold call (fresh process, full TLS handshake) | 330–460 ms |
-| **warm, in-process, median** | **222 ms** |
-| warm, in-process, min / p95 | 219 ms / 350 ms |
-| `redis:validate` average over 12 requests | 244 ms |
+| cold call (fresh process, full TLS handshake) | 320–460 ms |
+| **warm, in-process, median** | **216 ms** |
+| warm, in-process, min / max | 213 ms / 239 ms |
+| `redis:validate` average over 12 requests | 231 ms |
+
+Measured against two successively-created databases; both landed in
+`ap-south-1` and both measured the same, which is itself the finding.
 
 The warm figure is the one that matters: the application is a long-lived
 process and reuses the connection, so 222 ms is what a request actually pays.
@@ -76,22 +79,34 @@ paid on every sign-in attempt** — the login-failure lockout is read before the
 password is checked. It is also the strongest possible confirmation of §1.1:
 anything that reads Redis where SQL would do is a straightforward regression.
 
-**Two things about this particular database made it worse than it needs to be**,
-and both were found by the ping rather than by reading the console:
+**The cause is the primary region**, resolved from the endpoint's DNS: every
+endpoint address is in `ap-south-1` (Mumbai), and from California that is
+essentially all of the 216 ms. A primary region near the application host is
+typically 10–30 ms. The primary region is fixed when the database is created, so
+changing it means a new database and a new pair of credentials.
 
-- **It is in `ap-south-1` (Mumbai)**, resolved from the endpoint's DNS. From
-  California that is most of the 222 ms. A region near the application host is
-  typically 10–30 ms. Region cannot be changed after creation — it needs a new
-  database.
-- **It is a Global database, not Regional.** Upstash replicates every write to
-  each read region and bills each replication as its own command, so the
-  command model in §7.3 is optimistic by whatever the replication factor is.
-  §8.2 has always said to choose Regional; `npm run redis:ping` now says so too
-  when it detects one, because nothing else would ever report it.
+**A correction, recorded because the wrong version of it was briefly acted on.**
+The first reading of this was that the database being *Global* rather than
+*Regional* was itself a problem, on the grounds that Upstash bills each
+replication to a read region as its own command. That inference was wrong, in a
+way worth keeping written down:
 
-Both are configuration, not code. Re-measure and update this table after moving
-to a regional database near the host; if the warm figure lands in the 10–30 ms
-range, the sign-in cost stops being interesting.
+- Upstash's documentation states that a global database with a primary region
+  and **no read regions** is "practically same with a single region (regional)
+  database". The endpoint type says nothing about how many regions are actually
+  replicated to.
+- This deployment's database was checked: `INFO replication` reports no
+  replicas, and all four endpoint addresses resolve to the one region. It has no
+  read regions, so **nothing is being multiplied and the model in §7.3 holds.**
+- Newer Upstash databases are Global by default and the console does not
+  meaningfully offer "Regional" any more, which is why looking for it is a dead
+  end. The setting that matters is the **primary region**, and separately
+  whether any **read regions** have been added.
+
+So there is one open item here, not two: the primary region. Re-measure and
+update this table after moving to a database whose primary region is near the
+host; if the warm figure lands in the 10–30 ms range, the sign-in cost stops
+being interesting.
 
 ---
 
@@ -297,11 +312,14 @@ promise into a 500 on `/api/auth/login`.
 > does not matter which is current. Re-read both if the design ever approaches
 > the ceiling.
 
-**Use a regional database, never global.** Upstash replicates writes to read
-regions and **counts each replication as a command**, so one read region doubles
-the spend for a deployment that is one server in one place. The first database
-configured for this project was Global (§1.2), which is the mistake this warning
-exists for and the reason `npm run redis:ping` now detects it.
+**Add no read regions.** Upstash replicates writes to every read region and
+**counts each replication as a command**, so a single read region doubles the
+spend for a deployment that is one server in one place. This is about read
+regions specifically, *not* about the database being "Global": a global database
+with no read regions is equivalent to a regional one, which is what this
+deployment has (§1.2). What matters at creation is the **primary region**, and
+what matters afterwards is not adding read regions to save a latency problem
+that a correctly-placed primary would not have had.
 
 ### 7.2 What this integration costs per operation
 
@@ -393,17 +411,23 @@ counters.
 ### 8.2 Creating the database
 
 1. Sign in at <https://console.upstash.com>.
-2. **Create Database.** Choose **Regional**, not Global — see §7.1.
-3. Pick the region nearest the application host. This is the single biggest
-   factor in the latency `npm run redis:ping` will report.
-4. Leave eviction **off**. Nothing here should be evicted under pressure; every
+2. **Create Database.** Newer databases are Global by default and there is no
+   meaningful "Regional" choice to hunt for — that is fine. What matters is the
+   next two steps.
+3. **Set the PRIMARY REGION to the one nearest the application host.** This is
+   the single biggest factor in the latency `npm run redis:ping` will report,
+   it is fixed at creation, and getting it wrong costs ~200 ms on every
+   sign-in (§1.2).
+4. **Add no read regions.** Each one bills every write a second time (§7.1). A
+   global database with no read regions is exactly what this integration wants.
+5. Leave eviction **off**. Nothing here should be evicted under pressure; every
    key has a TTL and the working set is a few megabytes.
-5. Open the **REST API** tab and copy `UPSTASH_REDIS_REST_URL` and
+6. Open the **REST API** tab and copy `UPSTASH_REDIS_REST_URL` and
    `UPSTASH_REDIS_REST_TOKEN`.
-6. Put both in `/etc/wevolunteer/wevolunteer.env` (mode 0600, root-owned) —
+7. Put both in `/etc/wevolunteer/wevolunteer.env` (mode 0600, root-owned) —
    never in the repository, and never in `.env.production`, which is compiled
    into the browser bundle.
-7. Restart the service and run the validation below.
+8. Restart the service and run the validation below.
 
 ### 8.3 Validating
 
@@ -486,12 +510,13 @@ schema of any kind.
    (2026-08-30, nine checks, all passed, every key it wrote deleted), so the
    vendor path is proven; what is not yet proven is the same path from the host
    that will actually serve traffic, whose region and network are different.
-3. **Recreate the database as REGIONAL, in a region near the application host.**
-   The one currently configured is Global and in `ap-south-1`; §1.2 has the
-   measurements. This is the single highest-value action on this list: it takes
-   the sign-in path from 222 ms to an expected 10–30 ms and removes an unmodelled
-   multiplier from the command spend. Region and type are both fixed at creation,
-   so it means a new database and a new pair of credentials.
+3. **Create the database with a PRIMARY REGION near the application host**, and
+   no read regions. The one currently configured has its primary in
+   `ap-south-1`, which costs ~216 ms on every sign-in attempt (§1.2). This is
+   the highest-value action on this list and the only open one from validation.
+   Do not go looking for a "Regional" database type — Global with no read
+   regions is the same thing and is correct. The primary region is fixed at
+   creation, so this means a new database and a new pair of credentials.
 4. **Re-measure and update §1.2** with `npm run redis:ping` after that move, so
    the table describes the deployment rather than its first attempt.
 5. **Add Upstash to the Privacy Policy's subprocessor table** before it holds any
