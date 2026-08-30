@@ -1310,6 +1310,21 @@ See [`docs/operations/betterstack.md`](operations/betterstack.md) for what is
 sent, what is never sent, the delivery guarantees, and the operator decisions
 the integration forces.
 
+**The same bar now binds a second wire.** Traces and metrics go to the same
+Better Stack source over OTLP, and OpenTelemetry's automatic instrumentation
+does not know about any of the above — measured on the shipped package
+versions, an HTTP server span records the query string verbatim, the client's
+IP address twice, the real path and the User-Agent by default. Every one of
+those is something this subsection forbids.
+
+`server/observability/spanAttributes.js` is the allowlist that holds the trace
+wire to it, and it is the file to read before adding an instrumentation or
+bumping one: it fails closed, it covers span *events* as well as attributes
+(because `recordException` writes an error's message and stack into one), and
+it runs before anything downstream can buffer a value. The reasoning, the
+budget and the cost controls are in
+[`docs/operations/observability.md`](operations/observability.md).
+
 #### Groups, events, fingerprints
 
 An **error group** is one *problem*. An **error event** is one *occurrence* of

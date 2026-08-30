@@ -25,7 +25,22 @@ EnvironmentFile=/etc/wevolunteer/wevolunteer.env
 # service runs as `wev`, whose shell is nologin. Install Node system-wide.
 #
 # Verify before enabling:  /usr/bin/env node --version   (must be v24.x)
-ExecStart=/usr/bin/env node server/server.js
+#
+# ── --import is load-bearing for tracing, and is not optional ────────────────
+#
+# It installs OpenTelemetry's ESM loader hook BEFORE the application's module
+# graph is loaded. Without it, express is read before the hook exists, the
+# Express instrumentation silently applies to nothing, and every trace shows one
+# span named `GET` instead of four named `GET /api/events/:id`. Nothing errors;
+# the dashboard is just quietly less useful. See server/observability/register.mjs.
+#
+# Losing this flag is therefore a real regression, so the application WARNS at
+# boot when it is absent:
+#
+#     [otel] WARNING: the ESM loader hook was not preloaded ...
+#
+# If you see that line, this is the line that is wrong.
+ExecStart=/usr/bin/env node --import ./server/observability/register.mjs server/server.js
 
 Restart=on-failure
 RestartSec=5

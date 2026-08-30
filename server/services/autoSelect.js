@@ -32,6 +32,7 @@ import { notificationService } from './notificationService.js';
 import '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { verifyRunStillApplies, staleRunMessage } from './autoSelectStaleness.js';
+import { withSpan } from '../observability/spans.js';
 
 /**
  * Computes a draw without writing anything.
@@ -445,6 +446,28 @@ export async function hasConfirmedRun(db, eventId) {
  * manual route already enforces and the reason this is safe to call repeatedly.
  */
 export async function runAndConfirm(db, eventId, { source = 'scheduler' } = {}) {
+  /**
+   * One of the four operations in this codebase given a span by hand.
+   *
+   * It earns one on the criteria in `spans.js`: it is not a layer, so automatic
+   * instrumentation cannot name it; it does real work — a draw, a weighting
+   * pass, a write and an apply, each of which touches the database; and it is
+   * the operation an organizer complains about when a selection "did not
+   * happen", where the useful answer is which of those four stages was slow or
+   * which one refused.
+   *
+   * `eventId` is deliberately NOT an attribute. It is an identifier, the
+   * allowlist in `spanAttributes.js` has no key for it, and a span attribute is
+   * not the place to start carrying one — the `wev.request_id` on the enclosing
+   * HTTP span already joins this trace to the log record that names what was
+   * being selected for.
+   */
+  return withSpan('autoselect.run', { component: 'autoselect', reason: source }, async () => {
+    return runAndConfirmInner(db, eventId, { source });
+  });
+}
+
+async function runAndConfirmInner(db, eventId, { source }) {
   if (await hasConfirmedRun(db, eventId)) {
     return { executed: false, reason: 'already_confirmed' };
   }

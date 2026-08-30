@@ -13,6 +13,7 @@ import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME } from './config
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
+import { recordHttpRequest } from './observability/metrics.js';
 import { limitHandler } from './rateLimitResponse.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -151,16 +152,38 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     try {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      /* The Express PATTERN, never `req.originalUrl` — a real URL carries a
+         query string, and query strings carry search terms and addresses.
+         Resolved once and shared, so the log record and the metric cannot
+         disagree about which route this was. */
+      const route = req.route?.path ?? routePatternOf(req);
+
       logHttpRequest({
         method: req.method,
-        /* The Express PATTERN, never `req.originalUrl` — a real URL carries a
-           query string, and query strings carry search terms and addresses. */
-        route: req.route?.path ?? routePatternOf(req),
+        route,
         statusCode: res.statusCode,
         durationMs: Math.round(durationMs),
         requestId: req.id,
         role: req.principal?.effectiveRole ?? req.user?.role,
         userHash: hashUserId(req.user?.id),
+      });
+
+      /**
+       * The same request, as a metric.
+       *
+       * Not a duplicate of the line above, and the difference is the point: the
+       * log record is SAMPLED (5% of successes, every error), so it cannot
+       * answer "what is the p95 right now". This counts every request without
+       * exception, at a fixed cost that does not grow with traffic, and carries
+       * no identifier of any kind — see `metrics.js` on cardinality.
+       *
+       * Unconditional: with telemetry off this is a call into a no-op meter.
+       */
+      recordHttpRequest({
+        method: req.method,
+        route,
+        statusCode: res.statusCode,
+        durationMs,
       });
     } catch { /* telemetry must never touch the response */ }
   });
