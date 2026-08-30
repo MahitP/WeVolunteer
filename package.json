@@ -29,7 +29,11 @@
     "pinecone:backfill": "node --env-file-if-exists=.env bin/pinecone-index.mjs backfill",
     "pinecone:reindex": "node --env-file-if-exists=.env bin/pinecone-index.mjs reindex",
     "pinecone:reconcile": "node --env-file-if-exists=.env bin/pinecone-index.mjs reconcile",
-    "pinecone:stats": "node --env-file-if-exists=.env bin/pinecone-index.mjs stats"
+    "pinecone:stats": "node --env-file-if-exists=.env bin/pinecone-index.mjs stats",
+    "redis:status": "node --env-file-if-exists=.env bin/upstash-redis.mjs status",
+    "redis:ping": "node --env-file-if-exists=.env bin/upstash-redis.mjs ping",
+    "redis:keys": "node --env-file-if-exists=.env bin/upstash-redis.mjs keys",
+    "redis:validate": "node --env-file-if-exists=.env bin/upstash-redis.mjs validate"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",

@@ -2231,24 +2231,75 @@ exist so the decision is made on evidence rather than enthusiasm.
   calculation added in 1.1.0.
 - **Do not adopt** to "be ready". Adopt when a trigger fires.
 
-### 10.2 Redis adoption
+### 10.2 Redis adoption (partially adopted, v1.3)
 
-- **Why it may become necessary.** Several pieces of state are currently
-  in-process: rate-limiter counters, the auto-select scheduler, Socket.IO
-  connection state. All are correct for exactly one instance — and
-  `instanceLock.js` enforces that assumption. The moment a second instance
-  exists, every one of them becomes wrong: rate limits become per-instance
-  (trivially bypassed by reconnecting), the scheduler double-runs, and realtime
-  events reach only the clients attached to one instance.
-- **Triggers.** A second application instance, for any reason. Session or cache
-  state must outlive a restart. Socket.IO needs an adapter to broadcast across
-  instances.
-- **Tradeoffs.** Gains: shared state, correct distributed rate limiting, a
-  working Socket.IO adapter, distributed locks. Costs: another service; a new
-  failure mode (what happens when Redis is down?); cache-invalidation bugs; and
-  the temptation to move state there that should be in the database.
-- **Note.** This is tightly coupled to §10.1 and §10.7. Multi-instance is a
-  single decision with three consequences, not three independent projects.
+Like §10.9, this one has partly happened. What is worth keeping is not the
+decision to adopt but **how narrow the adoption is, and the measurement that
+made it narrow** — because the obvious version of this project was several times
+larger and would have made the application slower.
+
+- **What forced it.** Two things, neither of them speed. The security counters
+  were process memory, so a restart cleared them: a deploy during a password
+  spray handed the attempt a fresh budget, and an account two failures from
+  lockout went back to ten. And the third-party lookup caches died on every
+  deploy, which for geocoding means re-warming against Nominatim's limit of one
+  request per second **for this application in total** — a limit whose breach is
+  not a 500 but OSM blocking the User-Agent for every school at once.
+
+- **The measurement that shaped everything else.** `postgres-scale-measurements.md`
+  puts the hot queries at **0.3–0.5 ms** at 50× pilot scale. An Upstash call is
+  an HTTPS round trip to another host. So caching a database query in Redis is
+  not an optimisation here, it is a regression that also spends a metered
+  allowance — and "cache the hot reads" is the intuition this work exists to
+  have measured and rejected rather than followed.
+
+- **What was adopted.** The login-failure throttle and five security limiters
+  share a Redis-backed counter; the weather and geocode caches gained a second
+  tier behind their in-process one; the Nominatim pacing reservation became
+  application-wide rather than process-wide. Nothing else.
+
+- **The second measurement, which cut the scope again.** The first version
+  shared all eight security limiters, including the three on the sign-in path.
+  Those three set `skipSuccessfulRequests`, which bills an increment on every
+  request and a decrement on every success — so the expensive case is a
+  *successful* sign-in, and the version that looked most thorough came to 107%
+  of the free plan's monthly allowance at a thousand users. The shipped scoping
+  is a fifth of that. The lesson is the one §10 exists for: an integration's
+  cost is a property of its traffic shape, not of how many features it touches,
+  and it is worth computing before it is worth building.
+
+- **What was rejected, and why it is worth knowing.** Sessions — WeVolunteer
+  already has per-session revocation in SQL, and routing it through Redis would
+  add a round trip to *every authenticated request* to replace an indexed local
+  read. Chat — durable messages belong in the relational database, where
+  retention, deletion, export and moderation are built. Leaderboards — a sorted
+  set would be a derived index that can drift from the hours ledger, against
+  INV-001, to fix a scan that an index fixes for free. Pub/Sub — with one
+  instance `io.emit` is already correct, faster, and cannot drop a message to an
+  outage.
+
+- **The privacy decision to copy.** The travel-time route was the strongest
+  remaining cache candidate and is deliberately excluded: its origin is a minor's
+  location, and that module promises the coordinate is "never persisted. No
+  column, no row, nowhere". Hashing the key does not rescue that promise, because
+  the promise is about where the data goes rather than how it is encoded. A test
+  fails the build if that route ever imports `server/redis/`.
+
+- **The constraint that shaped the rest.** Upstash's free plan is treated as
+  permanent: 500,000 commands a month, and **one database**. That is why only
+  limiters that tick on a failure were migrated — `apiLimiter` alone would spend
+  the month in an afternoon — and why environment separation is a key prefix
+  rather than a second instance.
+
+- **Still deferred, and still triggered by a second instance.** The Socket.IO
+  adapter, a distributed lock replacing `instanceLock.js`, and the volume
+  limiters. This remains coupled to §10.1 and §10.7: multi-instance is a single
+  decision with several consequences, not several independent projects. What has
+  changed is that the *first* of those consequences — shared rate-limit state,
+  which `docs/plans/supabase-vercel-migration-plan.md` §4.4 names as the
+  prerequisite — is now built and tested.
+
+See [`docs/operations/upstash.md`](operations/upstash.md).
 
 ### 10.3 Email infrastructure
 
@@ -2395,7 +2446,9 @@ Roughly ascending cost and risk, given today's foundations:
 4. **PWA, offline reads** (§10.5) — self-contained
 5. **Analytics** (§10.6) — needs a privacy design first
 6. **PostgreSQL** (§10.1) — infrastructure change
-7. **Redis** (§10.2) — arrives with multi-instance
+7. **Redis** (§10.2) — the shared-counter and cache half is done; the
+   multi-instance half (Socket.IO adapter, distributed lock) still waits for a
+   second instance
 8. **Multi-district tenancy** (§10.7) — dedicated design phase, `2.0.0`
 
 This is a default ordering, not a commitment. A district requirement can
