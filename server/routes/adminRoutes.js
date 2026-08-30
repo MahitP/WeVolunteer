@@ -193,39 +193,88 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
      * `users` is left as a raw count of rows on purpose: it is the size of the
      * table, not a population, and the two tombstone rows belong in it.
      */
-    /* Each row is parenthesised before its column is read: `await q.get().c`
-       would take `.c` off the pending promise and report every total as
-       `undefined`, which the dashboard would render as a blank rather than an
-       error. */
+    /**
+     * Every whole-table scalar this page needs, in ONE statement.
+     *
+     * ── Why this is one query and not ten ──
+     *
+     * It was ten separate `await db.prepare(…).get()` calls. On `node:sqlite`
+     * that cost nothing: `DatabaseSync` is synchronous, so ten statements were
+     * ten function calls. On PostgreSQL each `await` is a network round trip,
+     * and against a managed provider that round trip is the dominant cost — ten
+     * of them, in series, before the page can render.
+     *
+     * Consolidating is strictly better than `Promise.all` here. Parallelising
+     * ten independent reads would take ten clients from a pool of ten
+     * (`db/engine.js` argues that size, and it is deliberately small), so two
+     * administrators refreshing at once would queue behind each other. One
+     * statement takes one connection and one round trip.
+     *
+     * A scalar subquery per figure rather than conditional aggregation over a
+     * join, because these are counts of DIFFERENT tables — there is no single
+     * row set they are all aggregates of, and inventing one with joins would
+     * multiply rows and silently change the answers.
+     *
+     * The `?` binding appears twice because both `hours` and `active_volunteers`
+     * are over `present = 1`; the value is bound once per occurrence, which is
+     * what `translatePlaceholders` expects on both engines.
+     */
+    const scalars = await db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM users) AS users,
+        (SELECT COUNT(*) FROM users WHERE role = 'student' AND account_status <> 'deleted') AS students,
+        (SELECT COUNT(*) FROM users WHERE role = 'organizer' AND account_status <> 'deleted') AS organizers,
+        (SELECT COUNT(*) FROM events) AS events,
+        (SELECT COUNT(*) FROM applications) AS applications,
+        (SELECT COALESCE(SUM(hours_awarded), 0) FROM attendance WHERE present = 1) AS hours,
+        (SELECT COUNT(*) FROM users WHERE role = 'organizer' AND verified = 0) AS pending_organizers,
+        (SELECT COUNT(*) FROM attendance) AS attendance_total,
+        (SELECT COUNT(*) FROM attendance WHERE present = 1) AS attendance_present,
+        (SELECT COUNT(DISTINCT user_id) FROM attendance WHERE present = 1) AS active_volunteers
+    `).get();
+
     const totals = {
-      users: (await db.prepare('SELECT COUNT(*) as c FROM users').get()).c,
-      students: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'student' AND account_status <> 'deleted'").get()).c,
-      organizers: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND account_status <> 'deleted'").get()).c,
-      events: (await db.prepare('SELECT COUNT(*) as c FROM events').get()).c,
-      applications: (await db.prepare('SELECT COUNT(*) as c FROM applications').get()).c,
-      hours: (await db.prepare('SELECT COALESCE(SUM(hours_awarded),0) as h FROM attendance WHERE present = 1').get()).h,
-      pendingOrganizers: (await db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'organizer' AND verified = 0").get()).c
+      users: scalars.users,
+      students: scalars.students,
+      organizers: scalars.organizers,
+      events: scalars.events,
+      applications: scalars.applications,
+      hours: scalars.hours,
+      pendingOrganizers: scalars.pending_organizers
     };
 
     // ── Rates that tell staff whether the programme is healthy ──
-    const attendance = await db.prepare(`
-      SELECT COUNT(*) as total, SUM(CASE WHEN present = 1 THEN 1 ELSE 0 END) as present
-      FROM attendance
-    `).get();
-    const attendanceRate = attendance.total > 0
-      ? Math.round((attendance.present / attendance.total) * 100) : null;
+    const attendanceRate = scalars.attendance_total > 0
+      ? Math.round((scalars.attendance_present / scalars.attendance_total) * 100) : null;
 
-    const eventStatus = (await db.prepare(`
-      SELECT status, COUNT(*) as c FROM events GROUP BY status
-    `).all()).reduce((acc, r) => ({ ...acc, [r.status]: r.c }), {});
+    /**
+     * The two `events` rollups, folded from one scan instead of two.
+     *
+     * `eventStatus` groups by `status` and `selectionSplit` groups by
+     * `auto_approve`; both read every row of `events` and neither filters. One
+     * `GROUP BY status, auto_approve` produces both, and the JS below sums the
+     * cells back into the two shapes the response has always published — so the
+     * payload is unchanged and the table is read once.
+     */
+    const eventRollup = await db.prepare(`
+      SELECT status, COALESCE(auto_approve, 0) AS auto, COUNT(*) AS c
+      FROM events GROUP BY status, COALESCE(auto_approve, 0)
+    `).all();
+
+    const eventStatus = {};
+    const selectionSplit = { manual: 0, autoSelect: 0 };
+    for (const r of eventRollup) {
+      eventStatus[r.status] = (eventStatus[r.status] || 0) + r.c;
+      if (Number(r.auto) === 1) selectionSplit.autoSelect += r.c;
+      else selectionSplit.manual += r.c;
+    }
+
     const finishedEvents = (eventStatus.completed || 0) + (eventStatus.cancelled || 0);
     const completionRate = finishedEvents > 0
       ? Math.round(((eventStatus.completed || 0) / finishedEvents) * 100) : null;
 
     // How many students actually volunteered vs merely registered
-    const activeVolunteers = (await db.prepare(`
-      SELECT COUNT(DISTINCT user_id) as c FROM attendance WHERE present = 1
-    `).get()).c;
+    const activeVolunteers = scalars.active_volunteers;
     const participationRate = totals.students > 0
       ? Math.round((activeVolunteers / totals.students) * 100) : null;
 
@@ -274,11 +323,6 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
       LIMIT 5
     `).all();
 
-    const selectionSplit = (await db.prepare(`
-      SELECT COALESCE(auto_approve, 0) as auto, COUNT(*) as c
-      FROM events GROUP BY auto
-    `).all()).reduce((acc, r) => ({ ...acc, [r.auto === 1 ? 'autoSelect' : 'manual']: r.c }), {});
-
     res.json({
       ...totals,
       activeVolunteers,
@@ -294,7 +338,7 @@ router.get('/api/admin/stats', authenticateToken, requireCap('analytics.school')
         id: o.id, name: o.name, avatar: o.avatar, verified: o.verified === 1,
         events: o.events, hours: Number(o.hours)
       })),
-      selectionSplit: { manual: selectionSplit.manual || 0, autoSelect: selectionSplit.autoSelect || 0 }
+      selectionSplit
     });
   } catch (err) {
     console.error('Admin stats error:', err);
