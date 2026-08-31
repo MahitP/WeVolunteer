@@ -56,8 +56,26 @@ const reset = spawnSync(process.execPath, ['bin/reset-dev-db.mjs', '--yes'], {
 });
 if (reset.status !== 0) process.exit(reset.status ?? 1);
 
+/**
+ * `WEV_A11Y_HARNESS=1` exempts the audit's server from the VOLUME limiter.
+ *
+ * One full run makes more than the 10,000 requests `apiLimiter` allows in
+ * fifteen minutes — measured, and mostly the application loading its own pages
+ * a hundred and ninety times rather than anything this harness does. Without
+ * this the run exhausts the ceiling partway through and the remaining specs
+ * fail with 429s that say nothing about accessibility, so the gate cannot state
+ * a result in one invocation.
+ *
+ * It exempts nothing else. Every credential limiter — login, signup, mail,
+ * reauth, 2FA — still counts these requests, and `config.js` refuses the
+ * variable outright when NODE_ENV is production, where `server.js` also
+ * declines to boot on it. See A11Y_HARNESS in server/config.js.
+ *
+ * Passed to Playwright rather than exported here because playwright.config.js
+ * spawns the API server itself; this is the process that inherits it.
+ */
 const pw = spawnSync('npx', ['playwright', 'test', ...args.filter(a => a !== '--yes' && a !== '--dry-run')], {
   cwd: ROOT, stdio: 'inherit',
-  env: { ...process.env, WEV_DB_PATH: dbPath, DATABASE_ENGINE: 'sqlite' }
+  env: { ...process.env, WEV_DB_PATH: dbPath, DATABASE_ENGINE: 'sqlite', WEV_A11Y_HARNESS: '1' }
 });
 process.exit(pw.status ?? 1);

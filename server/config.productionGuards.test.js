@@ -307,3 +307,90 @@ describe('DEMO_MODE cannot be enabled in production', () => {
     expect(r.out).not.toMatch(/PUBLISHED password/i);
   });
 });
+
+/**
+ * The accessibility harness's volume-limiter exemption must not survive
+ * production either.
+ *
+ * `WEV_A11Y_HARNESS=1` makes `apiLimiter` — the blanket 600-per-fifteen-minutes
+ * volume control on `/api` — skip every request, so that `npm run a11y` can
+ * complete in one invocation instead of exhausting the ceiling partway through.
+ * In production that same flag would remove the only bound on how fast one
+ * device may call the API.
+ *
+ * Two independent things stop it, and both are asserted here because either one
+ * alone would be a single point of failure:
+ *
+ *   1. `config.js` requires `!IS_PRODUCTION` before `A11Y_HARNESS` is ever true,
+ *      so even a process that somehow got past the boot check applies the
+ *      limiter normally.
+ *   2. `server.js` refuses to boot at all, so an operator who set the variable
+ *      is told rather than left believing an exemption is active.
+ */
+describe('WEV_A11Y_HARNESS cannot be enabled in production', () => {
+  const bootServer = (env) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [`${root}/server/server.js`], {
+      env: {
+        ...PRODUCTION,
+        WEV_DB_PATH: `/tmp/wev-a11y-guard-${process.pid}.db`,
+        ...env,
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+  };
+
+  it('refuses to boot, and exits non-zero', () => {
+    const r = bootServer({ WEV_A11Y_HARNESS: '1' });
+
+    expect(r.out).toMatch(/FATAL: WEV_A11Y_HARNESS cannot be enabled in production/);
+    expect(r.status, 'a refusal that exits 0 is not a refusal').toBe(1);
+  });
+
+  /**
+   * The constant itself, evaluated in a production environment.
+   *
+   * Belt and braces against the boot guard being the only thing holding this:
+   * if `A11Y_HARNESS` were ever computed without the `!IS_PRODUCTION` term, a
+   * process that reached `app.js` by any path would silently have no volume
+   * limiter.
+   */
+  it('is false in a production process even when the variable is set', () => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [
+      '--input-type=module', '-e',
+      `const c = await import('${root}/server/config.js');`
+      + 'process.stdout.write(String(c.A11Y_HARNESS));',
+    ], {
+      env: { ...PRODUCTION, WEV_A11Y_HARNESS: '1', WEV_DB_PATH: `/tmp/wev-a11y-const-${process.pid}.db` },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+
+    expect(r.stdout, r.stderr).toBe('false');
+  });
+
+  it('is true outside production when the variable is set', () => {
+    /* The other half: a flag that is always false would make the case above
+       pass while the harness stayed broken. */
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [
+      '--input-type=module', '-e',
+      `const c = await import('${root}/server/config.js');`
+      + 'process.stdout.write(String(c.A11Y_HARNESS));',
+    ], {
+      env: {
+        ...PRODUCTION,
+        NODE_ENV: 'development',
+        WEV_A11Y_HARNESS: '1',
+        WEV_DB_PATH: `/tmp/wev-a11y-dev-${process.pid}.db`,
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+
+    expect(r.stdout, r.stderr).toBe('true');
+  });
+});
