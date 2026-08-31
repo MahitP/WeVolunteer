@@ -275,16 +275,28 @@ export default function CalendarView({
             {/* No class for the active state: the inline style below already
                 sets its background, colour and shadow. The generated class that
                 used to sit here never had a rule written for it and was a no-op,
-                so it is dropped rather than given one. */}
+                so it is dropped rather than given one.
+
+                The INACTIVE segment sets no box-shadow at all, and that is
+                load-bearing rather than tidy. It used to set `boxShadow: 'none'`
+                — redundant, because `.btn-ghost` has no shadow to remove — and
+                an inline declaration beats every stylesheet rule. The app's
+                focus indicator IS a box-shadow (`:focus-visible { box-shadow:
+                var(--focus) }`), so the inline `none` silently deleted the focus
+                ring from whichever segment was not selected: a WCAG 2.4.7
+                failure on a control a keyboard user has to pass through to
+                reach the calendar. The active segment kept its
+                `--control-shadow` and so always looked fine.
+                Omitting the property lets the ring paint. */}
             <button
               className={`btn btn-sm ${viewMode === 'month' ? '' : 'btn-ghost'}`}
               onClick={() => setViewMode('month')}
-              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'month' ? 'var(--surface)' : 'transparent', color: viewMode === 'month' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'month' ? 'var(--control-shadow)' : 'none' }}
+              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'month' ? 'var(--surface)' : 'transparent', color: viewMode === 'month' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'month' ? 'var(--control-shadow)' : undefined }}
             >Month</button>
             <button 
               className={`btn btn-sm ${viewMode === 'week' ? '' : 'btn-ghost'}`}
               onClick={() => setViewMode('week')}
-              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'week' ? 'var(--surface)' : 'transparent', color: viewMode === 'week' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'week' ? 'var(--control-shadow)' : 'none' }}
+              style={{ margin: 0, borderRadius: 'calc(var(--r-md) - 2px)', background: viewMode === 'week' ? 'var(--surface)' : 'transparent', color: viewMode === 'week' ? 'var(--ink)' : 'var(--ink-2)', boxShadow: viewMode === 'week' ? 'var(--control-shadow)' : undefined }}
             >Week</button>
           </div>
         </div>

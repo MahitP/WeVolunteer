@@ -2060,6 +2060,27 @@ time { font-variant-numeric: tabular-nums; }
   color: var(--ink-inv);
   box-shadow: none;
 }
+/**
+ * The focus ring this panel had removed along with the shadow.
+ *
+ * `.nextshift .btn-secondary` above sets `box-shadow: none`, which is right for
+ * the translucent surface — `--sh-1` is a drop shadow built for a white card and
+ * reads as dirt on the green. But the app's focus indicator IS a box-shadow, and
+ * that selector is (0,2,0) against `:focus-visible`'s (0,1,0), so it deleted the
+ * ring as well: "View details" is the most prominent action on the volunteer
+ * dashboard and a keyboard user reached it with nothing shown at all. WCAG 2.4.7.
+ *
+ * An outline rather than restoring the box-shadow, for two reasons. `--focus`
+ * paints its inner ring in `--surface` to separate the ring from a white card,
+ * and this panel is the app's one inverse surface, so that ring would be a pale
+ * band on green. And the sibling control here — `.nextshift .location-link` —
+ * already focuses with `outline-color: var(--ink-inv)`, so this matches the
+ * pattern the panel already uses rather than inventing a second one.
+ */
+.nextshift .btn-secondary:focus-visible {
+  outline: 2px solid var(--ink-inv);
+  outline-offset: 2px;
+}
 .nextshift .btn-secondary:hover {
   background: var(--brand-translucent-hover);
   border-color: var(--brand-translucent-border-hover);

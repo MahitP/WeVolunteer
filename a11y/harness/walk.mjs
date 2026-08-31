@@ -89,6 +89,40 @@ export async function forEachRoute(
         .waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
 
       /**
+       * …and then wait for the page's CONTENT, which the landmark does not
+       * imply.
+       *
+       * `main` is the shell. It becomes visible as soon as the route's component
+       * mounts, while the data it renders is still being fetched, so the wait
+       * above returns on a page that is nothing but loading skeletons. Every
+       * sweep then measures placeholders: the focus walk tabs through controls
+       * that are still being replaced, and axe scans a page the reader never
+       * sees.
+       *
+       * That is not hypothetical. The GitHub runner is slower than a developer
+       * machine, and the focus sweep failed there on `/` and `/calendar` —
+       * reporting "View details" and "Week" as having no focus indicator —
+       * while passing locally every time. The uploaded screenshot settled it:
+       * the dashboard was still showing grey skeleton blocks. The rings were
+       * never missing; the page had not finished arriving.
+       *
+       * This is the same mistake, in the same shape, that
+       * `preferences.spec.js` made about the Accessibility Statement: waiting
+       * for a landmark that was already on screen and reading the previous
+       * page's content.
+       *
+       * Bounded and forgiving. A route whose skeletons never clear — a genuinely
+       * stuck fetch — still gets measured after the timeout rather than hanging
+       * the sweep, and whatever it reports about a stuck page is a true finding
+       * about a stuck page.
+       */
+      await page.waitForFunction(
+        () => !document.querySelector('.skeleton, .premium-skeleton'),
+        undefined,
+        { timeout: 10000 },
+      ).catch(() => {});
+
+      /**
        * Settle the styles before anything measures them.
        *
        * This is not a convenience — it is the difference between real findings
