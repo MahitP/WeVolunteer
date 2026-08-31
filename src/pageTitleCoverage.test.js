@@ -49,9 +49,27 @@ const IS_ACTUALLY_THE_DASHBOARD = new Set(['/']);
  * `PAGE_META`.
  */
 const OUTSIDE_THE_SHELL = new Set([
-  '/login', '/signup', '/welcome', '/about', '/legal', '/privacy',
+  '/login', '/signup', '/welcome', '/about', '/privacy',
   '/appeal', '/reset-password', '/oauth/callback', '/verify',
 ]);
+
+/**
+ * `/legal` was on the list above, and it was the fourth instance of the defect
+ * this file exists to catch.
+ *
+ * PUBLIC is not the same as OUTSIDE THE SHELL. A signed-out reader gets the
+ * Legal Center on its own, but a signed-in one gets it inside the shell with
+ * the topbar and the rail — and `tabForPath` had no `/legal` branch, so it fell
+ * through to `return 'dashboard'`. Every legal document's browser tab said
+ * "Dashboard · WeVolunteer", measured live on `/legal/accessibility-statement`,
+ * which is a WCAG 2.4.2 failure on the pages a reader is most likely to have
+ * opened in a background tab to compare against another.
+ *
+ * Removing it from the exemption is what makes the case below cover it. The
+ * exemption is for routes that genuinely never reach `PAGE_META`; a route that
+ * reaches it and is described wrongly is the thing being tested.
+ */
+
 
 describe('every shell route is titled for itself', () => {
   it('finds routes to check, so this file cannot pass by finding none', () => {

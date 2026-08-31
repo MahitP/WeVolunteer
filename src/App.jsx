@@ -500,6 +500,30 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
   if (pathname.startsWith('/admin/legal')) return 'legalEditor';
+  /**
+   * The Legal Center, and every document under it.
+   *
+   * AFTER `/admin/legal`, which is a different page — the editor, not the
+   * reader's catalogue — and a `/legal` branch placed above it would swallow
+   * `/admin/legal`… except it would not, because the prefixes differ at the
+   * first character. Ordered this way anyway so the pair reads in the order a
+   * person would check them.
+   *
+   * Its absence was the fourth instance of the defect this function's comments
+   * already record three times: `/legal/privacy-policy` fell through to
+   * `return 'dashboard'` below, so the Legal Center rendered under the
+   * dashboard's title and every legal document's browser tab said
+   * "Dashboard · WeVolunteer". `pageTitleCoverage.test.js` did not catch it
+   * because `/legal` was listed there as a signed-out screen rendered outside
+   * the shell. It is public, which is not the same thing — a signed-in reader
+   * opening the Privacy Policy gets it inside the shell, with the topbar and
+   * the rail, and that is the reader who was told they were on the dashboard.
+   *
+   * `LegalDocument` narrows the tab to the document's own name once it has
+   * loaded, through `useDocumentTitle`. This is the title before that and the
+   * title for the catalogue page itself.
+   */
+  if (pathname.startsWith('/legal')) return 'legal';
   return 'dashboard';
 }
 
@@ -603,6 +627,9 @@ export const PAGE_META = {
   volunteer: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    /* Public, and reachable by every persona from the Help area of Settings
+       and from the footer of the signed-out screens. */
+    legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
@@ -642,6 +669,9 @@ export const PAGE_META = {
   host: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    /* Public, and reachable by every persona from the Help area of Settings
+       and from the footer of the signed-out screens. */
+    legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
@@ -659,6 +689,9 @@ export const PAGE_META = {
   staff: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    /* Public, and reachable by every persona from the Help area of Settings
+       and from the footer of the signed-out screens. */
+    legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
@@ -707,6 +740,9 @@ export const PAGE_META = {
   partner: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
     settings: { title: 'Settings', sub: 'Your account, privacy, and notifications' },
+    /* Public, and reachable by every persona from the Help area of Settings
+       and from the footer of the signed-out screens. */
+    legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     /* No `welly` entry, deliberately. Welly answers from the reader's own
        record and every one of its tools is scoped to `self.read`, which a
        partner does not hold — so both the rail entry and the route gate refuse
