@@ -9,6 +9,9 @@ import EmptyState from '../components/common/EmptyState';
 import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
 import { CATEGORY_GROUPS } from '../eventCategories';
 import { can } from '../authz';
+/* Mirrored from the server so the two roster exports cannot disagree about what
+   a safe cell is — the same reason src/authz.js imports server/authz.js. */
+import { csvCell } from '../../server/csv.js';
 const TABS = [{
   id: 'active',
   label: 'Active'
@@ -199,9 +202,8 @@ export default function OrganizerDashboard({
     }
   };
   const downloadRosterCSV = () => {
-    const escCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const roster = rosterOf(acceptedApps);
-    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(escCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(escCell).join(','))].join('\n');
+    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(csvCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(csvCell).join(','))].join('\n');
     const blob = new Blob([rows], {
       type: 'text/csv;charset=utf-8;'
     });
@@ -515,6 +517,22 @@ export default function OrganizerDashboard({
           <div className="stat-value">{uniqueVolunteers}</div>
           <div className="stat-note">{acceptedApps.length} shift assignments</div>
         </div>
+        {/**
+          * Hours credited sits above Awaiting review.
+          *
+          * The first three tiles are the settled record of the programme —
+          * events running, volunteers confirmed, hours credited — and the
+          * fourth is the only one that is a job still to do. Ending on it puts
+          * the outstanding work next to the review section directly below,
+          * rather than burying it between two totals.
+          *
+          * Order only. The figures, the warning colour on an outstanding count,
+          * and everything the review section does are untouched.
+          */}
+        <div className="stat">
+          <div className="stat-label">Hours credited</div>
+          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
+        </div>
         <div className="stat">
           <div className="stat-label">Awaiting review</div>
           <div className="stat-value" style={{
@@ -522,10 +540,6 @@ export default function OrganizerDashboard({
         }}>
             {pendingApps.length}
           </div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Hours credited</div>
-          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
         </div>
       </section>
 

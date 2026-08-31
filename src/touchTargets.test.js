@@ -3,7 +3,14 @@ import fs from 'fs';
 import path from 'path';
 
 /**
- * WCAG 2.1 §2.5.5 guard for the controls where a small target hurts most.
+ * The 44px HOUSE RULE for the controls where a small target hurts most.
+ *
+ * Not a WCAG AA requirement, and this file used to say it was. WCAG 2.2's Level
+ * AA target-size criterion is 2.5.8 Target Size (Minimum) at 24x24 CSS px;
+ * §2.5.5 Target Size (Enhanced), which is where 44px comes from, is Level AAA.
+ * So a failure here is this project choosing to be stricter than conformance
+ * requires — worth keeping, and worth not citing as a conformance failure.
+ * `a11y/sweep.geometry.spec.js` measures the two separately for that reason.
  *
  * ── The failure this exists to prevent ──
  *
@@ -79,6 +86,37 @@ describe('touch targets', () => {
       const focus = ruleFor('.modal-close:focus-visible');
       expect(focus, '.modal-close:focus-visible has no rule').toBeTruthy();
       expect(focus).toMatch(/outline/);
+    });
+  });
+
+  describe('.toast button — the way out of a message covering something', () => {
+    const body = ruleFor('.toast button');
+
+    it('has a rule at all', () => {
+      /* Guards the guard, same as above: a renamed selector would make the
+         assertions below pass against null. */
+      expect(body, '.toast button is no longer declared in index.css').toBeTruthy();
+    });
+
+    it('declares a hit area of at least 44px in both directions', () => {
+      /**
+       * Measured in a real browser at 14x15px — the icon's own box, because the
+       * button had no padding and no minimum. That is under WCAG 2.2 2.5.8's
+       * 24x24 AA floor, let alone this file's 44px house rule, on the one control
+       * every user of the application reaches.
+       *
+       * Found by the browser sweep rather than by this file, which is the
+       * division of labour: a declared `min-width` is checkable here, and whether
+       * a control with NO minimum ends up big enough anyway is only answerable
+       * where layout exists.
+       */
+      expect(pxOf(body, 'min-width'), 'min-width').toBeGreaterThanOrEqual(MINIMUM);
+      expect(pxOf(body, 'min-height'), 'min-height').toBeGreaterThanOrEqual(MINIMUM);
+    });
+
+    it('centres its icon, so the target is the button and not the glyph', () => {
+      expect(body).toMatch(/align-items\s*:\s*center/);
+      expect(body).toMatch(/justify-content\s*:\s*center/);
     });
   });
 

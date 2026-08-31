@@ -97,13 +97,40 @@ describe('what it offers instead', () => {
     expect(reply).toMatch(/find one that already exists/i);
   });
 
-  it('sends an organizer to the page', () => {
-    expect(actionReplyFor(organizer, { kind: 'event' })).toMatch(/Create event page/i);
+  /**
+   * ── What changed, and why the old assertion had to ──
+   *
+   * This used to require the organizer's reply to name the Create event page,
+   * and the one below required EVERY reply to say Welly cannot create anything.
+   * Both were true when Welly could not create an event. It can now — the
+   * conversation in `eventDraft.js` collects the details and
+   * `TOOLS.create_event` posts them through the same endpoint the page does —
+   * so repeating "I can't create anything myself" to an organizer would be a
+   * false statement about the feature they are being offered.
+   *
+   * The safety property underneath is unchanged and is what the two tests
+   * below assert instead: nobody without `event.create` is told Welly will do
+   * it, and nothing Welly genuinely cannot do is claimed for anybody.
+   */
+  it('offers an organizer the conversation, because Welly can now run it', () => {
+    const reply = actionReplyFor(organizer, { kind: 'event' });
+    expect(reply).toMatch(/create an event/i);
+    expect(reply).not.toMatch(/can't create or change anything/i);
   });
 
-  it('never claims Welly can act, whoever is asking', () => {
+  it('never offers to create an event to somebody who cannot', () => {
+    for (const who of [student, null]) {
+      const reply = actionReplyFor(who, { kind: 'event' });
+      expect(reply).toMatch(/can't create or change anything/i);
+      expect(reply).not.toMatch(/I will ask for the details/i);
+    }
+  });
+
+  it('never claims Welly can decide anything, whoever is asking', () => {
+    /* Deciding who gets a place, and everything else outside the tool
+       registry, stays something Welly does not do — for every role. */
     for (const who of [student, organizer, owner, null]) {
-      for (const kind of ['event', 'decision', 'other']) {
+      for (const kind of ['decision', 'other']) {
         expect(actionReplyFor(who, { kind })).toMatch(/can't create or change anything/i);
       }
     }

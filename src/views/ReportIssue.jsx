@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { LifeBuoy, Send, CheckCircle2, ShieldAlert, Flag } from 'lucide-react';
 import { api } from '../utils/api';
-import { ISSUE_CATEGORIES, MIN_DESCRIPTION, MAX_DESCRIPTION } from '../issueReports';
+import { ISSUE_CATEGORIES, ISSUE_CATEGORY_VALUES, MIN_DESCRIPTION, MAX_DESCRIPTION } from '../issueReports';
 import { APP_NAME } from '../config';
 
 /**
@@ -30,7 +30,26 @@ import { APP_NAME } from '../config';
 export default function ReportIssue({ currentUser, addToast }) {
   const location = useLocation();
 
-  const [category, setCategory] = useState('');
+  /**
+   * `?category=` preselects the dropdown, when it names a real category.
+   *
+   * Settings → Accessibility links here as `?category=accessibility`, and the
+   * Accessibility Statement does the same. Without this the parameter was
+   * decorative: the link arrived on a form with an empty dropdown, so somebody
+   * blocked by a barrier still had to find the right option in a select using
+   * the interface that was failing them. A link that ignores its own parameter
+   * is worse than no link, because it looks like a shortcut.
+   *
+   * Validated against ISSUE_CATEGORY_VALUES — the same list the server accepts —
+   * rather than trusted. A URL is user input, and an unrecognised value must
+   * leave the field empty so the existing "Choose what kind of problem this is"
+   * validation still runs, instead of submitting a category the server will
+   * reject after the person has written their report.
+   */
+  const [category, setCategory] = useState(() => {
+    const requested = new URLSearchParams(location.search).get('category');
+    return ISSUE_CATEGORY_VALUES.includes(requested) ? requested : '';
+  });
   const [description, setDescription] = useState('');
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);

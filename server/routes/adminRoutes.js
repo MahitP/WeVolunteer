@@ -6,10 +6,14 @@ import { authenticateToken, formatUserResponse } from '../utils.js';
 import { db } from '../db.js';
 import { notificationService } from '../services/notificationService.js';
 import { getMailHealth } from '../email.js';
+import { csvCell } from '../csv.js';
 import { getQueueHealth } from '../workers/notificationWorker.js';
 /* Shared with `alerting.js`, which asks the same question for somebody who did
    not come to look. Two definitions of "stale" would drift. */
 import { backupStatus } from '../backupStatus.js';
+import { redisStatus } from '../redis/status.js';
+import { weatherCacheStats } from './weatherRoutes.js';
+import { geocodeCacheStats } from './geocodeRoutes.js';
 import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
 import { grantsFor } from '../userCapabilities.js';
 import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthResponses.js';
@@ -1020,21 +1024,13 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('report.re
       ORDER BY u.name ASC
     `).all();
 
-    const sanitizeCsv = (val) => {
-      let str = String(val || '');
-      if (/^[=+\-@\t\r]/.test(str)) {
-        str = "'" + str;
-      }
-      return `"${str.replace(/"/g, '""')}"`;
-    };
-
     // Create CSV content
     const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
     const rows = students.map(s => [
       s.id,
-      sanitizeCsv(s.name),
-      sanitizeCsv(s.email),
-      sanitizeCsv(s.school),
+      csvCell(s.name),
+      csvCell(s.email),
+      csvCell(s.school),
       s.created_at,
       s.total_hours
     ]);
@@ -1434,6 +1430,22 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
     delivery: await deliveryHealth(),
     notificationQueue: await getQueueHealth(),
     backup: backupStatus(),
+    /**
+     * The Redis layer, if there is one.
+     *
+     * `configured: false` is a supported, unalarming state — the pilot runs
+     * without Upstash. The field worth watching is `degraded`, which means
+     * configured but currently falling back: nothing is broken for users, and
+     * every shared rate limit has quietly become per-process again.
+     *
+     * Counts and configuration only. No key names, no key contents, and never
+     * the token — see redis/status.js, which owns that decision so this handler
+     * does not become a second place that makes it.
+     */
+    redis: redisStatus({
+      weather: weatherCacheStats(),
+      geocode: geocodeCacheStats(),
+    }),
     hoursLedger: await hoursLedgerStatus()
   });
 });

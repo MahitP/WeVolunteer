@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { createRedisLimitStore } from './redis/limitStore.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -14,6 +15,7 @@ import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, JWT_SECRET } fr
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
+import { recordHttpRequest } from './observability/metrics.js';
 import { limitHandler } from './rateLimitResponse.js';
 
 import authRoutes from './routes/authRoutes.js';
@@ -152,16 +154,38 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     try {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      /* The Express PATTERN, never `req.originalUrl` — a real URL carries a
+         query string, and query strings carry search terms and addresses.
+         Resolved once and shared, so the log record and the metric cannot
+         disagree about which route this was. */
+      const route = req.route?.path ?? routePatternOf(req);
+
       logHttpRequest({
         method: req.method,
-        /* The Express PATTERN, never `req.originalUrl` — a real URL carries a
-           query string, and query strings carry search terms and addresses. */
-        route: req.route?.path ?? routePatternOf(req),
+        route,
         statusCode: res.statusCode,
         durationMs: Math.round(durationMs),
         requestId: req.id,
         role: req.principal?.effectiveRole ?? req.user?.role,
         userHash: hashUserId(req.user?.id),
+      });
+
+      /**
+       * The same request, as a metric.
+       *
+       * Not a duplicate of the line above, and the difference is the point: the
+       * log record is SAMPLED (5% of successes, every error), so it cannot
+       * answer "what is the p95 right now". This counts every request without
+       * exception, at a fixed cost that does not grow with traffic, and carries
+       * no identifier of any kind — see `metrics.js` on cardinality.
+       *
+       * Unconditional: with telemetry off this is a call into a no-op meter.
+       */
+      recordHttpRequest({
+        method: req.method,
+        route,
+        statusCode: res.statusCode,
+        durationMs,
       });
     } catch { /* telemetry must never touch the response */ }
   });
@@ -496,6 +520,52 @@ app.use(express.json({ limit: '100kb' }));
 // before the rate limiters so every downstream handler sees the same shape.
 app.use(cookieParser());
 
+/**
+ * Which limiters keep a SHARED counter, and which stay in process memory.
+ *
+ * Five of them below carry `store: createRedisLimitStore(...)` — the mail
+ * pair, re-authentication, appeals and certificate verification — together with
+ * the login-failure counter in authRoutes.js, which is not middleware. What
+ * they gain is that a restart no longer clears them: today a deploy in the
+ * middle of a password spray hands the attempt a fresh budget. They are also
+ * the ones a second application instance would silently double, which is why
+ * `docs/plans/supabase-vercel-migration-plan.md` §4.4 names shared-store rate
+ * limiting as the first prerequisite for one.
+ *
+ * ── Why the three sign-in limiters are NOT among them ──
+ *
+ * `authLimiter`, `loginLimiter` and `loginIpCeilingLimiter` were the obvious
+ * candidates and were measured out again. Two things make them the most
+ * expensive limiters here rather than the most valuable. They sit on the
+ * highest-volume authentication paths — `/api/auth/login`, `/api/oauth`,
+ * signup, reset — and every one of them sets `skipSuccessfulRequests`, which
+ * costs an INCREMENT on every request and a DECREMENT on every success, so the
+ * common case (somebody signing in correctly) is the expensive one.
+ *
+ * Modelled at the traffic in docs/operations/upstash.md §7.3, sharing those
+ * three costs about 536 commands per user per month against the free plan's
+ * 500,000 — which is 107% of the monthly allowance at a thousand users, before
+ * anything else spends a command. Leaving them in memory brings the whole
+ * integration to about 98.
+ *
+ * What is given up is small and is bounded, because the control that actually
+ * limits password guessing against an account IS shared: `loginFailures` in
+ * authRoutes.js caps ten failures per account across every device, survives a
+ * restart, and is keyed on the resolved account rather than on what was typed.
+ * These three are the per-device layer over it, and per-device is the layer a
+ * single-instance deployment already enforces correctly.
+ *
+ * The rest — `apiLimiter`, `lookupLimiter`, `errorReportLimiter`,
+ * `appealReadLimiter`, and the per-route limiters in geocode, weather, travel,
+ * legal, issues and exports — stay in memory for the same reason at a larger
+ * scale. `apiLimiter` alone allows 600 requests per fifteen minutes per device,
+ * so metering it would spend the monthly allowance in an afternoon and then
+ * fail open for everything else.
+ *
+ * When Redis is unconfigured or unreachable, the store falls back to an
+ * in-process counter it has been incrementing all along, so the behaviour is
+ * exactly what it is today rather than a reset. See `redis/limitStore.js`.
+ */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 1000 : 10,
@@ -503,6 +573,65 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   skipSuccessfulRequests: true,
   handler: limitHandler('Too many sign-in attempts from this device.'),
+});
+
+/**
+ * Account creation, counted — every request, not only the ones that fail.
+ *
+ * ── The hole this closes ──
+ *
+ * `/api/auth/signup` was mounted on `authLimiter`, and `authLimiter` carries
+ * `skipSuccessfulRequests: true`. A successful signup answers 201, so it was
+ * never counted, and the only ceiling on creating accounts was `apiLimiter` at
+ * 600 per 15 minutes — roughly 2,400 accounts an hour from one address, each a
+ * bcrypt hash, a user row, and a verification email to an address the CALLER
+ * chose.
+ *
+ * That last part is the amplification worth naming: signup mails whatever
+ * address it is handed, so an uncounted signup endpoint is also a mail relay
+ * aimed at whoever the caller names, spending this platform's sending
+ * reputation.
+ *
+ * This is the same defect, in the same shape, that `mailLimiter` below exists to
+ * fix. Its own comment records forgot-password as "a route that always returns
+ * 200, so skipSuccessfulRequests made it effectively unlimited". Signup was left
+ * on the limiter that has that flag, and it is the one endpoint where the
+ * mistake also writes rows.
+ *
+ * ── And the opposite failure, on the same line ──
+ *
+ * `authLimiter` allows ten FAILURES per address. A school egresses from one
+ * public address and a signup form fails for ordinary reasons — password too
+ * short, username taken, email mistyped. So the eleventh student in a building
+ * to fumble the form was refused for the rest of the window. That is the exact
+ * shared-address problem `loginIpCeilingLimiter` and `mailLimiter` were built to
+ * remove, still sitting on the one form every account passes through once.
+ *
+ * So this route leaves `authLimiter` entirely rather than being tightened. It
+ * needs a limiter that counts everything and a ceiling a campus will not meet,
+ * which are opposite changes to the two halves of what it had.
+ *
+ * ── Choosing 300, and being honest about what it does ──
+ *
+ * A two-thousand-student building rolling out over a morning is on the order of
+ * a few hundred signups per quarter hour; `loginIpCeilingLimiter` reasons the
+ * same way and lands on 200 for failures alone. 300 clears a campus and still
+ * cuts the uncounted 2,400/hour by half.
+ *
+ * But the IP figure is the least important part of this, and pretending
+ * otherwise would be the wrong record to leave. On a shared address no per-IP
+ * number can separate an attacker from a campus; this is a volume brake. What
+ * bounds abuse per identity is `mailLimiter`, which caps requests naming the
+ * same address and costs a campus nothing because a campus does not sign the
+ * same address up twice, and email verification, which leaves an unverified
+ * account inert.
+ */
+export const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: Number(process.env.SIGNUP_RATE_LIMIT) || (DEMO_MODE ? 10000 : 300),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  handler: limitHandler('Too many accounts have been created from this network recently.'),
 });
 
 /**
@@ -657,6 +786,30 @@ function apiLimiterKey(req, res) {
   return `api:ip:${ipKeyGenerator(req, res)}`;
 }
 
+/**
+ * In-process, and it must stay there — the one limiter deliberately left off
+ * the shared Redis store the five below use.
+ *
+ * At 600 requests per fifteen minutes per bucket this is by a wide margin the
+ * highest-volume limiter in the application, and metering it through Upstash
+ * would cost more of the monthly allowance than every other limiter combined —
+ * the arithmetic is in `docs/operations/upstash.md` §7.3. It is a volume
+ * control, not a credential control, and the credential controls (`loginFailures`
+ * in authRoutes.js, `mailLimiter`) are the ones that are shared.
+ *
+ * ── What keying it per session does to that arithmetic ──
+ *
+ * `apiLimiterKey` above buckets a signed-in caller by session rather than by
+ * address, so the number of live buckets now tracks concurrent USERS rather
+ * than egress addresses — more buckets, each smaller. That makes a shared store
+ * more expensive, not less, so the decision to keep this one in memory is
+ * strengthened by the re-key rather than reopened by it.
+ *
+ * The cost of staying in memory is bounded and known: a restart clears the
+ * counters, and a second instance would meter independently. For a volume
+ * brake, both are acceptable — and `docs/operations/horizontal-scaling.md`
+ * records it as such rather than as a solved problem.
+ */
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   /* `API_RATE_LIMIT` follows the convention the four limiters above already use
@@ -744,6 +897,7 @@ function mailKeyGenerator(req, res) {
 
 export const mailLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  store: createRedisLimitStore({ name: 'mail' }),
   limit: Number(process.env.MAIL_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -761,6 +915,7 @@ export const mailLimiter = rateLimit({
  */
 export const mailIpCeilingLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  store: createRedisLimitStore({ name: 'mail-ip' }),
   limit: Number(process.env.MAIL_IP_CEILING) || (DEMO_MODE ? 10000 : 120),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -774,6 +929,7 @@ export const mailIpCeilingLimiter = rateLimit({
 // exactly the thing an enumeration attempt looks like from the outside.
 export const verifyLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  store: createRedisLimitStore({ name: 'cert-verify' }),
   limit: DEMO_MODE ? 1000 : 20,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -824,6 +980,7 @@ export const verifyLimiter = rateLimit({
  */
 export const reauthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  store: createRedisLimitStore({ name: 'reauth' }),
   limit: Number(process.env.REAUTH_RATE_LIMIT) || (DEMO_MODE ? 1000 : 5),
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -833,6 +990,7 @@ export const reauthLimiter = rateLimit({
 
 export const appealLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  store: createRedisLimitStore({ name: 'appeal' }),
   limit: DEMO_MODE ? 1000 : 5,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -848,6 +1006,10 @@ export const appealLimiter = rateLimit({
  * show a parent — must never cost them the ability to file. Still bounded,
  * because the route is unauthenticated and answers about a real account.
  */
+/* In-process: this counts every READ of the appeal page, including the
+   re-reads it is deliberately generous about, so it is a volume control rather
+   than a guessing control. `appealLimiter`, which bounds actually filing, is
+   the one that carries a shared counter. */
 export const appealReadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 1000 : 60,
@@ -875,6 +1037,10 @@ export const appealReadLimiter = rateLimit({
  * errorReporter.js bounds STORAGE regardless of where the traffic comes from.
  * Neither subsumes the other and both are required.
  */
+/* In-process: a broken build makes every client report at once, which is
+   precisely when spending the monthly Redis allowance would be worst. The
+   500-group storage ceiling in errorReporter.js is the bound that matters here,
+   and it is already durable. */
 export const errorReportLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.ERROR_REPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 20),
@@ -883,6 +1049,10 @@ export const errorReportLimiter = rateLimit({
   handler: limitHandler('Too many error reports from this device.'),
 });
 
+/* In-process: a signup form probes availability as somebody types, so this
+   counts successes at keystroke volume. Sharing it would cost roughly as much
+   allowance as every failure-counting limiter above put together, to harden a
+   control whose real protection is that it answers slowly and generically. */
 export const lookupLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 5000 : 60,
@@ -922,7 +1092,11 @@ app.use('/api/auth/login-2fa', loginIpCeilingLimiter, loginLimiter);
  * makes this endpoint cost something in aggregate.
  */
 app.use('/api/auth/login-2fa/email/send', mailIpCeilingLimiter);
-app.use('/api/auth/signup', authLimiter);
+/**
+ * Per-address first, then the network ceiling. `authLimiter` is deliberately
+ * absent — see `signupLimiter` for why its two halves were both wrong here.
+ */
+app.use('/api/auth/signup', mailLimiter, signupLimiter);
 // Both mail endpoints get the per-IP ceiling first, then the per-address limiter.
 // Order is immaterial to the outcome (both must pass) but reads in the direction of
 // broad-to-specific.

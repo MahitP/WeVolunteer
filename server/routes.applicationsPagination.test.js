@@ -81,9 +81,59 @@ beforeAll(async () => {
   /* Slot ids come from the list endpoint, once, rather than a detail call per
      event — the same route the sibling application suites read them from. */
   const listed = (await srv.call('GET', '/api/events', undefined, organizer)).body;
-  for (const eventId of created) {
+
+  /**
+   * Applications are DECIDED as they are made, all but the last few.
+   *
+   * ── Why the fixture cannot simply apply 24 times ──
+   *
+   * `PENDING_APPLICATION_LIMIT` (config.js, default 10) caps how many
+   * opportunities one student may hold awaiting a decision, and
+   * `POST /api/events/:id/apply` answers 409 `application_limit_reached` past
+   * it. A loop that applied 24 times and decided nothing therefore produced
+   * ELEVEN applications, not 24, and the suite failed on a count it had every
+   * right to expect — the endpoint was right and the fixture was written before
+   * the cap existed.
+   *
+   * Deciding as we go is also the more honest fixture. A student with two dozen
+   * applications on file is a student with a HISTORY: most of them resolved,
+   * a few still waiting. A student holding 24 simultaneously pending
+   * applications is a state the application deliberately does not allow, so a
+   * pagination suite built on one would be paginating something that cannot
+   * occur.
+   *
+   * `rejected` rather than `accepted` for the decided ones: it clears the
+   * pending count without consuming slot capacity, awarding hours or writing
+   * attendance rows, so the fixture stays a pagination fixture rather than
+   * quietly becoming an attendance one. The last `STILL_PENDING` are left
+   * undecided so the page still contains both shapes.
+   */
+  const STILL_PENDING = 5;
+  for (const [i, eventId] of created.entries()) {
     const slot = listed.find(e => e.id === eventId).slots[0];
-    await srv.call('POST', `/api/events/${eventId}/apply`, { slotId: slot.id }, student);
+    const applied = await srv.call(
+      'POST', `/api/events/${eventId}/apply`, { slotId: slot.id }, student
+    );
+    /* Loud rather than silent: a fixture that half-fails and carries on is how
+       the count drifted unnoticed in the first place. */
+    if (applied.status !== 201) {
+      throw new Error(
+        `fixture: apply ${i} answered ${applied.status} `
+        + `(${JSON.stringify(applied.body)}) — expected 201`
+      );
+    }
+    if (i < SEEDED - STILL_PENDING) {
+      const decided = await srv.call(
+        'PATCH', `/api/applications/${applied.body.application.id}`,
+        { status: 'rejected' }, organizer
+      );
+      if (decided.status !== 200) {
+        throw new Error(
+          `fixture: decision on application ${i} answered ${decided.status} `
+          + `(${JSON.stringify(decided.body)}) — expected 200`
+        );
+      }
+    }
   }
 }, 120000);
 

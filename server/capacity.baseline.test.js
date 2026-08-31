@@ -268,6 +268,23 @@ describe('capacity baseline (SQLite, current behaviour)', () => {
         addSlot('s1', 1);
         addApplicant('low', 's1');
         addApplicant('high', 's1');
+        /**
+         * `e0` has to be a real event now, and it always was in production.
+         *
+         * `attendance.event_id` carries `FOREIGN KEY … REFERENCES events(id)`, so
+         * an attendance row pointing at an event that does not exist is a state
+         * the schema forbids — SQLite only allowed it here because foreign keys
+         * are off by default. The draw's hours query now joins `events` to
+         * exclude cancelled ones, matching `creditedHoursFor`, and against this
+         * fixture that join found nothing and read the 1000 hours as zero.
+         *
+         * So the fixture was exercising an impossible row, and the assertion it
+         * broke was the one that noticed. Inserting the event makes the history
+         * real rather than making the test weaker: 'high' still has 1000
+         * credited hours, and the lottery bounds below are unchanged.
+         */
+        conn.prepare(`INSERT OR IGNORE INTO events (id,title,organizer_id,application_deadline,status)
+          VALUES ('e0','History','org','2099-01-01T00:00:00.000Z','completed')`).run();
         conn.prepare(`INSERT INTO attendance (id,user_id,event_id,slot_id,present,hours_awarded)
           VALUES (?, 'high', 'e0', 's0', 1, 1000)`).run(`att-${i}`);
         assertFixtures('s1', 2);

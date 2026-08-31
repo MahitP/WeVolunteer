@@ -9,6 +9,23 @@
  */
 import './preflight.js';
 
+/**
+ * MUST stay above `app.js`, for the same reason `preflight.js` must stay above
+ * everything.
+ *
+ * OpenTelemetry's automatic instrumentation works by patching modules as they
+ * are loaded, so a module already loaded can no longer be instrumented. ES
+ * imports are evaluated in source order, so this line is what guarantees the
+ * `http`, `express` and `pg` patches are installed before `app.js` pulls those
+ * packages in.
+ *
+ * It is a side-effect import on purpose: `startOtel()` is called from inside the
+ * module rather than from a statement below, because a statement below would run
+ * after every import in this file had already been evaluated — which is exactly
+ * too late. See server/observability/otel.js.
+ */
+import './observability/bootstrap.js';
+
 import { app } from './app.js';
 import { PORT, IS_PRODUCTION, DEMO_MODE } from './config.js';
 import { createServer } from 'http';
@@ -30,6 +47,7 @@ import { startNotificationWorker } from './workers/notificationWorker.js';
 import { startExportWorker } from './workers/exportWorker.js';
 import { installShutdownHandlers } from './shutdown.js';
 import { logLifecycle, telemetryStatus } from './telemetry.js';
+import { otelStatus, otelSnapshot } from './observability/otel.js';
 import { startIndexWorker } from './search/indexWorker.js';
 import { pineconeStatus } from './search/pineconeConfig.js';
 import { startAutoSelectScheduler } from './services/autoSelectScheduler.js';
@@ -248,6 +266,27 @@ httpServer.listen(PORT, BIND_ADDRESS, () => {
   );
   if (telemetry.enabled) {
     logLifecycle('boot', { outcome: 'listening', ok: true });
+  }
+
+  /**
+   * And one line for the traces and metrics half.
+   *
+   * Reported separately from the log line above because the two halves can
+   * genuinely differ: they share a token and a host, but tracing has its own off
+   * switch (`WEV_OTEL_ENABLED=false`), and an operator who turned it off during
+   * an incident should be able to see that rather than infer it. When it is on,
+   * the sample rate and the daily span budget are printed because they are the
+   * two numbers that explain a trace somebody expected to find and did not.
+   */
+  const otel = otelStatus();
+  if (otel.enabled) {
+    const snap = otelSnapshot();
+    console.log(
+      `[otel] Traces and metrics enabled (sampling ${snap.config.sampleRatio}, `
+      + `budget ${snap.config.dailySpanBudget} spans/day).`
+    );
+  } else {
+    console.log(`[otel] Traces and metrics disabled (${otel.reason}).`);
   }
 
   /**

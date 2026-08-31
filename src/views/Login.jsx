@@ -958,6 +958,13 @@ export default function Login({ onLoginSuccess, addToast }) {
                   {showPassword ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
                 </button>
               </div>
+              <button
+                type="button"
+                className="auth-link auth-inline-link small field-aside"
+                onClick={() => { setMode('forgot'); setError(''); setErrorField(null); }}
+              >
+                Forgot?
+              </button>
             </div>
 
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading || !password}>
@@ -1021,17 +1028,25 @@ export default function Login({ onLoginSuccess, addToast }) {
               )}
             </div>
 
-            <div className="field">
-              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-                <label htmlFor="login-password">Password</label>
-                <button
-                  type="button"
-                  className="auth-link auth-inline-link small"
-                  onClick={() => { setMode('forgot'); setError(''); setErrorField(null); }}
-                >
-                  Forgot?
-                </button>
-              </div>
+            {/**
+              * `field-with-aside`: the label and "Forgot?" share a row VISUALLY,
+              * but "Forgot?" comes after the input in DOM order.
+              *
+              * It used to sit inside the label row, which put it between the two
+              * inputs in the tab sequence. Typing an email, pressing Tab, typing a
+              * password and pressing Enter — the sequence every keyboard user
+              * performs — focused "Forgot?", swallowed the password keystrokes,
+              * and then activated it: you arrive on "Reset your password" having
+              * lost what you typed, with nothing explaining why.
+              *
+              * A grid places it back in the label row, so nothing moves on screen
+              * and Tab goes identifier -> password -> Forgot? -> show/hide. Doing
+              * it with CSS rather than `tabindex` keeps one source of truth for
+              * the order: a positive tabindex here would have to be matched by
+              * every other control on the screen.
+              */}
+            <div className="field field-with-aside">
+              <label htmlFor="login-password">Password</label>
               <div className="input-affix">
                 <Lock size={16} aria-hidden="true" />
                 <input

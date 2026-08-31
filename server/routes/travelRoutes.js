@@ -53,6 +53,29 @@ const router = express.Router();
  * road-to-road journeys rather than of people. It is process-local and dies with
  * the process.
  *
+ * ── And it stays process-local. This route is NOT a caller of the Redis cache ──
+ *
+ * `redis/lookupCache.js` gives the weather and geocode routes a second cache
+ * tier that survives a deploy, and the same argument appears to apply here: the
+ * upstream is slow, the answer is shared, and a restart throws the cache away.
+ * It does not apply, and the reason is the paragraph above. Those two routes
+ * cache a property of a PLACE — an event's published venue, a 1.1 km weather
+ * grid square. This one caches a journey whose origin is a minor's location,
+ * and the bullets above promise that coordinate is never persisted and never
+ * leaves this process.
+ *
+ * Hashing the key does not rescue it. The promise is not "the coordinate is
+ * unreadable in the store"; it is that the coordinate does not go anywhere,
+ * which is a claim about the data flow and not about the encoding. A hash also
+ * still answers "was this exact journey looked up", which is the question the
+ * promise exists to make unanswerable by anyone holding the store.
+ *
+ * So the trade is accepted deliberately: this cache is emptied by every
+ * restart, every deploy pays for its first few lookups again, and that cost is
+ * the price of the invariant. If a future change makes this route cache
+ * something that is genuinely a property of a place rather than of a person,
+ * revisit it then — and say so here.
+ *
  * ── When it is not available ──
  *
  * With no key configured this route returns 503 `routing_unconfigured` and the

@@ -18,7 +18,7 @@
  */
 
 import { routeIntent } from './router.js';
-import { TOOLS, runTool, normalizeEventCategory } from './tools.js';
+import { TOOLS, runTool } from './tools.js';
 import { AIStatus } from './runtime/types.js';
 import { isAbort } from './runtime/types.js';
 import { CHAT_PROMPT, isUsableReply, WELLY_NAME } from './prompts/welly.js';
@@ -29,10 +29,20 @@ import { haversineDistance } from '../utils/helpers.js';
 import {
   createDraft,
   getPendingDraft,
-  updateActiveDraft,
   confirmDraft,
   cancelDraft,
 } from './confirm.js';
+import {
+  beginEventDraft,
+  getEventDraft,
+  clearEventDraft,
+  applyEventMessage,
+  missingField,
+  questionFor,
+  buildEventPayload,
+  describeEventDraft,
+  explainInvalidEvent,
+} from './eventDraft.js';
 import { can } from '../authz.js';
 import { api } from '../utils/api.js';
 
@@ -81,12 +91,18 @@ const FIXED = {
    * Both have one correct answer, so neither is a generation. See the rules in
    * `router.js` for the third of the set.
    */
+  /**
+   * The model is named from the registry entry that is LOADED — see
+   * `identityAnswer` — because this string used to say "Qwen2.5 0.5B" whatever
+   * was running. Somebody on the Advanced model, which is Qwen2.5 1.5B, asked
+   * Welly what it was and was told the name of the other one. This is the
+   * fallback for when nothing is loaded and there is no model to name.
+   */
   identity_self:
     'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
     + 'I am software, not a person. When Welly AI is switched on I run a small open '
-    + 'language model called Qwen2.5 0.5B, entirely on your own device — nothing you '
-    + 'type here is sent anywhere. Otherwise I answer straight from your WeVolunteer '
-    + 'records.',
+    + 'language model entirely on your own device — nothing you type here is sent '
+    + 'anywhere. Otherwise I answer straight from your WeVolunteer records.',
 
   identity_platform:
     'This is WeVolunteer — the app schools use to post volunteer events, sign students '
@@ -148,7 +164,7 @@ function summarise(kind, data) {
       return `I found ${data.total} ${data.total === 1 ? 'opportunity' : 'opportunities'}.`;
     case 'certificate':
       return data.valid
-        ? `That certificate is valid: ${data.hours ?? 0} hours for ${data.eventTitle || 'an event'}.`
+        ? `That certificate is valid: ${data.hours ?? 0} hours for ${plainValue(data.eventTitle) || 'an event'}.`
         : 'No certificate matches that code.';
     case 'notifications':
       if (!data.total) return 'You have no recent notifications.';
@@ -156,7 +172,7 @@ function summarise(kind, data) {
     case 'profile':
       return `Profile for ${data.name || 'you'} (${data.role || 'volunteer'}) with ${data.hours || 0} verified hours.`;
     case 'event_details':
-      return `Details for ${data.title}: ${data.slots?.length || 0} shifts available.`;
+      return `Details for ${plainValue(data.title)}: ${data.slots?.length || 0} shifts available.`;
     case 'event_roster':
       return `Roster for event ${data.eventId}: ${data.total} ${data.total === 1 ? 'volunteer' : 'volunteers'} registered.`;
     case 'vacant_events':
@@ -187,7 +203,7 @@ function summarise(kind, data) {
     case 'next_shift': {
       if (!data.next) return 'You have nothing coming up that has been accepted yet.';
       const { eventTitle, slotName, startsAt, hours } = data.next;
-      const where = [eventTitle, slotName].filter(Boolean).join(' — ');
+      const where = [plainValue(eventTitle), plainValue(slotName)].filter(Boolean).join(' — ');
       const length = hours ? ` It is ${hours} ${hours === 1 ? 'hour' : 'hours'}.` : '';
       return `Your next shift is ${where || 'a shift'}${startsAt ? `, ${startsAt}` : ''}.${length}`;
     }
@@ -196,7 +212,7 @@ function summarise(kind, data) {
       if (!data.total) return 'You are not on any waitlists at the moment.';
       const first = data.items?.[0];
       const place = first?.position
-        ? ` You are number ${first.position} for ${first.eventTitle || 'the first one'}.`
+        ? ` You are number ${first.position} for ${plainValue(first.eventTitle) || 'the first one'}.`
         : '';
       return `You are waitlisted for ${data.total} ${data.total === 1 ? 'shift' : 'shifts'}.${place}`;
     }
@@ -227,7 +243,7 @@ function summarise(kind, data) {
     case 'recent_audit': {
       if (!data.total) return 'There is nothing in the audit trail yet.';
       const latest = data.items?.[0];
-      const tail = latest?.action ? ` The most recent is "${latest.action}"${latest.at ? `, ${latest.at}` : ''}.` : '';
+      const tail = latest?.action ? ` The most recent is "${plainValue(latest.action)}"${latest.at ? `, ${latest.at}` : ''}.` : '';
       return `The audit trail has ${data.total} recent ${data.total === 1 ? 'entry' : 'entries'}.${tail}`;
     }
     case 'application_withdrawn':
@@ -236,8 +252,27 @@ function summarise(kind, data) {
       return `Your profile has been updated (${(data.updated || []).join(', ')}).`;
     case 'preferences_updated':
       return 'Your notification preferences have been updated.';
-    case 'event_created':
-      return `Event "${data.title}" has been created successfully.`;
+    /**
+     * Said only after the API has answered with an id — see `create_event` in
+     * tools.js, which reports a failure rather than a success for anything
+     * else. The date and the place are repeated because they are the two
+     * things the organizer will check, and because a confirmation that names
+     * them is a confirmation of the right event.
+     *
+     * The title and the location go through `plainValue` because an
+     * organizer typed them: control characters and folded whitespace are
+     * how a stored string steers the sentence it is quoted into. The date
+     * is formatted by `localDay` and the shift count is a number, so
+     * neither is text anybody supplied.
+     */
+    case 'event_created': {
+      const when = data.startsOn || null;
+      const where = data.location ? ` at ${plainValue(data.location)}` : '';
+      const shifts = data.shifts > 1 ? ` (${data.shifts} shifts)` : '';
+      return when
+        ? `Done — “${plainValue(data.title)}” is created and open for applications, starting ${when}${where}${shifts}.`
+        : `Done — “${plainValue(data.title)}” is created and open for applications${where}${shifts}.`;
+    }
     default:
       return 'Here is what I found.';
   }
@@ -246,7 +281,36 @@ function summarise(kind, data) {
 /**
  * What to say when the lookup itself failed.
  */
-function failureMessage(reason) {
+function failureMessage(reason, detail = null) {
+  /**
+   * The server's own sentence, when it wrote one for the reader.
+   *
+   * ── Why this is here rather than a bigger `switch` ──
+   *
+   * Event creation has a dozen refusal rules and gains more as the product
+   * does, and every one of them already has a sentence written for an
+   * organizer: "The application deadline must be on or before the first shift
+   * starts.", "Each shift must allow between 1 and 100 volunteers.",
+   * "Organizer account pending admin approval." Mapping them here would mean
+   * maintaining a second copy of the server's vocabulary, and a rule added
+   * server-side would surface as "I couldn't look that up just now" until
+   * somebody remembered this file.
+   *
+   * `tools.js` only attaches this for the statuses that carry an explanation
+   * for the person who caused it — 400, 403, 409 — so nothing here can leak a
+   * 500's internal text.
+   */
+  if (detail?.serverMessage) {
+    return `That didn't go through: ${lowerFirst(detail.serverMessage)}`;
+  }
+
+  if (reason === 'missing_event_fields') {
+    const missing = detail?.missing?.length ? detail.missing.join(', ') : null;
+    return missing
+      ? `I still need ${missing} before I can create that event.`
+      : 'I still need a few details before I can create that event.';
+  }
+
   switch (reason) {
     case 'offline':
       return "I couldn't reach WeVolunteer just now, so I can't check that. It might be your connection.";
@@ -264,6 +328,39 @@ function failureMessage(reason) {
     default:
       return "I couldn't look that up just now. Please try again.";
   }
+}
+
+/**
+ * Who Welly is, naming the model that is actually running.
+ *
+ * The fixed sentence named one model regardless, so an organizer on the
+ * Advanced model — Qwen2.5 1.5B — was told they were running the 0.5B. That is
+ * a small thing to get wrong and a bad one: it is the answer somebody asks for
+ * precisely when they are checking whether the model they chose is the model
+ * they got.
+ *
+ * The name comes from the loaded registry entry rather than from the
+ * preference, so it describes what is answering rather than what was asked for.
+ */
+function identityAnswer(runtime) {
+  const model = runtime?.status === AIStatus.READY ? runtime.model : null;
+  if (!model) return FIXED.identity_self;
+
+  const name = [model.family, model.parameters].filter(Boolean).join(' ')
+    || model.parameters
+    || model.label;
+
+  return 'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
+    + 'I am software, not a person. Right now I am running a small open language model '
+    + `(${name}) entirely on your own device — nothing you type here is sent anywhere. `
+    + 'Otherwise I answer straight from your WeVolunteer records.';
+}
+
+/** "The deadline must…" → "the deadline must…", for use inside a sentence. */
+function lowerFirst(sentence) {
+  const text = String(sentence || '').trim();
+  if (!text) return 'the server refused it.';
+  return text[0].toLowerCase() + text.slice(1);
 }
 
 /**
@@ -319,6 +416,49 @@ const CHAT_HISTORY_TURNS = 6;
  * one thing cannot commit as another — which is the property
  * `responseQuality.test.js` pins.
  */
+/**
+ * A user-authored value, flattened to one line before it enters an answer.
+ *
+ * ── What this is defending ──
+ *
+ * Event titles, shift names and audit action strings are written by other
+ * people. `summarise()` interpolates them into the sentence Welly says, and that
+ * sentence is committed to the transcript as an ordinary assistant turn —
+ * `systemNotice` is false for a successful answer, deliberately, because
+ * `sanitizeHistory` keeps real answers so a follow-up has something to refer to.
+ *
+ * So on the next conversational turn that text is replayed into the model's
+ * context as `{ role: 'assistant', content: … }`. Attacker-authored text,
+ * wearing the assistant's role, in the instruction channel.
+ *
+ * Nothing is escalated by it: the model cannot select a tool, and every
+ * capability is checked on the server. What it can do is steer the next reply,
+ * and the reply is rendered to a minor in the voice of the assistant the app
+ * told them to trust.
+ *
+ * ── Why flattening, specifically ──
+ *
+ * Chat-template injection works by looking like structure — a blank line, then
+ * `System:` or `Assistant:` at the start of a line. Collapse every run of
+ * whitespace to a single space and that shape is unavailable: the words remain,
+ * but they are stuck mid-sentence inside a line Welly is visibly saying.
+ *
+ * The words REMAIN on purpose. A student looking at an event whose name is
+ * suspicious has to be able to read it, and an organizer who typed something odd
+ * should not have it quietly rewritten. This is not sanitisation and must not
+ * become it — `containsLink` in `prompts/welly.js` is what stops the model
+ * turning any of it into somewhere to go.
+ *
+ * Control characters go entirely. They are not content, and they are how a
+ * value smuggles line structure past a whitespace collapse.
+ */
+export function plainValue(value) {
+  if (value === null || value === undefined) return value;
+  const text = String(value);
+  /* eslint-disable-next-line no-control-regex -- the point is to remove these */
+  return text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function formatResponseText(text) {
   if (!text || typeof text !== 'string') return '';
 
@@ -599,6 +739,133 @@ function getConversationalReply(intent, message, { history = [], user = null } =
   return null;
 }
 
+/* ── Creating an event, conversationally ─────────────────────────────────── */
+
+/**
+ * The capability that decides whether Welly may run this at all.
+ *
+ * `event.create` and nothing wider. The server also admits
+ * `organization.event.create` — the Student Organizer rank — but only for an
+ * event attached to an organization the person helps run, which is a choice
+ * (which club, and are they a manager of it) that this conversation does not
+ * ask for and must not guess. So that account is told plainly where to do it,
+ * rather than being walked through a flow whose last step would 403. Widening
+ * this means adding the organization question first, not relaxing the check.
+ */
+const EVENT_CREATE_CAPABILITY = 'event.create';
+
+/** Asking for an event to be created, as opposed to asking about one. */
+const CREATE_EVENT_REQUEST =
+  /\b(create|make|add|set ?up|schedule|post|publish|start|new|organi[sz]e|host|run)\b[^.?!]{0,30}\b(event|opportunit(y|ies)|shift|sign-?up sheet)\b/i;
+
+/**
+ * Intents that INTERRUPT a collection instead of answering its question.
+ *
+ * ── Why a list rather than "anything that routes" ──
+ *
+ * Most answers to Welly's questions do not route to anything. "Food Drive",
+ * "South Brunswick Community Center" and "September 15" are all `unknown`, and
+ * "20 volunteers" is two words containing "volunteer", which the router reads
+ * as a terse opportunity search. If every routed intent broke out of the
+ * collection, half the answers an organizer gives would be answered as
+ * something else and the flow would be unusable.
+ *
+ * So the break-out set is the intents that cannot plausibly be an answer: a
+ * refusal, a lookup in somebody's records, a page to open, a question about how
+ * the platform works. Those are answered normally and the collection is left
+ * exactly where it was, so the next answer continues it.
+ */
+const COLLECTION_INTERRUPTS = new Set([
+  'refuse_other_user_data', 'refuse_credentials', 'refuse_account_action',
+  'navigate', 'capabilities', 'identity_self', 'identity_platform', 'my_name',
+  'info_how_events_work', 'info_how_applications_work', 'info_role_capabilities',
+  'info_selection', 'info_hours', 'info_certificates', 'info_organizations',
+  'my_hours', 'my_certificates', 'my_organizations', 'my_applications',
+  'my_next_shift', 'my_waitlists', 'my_notifications', 'my_profile',
+  'my_events', 'my_vacant_events', 'organizer_summary', 'event_roster',
+  'event_details', 'verify_certificate', 'verify_certificate_missing_code',
+  'platform_stats', 'admin_reports_summary', 'admin_appeals_summary',
+  'system_health', 'recent_audit', 'eligibility_question', 'distance_to_event',
+  'withdraw_application', 'update_profile', 'update_preferences',
+  'empty',
+]);
+
+/** Words that are agreement, not an event name. */
+const NOT_AN_ANSWER = new Set(['affirmation', 'confirm_action', 'greeting']);
+
+/**
+ * One turn of the collection: ask for the next thing, or present the finished
+ * event for confirmation.
+ *
+ * Never creates anything. When the event is complete and passes the same
+ * validation the API runs, it is handed to `confirm.js` as a draft — and a
+ * draft is the only thing "yes" can execute.
+ */
+function eventCollectionTurn(draft, user, { intro = null } = {}) {
+  const outstanding = missingField(draft);
+  if (outstanding) {
+    return {
+      intent: 'create_event',
+      answer: [intro, questionFor(outstanding, draft)].filter(Boolean).join(' '),
+      card: null,
+      collecting: outstanding,
+      phrasedByModel: false,
+    };
+  }
+
+  const payload = buildEventPayload(draft);
+  const problem = explainInvalidEvent(payload);
+  if (problem) {
+    /**
+     * Put the offending answer back to being missing, so the organizer's next
+     * message is read as the correction rather than as free text. Without this
+     * the flow tells somebody their deadline is wrong and then has nowhere to
+     * put the new one.
+     */
+    if (problem.field === 'deadline') draft.fields.deadlineDate = null;
+    if (problem.field === 'shifts') {
+      draft.fields.shifts = draft.fields.shifts.map(s => ({ ...s, startTime: null, endTime: null }));
+    }
+    if (problem.field === 'capacity') {
+      draft.fields.shifts = draft.fields.shifts.map(s => ({ ...s, maxSpots: null }));
+    }
+    return {
+      intent: 'create_event',
+      answer: problem.message,
+      card: null,
+      invalid: true,
+      phrasedByModel: false,
+    };
+  }
+
+  const pending = createDraft({
+    tool: 'create_event',
+    args: payload,
+    preview: `Create “${payload.title}” at ${payload.location}`,
+    summary: `Create “${payload.title}”`,
+    user,
+  });
+
+  return {
+    intent: 'create_event',
+    answer: `Everything checks out — here is what I have:\n\n${describeEventDraft(draft)}\n\n`
+      + 'Nothing has been created yet. Shall I create it?',
+    card: { kind: 'draft', data: pending },
+    draft: true,
+    phrasedByModel: false,
+  };
+}
+
+/** What an account that cannot create events is told when it asks. */
+function cannotCreateEvents(user) {
+  if (can(user, 'organization.event.create')) {
+    return 'Events for a club are set up on the Create event page, where you choose which '
+      + 'organization the event is for — that choice is why I do not do this one for you. '
+      + 'I can show you what your club already has running if that helps.';
+  }
+  return actionReplyFor(user, { kind: 'event' });
+}
+
 export async function ask(
   message,
   { runtime = null, position = null, onToken, signal, history = [], user = null } = {},
@@ -619,6 +886,73 @@ export async function ask(
       phrasedByModel: false,
       systemNotice: true,
     };
+  }
+
+  /**
+   * ── 1b. A collection in progress owns the turn ────────────────────────────
+   *
+   * Before the confirmation lifecycle, because while an event is being
+   * collected there is no draft to confirm — and "yes" said to "What's the
+   * event called?" must be re-asked, not answered as agreement to nothing.
+   *
+   * `cancel_action` still gets out, and so does anything in
+   * `COLLECTION_INTERRUPTS`; those are answered normally with the collection
+   * left where it was.
+   */
+  const collecting = getEventDraft({ user });
+  /**
+   * The finished event waiting for a yes, if there is one.
+   *
+   * Its presence is what separates the two stages of the same conversation.
+   * While it exists the collection is complete and the turn belongs to the
+   * confirmation lifecycle below — otherwise "confirm" would be re-asked as if
+   * it were an answer to a question, which is the loop this whole change
+   * exists to end.
+   */
+  const awaitingCreate = (() => {
+    const p = getPendingDraft(null, { user });
+    return p && p.tool === 'create_event' ? p : null;
+  })();
+
+  if ((collecting || awaitingCreate) && intent === 'cancel_action') {
+    clearEventDraft();
+    cancelDraft(null, { user });
+    return {
+      intent: 'cancel_action',
+      answer: "I've stopped setting that event up. Nothing was created.",
+      card: null,
+      phrasedByModel: false,
+    };
+  }
+  if (collecting && !awaitingCreate && !COLLECTION_INTERRUPTS.has(intent)) {
+    /**
+     * Agreement is not an event name.
+     *
+     * "yes", "sure" and "hi" are the words somebody types when they have lost
+     * the thread, not answers to the question that was asked — and storing one
+     * as a title is how an event ends up called "yes". Re-asked instead, with
+     * the question repeated so the thread is easy to pick back up.
+     */
+    if (NOT_AN_ANSWER.has(intent)) {
+      return eventCollectionTurn(collecting, user, { intro: 'Before I can create it:' });
+    }
+
+    const outcome = applyEventMessage(message, { user });
+    if (!outcome?.understood) {
+      const stuck = missingField(collecting);
+      const f = collecting.fields;
+      const nudge = stuck === 'dates'
+        ? "I didn't catch a date there."
+        : stuck === 'shifts'
+          ? (f.shifts.length && f.shifts.every(sh => sh.startTime)
+            ? "I didn't catch a number there."
+            : "I didn't catch the hours there.")
+          : stuck === 'deadline'
+            ? "I didn't catch a closing date there."
+            : "Sorry, I didn't catch that.";
+      return eventCollectionTurn(collecting, user, { intro: nudge });
+    }
+    return eventCollectionTurn(collecting, user);
   }
 
   /* ── 2. Draft Lifecycle Confirmations & Cancellations ─────────────────────── */
@@ -660,15 +994,30 @@ export async function ask(
 
       const result = await runTool(draft.tool, draft.args, { user });
       if (!result.ok) {
+        /**
+         * The collection is kept when the refusal is one the organizer can
+         * answer — a rule about the dates, the hours or the capacity — so
+         * "change the deadline to the 12th" has something to change. It is
+         * dropped when there is nothing to fix from here: no permission, or a
+         * failure that is not about this event at all.
+         */
+        const fixable = draft.tool === 'create_event'
+          && (result.detail?.status === 400 || result.detail?.status === 409);
+        if (draft.tool === 'create_event' && !fixable) clearEventDraft();
+
         return {
           intent,
-          answer: failureMessage(result.reason),
+          answer: failureMessage(result.reason, result.detail),
           card: null,
           toolFailed: true,
           phrasedByModel: false,
           systemNotice: true,
         };
       }
+
+      /* Created. The conversation that gathered it is over — anything further
+         is a new event, not an edit of one that now exists. */
+      if (draft.tool === 'create_event') clearEventDraft();
 
       const summary = summarise(result.kind, result.data);
       return {
@@ -725,76 +1074,54 @@ export async function ask(
     }
   }
 
-  /* ── 5. Conversational Draft Modification & Action Requests ─────────────── */
-  const pending = getPendingDraft(null, { user });
-  if (pending && pending.tool === 'create_event') {
-    const spotsCorrection = message.match(/\b(?:make it|change spots to|set spots to|actually)\s*(\d+)\s*(?:spots|volunteers|people)?\b/i);
-    const locCorrection = message.match(/\b(?:change location to|set location to|location should be)\s+["']?([^"',]+)["']?/i);
+  /* ── 5. Revising the Finished Event, and Action Requests ─────────────────── */
 
-    if (spotsCorrection || locCorrection) {
-      const updatedSlots = [...pending.args.slots];
-      if (spotsCorrection) {
-        const newSpots = parseInt(spotsCorrection[1], 10);
-        if (newSpots > 0 && newSpots <= 100) {
-          updatedSlots[0] = { ...updatedSlots[0], maxSpots: newSpots };
-        }
-      }
-      const updatedArgs = {
-        slots: updatedSlots,
-        ...(locCorrection ? { location: locCorrection[1].trim() } : {}),
-      };
-      const updated = updateActiveDraft(updatedArgs, {
-        user,
-        preview: `Create event "${pending.args.title}" (${updatedSlots[0].maxSpots} spots at ${updatedArgs.location || pending.args.location})`,
-      });
-
-      return {
-        intent: 'action_request',
-        answer: `I've updated the draft:\n\nTitle: ${updated.args.title}\nLocation: ${updated.args.location}\nSpots: ${updated.args.slots[0].maxSpots}\n\nReply "confirm" to create this event, "cancel" to discard, or set it up directly on the Create event page.`,
-        card: { kind: 'draft', data: updated },
-        draft: true,
-        phrasedByModel: false,
-      };
+  /**
+   * A change asked for while the summary is on screen.
+   *
+   * The draft waiting for a yes is immutable and correct to be — what is edited
+   * is the collection that produced it, which is then re-validated and
+   * re-presented as a NEW draft. So a revision can never leave a stale payload
+   * confirmable, and it goes through the same validation the first version did.
+   *
+   * `awaitingCreate` is only set when the collection is complete, so anything
+   * read out of the message here is a change to something already stated.
+   */
+  if (awaitingCreate && collecting) {
+    const revision = applyEventMessage(message, { user, revising: true });
+    if (revision?.understood) {
+      cancelDraft(null, { user });
+      const turn = eventCollectionTurn(collecting, user);
+      return turn.draft
+        ? { ...turn, answer: `Updated.\n\n${turn.answer}` }
+        : turn;
     }
   }
 
   if (intent === 'action_request') {
-    const isCreateEventRequest = /\b(create|make|add|set ?up|draft|post|schedule|new)\b.{0,20}\b(event|shift|opportunity)\b/i.test(message);
+    if (CREATE_EVENT_REQUEST.test(message)) {
+      if (!can(user, EVENT_CREATE_CAPABILITY)) {
+        return {
+          intent,
+          answer: cannotCreateEvents(user),
+          card: null,
+          phrasedByModel: false,
+        };
+      }
 
-    if (isCreateEventRequest && can(user, 'event.create')) {
-      const titleMatch = message.match(/(?:called|named|title[d]?)\s+["']?([^"',]+)["']?/i);
-      const locMatch = message.match(/(?:at|location)\s+["']?([^"',]+)["']?/i);
-      const spotsMatch = message.match(/(\d+)\s+(?:spots|volunteers|people)/i);
-
-      const eventData = {
-        title: titleMatch ? titleMatch[1].trim() : 'Community Service Event',
-        category: normalizeEventCategory(slots.category || 'Other'),
-        location: locMatch ? locMatch[1].trim() : 'Community Center',
-        description: `Volunteer event for ${titleMatch ? titleMatch[1].trim() : 'community service'}.`,
-        applicationDeadline: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-        slots: [{
-          name: 'General Shift',
-          startDatetime: new Date(Date.now() + 8 * 86400000).toISOString(),
-          endDatetime: new Date(Date.now() + 8 * 86400000 + 3600000 * 3).toISOString(),
-          maxSpots: spotsMatch ? parseInt(spotsMatch[1], 10) : 10,
-        }],
-      };
-
-      const draft = createDraft({
-        tool: 'create_event',
-        args: eventData,
-        preview: `Create event "${eventData.title}" (${eventData.slots[0].maxSpots} spots at ${eventData.location})`,
-        summary: `Create event "${eventData.title}"`,
-        user,
-      });
-
-      return {
-        intent: 'action_request',
-        answer: `Event draft prepared:\n\nTitle: ${eventData.title}\nLocation: ${eventData.location}\nSpots: ${eventData.slots[0].maxSpots}\n\nThis hasn't been created yet. Reply "confirm" to create this event, "cancel" to discard, or set it up directly on the Create event page.`,
-        card: { kind: 'draft', data: draft },
-        draft: true,
-        phrasedByModel: false,
-      };
+      /**
+       * ── Nothing is drafted from one sentence ──
+       *
+       * A collection is started and whatever the request already contained is
+       * folded into it, so "create a food drive at the community center on
+       * September 15" arrives three fields ahead and Welly asks for the rest.
+       * "Create an event" on its own arrives with nothing and Welly asks for
+       * all of it — which is the whole difference from the invented
+       * "Community Service Event / Community Center / 10 spots" this replaced.
+       */
+      const started = beginEventDraft({ user });
+      applyEventMessage(message, { user, initial: true });
+      return eventCollectionTurn(started, user);
     }
 
     return {
@@ -848,14 +1175,14 @@ export async function ask(
       const draft = createDraft({
         tool: 'withdraw_application',
         args: { applicationId: targetId },
-        preview: `Withdraw application for ${eventTitle || targetId}`,
-        summary: `Withdraw application for ${eventTitle || targetId}`,
+        preview: `Withdraw application for ${plainValue(eventTitle) || targetId}`,
+        summary: `Withdraw application for ${plainValue(eventTitle) || targetId}`,
         user,
       });
 
       return {
         intent,
-        answer: `Are you sure you want to withdraw your application for ${eventTitle || targetId}? Reply "confirm" to proceed or "cancel" to keep your spot.`,
+        answer: `Are you sure you want to withdraw your application for ${plainValue(eventTitle) || targetId}? Reply "confirm" to proceed or "cancel" to keep your spot.`,
         card: { kind: 'draft', data: draft },
         draft: true,
         phrasedByModel: false,
@@ -891,35 +1218,20 @@ export async function ask(
     }
 
     if (tool === 'create_event') {
-      const eventData = {
-        title: slots.title || 'Community Service Event',
-        category: normalizeEventCategory(slots.category || 'Other'),
-        location: slots.location || 'Local Community Center',
-        description: slots.description || `Volunteer event for ${slots.title || 'community service'}.`,
-        applicationDeadline: slots.applicationDeadline || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-        slots: [{
-          name: 'Volunteer Shift',
-          startDatetime: new Date(Date.now() + 8 * 86400000).toISOString(),
-          endDatetime: new Date(Date.now() + 8 * 86400000 + 3600000 * 3).toISOString(),
-          maxSpots: slots.maxSpots || 10,
-        }],
-      };
-
-      const draft = createDraft({
-        tool: 'create_event',
-        args: eventData,
-        preview: `Create event "${eventData.title}" (${eventData.slots[0].maxSpots} spots at ${eventData.location})`,
-        summary: `Create event "${eventData.title}"`,
-        user,
-      });
-
-      return {
-        intent,
-        answer: `Event draft prepared:\n\nTitle: ${eventData.title}\nLocation: ${eventData.location}\nSpots: ${eventData.slots[0].maxSpots}\n\nThis hasn't been created yet. Reply "confirm" to create this event, "cancel" to discard, or set it up directly on the Create event page.`,
-        card: { kind: 'draft', data: draft },
-        draft: true,
-        phrasedByModel: false,
-      };
+      /**
+       * Reached from the router's own `create_event` rule ("start a draft",
+       * "new event workflow") rather than from an action request. Same
+       * conversation either way — the router decides which words got here, and
+       * there is one implementation of what happens next.
+       *
+       * The capability gate has already run: `INTENT_CAPABILITY.create_event`
+       * is `event.create`, so an account without it was refused before this
+       * line. `runTool` checks it again before anything is posted, and so does
+       * the server.
+       */
+      const started = beginEventDraft({ user });
+      applyEventMessage(message, { user, initial: true });
+      return eventCollectionTurn(started, user);
     }
   }
 
@@ -994,8 +1306,8 @@ export async function ask(
 
       const nearest = measured[0];
       const answer = measured.length === 1
-        ? `${nearest.title} is about ${nearest.miles} ${nearest.miles === 1 ? 'mile' : 'miles'} away.`
-        : `The closest is ${nearest.title}, about ${nearest.miles} `
+        ? `${plainValue(nearest.title)} is about ${nearest.miles} ${nearest.miles === 1 ? 'mile' : 'miles'} away.`
+        : `The closest is ${plainValue(nearest.title)}, about ${nearest.miles} `
           + `${nearest.miles === 1 ? 'mile' : 'miles'} away.`;
 
       return {
@@ -1026,7 +1338,9 @@ export async function ask(
 
     return {
       intent,
-      answer: FIXED[intent] || FIXED.unknown,
+      answer: intent === 'identity_self'
+        ? identityAnswer(runtime)
+        : (FIXED[intent] || FIXED.unknown),
       card: null,
       phrasedByModel: false,
       /* Only the two that mean "the application did not understand". The rest

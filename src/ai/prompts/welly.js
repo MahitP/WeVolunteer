@@ -248,6 +248,54 @@ export function asksForPersonalInfo(text) {
   return PERSONAL_INFO_REQUESTS.some(pattern => pattern.test(raw));
 }
 
+/**
+ * Anything that names somewhere to go.
+ *
+ * A scheme-qualified URL, or a `www.` host. Deliberately not a general
+ * "looks like a domain" pattern: `\w+\.\w{2,}` matches "shift.It" across a
+ * missing space and "2.5 hours", and a validator that discards correct answers
+ * gets deleted by whoever is debugging it.
+ */
+const LINK_PATTERNS = Object.freeze([
+  /[a-z][a-z0-9+.-]*:\/\//i,
+  /\bwww\.[a-z0-9-]+\.[a-z]{2,}/i,
+]);
+
+/**
+ * True when a reply points the reader at a destination.
+ *
+ * ── Why any link at all is refused ──
+ *
+ * Welly has no reason to produce one. The informational corpus is fixed
+ * application text, every deterministic answer is composed in `summarise()`, and
+ * getting somewhere in this app is a router NAVIGATION — `res.navigate`, chosen
+ * from the `DESTINATIONS` allowlist — not a link the model writes. So a URL in
+ * model output is either hallucinated or planted, and there is no third case to
+ * protect.
+ *
+ * ── Why it matters more here than the other validators ──
+ *
+ * `WellyMessage` renders `http(s)` runs in a reply as clickable anchors. The
+ * audience is minors, and the voice is the assistant the app tells them to
+ * trust. That makes a link the single most valuable thing an attacker can get
+ * Welly to say — more valuable than a false fact, because it moves the reader
+ * somewhere the platform no longer protects them.
+ *
+ * `indirectInjection.test.js` records the path that makes this reachable: an
+ * event title carries into an answer, the answer becomes an assistant turn, and
+ * `sanitizeHistory` replays it into the next prompt wearing the assistant's
+ * role.
+ *
+ * This is not the security boundary. The boundary is that the model holds no
+ * capability — OWASP is explicit that a prompt-level or output-shape defence is
+ * not one. It removes the reachable harm sitting inside that boundary, which is
+ * a different and smaller claim.
+ */
+export function containsLink(text) {
+  const raw = String(text || '');
+  return LINK_PATTERNS.some(pattern => pattern.test(raw));
+}
+
 /** True when a reply promises an action this assistant cannot perform. */
 export function claimsAnAction(text) {
   const raw = String(text || '');
@@ -359,6 +407,8 @@ export function isUsableReply(text) {
   if (asksForPersonalInfo(raw)) return false;
   /* Repetitive generation loops from small models. */
   if (hasRepetitiveLoop(raw)) return false;
+  /* Somewhere to go. See containsLink — the payload an injected title wants. */
+  if (containsLink(raw)) return false;
 
   /**
    * A reply that is punctuation or a stray fragment, rather than an answer.

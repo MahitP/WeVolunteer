@@ -21,7 +21,7 @@
  * already uses — the other signed-out, token-addressed page in this product.
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, ShieldOff, CheckCircle2 } from 'lucide-react';
 import { api } from '../utils/api';
 import BrandMark from '../components/common/BrandMark';
@@ -134,6 +134,24 @@ export default function Appeal() {
             If you are not sure which email your account uses, send it anyway and include your
             full name and your school.
           </p>
+          {/**
+            * A way onward, because this page had none.
+            *
+            * Measured: this state rendered with ZERO tab stops. The heading takes
+            * focus and the text explains itself, but a keyboard user arriving on
+            * a link that has expired could then press Tab as many times as they
+            * liked and reach nothing — no sign-in, no Legal Center, no route
+            * anywhere. Somebody contesting a decision taken about them was left
+            * on a dead end.
+            *
+            * A link rather than a `mailto:`, deliberately. ReportIssue's header
+            * records why: on a school Chromebook with no registered mail handler
+            * a `mailto:` does nothing at all — no error, no window — which is the
+            * worst possible behaviour on a page somebody reaches when they are
+            * already stuck. The address stays as selectable text above; this is
+            * the part that has to work.
+            */}
+          <Link className="btn btn-secondary" to="/login">Go to sign in</Link>
         </main>
       </div>
     );

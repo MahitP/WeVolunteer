@@ -1523,8 +1523,16 @@ router.post('/api/events/:id/auto-approve', authenticateToken, requireCapAny(['e
     // priority goes to students with the fewest credited hours (tie: earliest applied)
     const slots = await db.prepare('SELECT id, name, max_spots FROM slots WHERE event_id = ?').all(eventId);
     const approveStmt = await db.prepare("UPDATE applications SET status = 'accepted' WHERE id = ?");
+    /* Credited hours, matching `creditedHoursFor` and the Auto Select draw.
+       Without the events join this counts hours from CANCELLED events, which the
+       student's own profile excludes — so the Equalizer ordered by a number
+       nobody could see, and since it sorts lowest-hours-first, a student whose
+       event was cancelled was pushed down the queue for it. */
     const hoursStmt = await db.prepare(`
-      SELECT SUM(hours_awarded) as total FROM attendance WHERE user_id = ? AND present = 1
+      SELECT COALESCE(SUM(a.hours_awarded), 0) as total
+      FROM attendance a
+      JOIN events e ON e.id = a.event_id
+      WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
     `);
 
     let approvedCount = 0;

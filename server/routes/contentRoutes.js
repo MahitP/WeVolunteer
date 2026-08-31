@@ -87,11 +87,30 @@ router.get('/api/events/:id/comments', authenticateToken, async (req, res) => {
   }
 });
 
+/** Named so the cap and the message it produces cannot drift apart. */
+const MAX_COMMENT_LENGTH = 1000;
+
 router.post('/api/events/:id/comments', authenticateToken, async (req, res) => {
   try {
     const { body } = req.body;
-    if (!body || !body.trim()) return res.status(400).json({ error: 'Comment cannot be empty' });
-    if (body.length > 1000) return res.status(400).json({ error: 'Comment is too long (max 1000 chars)' });
+    /**
+     * `typeof`, not just truthiness.
+     *
+     * `!body` alone let `42`, `true`, `['hi']` and `{a:1}` reach `body.trim()`,
+     * which is not a function on a number or a plain object — so the request
+     * threw, landed in the catch below, and answered 500. The server said it was
+     * broken when the request was.
+     *
+     * Same defect and same fix as the `slotId` guard in `applicationRoutes.js`
+     * and the non-string `targetId` in `reportService.js`;
+     * `routes.malformed.test.js` is where that class is asserted.
+     */
+    if (typeof body !== 'string' || !body.trim()) {
+      return res.status(400).json({ error: 'Comment cannot be empty' });
+    }
+    if (body.length > MAX_COMMENT_LENGTH) {
+      return res.status(400).json({ error: `Comment is too long (max ${MAX_COMMENT_LENGTH} chars)` });
+    }
 
     const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
     if (!event) return res.status(404).json({ error: 'Event not found' });
@@ -580,7 +599,38 @@ router.get('/api/leaderboard', authenticateToken, async (req, res) => {
          */
         AND ${nullSafeNotEquals(db, 'u.hours_visibility', "'private'")}
       GROUP BY u.id
-      ORDER BY hours DESC, shifts DESC
+      /**
+       * The third term is what makes this a ranking rather than a sample.
+       *
+       * Ordering by hours then shifts alone leaves every exact tie unordered,
+       * and the engine is free to return those rows in whatever order the plan
+       * produced. Two consequences, and the second is the real one:
+       *
+       *   - The board reshuffles between two identical requests. A student who
+       *     was fourth is sixth on reload, having done nothing.
+       *   - The 25-row limit turns that into an appearance test. When the rows
+       *     at positions 25 and 26 are tied, WHICH ONE IS ON THE BOARD AT ALL
+       *     is whatever the planner chose that time, so a student can drop off
+       *     and come back on refresh. At the bottom of a board ties are the
+       *     common case rather than the exotic one: everybody on zero hours and
+       *     zero shifts is tied with everybody else.
+       *
+       * The id, because it is unique, already selected, and stable for the life
+       * of the account. It is arbitrary — somebody wins the tie for no reason
+       * they can influence — and that is the right trade: every deterministic
+       * tiebreak is arbitrary, and the alternative is not fairness but flicker.
+       *
+       * Deliberately NOT insertionTiebreak from db/dialectSql.js. That helper
+       * is for histories, where sharing a timestamp is common and insertion
+       * order is meaningful, and it resolves to rowid on SQLite and id on
+       * PostgreSQL — so the two engines would rank tied students differently.
+       * On a board students actually look at, one answer on both engines is
+       * worth more than signup-order on one of them.
+       *
+       * (No backticks in this comment, for the reason the hours_visibility
+       * comment above gives: it lives inside a template literal.)
+       */
+      ORDER BY hours DESC, shifts DESC, u.id ASC
       LIMIT 25
     `).all();
     res.json(rows.map((r, i) => ({

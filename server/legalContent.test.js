@@ -259,6 +259,23 @@ describe('policy content verification', () => {
     }
 
     /**
+     * Paths a policy document may link to outside the Legal Center.
+     *
+     * Derived from src/routes/index.jsx rather than listed here, so a route that
+     * is renamed or removed breaks this test instead of silently leaving a
+     * policy pointing at a 404. Parameterised and catch-all routes are excluded:
+     * a policy has no business deep-linking to a specific event or user, and a
+     * literal `:id` in prose is a mistake worth failing on.
+     */
+    const APP_LINK_TARGETS = new Set(
+      [...readFileSync(
+        path.join(process.cwd(), 'src', 'routes', 'index.jsx'), 'utf8'
+      ).matchAll(/\{\s*path:\s*'([^']+)'/g)]
+        .map(m => m[1])
+        .filter(p => !p.includes(':') && !p.includes('*'))
+    );
+
+    /**
      * Source text shaped like a link, whether or not the renderer accepts it.
      *
      * Code spans are stripped first because the renderer matches them first, so
@@ -306,8 +323,31 @@ describe('policy content verification', () => {
           continue;
         }
 
+        /**
+         * An in-app destination, checked against the route table rather than
+         * banned.
+         *
+         * This used to allow only `/legal/<slug>` and `#fragment`, which is the
+         * right instinct — a policy naming a URL that 404s is worse than one
+         * that names none — but it was enforced by forbidding the whole class.
+         * The Accessibility Statement is the case that breaks: its entire
+         * purpose is to give somebody blocked by a barrier a route to a person
+         * who can fix it, and "Settings, then Help and Support, then Report an
+         * issue" is not a route, it is a set of directions to be followed by
+         * exactly the person having the most difficulty navigating.
+         *
+         * So an app link is permitted when the route actually exists. The query
+         * string is stripped before matching because ROUTE_PATHS holds paths;
+         * `?category=accessibility` is a parameter the destination reads, not a
+         * different page.
+         */
         if (!href.startsWith('/legal/')) {
-          problems.push(`${slug}: internal link is neither /legal/<slug> nor #fragment: ${href}`);
+          const [pathOnly] = href.split('?');
+          if (APP_LINK_TARGETS.has(pathOnly)) continue;
+          problems.push(
+            `${slug}: internal link is not /legal/<slug>, not #fragment, and not a `
+            + `declared app route: ${href}`
+          );
           continue;
         }
 
@@ -411,10 +451,23 @@ describe('policy content verification', () => {
         expect(problems[0]).toMatch(/not a heading in this document/);
       });
 
-      it('an internal link that is neither a /legal/ page nor a fragment', () => {
+      it('an internal link to a path that is not a declared route', () => {
         const problems = problemsForFixture('# T\n\nSee [settings](/settings/privacy).\n');
         expect(problems).toHaveLength(1);
-        expect(problems[0]).toMatch(/neither \/legal\/<slug> nor #fragment/);
+        /* /settings/privacy is not a declared route — the real path is
+           /settings with a ?section= parameter — so it is still rejected. What
+           changed is only that a link to a route which DOES exist is now
+           allowed; a link to one that does not is still the failure. */
+        expect(problems[0]).toMatch(/not a declared app route/);
+      });
+
+      it('allows an internal link to a route that does exist', () => {
+        /* The Accessibility Statement's reason for existing: somebody blocked by
+           a barrier needs a link, not directions. /report-issue is a declared
+           route, so linking to it — parameters and all — is not a defect. */
+        expect(problemsForFixture(
+          '# T\n\nSee [report it](/report-issue?category=accessibility).\n'
+        )).toEqual([]);
       });
 
       it('an href containing a space, which the renderer prints as literal text', () => {

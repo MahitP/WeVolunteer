@@ -29,7 +29,14 @@
     "pinecone:backfill": "node --env-file-if-exists=.env bin/pinecone-index.mjs backfill",
     "pinecone:reindex": "node --env-file-if-exists=.env bin/pinecone-index.mjs reindex",
     "pinecone:reconcile": "node --env-file-if-exists=.env bin/pinecone-index.mjs reconcile",
-    "pinecone:stats": "node --env-file-if-exists=.env bin/pinecone-index.mjs stats"
+    "pinecone:stats": "node --env-file-if-exists=.env bin/pinecone-index.mjs stats",
+    "redis:status": "node --env-file-if-exists=.env bin/upstash-redis.mjs status",
+    "redis:ping": "node --env-file-if-exists=.env bin/upstash-redis.mjs ping",
+    "redis:keys": "node --env-file-if-exists=.env bin/upstash-redis.mjs keys",
+    "redis:validate": "node --env-file-if-exists=.env bin/upstash-redis.mjs validate",
+    "a11y": "node bin/a11y-audit.mjs --yes",
+    "a11y:local": "VITE_LOCAL_AI=true node bin/a11y-audit.mjs --yes --grep @local",
+    "a11y:report": "node bin/a11y-report.mjs"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",
@@ -47,6 +54,8 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.17",

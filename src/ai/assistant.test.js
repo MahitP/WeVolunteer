@@ -312,9 +312,18 @@ describe('the role gate', () => {
     expect(res.answer).not.toMatch(/Create event page/i);
   });
 
-  it('points an organizer at the page', async () => {
+  /**
+   * This used to assert the organizer was pointed at the Create event page.
+   * Welly runs the creation itself now, so the honest reply is the first
+   * question of that conversation — and pointing somewhere else while offering
+   * to do it here would be the same mistake the student case is about, in
+   * reverse.
+   */
+  it('starts the conversation for an organizer instead of pointing elsewhere', async () => {
     const res = await ask("I'd like you to create an event", { user: organizer });
-    expect(res.answer).toMatch(/Create event page/i);
+    expect(res.intent).toBe('create_event');
+    expect(res.answer).toMatch(/what'?s the event called/i);
+    expect(res.card).toBeNull();
   });
 
   it('lists only the abilities the person actually has', async () => {

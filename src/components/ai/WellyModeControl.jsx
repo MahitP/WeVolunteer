@@ -72,6 +72,21 @@ export function modeFor({ capability, prefs, status }) {
   if (status === AIStatus.ERROR) {
     return { id: 'chat', label: 'Welly Chat', detail: 'Welly AI didn’t start', tone: 'warn' };
   }
+  /**
+   * Fetching weights is a different wait from initialising them, and it is the
+   * long one — several hundred megabytes for the smaller model and nearly a
+   * gigabyte for the larger.
+   *
+   * It shared a caption with LOADING, which meant a model being re-downloaded
+   * after an incomplete transfer looked exactly like a model that had hung. A
+   * reader who is told it is downloading knows to leave the tab open; one who
+   * is told it is "starting up" for four minutes reasonably concludes it is
+   * broken. Same tone, because both are the same kind of wait to the control
+   * around it.
+   */
+  if (status === AIStatus.DOWNLOADING) {
+    return { id: 'starting', label: 'Welly AI', detail: 'Downloading the model', tone: 'busy' };
+  }
   if (prefs?.enabled && prefs?.modelId) {
     return { id: 'starting', label: 'Welly AI', detail: 'Starting up', tone: 'busy' };
   }

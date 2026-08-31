@@ -308,9 +308,24 @@ describe('a streamed reply arrives whole', () => {
     'Nice work! 🎉 That puts you at the top of your grade — ¡felicidades!',
     'Ståle, 日本語, Привет, and a family 👨‍👩‍👧‍👦.',
 
-    /* Links */
-    'You can read more at https://example.org/hours (it explains crediting).',
-    'See [the guide](https://example.org/guide) when you get a moment.',
+    /**
+     * Shapes that used to be tested with URLs in them.
+     *
+     * This group was `/* Links *\/` and held
+     * "You can read more at https://example.org/hours (it explains crediting)."
+     * and "See [the guide](https://example.org/guide) when you get a moment."
+     *
+     * `isUsableReply` now refuses a model reply that names an absolute
+     * destination, so those two are no longer committed and cannot be used to
+     * prove anything about reassembly. The reassembly shapes they contributed —
+     * a parenthetical tail, and bracket-then-parenthesis text — are kept here
+     * without the URL, because losing the shape was never the intention.
+     *
+     * The policy itself is asserted below, and the reason it exists is in
+     * `indirectInjection.test.js`.
+     */
+    'You can read more on the hours page (it explains crediting).',
+    'See [the guide] under Help when you get a moment.',
   ];
 
   for (const reply of REPLIES) {
@@ -343,6 +358,35 @@ describe('a streamed reply arrives whole', () => {
       expect(res.phrasedByModel).toBe(true);
     });
   }
+
+  it('does not commit a model reply that names a destination', async () => {
+    /**
+     * The counterpart to the matrix above: these are the replies that
+     * deliberately do NOT arrive whole.
+     *
+     * Welly has no source of URLs — the informational corpus is fixed
+     * application text, `summarise()` composes every deterministic answer, and
+     * getting somewhere in this app is a router navigation rather than a link
+     * the model writes. So an absolute destination in model output is either
+     * hallucinated or planted, and `WellyMessage` would render an http(s) one as
+     * a clickable anchor to a fourteen-year-old.
+     *
+     * A rejected reply is replaced wholesale by the deterministic sentence, so
+     * `phrasedByModel` is the observable difference. Nothing is repaired or
+     * edited — that invariant is unchanged.
+     */
+    for (const planted of [
+      'You can read more at https://example.org/hours (it explains crediting).',
+      'See [the guide](https://example.org/guide) when you get a moment.',
+    ]) {
+      const runtime = readyRuntime(planted);
+      const res = await ask('just chatting about something', {
+        runtime, user: studentUser, onToken: () => {},
+      });
+      expect(res.answer, `committed a reply naming a destination: ${planted}`).not.toBe(planted);
+      expect(res.phrasedByModel).toBe(false);
+    }
+  });
 
   it('does not move terminal punctuation out of the answer', async () => {
     const runtime = readyRuntime('Hello, how are you?');

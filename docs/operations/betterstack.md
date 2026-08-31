@@ -1,5 +1,26 @@
 # Better Stack: telemetry and the MCP server
 
+> **Traces and metrics are documented separately**, in
+> [`observability.md`](observability.md). This document covers the LOG wire —
+> `telemetrySink.js`, the HTTP ingestion API, the field allowlist — and the MCP
+> operator tooling. The OpenTelemetry half shares this source and this token but
+> is a different pipeline with different failure modes and its own cost
+> controls, and merging the two documents would bury both.
+>
+> The short version of the split: OpenTelemetry JavaScript marks Logs
+> "Development" while Traces and Metrics are Stable, so the reviewed log
+> boundary described below was kept rather than replaced.
+>
+> **The MCP questions in §7 below are now answered.** They were the three
+> unknowns about `X-MCP-Tools-Only`, and `bin/betterstack-mcp-audit.mjs` settled
+> all of them against the live service on 2026-08-29: the header is honoured
+> (111 tools unfiltered, 8 with the allowlist), it **fails closed** (an
+> unmatched name grants nothing rather than voiding the header), an entry names
+> a category rather than one tool (`monitors` also admitted `monitor`, but not
+> `create_monitor`), and an invalid token is refused with 401. None of the eight
+> granted tools mutates anything. Re-run the audit after any Better Stack
+> change.
+
 Two separate things that share a vendor, and the distinction matters:
 
 - **Telemetry** is how the *product* reports on itself — a batched HTTPS POST

@@ -119,6 +119,62 @@ describe('the URL an upload returns is served', () => {
     scratchFiles.push(path.join(REPO_ROOT, 'public', url));
   });
 
+  /**
+   * The headers on a user-uploaded file, asserted rather than assumed.
+   *
+   * ── Why these were worth pinning ──
+   *
+   * `/uploads` is the one statically-served directory whose contents a user
+   * chose. Four independent things keep a stored file from ever being
+   * interpreted as markup: the bytes must decode as an image, the format must be
+   * on an allowlist, the output is re-encoded to WebP, and the filename — and so
+   * the extension and the served Content-Type — is generated server-side.
+   *
+   * `nosniff` is the fifth, and it was the only one of the five that nothing
+   * asserted and nothing set explicitly. It arrives as a helmet default: the
+   * options object in `app.js` configures `contentSecurityPolicy` and
+   * `crossOriginResourcePolicy` and never mentions `noSniff`, so the protection
+   * is one dependency-default change away from disappearing with no test going
+   * red. A grep for `nosniff` across `server/` and `src/` found nothing at all.
+   *
+   * ── What is deliberately NOT asserted ──
+   *
+   * `Content-Disposition: attachment` is the textbook hardening for served user
+   * content and it is wrong here: it tells the browser to download the file
+   * rather than render it, which breaks every `<img>` on the site. The stronger
+   * measures — a separate cookieless origin, or a restrictive CSP on the image
+   * response — are infrastructure and product decisions rather than something a
+   * test should assert into existence.
+   *
+   * `Cross-Origin-Resource-Policy` IS asserted, at the value `app.js` sets
+   * deliberately (`cross-origin`, loosened from helmet's `same-origin` default).
+   * It is pinned not because it is the right value but because it is a
+   * deliberate weakening with no comment and no test, and a reader deserves to
+   * find it stated somewhere.
+   */
+  it('serves an uploaded file with nosniff, so the extension is the last word', async () => {
+    const res = await fetch(`${srv.base}${url}`);
+
+    expect(
+      res.headers.get('x-content-type-options'),
+      'nosniff is absent, so a browser may content-sniff a user-supplied file and '
+      + 'disagree with the Content-Type this server chose'
+    ).toBe('nosniff');
+  });
+
+  it('serves it as webp, the type the server chose rather than one a caller named', async () => {
+    const res = await fetch(`${srv.base}${url}`);
+    /* The filename is `{userId}-{timestamp}.webp`, generated server-side, so the
+       extension express.static maps to a type is never attacker-influenced. */
+    expect(res.headers.get('content-type')).toMatch(/^image\/webp/);
+    expect(url).toMatch(/\.webp$/);
+  });
+
+  it('records the Cross-Origin-Resource-Policy this deployment actually sends', async () => {
+    const res = await fetch(`${srv.base}${url}`);
+    expect(res.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
+  });
+
   it('answers the stored URL with the image, not with a 404 and not with the SPA shell', async () => {
     const res = await fetch(`${srv.base}${url}`);
 

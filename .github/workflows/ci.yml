@@ -41,3 +41,53 @@ jobs:
 
     - name: Lint Code
       run: npm run lint
+
+  # A separate job, not an addition to `validate`. That pipeline runs build,
+  # vitest and oxlint in a few minutes, and a browser download must not be able
+  # to break it.
+  accessibility:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24.x'
+        cache: 'npm'
+
+    - name: Install Dependencies
+      run: npm ci
+
+    # Chromium only. The other engines triple the download for coverage this
+    # audit does not claim to have.
+    - name: Install Chromium
+      run: npx playwright install --with-deps chromium
+
+    # WEV_DB_PATH is not a convenience here: the harness refuses to start without
+    # it, because its default would be a real developer database, and pilot.db
+    # holds real minors' data. See a11y/harness/guard.mjs.
+    #
+    # --grep-invert @local excludes the Welly streaming tests. VITE_LOCAL_AI is
+    # false in CI, which renders the engine-unavailable state, so those tests
+    # would audit a placeholder and pass while proving nothing.
+    - name: Run the accessibility sweep
+      env:
+        NODE_ENV: development
+        DATABASE_ENGINE: sqlite
+        VITE_LOCAL_AI: 'false'
+      run: |
+        mkdir -p scratch
+        WEV_DB_PATH="$PWD/scratch/a11y.db" npm run a11y -- --grep-invert @local
+
+    - name: Upload the report on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: a11y-report
+        path: |
+          playwright-report/
+          test-results/
+        retention-days: 7

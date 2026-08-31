@@ -36,6 +36,7 @@ import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { stopRetentionWorker } from './workers/retentionWorker.js';
 import { closeRealtimeAdapter } from './realtime/adapter.js';
 import { logLifecycle, drainTelemetry } from './telemetry.js';
+import { shutdownOtel } from './observability/otel.js';
 import { stopIndexWorker } from './search/indexWorker.js';
 
 /**
@@ -232,6 +233,25 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
     logLifecycle('shutdown', { outcome: exitCode === 0 ? 'clean' : 'forced', ok: exitCode === 0 });
     await drainTelemetry();
   } catch { /* a shutdown must not fail on its own epilogue */ }
+
+  /**
+   * 8. Flush traces and metrics, under their own hard deadline.
+   *
+   * After the log drain rather than before, because the log records are the ones
+   * that answer "why did it restart" and they should not queue behind a trace
+   * export. Both budgets are five seconds and they run in sequence, so the
+   * telemetry epilogue costs at most ten seconds even with Better Stack
+   * completely unreachable — which, on top of the 15s in-flight drain, still
+   * leaves headroom under systemd's default 90s `TimeoutStopSec`.
+   *
+   * `shutdownOtel` enforces its own deadline internally rather than trusting the
+   * SDK's per-export timeout; see the note there for why "bounded per attempt"
+   * is not the same as bounded. It always resolves, and is a no-op when
+   * OpenTelemetry was never started — which is the default.
+   */
+  try {
+    await shutdownOtel();
+  } catch { /* the epilogue's epilogue is still not worth failing over */ }
 
   console.log(`[Shutdown] Complete (exit ${exitCode}).`);
   return exitCode;

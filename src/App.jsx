@@ -1209,7 +1209,7 @@ function AppShell({ toasts, addToast, removeToast }) {
      OfflineOverlay, no Toasts — because "standalone" is the entire point. */
   const errorRouteKind = ERROR_ROUTES[currentPath];
   if (errorRouteKind) {
-    return <ErrorExperience kind={errorRouteKind} signedIn={Boolean(currentUser)} />;
+    return <ErrorExperience kind={errorRouteKind} signedIn={Boolean(currentUser)} standalone />;
   }
 
   if (AUTH_FLOW_PATHS.includes(currentPath)) {
@@ -1323,7 +1323,7 @@ function AppShell({ toasts, addToast, removeToast }) {
             element={
               searchParams.has('reset')
                 ? <Navigate to={`/reset-password?token=${encodeURIComponent(searchParams.get('reset'))}`} replace />
-                : <ErrorExperience kind="404" signedIn={false} />
+                : <ErrorExperience kind="404" signedIn={false} standalone />
             }
           />
         </Routes>
@@ -1574,7 +1574,7 @@ function AppShell({ toasts, addToast, removeToast }) {
    * role that has no profile VIEW rather than for a missing capability, so there
    * is no route condition to explain and the themed copy stands alone.
    */
-  const deniedFallback = (route) => <ErrorExperience kind="403" denied={route} />;
+  const deniedFallback = (route) => <ErrorExperience kind="403" denied={route} standalone />;
 
   /* An unknown URL is a takeover, and it has to be decided HERE rather than by
      a `<Route path="*">` inside the shell — a catch-all route can only render
@@ -1595,7 +1595,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     if (isSignedOutOnlyPath(currentPath)) {
       return <Navigate to="/" replace />;
     }
-    return <ErrorExperience kind="404" />;
+    return <ErrorExperience kind="404" standalone />;
   }
 
   /* A refusal is a takeover too, and was the last error state that was not.
@@ -1608,7 +1608,7 @@ function AppShell({ toasts, addToast, removeToast }) {
      can act on. */
   const deniedMatch = viewingProfile ? null : deniedRoute(currentPath, currentUser);
   if (deniedMatch) {
-    return <ErrorExperience kind="403" denied={deniedMatch} />;
+    return <ErrorExperience kind="403" denied={deniedMatch} standalone />;
   }
 
   /* Offline COVERS the whole shell rather than replacing the routed view.

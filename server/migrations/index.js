@@ -68,6 +68,7 @@ import isoLoginAttemptTimestamps from './056_iso_login_attempt_timestamps.js';
 import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
+import leaderboardCandidates from './060_leaderboard_candidates.js';
 import schedulerLeases from './061_scheduler_leases.js';
 
 export const MIGRATIONS = [
@@ -395,16 +396,25 @@ export const MIGRATIONS = [
    */
   eventSearchIndex,
   /**
+   * 060 — the index behind the leaderboard's candidate set (audit finding P-2).
+   *
+   * An index and an ANALYZE, nothing else. It must run after `users` exists and
+   * after 001, which rebuilds `users` to widen a CHECK — a rebuild drops and
+   * recreates the table's indexes from its own list, so creating this one
+   * earlier would leave it silently absent afterwards. Additive on both engines
+   * and order-independent beyond that.
+   */
+  leaderboardCandidates,
+  /**
    * 061 — leader leases for the four periodic sweeps.
    *
    * A standalone table with no foreign keys, so it is order-independent.
    *
-   * Numbered 061 rather than 060 deliberately: 060 is taken by an unmerged
-   * branch, and two migrations sharing a version is refused at boot
-   * ("Duplicate migration version"). Gaps in the sequence are fine — the loader
-   * sorts and applies whatever it has not recorded — and a gap is a much
-   * cheaper thing to explain than a collision is to untangle after both have
-   * been applied somewhere.
+   * Numbered 061 while 060 was still on an unmerged branch, precisely so the
+   * two could not collide — two migrations sharing a version is refused at boot
+   * ("Duplicate migration version"). Both are now here, in order, and the
+   * reservation did its job: nothing had to be renumbered after either had been
+   * applied somewhere.
    */
   schedulerLeases
 ];

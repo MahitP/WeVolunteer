@@ -63,8 +63,17 @@ const MAX_GLOBAL_IMPORT_FILES = 42;
  * exactly the direction this ratchet exists to encourage. The file count is
  * unchanged at 42, because a module keeps its import as long as one statement
  * still uses it.
+ *
+ * 518 → 519 on integrating mahit/vibrant-murdock-737e90. Both sides of that
+ * merge sat at 518, so neither branch's own run could see it: the single extra
+ * call site is the outstanding-application cap added by 3378e8e, one
+ * `db.prepare(...).get(...)` inside `routes/applicationRoutes.js`, which
+ * already held 21 of them. The file count is still 42 — no module joined the
+ * surface — and the new statement reaches the pooled client through the same
+ * async-context proxy as the other 518, so what this ratchet protects is
+ * unchanged. Raised by exactly one, and still only ever to be lowered again.
  */
-const MAX_GLOBAL_IMPORT_CALLSITES = 518;
+const MAX_GLOBAL_IMPORT_CALLSITES = 519;
 
 /**
  * `db.js` and the context module are the boundary itself and are exempt.

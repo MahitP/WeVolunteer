@@ -14,6 +14,7 @@ import {
   clearDraft,
 } from './confirm.js';
 import { api } from '../utils/api.js';
+import { collectEvent } from '../testFixtures/wellyEventDraft.js';
 
 const studentUserA = { id: 'usr-student-A', name: 'Student Alice', role: 'student' };
 const studentUserB = { id: 'usr-student-B', name: 'Student Bob', role: 'student' };
@@ -231,11 +232,19 @@ describe('draft-and-confirm session isolation & account switching', () => {
     }).toThrow();
   });
 
+  /**
+   * ── What this test used to assert, and why it could not any more ──
+   *
+   * It began with one sentence and expected a confirmable draft immediately,
+   * carrying ten spots — a figure nobody had said, invented by the code this
+   * change removed. The behaviour underneath is what it was really about and is
+   * unchanged: a change made before confirming produces ONE draft, not two, and
+   * the value that is created is the corrected one.
+   */
   it('supports conversational multi-turn draft adjustments without duplicate drafts', async () => {
-    // Organizer initiates event drafting
-    const initialRes = await ask('create an event called "River Cleanup" at "West Pier" with 10 spots', { user: organizerUserA });
-    expect(initialRes.draft).toBe(true);
-    expect(initialRes.card?.data?.args?.slots[0]?.maxSpots).toBe(10);
+    const { last } = await collectEvent(ask, organizerUserA, { spots: 10 });
+    expect(last.draft).toBe(true);
+    expect(last.card?.data?.args?.slots[0]?.maxSpots).toBe(10);
 
     // Organizer conversationally modifies spots before confirming
     const modRes = await ask('actually make it 25 spots', { user: organizerUserA });
@@ -243,10 +252,11 @@ describe('draft-and-confirm session isolation & account switching', () => {
     expect(modRes.card?.data?.args?.slots[0]?.maxSpots).toBe(25);
     expect(api.createEvent).not.toHaveBeenCalled();
 
-    // Confirm execution
+    /* One draft, not two: the superseded one was cancelled, so confirming
+       reaches the corrected payload and nothing else is left confirmable. */
     const confirmRes = await ask('confirm', { user: organizerUserA });
     expect(confirmRes.intent).toBe('confirm_action');
-    expect(api.createEvent).toHaveBeenCalled();
+    expect(api.createEvent).toHaveBeenCalledTimes(1);
     expect(api.createEvent.mock.calls[0][0].slots[0].maxSpots).toBe(25);
   });
 });
@@ -315,12 +325,29 @@ describe('input sanitation and safe failure handling', () => {
   it('never reports fake success when backend returns an error', async () => {
     api.createEvent.mockRejectedValueOnce(new Error('Server 500 error'));
 
-    await ask('create an event called "Food Drive" at "Shelter" with 15 spots', { user: organizerUserA });
+    await collectEvent(ask, organizerUserA);
     const confirmRes = await ask('confirm', { user: organizerUserA });
 
     expect(confirmRes.toolFailed).toBe(true);
     expect(confirmRes.answer).toMatch(/couldn't look that up just now/i);
-    expect(confirmRes.answer).not.toMatch(/created successfully/i);
+    expect(confirmRes.answer).not.toMatch(/is created|created successfully/i);
+  });
+
+  /**
+   * A 2xx that carries no id is not a created event.
+   *
+   * The tool used to read `res.id` straight into a success card, so a response
+   * shaped differently — a proxy's 200, a future endpoint change — would have
+   * been announced as an event that exists, with an undefined id.
+   */
+  it('never reports success for a response with no event in it', async () => {
+    api.createEvent.mockResolvedValueOnce({ success: true });
+
+    await collectEvent(ask, organizerUserA);
+    const confirmRes = await ask('confirm', { user: organizerUserA });
+
+    expect(confirmRes.toolFailed).toBe(true);
+    expect(confirmRes.answer).not.toMatch(/is created/i);
   });
 });
 

@@ -214,6 +214,9 @@ Demo mode is opt-in and gated behind `VITE_DEMO_MODE` and `DEMO_MODE`, which are
 | `npm run test:watch` | Tests in watch mode |
 | `npm run lint` | oxlint |
 | `npm start` | Production API server |
+| `npm run redis:status` | Upstash configuration and plan limits (no network call) |
+| `npm run redis:ping` | Upstash reachability and round-trip latency |
+| `npm run redis:validate` | End-to-end Upstash check, cleaned up afterwards |
 
 ### Environment
 
@@ -227,6 +230,16 @@ Two configuration files with different lifetimes, deliberately kept separate:
 Templates for both are in the repository: [`deploy/wevolunteer.env.example`](deploy/wevolunteer.env.example) and [`.env.production.example`](.env.production.example). Full documentation of every variable is in the [deployment runbook](docs/operations/pilot-deployment-runbook.md).
 
 `VITE_*` values are compiled into the bundle. Changing one requires a rebuild; setting it on a running server has no effect.
+
+Three third-party services are optional and each is off unless its credentials are present. With them unset the application is complete rather than degraded, and none of them is ever required to serve a request:
+
+| Service | What it adds when configured | Docs |
+|---|---|---|
+| Pinecone | Semantic search in Discover; without it, Discover uses the database substring search | [`docs/operations/pinecone.md`](docs/operations/pinecone.md) |
+| Better Stack | Structured logs and errors; without it, logging goes to stdout | [`docs/operations/betterstack.md`](docs/operations/betterstack.md) |
+| Upstash Redis | Security counters survive restarts, and third-party lookup caches survive deploys; without it, both live in process memory | [`docs/operations/upstash.md`](docs/operations/upstash.md) |
+
+None of their credentials may ever carry a `VITE_` prefix — that would compile a live write credential into the browser bundle. A test fails the build if one does.
 
 ---
 

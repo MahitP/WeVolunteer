@@ -375,13 +375,25 @@ export default function VolunteerDashboard({
             <div className="stat-label">Upcoming</div>
             <div className="stat-value">{upcoming.length}</div>
           </div>
-          <div className="stat">
-            <div className="stat-label">Awaiting reply</div>
-            <div className="stat-value">{pending.length}</div>
-          </div>
+          {/**
+            * Shifts completed sits between Upcoming and Awaiting reply.
+            *
+            * The three read as one sentence about the reader's standing, and
+            * the middle slot is the one that gets looked at: what is booked,
+            * what has been done, and only then what is still waiting on
+            * somebody else. "Awaiting reply" is the least settled of the three
+            * and is the right place to end.
+            *
+            * Order only. The labels, the figures and the arithmetic behind them
+            * are untouched.
+            */}
           <div className="stat">
             <div className="stat-label">Shifts completed</div>
             <div className="stat-value">{completed.length}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Awaiting reply</div>
+            <div className="stat-value">{pending.length}</div>
           </div>
         </div>
       </section>

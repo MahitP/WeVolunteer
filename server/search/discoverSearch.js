@@ -34,6 +34,7 @@ import {
 } from './pineconeConfig.js';
 import { eventIdFromVectorId, vectorIdFor, TEXT_FIELD } from './eventDocument.js';
 import { logEvent } from './../telemetry.js';
+import { withSpan } from '../observability/spans.js';
 
 /**
  * Below this, a query is a prefix rather than a meaning.
@@ -122,6 +123,25 @@ export function buildPineconeFilter(filters = {}) {
  * @returns {Promise<{ok: boolean, ids: string[], reason?: string, durationMs: number}>}
  */
 export async function semanticCandidates(query, filters = {}, { topK = SEARCH_TOP_K } = {}) {
+  /**
+   * Given a span because it leaves the machine.
+   *
+   * This is a network call to Pinecone on the path of a user-visible search, so
+   * it is the operation most likely to be the reason Discover feels slow, and
+   * the one an operator cannot diagnose from this application's own logs — "the
+   * search took 900ms" and "Pinecone took 880ms of it" are different findings
+   * with different fixes.
+   *
+   * The QUERY TEXT is not an attribute and must never become one. The comment
+   * further down says why for the log record and the same reasoning binds here:
+   * a search box on a school platform is free text typed by a minor, and the
+   * allowlist in `spanAttributes.js` has no key that would carry it.
+   */
+  return withSpan('search.discover', { component: 'discover' }, () =>
+    semanticCandidatesInner(query, filters, { topK }));
+}
+
+async function semanticCandidatesInner(query, filters, { topK }) {
   const started = Date.now();
   if (!pineconeEnabled()) {
     return { ok: false, ids: [], reason: 'disabled', durationMs: 0 };

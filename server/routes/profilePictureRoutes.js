@@ -59,6 +59,112 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /**
+ * The formats this accepts, as an allowlist.
+ *
+ * ── What it replaces ──
+ *
+ * The check was `if (!decoded?.format)` — truthy, nothing more. So every format
+ * libvips was compiled with was accepted: TIFF, AVIF, HEIF, JP2, and SVG. The
+ * refusal message named "JPEG, PNG, WebP or GIF" the whole time, which is the
+ * worst version of the mistake, because a reader of that sentence believes a
+ * restriction exists.
+ *
+ * SVG is the one worth naming. No SVG was ever STORED — the output is
+ * unconditionally WebP, so the classic stored-SVG XSS was never reachable — but
+ * accepting it meant handing untrusted MARKUP to librsvg inside the server
+ * process, on a path any signed-in student can reach. That is parser surface
+ * with no upside: nobody sets a vector as their avatar.
+ *
+ * `ALLOWED_FORMAT_LABEL` is derived from this array rather than written out
+ * again, so the sentence and the rule cannot drift apart a second time.
+ */
+export const ALLOWED_IMAGE_FORMATS = Object.freeze(['jpeg', 'png', 'webp', 'gif']);
+export const ALLOWED_IMAGE_FORMAT_LABEL = 'JPEG, PNG, WebP or GIF';
+
+/**
+ * The stored edge, in pixels.
+ *
+ * Was 400. `.avatar` is 30px, `.avatar.lg` is 52px, and `ProfileMenu` is the
+ * only component in the application that renders `profile_picture_url` at all —
+ * so 400 was about seven times the largest size anything displays it at, and
+ * four times what a 2x display of the largest one needs.
+ *
+ * 192 covers a 96px surface at 2x, which is well beyond anything that exists
+ * today, and it is what makes the size ceiling below reachable without visible
+ * loss at the sizes actually in use.
+ */
+export const AVATAR_EDGE = 192;
+
+/**
+ * The ceiling on the STORED file. Owner requirement: under 5 KB.
+ *
+ * ── Why this is not a check on the upload ──
+ *
+ * A 5 KB source image is a thumbnail. Enforcing 5 KB on the incoming file would
+ * refuse every photograph a phone takes, and the feature would be unusable — the
+ * requirement would have been met by making the product not work.
+ *
+ * What the application is actually responsible for is the file it writes and
+ * then serves for ever. So the limit is a property of the OUTPUT, and the
+ * pipeline's job is to land under it. `MAX_UPLOAD_BYTES` stays at 5 MB as the
+ * separate, and separately-reasoned, bound on what may be buffered in memory.
+ */
+export const AVATAR_MAX_STORED_BYTES = 5 * 1024;
+
+/**
+ * Quality steps tried in order until the output fits.
+ *
+ * A fixed quality cannot satisfy a byte ceiling: how well a photograph
+ * compresses depends on the photograph. So this descends until the result fits,
+ * which is the only way to make "under 5 KB" a guarantee rather than a hope.
+ *
+ * The floor exists because there has to be one. If even the last step is over
+ * the ceiling the edge is halved once and the ladder runs again — a 96px avatar
+ * is still correct at every size this application displays one, and a refusal
+ * at that point would mean telling a student their face is too detailed.
+ */
+const QUALITY_LADDER = Object.freeze([80, 70, 60, 50, 40, 30]);
+
+/**
+ * Pixels libvips will decode from one upload.
+ *
+ * sharp defaults to about 268 megapixels, which is a guard against a decode
+ * bomb rather than a limit anybody chose for avatars. 40 MP is generous for a
+ * photograph — a 50-megapixel phone camera is unusual and this is an image about
+ * to become 192 pixels square — and it bounds the work a single request can ask
+ * for far below the default.
+ */
+export const MAX_IMAGE_INPUT_PIXELS = 40 * 1000 * 1000;
+
+/**
+ * Re-encodes to a square WebP that fits `AVATAR_MAX_STORED_BYTES`.
+ *
+ * Returns the encoded buffer. Never writes: the caller owns the filename, so a
+ * failure here cannot leave a file behind.
+ */
+async function encodeAvatar(buffer) {
+  for (const edge of [AVATAR_EDGE, Math.round(AVATAR_EDGE / 2)]) {
+    for (const quality of QUALITY_LADDER) {
+      const out = await sharp(buffer, { limitInputPixels: MAX_IMAGE_INPUT_PIXELS })
+        .resize(edge, edge, { fit: sharp.fit.cover, position: sharp.strategy.entropy })
+        .webp({ quality })
+        .toBuffer();
+      if (out.byteLength <= AVATAR_MAX_STORED_BYTES) return out;
+    }
+  }
+  /* Both edges exhausted. Return the smallest thing tried rather than throwing:
+     the last step of the inner loop at the halved edge is the smallest output
+     this pipeline can produce, and storing it is better than refusing a valid
+     photograph outright. */
+  return sharp(buffer, { limitInputPixels: MAX_IMAGE_INPUT_PIXELS })
+    .resize(Math.round(AVATAR_EDGE / 2), Math.round(AVATAR_EDGE / 2), {
+      fit: sharp.fit.cover, position: sharp.strategy.entropy,
+    })
+    .webp({ quality: QUALITY_LADDER[QUALITY_LADDER.length - 1] })
+    .toBuffer();
+}
+
+/**
  * Deletes a file this application previously wrote under `public/uploads/`,
  * addressed by the relative URL stored in `users.profile_picture_url`.
  *
@@ -231,9 +337,9 @@ router.post('/api/users/me/profile-picture', authenticateToken, receiveAvatar, a
   } catch {
     decoded = null;
   }
-  if (!decoded?.format) {
+  if (!decoded?.format || !ALLOWED_IMAGE_FORMATS.includes(decoded.format)) {
     return res.status(400).json({
-      error: 'That file could not be read as an image. Choose a JPEG, PNG, WebP or GIF.',
+      error: `That file could not be read as an image. Choose a ${ALLOWED_IMAGE_FORMAT_LABEL}.`,
       code: 'unsupported_media_type'
     });
   }
@@ -246,14 +352,14 @@ router.post('/api/users/me/profile-picture', authenticateToken, receiveAvatar, a
     const filename = `${req.user.id}-${Date.now()}.webp`;
     const filepath = path.join(UPLOADS_DIR, filename);
 
-    // Process image: resize, crop to square, convert to webp (strips metadata)
-    await sharp(req.file.buffer)
-      .resize(400, 400, {
-        fit: sharp.fit.cover,
-        position: sharp.strategy.entropy
-      })
-      .webp({ quality: 80 })
-      .toFile(filepath);
+    /* Resized, cropped square and re-encoded to WebP under the stored ceiling.
+       Re-encoding is also what strips metadata — sharp drops EXIF unless
+       `withMetadata()` is called, and it is not called anywhere, so a photo's
+       GPS coordinates do not survive the trip. That matters here: the
+       Privacy Policy promises no location is stored, and a phone photograph is
+       the one place a location would arrive without anybody choosing to send
+       it. */
+    fs.writeFileSync(filepath, await encodeAvatar(req.file.buffer));
 
     const relativeUrl = `/uploads/avatars/${filename}`;
 

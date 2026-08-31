@@ -87,6 +87,50 @@ const ACTION_REQUEST = new RegExp([
   /\b(sign me up|apply me|register me|book me)\b/,
 ].map(r => r.source).join('|'), 'i');
 
+/**
+ * Asking for an event to be created, when the sentence describes the event
+ * rather than naming the word.
+ *
+ * ── Why ACTION_REQUEST was not enough ──
+ *
+ * `ACTION_REQUEST` wants a creation verb within twenty characters of the word
+ * "event", "opportunity", "shift" or "slot". That covers "create an event" and
+ * misses the sentence an organizer in a hurry actually types:
+ *
+ *     "Create a food drive at the community center on September 15
+ *      from 9 AM to 1 PM with 20 volunteer spots."
+ *
+ * — which never says "event" at all, and was classified as `unknown`. The
+ * assistant then had nothing to do with it, so the fastest possible way to
+ * create an event was the one way that did not work.
+ *
+ * ── Why these two shapes and no more ──
+ *
+ * The first is the same verb-and-noun pair with a wider window, so a described
+ * event ("set up a new volunteer event for the food pantry") still reaches it.
+ *
+ * The second is the sentence above: a creation verb, a determiner, and then —
+ * within one sentence, because `[^.?!]` cannot cross a full stop — a COUNT of
+ * volunteers. Both of the narrowing parts are load-bearing, and both were added
+ * after watching the rule over-reach without them:
+ *
+ *   the determiner   without it, "make it 25 spots" matches — and that is a
+ *                    correction to an event already being discussed, not a
+ *                    request for a new one
+ *   the number       without it, "can you make a list of my shifts" matches on
+ *                    the word "shifts" alone, and a lookup becomes a write
+ *
+ * A number of volunteers is what nobody writes unless they are describing an
+ * event to be staffed, which is why it is the signal this leans on.
+ *
+ * Both are still gated by `INTENT_CAPABILITY.create_event`, which is
+ * `event.create`. A wider rule cannot widen who may use it.
+ */
+const CREATE_EVENT = new RegExp([
+  /\b(create|make|set ?up|schedule|post|publish|host|organi[sz]e|run)\b[^.?!]{0,40}\b(event|opportunit(y|ies)|sign-?up sheet)\b/,
+  /\b(create|make|set ?up|schedule|host|organi[sz]e|run)\s+(?:a|an|another|the|new)\b[^.?!]{0,140}\b\d{1,3}\s+(volunteers?|spots?|people|slots?|helpers?)\b/,
+].map(r => r.source).join('|'), 'i');
+
 /** Questions about eligibility and platform policies. */
 const ELIGIBILITY = /\b(counts?|allowed|eligible|qualif(y|ies)|permitted|supposed to|rules?|policy|okay to|ok to|fine to)\b/i;
 const QUESTION_SHAPE = /^\s*(does|do|is|are|am|can|could|may|should|would|will|what|why|if)\b/i;
@@ -779,7 +823,8 @@ const MATCHERS = [
     intent: 'create_event',
     tool: 'create_event',
     test: text =>
-      /\b(draft|new event workflow)\b/i.test(text),
+      /\b(draft|new event workflow)\b/i.test(text)
+      || CREATE_EVENT.test(text),
     slots: () => ({}),
   },
   {

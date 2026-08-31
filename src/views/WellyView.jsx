@@ -304,7 +304,31 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
         runtimeRef.current = null;
       }
       const runtime = await createRuntime();
-      await runtime.load(model);
+      /**
+       * The load reports whether it is fetching or initialising, and this page
+       * says which.
+       *
+       * It used to call `runtime.load(model)` with nothing, so a load that had
+       * to go back to the network — a cache entry that was evicted, or one
+       * discarded as incomplete and re-fetched — spent minutes under a pill
+       * reading "Starting up" with no way to tell it apart from a hang. On the
+       * Advanced model that is nearly a gigabyte of silence. `AIStatus` has had
+       * a DOWNLOADING state the whole time and nothing was setting it.
+       *
+       * Set once, on the first callback that is genuinely mid-transfer, rather
+       * than per chunk: wllama reports every 100ms, and it also reports once
+       * with `loaded === total` for a model already on the device — announcing
+       * a download for that would be the same lie in the other direction.
+       */
+      let announcedDownload = false;
+      await runtime.load(model, {
+        onProgress: ({ loaded, total } = {}) => {
+          if (announcedDownload || !aliveRef.current) return;
+          if (!(total > 0) || loaded >= total) return;
+          announcedDownload = true;
+          setStatus(AIStatus.DOWNLOADING);
+        },
+      });
       if (!aliveRef.current) {
         await runtime.unload();
         return;
@@ -1155,8 +1179,25 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
                 the platform works.
               </p>
 
-              <div className="welly-suggestions-container">
-                <p className="welly-suggestions-label dim small">Try asking</p>
+              {/**
+                * A labelled group, not a heading and a loose pile of buttons.
+                *
+                * "Try asking" was a visual label only: sighted readers saw the
+                * buttons grouped under it, and assistive technology met six
+                * unrelated buttons with no indication of what they were for or
+                * how many there were. Naming the group programmatically is what
+                * makes the visible relationship a real one.
+                *
+                * Each button's accessible name is its visible label — the arrow
+                * is aria-hidden — which is what 2.5.3 Label in Name requires of
+                * a control somebody may also be addressing by voice.
+                */}
+              <div
+                className="welly-suggestions-container"
+                role="group"
+                aria-labelledby="welly-suggestions-label"
+              >
+                <p className="welly-suggestions-label dim small" id="welly-suggestions-label">Try asking</p>
                 <div className="welly-suggestions-grid">
                   {suggestions.map(({ label, prompt }) => (
                     <button

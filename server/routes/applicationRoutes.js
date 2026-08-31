@@ -16,6 +16,8 @@ import { eventApplicationEligibility } from '../eventEligibility.js';
 import { db } from '../db.js';
 import { canRunEvent } from '../organizations.js';
 import { slotHasStarted } from '../attendance.js';
+import { PENDING_APPLICATION_LIMIT } from '../config.js';
+import { applicationLimiter } from '../applicationLimiter.js';
 
 const router = express.Router();
 
@@ -459,7 +461,7 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
 });
 
 // 7. Apply to an Event Slot (Student only)
-router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'), async (req, res) => {
+router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'), applicationLimiter, async (req, res) => {
   const eventId = req.params.id;
   const { slotId } = req.body;
 
@@ -567,6 +569,71 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
       'SELECT id, status FROM applications WHERE slot_id = ? AND user_id = ?'
     ).get(slotId, req.user.id);
 
+    /**
+     * How many opportunities this student already has outstanding.
+     *
+     * ── Placement ──
+     *
+     * Below the deadline and conflict checks, and below the `existing` lookup,
+     * both deliberately. A student re-applying to a slot they already hold gets
+     * "you have already applied", not a quota refusal — they are not adding
+     * anything. And if the deadline has passed or the shift clashes, that is the
+     * real reason and the one to give; a quota message would send them to
+     * withdraw something for no benefit.
+     *
+     * ── Counting ──
+     *
+     * DISTINCT event, excluding THIS event, so extra shifts of an opportunity
+     * already applied to are free — the unit is the opportunity, not the row.
+     * Excluding this event also makes the comparison correct in both directions:
+     * after this application the student holds `n + 1` distinct events either
+     * way, so `n >= limit` is the refusal in both the first-shift and the
+     * second-shift case.
+     *
+     * Cancelled events are left out. A pending application on a cancelled event
+     * cannot be made to resolve by the person holding it, and they did not cause
+     * it; charging it against their quota is a penalty for somebody else's
+     * decision.
+     *
+     * Only `pending`. `accepted` is a commitment rather than an outstanding
+     * request, and counting it would freeze out a student for succeeding.
+     * `waitlisted` is done TO an applicant by a draw and can be promoted without
+     * them acting, so counting it would let other people's decisions lock
+     * somebody out.
+     */
+    if (!existing || existing.status === 'withdrawn') {
+      const outstanding = await db.prepare(`
+        SELECT COUNT(DISTINCT a.event_id) AS n
+        FROM applications a
+        JOIN events e ON e.id = a.event_id
+        WHERE a.user_id = ?
+          AND a.status = 'pending'
+          AND a.event_id != ?
+          AND e.status <> 'cancelled'
+      `).get(req.user.id, eventId);
+
+      const pending = outstanding?.n ?? 0;
+      if (pending >= PENDING_APPLICATION_LIMIT) {
+        /**
+         * 409 rather than 429.
+         *
+         * 429 would say "come back later", and later changes nothing — the
+         * budget is not a window that refills. What clears it is withdrawing
+         * something, so the status has to be the one that means "this conflicts
+         * with the state you are in" and the message has to name the action.
+         */
+        return res.status(409).json({
+          error:
+            `You already have ${pending} opportunities waiting for a decision, which is the `
+            + `limit of ${PENDING_APPLICATION_LIMIT}. Withdraw one you no longer want, or wait `
+            + 'for an organizer to decide, and then apply to this one.',
+          code: 'application_limit_reached',
+          limit: PENDING_APPLICATION_LIMIT,
+          pending,
+        });
+      }
+    }
+
     const status = 'pending';
     const appliedAt = new Date().toISOString();
     let appId;
@@ -651,6 +718,29 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
       application: { id: appId, eventId, slotId, userId: req.user.id, status, appliedAt }
     });
   } catch (error) {
+    /**
+     * A lost race on `UNIQUE(user_id, slot_id)` is the client's answer, not ours.
+     *
+     * The duplicate check above reads, and then the insert writes, with awaits in
+     * between. On PostgreSQL every statement is a promise, so two taps on the
+     * same button interleave inside one process: one INSERT wins and the other
+     * violates the constraint. `instanceLock.js` predicts exactly this shape for
+     * handlers that read-then-write without `FOR UPDATE`, and this is one.
+     *
+     * The constraint is doing its job — no duplicate row is created — so the
+     * outcome is correct and only the status was wrong. Reporting 500 told the
+     * student the server was broken when what happened is that they already have
+     * this shift, which is the same thing the check above says with a 400.
+     *
+     * Detected by constraint name rather than by pre-checking again, because a
+     * second read would race the same way.
+     */
+    const violation = String(error?.code ?? '') === '23505'
+      || /UNIQUE constraint failed: applications\.(user_id|slot_id)/i.test(String(error?.message ?? ''));
+    if (violation) {
+      return res.status(400).json({ error: 'You have already applied for this time slot' });
+    }
+
     console.error('Apply error:', error);
     res.status(500).json({ error: 'Internal server error applying to event' });
   }

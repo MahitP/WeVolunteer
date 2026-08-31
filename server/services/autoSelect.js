@@ -32,6 +32,7 @@ import { notificationService } from './notificationService.js';
 import '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { verifyRunStillApplies, staleRunMessage } from './autoSelectStaleness.js';
+import { withSpan } from '../observability/spans.js';
 
 /**
  * Computes a draw without writing anything.
@@ -69,13 +70,41 @@ export async function computeDraw(db, eventId, { runNumber }) {
      * directly, over the real curve, so the two names cannot drift apart again
      * without the build going red.
      */
+    /**
+     * Credited hours, by the same definition `creditedHoursFor` uses.
+     *
+     * ── Why the events join matters ──
+     *
+     * Without it this sums every attendance row, including ones belonging to
+     * CANCELLED events — which the student's own profile excludes. Two numbers,
+     * both called credited hours, disagreeing. And because the weight curve
+     * rewards FEWER hours, the phantom ones made somebody less likely to be
+     * drawn because an organizer cancelled an event they had turned up to.
+     *
+     * ── Why a subquery and not a join ──
+     *
+     * The first attempt added `LEFT JOIN events … AND status <> 'cancelled'`
+     * plus a WHERE predicate, and `capacity.baseline.test.js` caught what that
+     * does: filtering in WHERE after a LEFT JOIN turns it into an inner join for
+     * any applicant whose every attendance row is excluded, so a student with
+     * only cancelled-event hours DISAPPEARED from the pool instead of being
+     * weighed at zero. The 200-run lottery assertion went to 200/200 and said
+     * so.
+     *
+     * A correlated subquery cannot drop an applicant, and it is the same shape
+     * as `creditedHoursFor`, which is the thing it has to agree with.
+     */
     const allPending = await db.prepare(`
       SELECT a.id, a.user_id,
-             COALESCE(SUM(att.hours_awarded), 0) as totalHours
+             (SELECT COALESCE(SUM(att.hours_awarded), 0)
+                FROM attendance att
+                JOIN events e_att ON e_att.id = att.event_id
+               WHERE att.user_id = a.user_id
+                 AND att.present = 1
+                 AND e_att.status <> 'cancelled') as totalHours
       FROM applications a
-      LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
       WHERE a.slot_id = ? AND a.status = 'pending'
-      GROUP BY a.id ORDER BY a.id
+      ORDER BY a.id
     `).all(slot.id);
 
     /**
@@ -392,23 +421,37 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
     let waitlistedHoursSum = 0;
 
     if (selectedIds.length > 0) {
+      /* Credited hours, as a subquery for the reason given on the draw's own
+         query above: a join plus a WHERE predicate drops an applicant whose
+         only hours came from a cancelled event, rather than counting them as
+         zero. */
       const rows = await tx.prepare(`
-        SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
+        SELECT (SELECT COALESCE(SUM(att.hours_awarded), 0)
+                  FROM attendance att
+                  JOIN events e_att ON e_att.id = att.event_id
+                 WHERE att.user_id = a.user_id
+                   AND att.present = 1
+                   AND e_att.status <> 'cancelled') as total_hours
         FROM applications a
-        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
         WHERE a.id IN (${selectedIds.map(() => '?').join(',')})
-        GROUP BY a.id
       `).all(...selectedIds);
       acceptedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
     }
 
     if (waitlistIds.length > 0) {
+      /* Credited hours, as a subquery for the reason given on the draw's own
+         query above: a join plus a WHERE predicate drops an applicant whose
+         only hours came from a cancelled event, rather than counting them as
+         zero. */
       const rows = await tx.prepare(`
-        SELECT COALESCE(SUM(att.hours_awarded), 0) as total_hours
+        SELECT (SELECT COALESCE(SUM(att.hours_awarded), 0)
+                  FROM attendance att
+                  JOIN events e_att ON e_att.id = att.event_id
+                 WHERE att.user_id = a.user_id
+                   AND att.present = 1
+                   AND e_att.status <> 'cancelled') as total_hours
         FROM applications a
-        LEFT JOIN attendance att ON att.user_id = a.user_id AND att.present = 1
         WHERE a.id IN (${waitlistIds.map(() => '?').join(',')})
-        GROUP BY a.id
       `).all(...waitlistIds);
       waitlistedHoursSum = rows.reduce((sum, r) => sum + r.total_hours, 0);
     }
@@ -475,6 +518,28 @@ export async function hasConfirmedRun(db, eventId) {
  * manual route already enforces and the reason this is safe to call repeatedly.
  */
 export async function runAndConfirm(db, eventId, { source = 'scheduler' } = {}) {
+  /**
+   * One of the four operations in this codebase given a span by hand.
+   *
+   * It earns one on the criteria in `spans.js`: it is not a layer, so automatic
+   * instrumentation cannot name it; it does real work — a draw, a weighting
+   * pass, a write and an apply, each of which touches the database; and it is
+   * the operation an organizer complains about when a selection "did not
+   * happen", where the useful answer is which of those four stages was slow or
+   * which one refused.
+   *
+   * `eventId` is deliberately NOT an attribute. It is an identifier, the
+   * allowlist in `spanAttributes.js` has no key for it, and a span attribute is
+   * not the place to start carrying one — the `wev.request_id` on the enclosing
+   * HTTP span already joins this trace to the log record that names what was
+   * being selected for.
+   */
+  return withSpan('autoselect.run', { component: 'autoselect', reason: source }, async () => {
+    return runAndConfirmInner(db, eventId, { source });
+  });
+}
+
+async function runAndConfirmInner(db, eventId, { source }) {
   if (await hasConfirmedRun(db, eventId)) {
     return { executed: false, reason: 'already_confirmed' };
   }

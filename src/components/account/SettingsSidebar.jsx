@@ -1,11 +1,14 @@
 import React from 'react';
-import { UserCog, Palette, Bell, Shield, Lock, MessageSquare, HelpCircle, ChevronRight } from 'lucide-react';
+import { UserCog, Palette, Accessibility, Bell, Shield, Lock, MessageSquare, HelpCircle, ChevronRight } from 'lucide-react';
 
 const SECTIONS = [
   // Account first: it holds the two things a person is most likely to have
   // come here to fix — the email address on the account and their username.
   { id: 'account', label: 'Account', icon: UserCog },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  // Directly after Appearance: both are "how WeVolunteer looks and behaves for
+  // me", and somebody who came to make text bigger looks under Appearance first.
+  { id: 'accessibility', label: 'Accessibility', icon: Accessibility },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'privacy', label: 'Privacy', icon: Shield },
   { id: 'security', label: 'Security', icon: Lock },

@@ -6,6 +6,7 @@ import '../email.js';
 import { JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, selfUserResponse, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
+import { createSharedCounter, __resetLocalCounters } from '../redis/limitStore.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import '../organizerAgreement.js';
 import '../userCapabilities.js';
@@ -52,55 +53,64 @@ export const OAUTH_ONLY = '!OAUTH_ONLY!';
  */
 const LOGIN_FAILURE_LIMIT = Number(process.env.LOGIN_FAILURE_LIMIT) || 10;
 const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
-const loginFailures = new Map();
+
+/**
+ * The counter behind the throttle, shared when Redis is configured.
+ *
+ * ── What changed, and what deliberately did not ──
+ *
+ * This was a module-level `Map`, which is correct for one process and has one
+ * property nobody chose: a restart clears it. A deploy in the middle of a
+ * password spray handed the attempt a fresh budget, and an account two failures
+ * from lockout went back to ten. `instanceLock.js` names the same `Map` as one
+ * of the reasons a second instance is refused.
+ *
+ * `createSharedCounter` keeps the `Map` as its fallback and increments it on
+ * every call, so with Redis unconfigured or unreachable the behaviour is
+ * exactly what it has always been rather than a reset. The window still starts
+ * at the first failure and still runs fifteen minutes from there — see the note
+ * on `HIT_SCRIPT` in redis/limitStore.js, which buys an extra `PTTL` precisely
+ * to avoid weakening that.
+ *
+ * The key is hashed before it reaches Redis, so an account id and an
+ * unrecognised identifier — which may be somebody's email address — are stored
+ * as digests rather than as a list of who was attacked.
+ */
+const loginFailureCounter = createSharedCounter({
+  name: 'login-failure',
+  windowMs: LOGIN_FAILURE_WINDOW_MS,
+});
 
 /** Bucket key for a resolved account, or for an identifier that matched none. */
 function throttleKey(userRow, identifier) {
   return userRow ? `id:${userRow.id}` : `anon:${String(identifier).trim().toLowerCase()}`;
 }
 
-function loginLockState(key) {
-  const entry = loginFailures.get(key);
-  if (!entry || entry.until <= Date.now()) return { locked: false };
-  if (entry.count < LOGIN_FAILURE_LIMIT) return { locked: false };
-  return { locked: true, minutes: Math.max(1, Math.ceil((entry.until - Date.now()) / 60000)) };
+async function loginLockState(key) {
+  const { count, resetAt } = await loginFailureCounter.peek(key);
+  if (count < LOGIN_FAILURE_LIMIT) return { locked: false };
+  return { locked: true, minutes: Math.max(1, Math.ceil((resetAt - Date.now()) / 60000)) };
 }
 
-function recordLoginFailure(key) {
-  const now = Date.now();
-  const entry = loginFailures.get(key);
-  if (!entry || entry.until <= now) {
-    loginFailures.set(key, { count: 1, until: now + LOGIN_FAILURE_WINDOW_MS });
-  } else {
-    entry.count += 1;
-  }
-
-  // Opportunistic sweep so an attacker cannot grow this map without bound by
-  // trying a new identifier every request.
-  if (loginFailures.size > 5000) {
-    for (const [k, v] of loginFailures) {
-      if (v.until <= now) loginFailures.delete(k);
-    }
-    // If the map is still too large (e.g., under active attack with unexpired entries),
-    // forcefully evict entries to prevent a memory exhaustion crash. Map iteration
-    // is insertion order, so this evicts the oldest attempts first.
-    if (loginFailures.size > 5000) {
-      for (const k of loginFailures.keys()) {
-        loginFailures.delete(k);
-        if (loginFailures.size <= 4000) break;
-      }
-    }
-  }
+async function recordLoginFailure(key) {
+  await loginFailureCounter.hit(key);
 }
 
 /** Clears an account's bucket. Takes the user id, not a typed identifier. */
-export function clearLoginFailuresForUser(userId) {
-  loginFailures.delete(`id:${userId}`);
+export async function clearLoginFailuresForUser(userId) {
+  await loginFailureCounter.clear(`id:${userId}`);
 }
 
-/** Test seam: lets a suite exercise the throttle without leaking state between cases. */
+/**
+ * Test seam: lets a suite exercise the throttle without leaking state between
+ * cases.
+ *
+ * Stays synchronous because every caller is a `beforeEach` that does not await
+ * it, and because the only state a test can have created is the in-process
+ * mirror — a suite runs with Redis unconfigured.
+ */
 export function __resetLoginThrottle() {
-  loginFailures.clear();
+  __resetLocalCounters();
 }
 
 /** Signs the caller in by setting the session cookie. */
@@ -574,7 +584,7 @@ router.post('/api/auth/login', async (req, res) => {
      * gated at all. A lock that only covers the password comparison is not a
      * lock on the endpoint.
      */
-    const lock = loginLockState(key);
+    const lock = await loginLockState(key);
     if (lock.locked) {
       return res.status(429).json({
         error: `Too many failed attempts for this account. Try again in about ${lock.minutes} minute${lock.minutes === 1 ? '' : 's'}, or reset your password.`,
@@ -584,7 +594,7 @@ router.post('/api/auth/login', async (req, res) => {
     }
 
     if (!userRow || userRow.account_status === 'deleted') {
-      recordLoginFailure(key);
+      await recordLoginFailure(key);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS
           ? GENERIC_MESSAGE
@@ -667,14 +677,14 @@ router.post('/api/auth/login', async (req, res) => {
     }
 
     if (!await bcrypt.compare(password, userRow.password_hash)) {
-      recordLoginFailure(key);
+      await recordLoginFailure(key);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS ? GENERIC_MESSAGE : 'Incorrect password.',
         code: 'wrong_password'
       });
     }
 
-    clearLoginFailuresForUser(userRow.id);
+    await clearLoginFailuresForUser(userRow.id);
 
     /* The caller describing themselves, so `grants` and `withheld` travel with
        it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */

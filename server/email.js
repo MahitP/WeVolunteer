@@ -836,9 +836,24 @@ export async function sendEmailChangeNotice(toEmail, newEmail) {
 }
 
 export async function sendNotificationEmail(toEmail, subject, text, htmlContent) {
+  /**
+   * `text` is escaped; `htmlContent` deliberately is not.
+   *
+   * The two parameters are not interchangeable. `htmlContent` exists so a caller
+   * can supply markup it composed itself, and escaping it would defeat its only
+   * purpose. `text` is the plain-text fallback — notification titles and bodies,
+   * which carry event titles and user names — and it was interpolated raw.
+   *
+   * Nothing reaches it today: the sole caller is `createNotification`, which
+   * passes no `htmlContent`, and `createNotification` has no production callers
+   * of its own. So this was one wire-up away rather than live — and the sweep
+   * that fixed this class in `notificationWorker.js` (see
+   * `email.escaping.test.js`) did not reach here, because a helper nothing calls
+   * looks exactly like a helper that is safe.
+   */
   const contentHTML = `
     <h1>${escapeHtml(subject)}</h1>
-    <p>${htmlContent || text.replace(/\n/g, '<br/>')}</p>
+    <p>${htmlContent || escapeHtml(text).replace(/\n/g, '<br/>')}</p>
   `;
 
   /* No `|| 'https://wevolunteer.org'` here any more. That fallback was the same

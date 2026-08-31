@@ -1310,6 +1310,21 @@ See [`docs/operations/betterstack.md`](operations/betterstack.md) for what is
 sent, what is never sent, the delivery guarantees, and the operator decisions
 the integration forces.
 
+**The same bar now binds a second wire.** Traces and metrics go to the same
+Better Stack source over OTLP, and OpenTelemetry's automatic instrumentation
+does not know about any of the above — measured on the shipped package
+versions, an HTTP server span records the query string verbatim, the client's
+IP address twice, the real path and the User-Agent by default. Every one of
+those is something this subsection forbids.
+
+`server/observability/spanAttributes.js` is the allowlist that holds the trace
+wire to it, and it is the file to read before adding an instrumentation or
+bumping one: it fails closed, it covers span *events* as well as attributes
+(because `recordException` writes an error's message and stack into one), and
+it runs before anything downstream can buffer a value. The reasoning, the
+budget and the cost controls are in
+[`docs/operations/observability.md`](operations/observability.md).
+
 #### Groups, events, fingerprints
 
 An **error group** is one *problem*. An **error event** is one *occurrence* of
@@ -2231,47 +2246,96 @@ exist so the decision is made on evidence rather than enthusiasm.
   calculation added in 1.1.0.
 - **Do not adopt** to "be ready". Adopt when a trigger fires.
 
-### 10.2 Redis adoption
+### 10.2 Redis adoption (partially adopted, v1.3)
 
-> **Partly overtaken by events.** Two of the three items below have been dealt
-> with without Redis, and the full inventory now lives in
-> [`docs/operations/horizontal-scaling.md`](operations/horizontal-scaling.md):
->
-> - **The scheduler no longer double-runs.** All four periodic sweeps take a
->   leader lease from the `scheduler_leases` table (migration 061) before
->   running. It is the same conditional-claim idiom `instanceLock.js` and the job
->   workers already use, it costs no new service, and it fails open.
-> - **The rate limiters' KEYS were wrong in a way Redis would not have fixed.**
->   `apiLimiter` was keyed on the address alone, so a school shared 600 requests
->   per quarter hour for the whole building. It is now keyed on the verified
->   session, with the address as the fallback — the same correction already made
->   to `loginLimiter` and `mailLimiter`. The STORE is still per-process, which is
->   the part Redis would address; the cost of doing so is measured in that
->   branch's `docs/operations/upstash.md` §7.3, which is not present here.
-> - **Socket.IO is no longer a blocker either.** `@socket.io/postgres-adapter`
->   broadcasts over LISTEN/NOTIFY, so the bus is the database that is already
->   here — no new service, and the Redis adapter was rejected on the 222 ms round
->   trip that branch measured, which an adapter on the message path cannot
->   afford. Built, tested with two real servers, and OFF: activation is one
->   environment variable. The remaining piece of work for multi-instance is a
->   shared rate-limit store, and nothing else.
+Like §10.9, this one has partly happened. What is worth keeping is not the
+decision to adopt but **how narrow the adoption is, and the measurement that
+made it narrow** — because the obvious version of this project was several times
+larger and would have made the application slower.
 
-- **Why it may become necessary.** Several pieces of state are currently
-  in-process: rate-limiter counters, the auto-select scheduler, Socket.IO
-  connection state. All are correct for exactly one instance — and
-  `instanceLock.js` enforces that assumption. The moment a second instance
-  exists, every one of them becomes wrong: rate limits become per-instance
-  (trivially bypassed by reconnecting), the scheduler double-runs, and realtime
-  events reach only the clients attached to one instance.
-- **Triggers.** A second application instance, for any reason. Session or cache
-  state must outlive a restart. Socket.IO needs an adapter to broadcast across
-  instances.
-- **Tradeoffs.** Gains: shared state, correct distributed rate limiting, a
-  working Socket.IO adapter, distributed locks. Costs: another service; a new
-  failure mode (what happens when Redis is down?); cache-invalidation bugs; and
-  the temptation to move state there that should be in the database.
-- **Note.** This is tightly coupled to §10.1 and §10.7. Multi-instance is a
-  single decision with three consequences, not three independent projects.
+- **What forced it.** Two things, neither of them speed. The security counters
+  were process memory, so a restart cleared them: a deploy during a password
+  spray handed the attempt a fresh budget, and an account two failures from
+  lockout went back to ten. And the third-party lookup caches died on every
+  deploy, which for geocoding means re-warming against Nominatim's limit of one
+  request per second **for this application in total** — a limit whose breach is
+  not a 500 but OSM blocking the User-Agent for every school at once.
+
+- **The measurement that shaped everything else.** `postgres-scale-measurements.md`
+  puts the hot queries at **0.3–0.5 ms** at 50× pilot scale. An Upstash call is
+  an HTTPS round trip to another host. So caching a database query in Redis is
+  not an optimisation here, it is a regression that also spends a metered
+  allowance — and "cache the hot reads" is the intuition this work exists to
+  have measured and rejected rather than followed.
+
+- **What was adopted.** The login-failure throttle and five security limiters
+  share a Redis-backed counter; the weather and geocode caches gained a second
+  tier behind their in-process one; the Nominatim pacing reservation became
+  application-wide rather than process-wide. Nothing else.
+
+- **The second measurement, which cut the scope again.** The first version
+  shared all eight security limiters, including the three on the sign-in path.
+  Those three set `skipSuccessfulRequests`, which bills an increment on every
+  request and a decrement on every success — so the expensive case is a
+  *successful* sign-in, and the version that looked most thorough came to 107%
+  of the free plan's monthly allowance at a thousand users. The shipped scoping
+  is a fifth of that. The lesson is the one §10 exists for: an integration's
+  cost is a property of its traffic shape, not of how many features it touches,
+  and it is worth computing before it is worth building.
+
+- **What was rejected, and why it is worth knowing.** Sessions — WeVolunteer
+  already has per-session revocation in SQL, and routing it through Redis would
+  add a round trip to *every authenticated request* to replace an indexed local
+  read. Chat — durable messages belong in the relational database, where
+  retention, deletion, export and moderation are built. Leaderboards — a sorted
+  set would be a derived index that can drift from the hours ledger, against
+  INV-001, to fix a scan that an index fixes for free. Pub/Sub — with one
+  instance `io.emit` is already correct, faster, and cannot drop a message to an
+  outage.
+
+- **The privacy decision to copy.** The travel-time route was the strongest
+  remaining cache candidate and is deliberately excluded: its origin is a minor's
+  location, and that module promises the coordinate is "never persisted. No
+  column, no row, nowhere". Hashing the key does not rescue that promise, because
+  the promise is about where the data goes rather than how it is encoded. A test
+  fails the build if that route ever imports `server/redis/`.
+
+- **The constraint that shaped the rest.** Upstash's free plan is treated as
+  permanent: 500,000 commands a month, and **one database**. That is why only
+  limiters that tick on a failure were migrated — `apiLimiter` alone would spend
+  the month in an afternoon — and why environment separation is a key prefix
+  rather than a second instance.
+
+- **What the performance pass then removed from this list, without Redis.**
+  Three of the consequences named here have since been dealt with, and none of
+  them needed a second service:
+
+  - **The scheduler no longer double-runs.** All four periodic sweeps take a
+    leader lease from `scheduler_leases` (migration 061) before running — the
+    same conditional-claim idiom `instanceLock.js` and the job workers already
+    use. A distributed lock in Redis would have replaced a correct database
+    claim with a networked one.
+  - **Socket.IO has an adapter.** `@socket.io/postgres-adapter` broadcasts over
+    LISTEN/NOTIFY, so the bus is the database that is already here. The Redis
+    adapter was rejected on the **222 ms warm round trip** measured in
+    `operations/upstash.md` §1.2, which an adapter sitting on the message path
+    would pay on every realtime event. Built, tested against two real servers,
+    and **off** — activation is one environment variable.
+  - **The limiter KEYS were wrong in a way Redis would not have fixed.**
+    `apiLimiter` was keyed on the address alone, so a school shared 600 requests
+    a quarter hour for the whole building. It is now keyed on the verified
+    session with the address as fallback. Sharing the *store* without fixing the
+    *key* would have distributed the defect rather than removed it.
+
+- **Still deferred, and still triggered by a second instance.** A shared store
+  for the volume limiters — `apiLimiter` above all, whose per-session keying
+  makes a shared store more expensive rather than less — and retiring
+  `instanceLock.js`. This remains coupled to §10.1 and §10.7: multi-instance is
+  a single decision with several consequences, not several independent projects.
+  The full inventory, classified line by line, is in
+  [`operations/horizontal-scaling.md`](operations/horizontal-scaling.md).
+
+See [`docs/operations/upstash.md`](operations/upstash.md).
 
 ### 10.3 Email infrastructure
 
@@ -2470,9 +2534,10 @@ Roughly ascending cost and risk, given today's foundations:
 4. **PWA, offline reads** (§10.5) — self-contained
 5. **Analytics** (§10.6) — needs a privacy design first
 6. **PostgreSQL** (§10.1) — infrastructure change
-7. **Redis** (§10.2) — arrives with multi-instance, and is now a shorter job
-   than it was: the scheduler and the limiter keys were fixed without it, so what
-   remains is a Socket.IO adapter and a shared limiter store
+7. **Redis** (§10.2) — the shared-counter and cache half is done, and the
+   multi-instance half turned out to be shorter than it looked: the scheduler
+   leases, the Socket.IO adapter and the limiter keys were all resolved without
+   Redis, leaving only a shared store for the volume limiters
 8. **Multi-district tenancy** (§10.7) — dedicated design phase, `2.0.0`
 
 This is a default ordering, not a commitment. A district requirement can
@@ -2630,3 +2695,139 @@ teaches something. A register nobody adds to is a register nobody trusts.
 
 *Established 2026-07-31 at `v1.1.0`. WeVolunteer — volunteer scheduling and
 service-hour tracking for schools and community organizations.*
+
+## Accessibility
+
+### The target, and what it is not
+
+WeVolunteer is built and tested against **WCAG 2.2 Level AA**.
+
+That is a technical target. It is **not** a legal conclusion: nothing in this repository
+establishes that WeVolunteer is "ADA compliant", and no document produced here may say so.
+Whether the ADA applies, and on what terms, depends on the organisation's structure, funding,
+users and jurisdiction — a question for qualified legal advice. Keep the distinction in any
+copy that reaches a user; `docs/legal/policies/13-accessibility-statement.md` is written to
+respect it and is the place to look for the wording.
+
+Corrections worth keeping, because they are easy to get backwards:
+
+- **2.5.5 Target Size (Enhanced) is Level AAA.** The AA criterion is **2.5.8 Target Size
+  (Minimum)** at **24×24 CSS px**, new in 2.2. This repo's 44px house rule is therefore
+  *stricter* than conformance requires. Both are enforced, and measured separately, so a house
+  rule is never reported as a conformance failure.
+- **2.4.13 Focus Appearance is Level AAA.** Focus problems at AA are **2.4.7 Focus Visible**,
+  **2.4.11 Focus Not Obscured (Minimum)** (new in 2.2) and **1.4.11 Non-text Contrast**.
+- **4.1.1 Parsing is obsolete in WCAG 2.2.** Do not treat it as a requirement.
+- **2.5.7 Dragging Movements** is not applicable while there are no drag interactions. If one is
+  added, it becomes live.
+
+### Two layers, and the line between them
+
+**Layer 1 is unconditional.** Keyboard operation, visible focus, semantic structure, accessible
+names, correct heading order, sufficient contrast, reflow, and respecting the operating system's
+`prefers-reduced-motion` are properties of the application. They are never behind a setting.
+
+**Layer 2 is personalisation.** `Settings → Accessibility` offers text size, increased contrast,
+reduced motion, reduced transparency, larger controls and always-underlined links. A person who
+already has what they need can ignore every one of them.
+
+There must never be a setting called "enable keyboard navigation", "screen reader mode" or
+anything of that shape. Such a setting means the application ships inaccessible by default with
+a hidden repair — findable only by using the interface that does not work yet.
+
+### Which guard checks what, and why they are split
+
+This is the part that is easy to get wrong.
+
+- **Static guards under `src/`** parse source text: `focusIndicators`, `textOpacity`,
+  `touchTargets`, `headingLevels`, `documentContrast`, `inputContrast`, `tokens`,
+  `noHardcodedColors`, `accessibilityPreferences`, `settingsSections`. They run in milliseconds
+  and need no browser.
+- **The `a11y/` harness** measures layout in a real Chromium.
+
+The split is not a preference. `getBoundingClientRect()` returns **zero** in jsdom, so a
+rendered assertion in a Vitest test is vacuous in exactly the way that looks convincing —
+`src/touchTargets.test.js` says so in its own header. **Never add a geometry, contrast, focus or
+reflow assertion to a jsdom test.** It belongs in `a11y/`.
+
+Both halves are needed, and they check different claims: a CSS parse proves a rule is
+*declared*, and a browser proves it *paints*. The forced-colors focus defect was a case where
+every declaration was individually correct and the composed result was no focus ring at all.
+
+### Running it
+
+```bash
+npm run a11y                       # the whole sweep
+npm run a11y:local                 # the @local Welly tests, with a real model
+npm run a11y -- a11y/sweep.axe.spec.js     # one sweep
+A11Y_UPDATE_BASELINE=1 npm run a11y -- a11y/sweep.axe.spec.js   # re-record
+```
+
+`WEV_DB_PATH` must be set to an absolute path under `scratch/`. It is not a convenience: the
+harness **refuses to start without it**, because its default would be `server/wevolunteer.db` —
+a real developer database — and `pilot.db` holds real minors' personal data. See
+`a11y/harness/guard.mjs`, which composes the shared refusals from `bin/lib/db-safety.mjs` and
+adds the ones an unattended run needs.
+
+**Harness code must never import `bin/resolveDb.mjs`.** Its own comment records that
+`process.loadEnvFile` overwrites variables the caller explicitly set, which would defeat the
+gate. Use `bin/lib/db-safety.mjs`.
+
+### The ratchet
+
+`a11y/A11Y_BASELINE.json` is one-way. Counts may fall freely; they rise only through an explicit
+reviewed edit to the committed file. A **new** rule firing is a regression and **more of an
+existing rule** is also a regression — without the second half, nine more unlabelled buttons on
+a page that already had one keeps the run green, which is worse than no baseline because it
+reads as proof. Every entry must name the audit finding that explains it, or `compare()` throws.
+
+### Measuring correctly — read this before trusting a number
+
+Running the harness found more defects in the harness than in the application. All six are
+documented in `docs/audits/2026-08-22-accessibility-audit.md` §5. The two most transferable:
+
+- **Settle styles before measuring anything visual.** Entrance animations here run 120–300ms,
+  and a fading element's *composited* colour is lighter than its token. Measured mid-fade, axe
+  reported 49 contrast violations; with animation disabled the same pages reported 18. Thirty-one
+  were artefacts, including the primary button — white on its token is 6.54:1, white on the
+  mid-fade composite is 4.29:1. Acting on those would have meant darkening a conformant palette.
+- **But do not settle a sweep that asks about motion.** Settling sets
+  `animation-duration: 0s`, which made the reduced-motion sweep pass on every route while
+  looking at nothing. That sweep opts out, and carries a control test that injects an infinite
+  animation and fails if the detector cannot find it — because "nothing animates forever" also
+  passes when nothing animates at all.
+
+Filter to elements that are actually **exposed** before reporting a structural finding.
+`display: none` removes an element from the accessibility tree, and counting DOM nodes instead
+produced 23 false "duplicate landmark" findings against navigation that no screen reader has
+ever seen twice.
+
+### Writing new UI
+
+- **Native element first.** A `<fieldset>` with radios gives group naming and position
+  announcements for free; a hand-rolled `role="radiogroup"` is more code that behaves worse.
+- **Every control needs an accessible name**, and the visible label must be part of it
+  (2.5.3). An icon-only control needs `aria-label`; its icon needs `aria-hidden="true"`.
+- **Never remove a focus indicator without a replacement that also survives `forced-colors`.**
+  `--focus` is a `box-shadow`, and forced-colors strips those, so any selector declaring
+  `outline: none` must be named in the `@media (forced-colors: active)` block.
+  `src/focusIndicators.test.js` enforces this and will tell you which selector you missed.
+- **De-emphasise text with a colour, never with `opacity`.** Every real contrast defect found in
+  this audit had that one cause. Opacity on a *container* also dims every descendant and cannot
+  be overridden by one — three attempts to fix a nested badge by changing its own colours failed
+  because the cause was two levels up. A colour inherits and can be overridden; opacity cannot.
+- **No clickable non-interactive elements.** A `<span onClick>` is unreachable by keyboard, and
+  promoting it to a button is not always the fix: if a properly named control already does the
+  same thing, make the text a fact instead.
+- **Status is never colour alone.** Say it in words as well.
+
+### Environment traps
+
+- The API server reads **`API_PORT`** (default 5050) and never `PORT`. Vite reads **`PORT`**
+  (default 5173). The harness uses 5199/5198 so a developer's own dev server survives a run.
+- **`VITE_LOCAL_AI` defaults to `'true'`.** CI sets it to `false`, which renders Welly's
+  engine-unavailable state — correct for structural checks, useless for streaming, which is why
+  those tests are tagged `@local` and excluded there.
+- Vite binds `[::1]` unless given `--host 127.0.0.1`, which once stalled the whole run with both
+  servers visibly up and no test ever starting.
+- `/login` is a **method picker**, not a form. The email fields live behind `?mode=email`.

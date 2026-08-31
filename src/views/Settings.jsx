@@ -12,6 +12,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import EmailCard from '../components/account/EmailCard';
 import UsernameCard from '../components/account/UsernameCard';
 import AISettingsCard from '../components/account/AISettingsCard';
+import AccessibilitySettingsCard from '../components/account/AccessibilitySettingsCard';
 import { api } from '../utils/api';
 import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
@@ -194,10 +195,31 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
               <h3 style={{ marginBottom: 'var(--s2)' }}>Theme</h3>
               <p className="dim" style={{ marginBottom: 'var(--s4)' }}>Choose how WeVolunteer looks to you.</p>
               
-              <div className="theme-options" style={{ display: 'flex', gap: 'var(--s4)', flexWrap: 'wrap' }}>
+              {/**
+                * `aria-pressed`, because `.active` is a colour.
+                *
+                * These three buttons are a mutually exclusive choice and the
+                * selected one was marked only by a class. Sighted readers saw
+                * which theme was on; assistive technology met three identically
+                * named buttons with no indication which one was current, and a
+                * keyboard user could not tell what pressing one would change.
+                *
+                * `aria-pressed` rather than a radiogroup: these are buttons that
+                * take effect immediately, not a form choice to be submitted, and
+                * converting them would mean rewriting working markup to gain
+                * nothing a state does not already give.
+                */}
+              <div
+                className="theme-options"
+                role="group"
+                aria-label="Theme"
+                style={{ display: 'flex', gap: 'var(--s4)', flexWrap: 'wrap' }}
+              >
                 {['light', 'system', 'dark'].map((t) => (
                   <button 
                     key={t}
+                    type="button"
+                    aria-pressed={theme === t}
                     className={`theme-option ${theme === t ? 'active' : ''}`}
                     onClick={() => setTheme(t)}
                   >
@@ -209,6 +231,12 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                 ))}
               </div>
             </div>
+          </SettingsSection>
+        );
+      case 'accessibility':
+        return (
+          <SettingsSection title="Accessibility" isMobile={isMobile} onBack={handleBack}>
+            <AccessibilitySettingsCard />
           </SettingsSection>
         );
       case 'notifications':

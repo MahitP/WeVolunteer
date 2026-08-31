@@ -145,7 +145,22 @@ function coord(value) {
 const MAX_ROWS = 8;
 
 const ok = (kind, data) => ({ ok: true, kind, data });
-const failed = reason => ({ ok: false, reason });
+
+/**
+ * A failure, and optionally what the server said about it.
+ *
+ * `detail.serverMessage` is set only where the endpoint's own refusals are
+ * written to be read by the person who caused them — `POST /api/events`
+ * answers "The application deadline must be on or before the first shift
+ * starts.", not a code — and only for the statuses that carry one. It exists so
+ * a new server-side rule reaches the organizer as a sentence instead of as
+ * "I couldn't look that up just now", which is what every unmapped `reason`
+ * becomes.
+ *
+ * Never set for 5xx: "Internal server error creating event" is a sentence about
+ * the server, not about the event, and repeating it tells the reader nothing.
+ */
+const failed = (reason, detail = null) => (detail ? { ok: false, reason, detail } : { ok: false, reason });
 
 /**
  * Map a thrown ApiError onto something the assistant can say.
@@ -991,14 +1006,26 @@ export const TOOLS = {
     privacy: PRIVACY.USER_PRIVATE,
     capability: 'event.create',
     resourceScope: 'own',
+    /**
+     * ── Every field here is one the API refuses without ──
+     *
+     * `description` and `applicationDeadline` were optional in this schema and
+     * are not optional at the endpoint, and `slots[].description` was absent
+     * altogether while `server/validation.js` requires it to BE a string —
+     * `typeof slot.description !== 'string'` is a 400. So the tool's own
+     * contract disagreed with the API's, and the disagreement was invisible
+     * until somebody confirmed a draft and was told "I couldn't look that up
+     * just now". They are required here now, so an incomplete event is refused
+     * where it can be explained rather than 400ed where it cannot.
+     */
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', minLength: 1, maxLength: 200 },
         category: { type: 'string', enum: VALID_CATEGORIES },
         location: { type: 'string', minLength: 1, maxLength: 300 },
-        description: { type: 'string', maxLength: 5000 },
-        applicationDeadline: { type: 'string' },
+        description: { type: 'string', minLength: 1, maxLength: 5000 },
+        applicationDeadline: { type: 'string', minLength: 1 },
         slots: {
           type: 'array',
           minItems: 1,
@@ -1006,8 +1033,9 @@ export const TOOLS = {
             type: 'object',
             properties: {
               name: { type: 'string', minLength: 1, maxLength: 100 },
-              startDatetime: { type: 'string' },
-              endDatetime: { type: 'string' },
+              description: { type: 'string', maxLength: 1000 },
+              startDatetime: { type: 'string', minLength: 1 },
+              endDatetime: { type: 'string', minLength: 1 },
               maxSpots: { type: 'integer', minimum: 1, maximum: 100 },
             },
             required: ['name', 'startDatetime', 'endDatetime', 'maxSpots'],
@@ -1015,46 +1043,104 @@ export const TOOLS = {
           },
         },
       },
-      required: ['title', 'category', 'location', 'slots'],
+      required: ['title', 'description', 'category', 'location', 'applicationDeadline', 'slots'],
       additionalProperties: false,
     },
+    /**
+     * ── Nothing here invents a value ──
+     *
+     * This used to fill in a title, a location, a description, a deadline a
+     * week out, a shift eight days out and ten spots — every one of them a fact
+     * about somebody's event that nobody had stated. An event created from
+     * those defaults is not the event the organizer asked for, and it is
+     * published to students under their name.
+     *
+     * So the defaults are gone and the field is required instead. Collecting
+     * the values is `eventDraft.js`'s job, and it asks.
+     */
     async run(eventData = {}) {
-      const cleanTitle = typeof eventData.title === 'string' ? eventData.title.trim().slice(0, 200) : '';
-      const cleanCategory = normalizeEventCategory(eventData.category);
-      const cleanLocation = typeof eventData.location === 'string' ? eventData.location.trim().slice(0, 300) : '';
-      const slots = Array.isArray(eventData.slots) && eventData.slots.length ? eventData.slots : null;
+      const text = (value, limit) => (typeof value === 'string' ? value.trim().slice(0, limit) : '');
 
-      if (!cleanTitle || !cleanCategory || !cleanLocation || !slots) {
-        return failed('missing_event_fields');
+      const cleanTitle = text(eventData.title, 200);
+      const cleanLocation = text(eventData.location, 300);
+      const cleanDescription = text(eventData.description, 5000);
+      const cleanDeadline = text(eventData.applicationDeadline, 100);
+      const cleanCategory = normalizeEventCategory(eventData.category);
+      const slots = Array.isArray(eventData.slots) ? eventData.slots : [];
+
+      const missing = [];
+      if (!cleanTitle) missing.push('title');
+      if (!cleanLocation) missing.push('location');
+      if (!cleanDescription) missing.push('description');
+      if (!cleanDeadline) missing.push('applicationDeadline');
+      if (!slots.length) missing.push('slots');
+      for (const s of slots) {
+        if (!s || typeof s !== 'object') { missing.push('slots'); break; }
+        if (!s.startDatetime || !s.endDatetime) { missing.push('shift times'); break; }
+        if (!Number.isInteger(Number(s.maxSpots)) || Number(s.maxSpots) < 1) { missing.push('shift capacity'); break; }
       }
+      if (missing.length) return failed('missing_event_fields', { missing });
 
       const payload = {
         title: cleanTitle,
         category: cleanCategory,
         location: cleanLocation,
-        description: typeof eventData.description === 'string' ? eventData.description.trim().slice(0, 5000) : `Volunteer event for ${cleanTitle}.`,
-        applicationDeadline: eventData.applicationDeadline || new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+        description: cleanDescription,
+        applicationDeadline: cleanDeadline,
         slots: slots.map(s => ({
-          name: typeof s.name === 'string' ? s.name.trim().slice(0, 100) : 'General Shift',
-          startDatetime: s.startDatetime || new Date(Date.now() + 8 * 86400000).toISOString(),
-          endDatetime: s.endDatetime || new Date(Date.now() + 8 * 86400000 + 3 * 3600000).toISOString(),
-          maxSpots: Math.max(1, Math.min(100, Number(s.maxSpots) || 10)),
+          name: text(s.name, 100) || cleanTitle,
+          /* A string, always. The server type-checks this field and a missing
+             one is a 400 — which is exactly how confirming a draft used to
+             fail. */
+          description: text(s.description, 1000),
+          startDatetime: s.startDatetime,
+          endDatetime: s.endDatetime,
+          /* Sent as stated. Clamping to the server's range here would create an
+             event for a number the organizer never chose — `server/validation.js`
+             refuses one outside it, and that refusal is a sentence they can read
+             (see `serverDetail`). */
+          maxSpots: Number(s.maxSpots),
         })),
       };
 
       try {
         const res = await api.createEvent(payload);
+        /* Only a response carrying an id is a created event. Anything else is
+           reported as a failure rather than announced as a success. */
+        if (!res?.id) return failed('unavailable');
         return ok('event_created', {
           id: res.id,
           title: res.title || payload.title,
           status: res.status || 'open',
+          location: payload.location,
+          /* Formatted here, where `localDay` lives, so the sentence upstairs
+             repeats a date rather than deriving one. */
+          startsOn: localDay(payload.slots.map(s => s.startDatetime).sort()[0]),
+          shifts: payload.slots.length,
         });
       } catch (err) {
-        return failed(reasonFor(err));
+        return failed(reasonFor(err), serverDetail(err));
       }
     },
   },
 };
+
+/**
+ * The server's own explanation, when it wrote one for the reader.
+ *
+ * 400 and 409 on the event routes are validation refusals phrased as sentences
+ * ("The application deadline must be on or before the first shift starts."),
+ * and 403 says which permission is missing ("Organizer account pending admin
+ * approval."). Those are worth repeating verbatim. A 5xx is not: its message
+ * describes the server's trouble, not the organizer's event.
+ */
+function serverDetail(err) {
+  const status = Number(err?.status) || 0;
+  if (status !== 400 && status !== 403 && status !== 409) return null;
+  const message = typeof err?.message === 'string' ? err.message.trim() : '';
+  if (!message) return null;
+  return { status, serverMessage: message, field: err?.data?.field || null, code: err?.data?.code || null };
+}
 
 /** Tool names, for tests and for capability verification. */
 export const TOOL_NAMES = Object.keys(TOOLS);

@@ -20,7 +20,7 @@ import { formatLegalDate } from './legalDates';
  *
  * ── Grouped by what the reader is, not by document number ──
  *
- * The files are numbered 01–10 for editorial convenience and that ordering means
+ * The files are numbered 01–13 for editorial convenience and that ordering means
  * nothing to a student. Grouping is by who needs the document: what everyone
  * agrees to, what keeps you safe, what an organizer signs, and the reference
  * policies. A flat alphabetical list buries the Youth Safety Guidelines between
@@ -31,12 +31,20 @@ import { formatLegalDate } from './legalDates';
  * Presentation groups, in reading order.
  *
  * Keyed off registry data (`scope`, `slug`) rather than a hardcoded list of
- * slugs per group, except for the two safety documents that are `scope:
- * 'notice'` but belong up front. Those are named explicitly, because "which
- * documents matter most to a student" is an editorial judgement the registry has
- * no field for and inventing one would be a field with two possible values.
+ * slugs per group, except for the safety document that is `scope: 'notice'` but
+ * belongs up front. It is named explicitly, because "which document matters most
+ * to a student" is an editorial judgement the registry has no field for and
+ * inventing one would be a field with two possible values.
+ *
+ * This list also used to name `community-guidelines`, and could never deliver
+ * it: the Guidelines are `scope: 'signup'`, `agreements` runs first, and `take`
+ * consumes on first match. So the list stated an intent the ordering overrode,
+ * and the comment above it claimed two documents where one was reachable. The
+ * ordering was right and the list was wrong — the Guidelines are incorporated
+ * into the Terms and accepted by the same checkbox, so "what everyone agrees to"
+ * is where a reader should meet them.
  */
-const FEATURED_NOTICES = ['youth-safety-guidelines', 'community-guidelines'];
+const FEATURED_NOTICES = ['youth-safety-guidelines'];
 
 function groupDocuments(documents) {
   const bySlug = new Map(documents.map(d => [d.slug, d]));
@@ -70,9 +78,25 @@ function groupDocuments(documents) {
     {
       key: 'organizers',
       title: 'For organizers',
-      blurb: 'What an organizer promises before they can see who applied to their event.',
+      blurb: 'What someone running events promises before they can see who applied.',
       Icon: Handshake,
-      documents: take(d => d.scope === 'organizer-onboarding'),
+      /**
+       * Any onboarding scope, not the adult one by name.
+       *
+       * This tested `scope === 'organizer-onboarding'` and the Student
+       * Organizer Agreement is `student-organizer-onboarding`, so it matched
+       * nothing and fell through to `reference` — a contract a student must
+       * affirmatively accept, presented under "the detail behind the agreements
+       * above". A misfiled document renders perfectly, which is why it survived.
+       *
+       * The `-onboarding` suffix is a deliberate convention rather than an
+       * accident of naming: `LEGAL_DOCUMENTS` spells it that way because
+       * `'organizer'` alone is a ROLE name and comparing against a quoted role
+       * literal fails the build. Matching the suffix therefore picks up a third
+       * role's agreement when one is added, instead of silently filing it as
+       * reference material the way this group did with the second.
+       */
+      documents: take(d => typeof d.scope === 'string' && d.scope.endsWith('-onboarding')),
     },
     {
       key: 'reference',

@@ -112,7 +112,13 @@
      white, just less opaque, mirroring how --ink-2/--ink-3 step down from
      --ink on the paper background. */
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  --ink-inv-3: rgba(255, 255, 255, 0.7);
+  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
+     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
+     dashboard card that tells somebody when their next shift is. 0.8 gives
+     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
+     alpha over a coloured surface is exactly where a muted token stops being
+     readable without anybody noticing. */
+  --ink-inv-3: rgba(255, 255, 255, 0.8);
 
   /* — Borders ——————————————————————————————————— */
   --border: var(--neutral-200);
@@ -375,7 +381,13 @@
   --ink-3: var(--text-muted);
   --ink-inv: #ffffff;
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  --ink-inv-3: rgba(255, 255, 255, 0.7);
+  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
+     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
+     dashboard card that tells somebody when their next shift is. 0.8 gives
+     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
+     alpha over a coloured surface is exactly where a muted token stops being
+     readable without anybody noticing. */
+  --ink-inv-3: rgba(255, 255, 255, 0.8);
 
   --border: rgba(199, 208, 203, 0.13);
   --border-hover: rgba(199, 208, 203, 0.24);
@@ -1913,7 +1925,12 @@ time { font-variant-numeric: tabular-nums; }
   white-space: nowrap;
 }
 .hourspill.zero { background: var(--surface-3); color: var(--ink-2); }
-.hourspill span { font-weight: 500; opacity: 0.8; }
+/* No `opacity` here.
+   `.hourspill.zero` already uses `--ink-2` on `--surface-3`, which is 5.52:1.
+   Dimming it a further 0.8 composited to #6d7a74 and dropped it to 3.65:1 — a
+   contrast failure created by de-emphasising text a muted token had already
+   de-emphasised. The weight difference is what marks it as secondary. */
+.hourspill span { font-weight: 500; }
 
 /* ==========================================================================
    Stats
@@ -2016,7 +2033,22 @@ time { font-variant-numeric: tabular-nums; }
 .nextshift-what { font-size: 0.875rem; opacity: 0.9; margin-top: 0.25rem; }
 .nextshift-detail {
   font-size: 0.8125rem;
-  opacity: 0.78;
+  /**
+   * `color`, never `opacity`.
+   *
+   * This was `opacity: 0.78`, and opacity on a CONTAINER dims everything nested
+   * inside it — including the weather badge, whose own text is opaque white
+   * chosen precisely so it would be readable on the translucent surface behind
+   * it. Measured, that badge came out at 3.66:1 while every token involved in it
+   * looked correct in isolation, and three attempts to fix it by changing the
+   * badge's own colours moved the number without reaching 4.5:1, because the
+   * cause was two levels up.
+   *
+   * `--ink-inv-3` de-emphasises this row's own text — 4.81:1 on the panel — and
+   * INHERITS, so a descendant that sets its own colour keeps it. That is the
+   * whole difference: colour is overridable by children, opacity is not.
+   */
+  color: var(--ink-inv-3);
   margin-top: var(--s2);
   display: flex;
   gap: var(--s4);
@@ -2053,7 +2085,22 @@ time { font-variant-numeric: tabular-nums; }
   margin-top: 0;
   background: var(--brand-translucent);
   border-color: var(--brand-translucent-border);
-  color: var(--ink-inv-2);
+  /**
+   * Opaque white, not a muted alpha — the one place in this file where stacked
+   * transparency has to stop.
+   *
+   * `--brand-translucent` is white-with-alpha over the panel's green, and
+   * `--ink-inv-2` is white-with-alpha again on top of that. Two alphas
+   * multiplying over a coloured surface make the final colour something nobody
+   * can predict from either token: measured, this text came out at #b7d3c8 on
+   * #297b59 — 3.23:1 — while both tokens individually look like safe choices,
+   * and raising either one moved the result unpredictably.
+   *
+   * `--ink-inv` removes the second alpha entirely and lands at 5.16:1. The badge
+   * is small and already set apart by its background; it does not need its text
+   * dimmed as well.
+   */
+  color: var(--ink-inv);
 }
 .nextshift .weather-temp,
 .nextshift .weather-icon {
@@ -2894,7 +2941,34 @@ time { font-variant-numeric: tabular-nums; }
 .toast.success svg { color: var(--toast-success); }
 .toast.error svg { color: var(--toast-error); }
 .toast.info svg { color: var(--toast-info); }
-.toast button { color: var(--toast-btn); display: flex; }
+/**
+ * The toast's dismiss control, at a size somebody can actually hit.
+ *
+ * Measured at 14x15px — the icon's own box, because the button had no padding
+ * and no minimum. That is under WCAG 2.2 2.5.8's 24x24 AA floor, and it is the
+ * control every single user of this application reaches: the way out of a
+ * message that is covering something.
+ *
+ * 44px, not 24, because this repo's house rule is 44 and this is exactly the
+ * control it was written for — src/touchTargets.test.js records the same defect
+ * on `.modal-close` and the same reasoning: a dismiss control that needs a
+ * second attempt is the worst one to get wrong, since the first miss usually
+ * lands on whatever the toast is covering.
+ *
+ * The icon stays 14px. The TARGET grew, not the glyph, which is why the centring
+ * matters: without it the icon sits in a corner of its own hit area and the
+ * visible affordance stops agreeing with the clickable one.
+ */
+.toast button {
+  color: var(--toast-btn);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: calc(-1 * var(--s2)) calc(-1 * var(--s2)) calc(-1 * var(--s2)) 0;
+  flex-shrink: 0;
+}
 .toast button:hover { color: var(--ink-inv); }
 
 /* ==========================================================================
@@ -4559,10 +4633,28 @@ time { font-variant-numeric: tabular-nums; }
   outline: none;
 }
 
+/**
+ * The ring moves to the wrapper; it does not disappear.
+ *
+ * This rule zeroed `outline` AND `box-shadow` together, on both `:focus` and
+ * `:focus-visible`, which made the message composer the one control in the
+ * application with no focus indicator at all — for everybody, in every mode, not
+ * just in a forced-colours one. A keyboard user tabbing into a conversation had
+ * no way to tell they had arrived in the text box.
+ *
+ * The textarea keeps `outline: none` because the visible border belongs to
+ * `form.message-composer` around it, and a ring tight around the text inside a
+ * bordered box reads as a doubled edge. `:focus-within` on the wrapper is the
+ * same indicator in the right place.
+ */
 .composer-input:focus,
 .composer-input:focus-visible {
   outline: none;
-  box-shadow: none;
+}
+
+.message-composer:focus-within {
+  box-shadow: var(--focus);
+  border-radius: var(--r-sm);
 }
 
 .composer-input::placeholder { color: var(--ink-3); }
@@ -6643,10 +6735,25 @@ input:disabled + .premium-slider {
      and gave the whole app a horizontal scrollbar — including `.toasts`, which
      is absolutely positioned and stretched to the widened document, so the
      symptom showed up somewhere else entirely.
-     `hidden` first for older Safari; `clip` where supported, because it does
-     the same job without creating a scroll container. */
+     `hidden` first for older Safari; `clip visible` where supported, because it
+     does the same job without creating a scroll container.
+
+     ── Why only the HORIZONTAL axis is clipped ──
+
+     Clipping both axes also clipped the CONTENT. Under the text-spacing
+     overrides WCAG 1.4.12 requires a page to tolerate — 1.5 line-height,
+     0.12em letter-spacing, 0.16em word-spacing — this section's content grew
+     from 819px to 901px inside a box that clipped at 819, measured on twelve
+     routes. What sits at the bottom of an error page is the actions, so the
+     thing being cut off was the way out, on the one screen whose whole purpose
+     is to offer one.
+
+     The wash only ever caused a problem on one axis: it made the document 22px
+     wider than the viewport and gave the whole app a horizontal scrollbar.
+     `clip visible` contains exactly that and lets the page grow downwards, which
+     it can do freely because the document already scrolls vertically. */
   overflow: hidden;
-  overflow: clip;
+  overflow: clip visible;
 }
 
 /* The wash. Two soft pools rather than one centred glow, so the light has a
@@ -12318,11 +12425,18 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   text-align: center;
   font-size: 0.75rem;
   line-height: 1.45;
-  opacity: 0.7;
+  /* No `opacity`.
+     `--ink-3` on `--paper` is 4.56:1 and passes. At 0.7 opacity it composited to
+     #8e9993 and measured 2.65:1 — the worst text contrast anywhere in the
+     application, on the line that tells somebody Welly makes mistakes and not to
+     type personal information into it. A disclaimer nobody can read is not a
+     disclaimer. The smaller size and the muted token are the de-emphasis; the
+     opacity was the defect. */
+  color: var(--ink-3);
 }
 
 /* The only link on the quiet row, so it carries the underline rather than a
-   colour — the row is already at 0.7 opacity and a brand-coloured link in it
+   colour — the row is already muted and a brand-coloured link in it
    reads as an error state. */
 .welly-policy-link {
   color: inherit;
@@ -12402,3 +12516,373 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   }
 }
 
+
+
+/* ==========================================================================
+   Forced colors — Windows High Contrast, and any user colour scheme
+   ========================================================================== */
+
+/**
+ * Focus rings, restored.
+ *
+ * `--focus` is a box-shadow by construction — two rings, `0 0 0 2px
+ * var(--surface), 0 0 0 4px var(--brand)` — and the note at `.persona-option`
+ * explains why `outline: 2px solid var(--focus)` would be invalid. Forced-colors
+ * mode strips box-shadow. Combined with the global `:focus { outline: none }`
+ * near the top of this file, that left this application with NO focus indicator
+ * at all, on any control, on any page, in the mode used by the people who most
+ * depend on one. It was invisible in review because nobody reviews CSS in High
+ * Contrast, and no static guard could see it because every declaration involved
+ * is individually correct.
+ *
+ * The colour is a system keyword rather than a token on purpose. forced-colors
+ * repaints authored colours, so `var(--brand)` could be mapped to something
+ * indistinguishable from the background; `Highlight` is the colour the user's own
+ * scheme picked for exactly this job.
+ */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+    /* Not merely redundant: a shadow that survived would sit under the outline
+       and read as a doubled ring. */
+    box-shadow: none;
+  }
+
+  /* Controls that opt out of the global rule and paint their own shadow ring.
+     Listed because each declares `outline: none` locally, which the rule above
+     cannot reach through. */
+  .dp-toggle:focus-visible,
+  .dp-nav-btn:focus-visible,
+  .dp-quick:focus-visible,
+  .dp-cell:focus-visible,
+  .form-input:focus,
+  .message-composer:focus-within,
+  .skip-link:focus {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* A border the user's scheme can see, on the surfaces that rely on a
+     background difference alone to read as a container. In forced-colors those
+     backgrounds all collapse to Canvas, so without this a card, a dialog and the
+     page behind them become one undifferentiated field. */
+  .card,
+  .modal,
+  .popover,
+  .form-input,
+  .btn {
+    border: 1px solid CanvasText;
+  }
+
+  /* Status colour carries meaning elsewhere in this file; here it cannot, so the
+     border is what distinguishes them. The text always says the status too — see
+     the colour-independence rule in the engineering guide — so nothing is lost. */
+  .status { border: 1px solid CanvasText; }
+}
+
+/* ==========================================================================
+   Links in running text
+   ========================================================================== */
+
+/**
+ * A link inside prose is underlined, always.
+ *
+ * WCAG 1.4.1 Use of Color (Level A): where a link is distinguished from the text
+ * around it by colour alone, the two must differ by at least 3:1. Measured here,
+ * they do not — and not marginally:
+ *
+ *   brand `#0f6b45` against muted text `#637269`  = 1.29:1
+ *   brand `#0f6b45` against body text  `#122019`  = 2.57:1
+ *
+ * So no prose link in this application was distinguishable without colour. axe
+ * reported one instance, in the Privacy panel, because its `link-in-text-block`
+ * rule only fires where it recognises a surrounding block of text — the
+ * criterion applies more widely than the rule detects, which is why this is
+ * fixed by container rather than by patching the one element that was flagged.
+ *
+ * Underlining is the technique WCAG itself gives for this, and it is applied to
+ * running-text containers only. Navigation and anything shaped like a button are
+ * excluded below: they are distinguishable by position and shape, and a rail of
+ * underlined destinations reads as a list of broken text rather than as
+ * navigation.
+ *
+ * The "Always show link underlines" preference in Settings → Accessibility is a
+ * superset of this — it underlines links everywhere, including inside cards and
+ * lists, for readers who want every link explicit. This rule is the floor that
+ * applies whether or not anybody visits that page.
+ */
+p a,
+.lead a,
+.dim a,
+.small a,
+li a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Controls and navigation that happen to sit inside prose containers are not
+   prose links. Listed after so they win. */
+p a.btn,
+.lead a.btn,
+.dim a.btn,
+.small a.btn,
+li a.btn,
+.nav a,
+.mobilenav a,
+.rail-item,
+a.btn {
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   Accessibility preferences — Settings → Accessibility
+   ========================================================================== */
+
+/**
+ * Six optional personalisations, keyed off `data-` attributes on `<html>`.
+ *
+ * Written by src/hooks/useAccessibilityPreferences.js and, before the first
+ * paint, by public/a11y-prefs.js. A default writes NO attribute, so every rule
+ * here is additive and an unset preference has zero specificity cost.
+ *
+ * None of these is required for the application to be accessible. Keyboard
+ * operation, focus indicators, semantic structure, reflow and the system's
+ * reduced-motion preference are unconditional. These are for the person who
+ * wants MORE than the default gives them.
+ */
+
+/**
+ * Text size scales the ROOT, not each rule.
+ *
+ * Every size in this stylesheet is in `rem`, so moving the root moves the whole
+ * type scale together and nothing has to be listed. Anything in `px` would not
+ * scale — which is the argument for keeping it that way.
+ *
+ * The steps are deliberately modest (112.5% and 125%). Browser zoom already
+ * exists and goes much further; what this offers is bigger TEXT without bigger
+ * everything, which zoom cannot do, and a step large enough to break the layout
+ * would be worse than no setting.
+ */
+:root[data-text-size='large'] { font-size: 112.5%; }
+:root[data-text-size='x-large'] { font-size: 125%; }
+
+/**
+ * High contrast, distinct from forced-colors.
+ *
+ * forced-colors replaces the palette with the user's own; this keeps the
+ * WeVolunteer palette and pushes its ends apart — for somebody who wants more
+ * separation without giving up the interface's colours entirely. Only the
+ * text-and-border tokens move; brand and status hues keep their meaning.
+ */
+:root[data-contrast='high'] {
+  --ink-2: var(--ink);
+  --ink-3: var(--ink-2);
+  --rule: var(--ink-3);
+  --rule-strong: var(--ink-2);
+}
+
+:root[data-contrast='high'] .dim,
+:root[data-contrast='high'] .small.dim {
+  color: var(--ink);
+}
+
+/**
+ * The same treatment, applied automatically when the OPERATING SYSTEM asks.
+ *
+ * macOS "Increase contrast", Windows "Increase contrast" and the equivalent on
+ * Android and iOS all set `prefers-contrast: more`. Without this block, a reader
+ * who had already told their device they need more contrast got nothing from
+ * WeVolunteer until they found Settings → Accessibility and asked a second time
+ * — which is the thing this whole design is supposed to avoid: an accessibility
+ * need already expressed, ignored until repeated in our interface.
+ *
+ * `prefers-contrast` is NOT `forced-colors`. Forced-colours replaces the palette
+ * with the user's own and is handled separately below; this one keeps our palette
+ * and asks for more separation within it, which is exactly what the
+ * `data-contrast='high'` tokens already do. So it reuses them rather than
+ * inventing a parallel set.
+ *
+ * The app setting stays useful on top of this: it covers the reader whose device
+ * preference is off — a shared machine, a browser that does not expose it — and,
+ * because both resolve to the same tokens, having both on is identical to having
+ * either on.
+ */
+/**
+ * Guarded against `forced-colors`, which can match this query too.
+ *
+ * When a user's forced-colours theme is itself high-contrast, `prefers-contrast:
+ * more` ALSO matches — the two are not mutually exclusive. Both blocks would
+ * then apply, and this one redefines the ink tokens that the forced-colours
+ * block deliberately leaves to the user's own palette. `forced-colors: none` is
+ * the explicit "not in a forced-colours mode" value, so when the user's own
+ * colours are in charge, ours stay out of the way.
+ */
+@media (prefers-contrast: more) and (forced-colors: none) {
+  :root {
+    --ink-2: var(--ink);
+    --ink-3: var(--ink-2);
+    --rule: var(--ink-3);
+    --rule-strong: var(--ink-2);
+  }
+
+  .dim,
+  .small.dim {
+    color: var(--ink);
+  }
+}
+
+/**
+ * Reduce motion, as an addition to the system preference and never a veto of it.
+ *
+ * The eight `prefers-reduced-motion` blocks above still apply on their own. This
+ * covers the reader whose device preference is off — a shared machine, a browser
+ * that does not expose it — and who wants less movement here. There is
+ * deliberately no "animate anyway" value: somebody who asked their operating
+ * system for less motion asked for a reason.
+ */
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/**
+ * Reduce transparency.
+ *
+ * `backdrop-filter` appears eight times in this file, and a blurred translucent
+ * bar over moving content is hard to read for anybody with reduced contrast
+ * sensitivity — and on the topbar it sits behind text. Replacing it with an
+ * opaque surface loses a visual flourish and nothing else.
+ */
+:root[data-transparency='reduce'] .topbar,
+:root[data-transparency='reduce'] .modal-overlay,
+:root[data-transparency='reduce'] .popover,
+:root[data-transparency='reduce'] .mobilenav {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--paper) !important;
+}
+
+:root[data-transparency='reduce'] .modal-overlay {
+  /* The overlay must still read as a layer over the page, or a dialog stops
+     looking modal. Opaque enough to remove the blur, dark enough to separate. */
+  background: rgba(0, 0, 0, 0.75) !important;
+}
+
+/**
+ * Larger controls.
+ *
+ * The 44px floor in this file is inside `@media (hover: none) and (pointer:
+ * coarse)` — it applies to touch and not to a mouse. This extends it to any
+ * pointer, for a reader with a tremor or limited fine motor control on a laptop,
+ * where the coarse-pointer rule never fires.
+ */
+:root[data-controls='large'] .btn,
+:root[data-controls='large'] .btn-icon,
+:root[data-controls='large'] .modal-close,
+:root[data-controls='large'] .icon-btn,
+:root[data-controls='large'] button.rail-item,
+:root[data-controls='large'] .form-input,
+:root[data-controls='large'] select,
+:root[data-controls='large'] .dp-toggle,
+:root[data-controls='large'] .dp-nav-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+:root[data-controls='large'] .btn-sm {
+  min-height: 44px;
+  padding-inline: var(--s3);
+}
+
+/**
+ * Always show link underlines.
+ *
+ * A link distinguished from body text by colour alone is a 1.4.1 problem when
+ * the contrast between the two is under 3:1, and it is a comprehension problem
+ * for far more people than that. On by choice rather than by default because
+ * this interface uses colour plus weight plus position, and underlining every
+ * link in a dense list is noisy for readers who do not need it.
+ */
+:root[data-link-underlines='always'] a,
+:root[data-link-underlines='always'] .auth-link,
+:root[data-link-underlines='always'] .link {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+/* Navigation and buttons styled as links are controls, not prose links: a rail
+   of underlined navigation items reads as a list of broken text. */
+:root[data-link-underlines='always'] .nav a,
+:root[data-link-underlines='always'] .mobilenav a,
+:root[data-link-underlines='always'] .btn,
+:root[data-link-underlines='always'] .rail-item {
+  text-decoration: none;
+}
+
+/**
+ * A fieldset that groups without drawing a box.
+ *
+ * `<fieldset>` is the right element — it names the group for assistive
+ * technology through its `<legend>`, which is what makes "Text size, Large, 2 of
+ * 3" possible with no ARIA — and its default border and padding do not belong
+ * inside a card that already has both. Resetting the appearance keeps the
+ * semantics, which is the only reason to use it.
+ */
+.a11y-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.a11y-fieldset > legend {
+  padding: 0;
+  margin-bottom: var(--s1);
+}
+
+/**
+ * A field whose label row carries a second control, without that control
+ * landing between the two inputs in the tab order.
+ *
+ * The sign-in form's "Forgot?" button used to live inside the label row, which
+ * is where it belongs visually and exactly the wrong place in the DOM: Tab from
+ * the identifier focused it instead of the password field, so a keyboard user
+ * typing their password typed into nothing and Enter took them to the password
+ * reset screen having lost their input.
+ *
+ * The grid puts the label and the aside on row 1 and the input across row 2,
+ * while the DOM order stays label -> input -> aside. Nothing moves on screen and
+ * Tab goes identifier -> password -> Forgot?. Done with CSS rather than
+ * `tabindex` because a positive tabindex would have to be matched by every other
+ * control on the screen to stay coherent.
+ */
+.field-with-aside {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  column-gap: var(--s2);
+}
+
+.field-with-aside > label { grid-column: 1; grid-row: 1; }
+.field-with-aside > .field-aside { grid-column: 2; grid-row: 1; justify-self: end; }
+/* The input group and anything after it (the error message) span both columns. */
+.field-with-aside > .input-affix { grid-column: 1 / -1; grid-row: 2; }
+.field-with-aside > .field-error { grid-column: 1 / -1; grid-row: 3; }
+
+/**
+ * The landmark wrapper for a full-page error.
+ *
+ * `App.jsx` returns a refusal or a 404 before it builds the shell, so there is no
+ * `<main>` on those pages and the error content sat in no landmark at all —
+ * measured on twelve routes, with `#main-content` absent entirely. This adds the
+ * landmark and nothing else: `.err` keeps its own min-height, max-width and
+ * centring, so the composition is unchanged.
+ */
+.err-page {
+  display: block;
+}

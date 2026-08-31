@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 67 tables, 97 indexes, 20 triggers
+ * Contents: 67 tables, 98 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -1180,6 +1180,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_blocks_pair
 CREATE INDEX IF NOT EXISTS idx_usercaps_user ON user_capabilities(user_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_nocase ON users(email COLLATE nocase);
+
+CREATE INDEX IF NOT EXISTS idx_users_leaderboard
+      ON users(role, leaderboard_opt_in);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL;
 
