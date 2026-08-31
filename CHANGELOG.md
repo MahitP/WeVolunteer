@@ -207,12 +207,17 @@ is that the list of reasons it must is short, evidenced and written down in
 - **No new indexes.** `docs/operations/postgres-scale-measurements.md` shows zero
   sequential scans on the hot path at 50× pilot scale; an index here would slow
   every write and move nothing.
-- **No caching layer.** The Redis work on its own branch measured a 222 ms warm
+- **No caching layer over the database.** The Redis work measured a 222 ms warm
   round trip against queries answering in 0.3–2 ms. Caching those would be a
-  regression.
-- **The events browse aggregate CTE is unchanged.** It is linear in event count
-  and crosses 100 ms at about 10,000 events, which the pilot is nowhere near, and
-  restructuring it puts sort and pagination correctness at stake on two dialects.
+  regression, and it stayed rejected when that work merged — the Redis
+  integration caches third-party lookups and shares security counters, and
+  touches no SQL read path.
+- ~~**The events browse aggregate CTE is unchanged.**~~ **Superseded by the
+  second pass above**, which restructured it after all. The reasoning here — that
+  sort and pagination correctness on two dialects was the risk — was right about
+  the risk and wrong about the conclusion; what changed is that the risk was
+  answered with a differential harness (`bin/events-query-probe.mjs`) comparing
+  every row of the old and new queries at four scales, rather than accepted.
 
 ### Added
 

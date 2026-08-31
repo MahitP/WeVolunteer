@@ -147,17 +147,38 @@ Socket.IO servers over a real PostgreSQL and checks that a broadcast made on one
 reaches a client attached to the other — which is precisely the delivery a second
 instance cannot do without it.
 
-### The rate limiters' STORE is still per-process
+### The rate limiters' STORE is shared for the security ones, per-process for the volume ones
 
-Every limiter uses `express-rate-limit`'s default `MemoryStore`. With N instances
-each enforces its own copy and the effective limit is N×.
+This was "every limiter is per-process" until the Redis integration merged. It is
+now a split, and the split is the interesting part.
 
-This is a known, costed decision rather than an oversight, and it belongs to the
-Redis branch: its `docs/operations/upstash.md` §7.3 measures that sharing the
-high-volume limiters would exceed Upstash's 500,000-command free tier somewhere
-between 500 and 1,000 users, and that `apiLimiter` alone would be several times
-the entire allowance. The keying fix above is orthogonal — it makes the buckets
-correct, whoever stores them.
+**Shared, through `redis/limitStore.js`:** `mailLimiter`, `mailIpLimiter`,
+`certVerifyLimiter`, `reauthLimiter`, `appealLimiter` — and, not middleware but
+the same class of control, the `loginFailures` counter in `routes/authRoutes.js`.
+These survive a restart, which is the property that matters: before, a deploy in
+the middle of a password spray handed the attempt a fresh budget.
+
+**Still `express-rate-limit`'s default `MemoryStore`:** `apiLimiter`,
+`lookupLimiter`, `errorReportLimiter`, `appealReadLimiter`, `signupLimiter`, and
+the per-route limiters in geocode, weather, travel, legal, issues and exports.
+With N instances each enforces its own copy and the effective limit is N×.
+
+That is a costed decision, not an oversight. `operations/upstash.md` §7.3
+measures sharing the high-volume limiters at more than Upstash's 500,000-command
+free tier somewhere between 500 and 1,000 users, with `apiLimiter` alone several
+times the entire allowance.
+
+**And the keying fix makes that split more right, not less.** `apiLimiter` is now
+keyed on the verified session rather than the address, so the live bucket count
+tracks concurrent *users* rather than egress addresses — more buckets, each
+smaller, which makes a shared store more expensive rather than less. Store and
+key are orthogonal: the key change makes the buckets correct wherever they live,
+and it would have been the wrong fix to share the store without it, because that
+would have distributed the defect rather than removed it.
+
+The residual risk is bounded and worth naming plainly: these are volume brakes,
+not credential controls. Every control that actually limits credential guessing —
+`loginFailures`, `mailLimiter` — is in the shared set.
 
 ### Other process-local state, classified
 
@@ -166,14 +187,18 @@ Re-audited after the adapter work. Every piece of module-level mutable state in
 
 | State | Where | Verdict |
 |---|---|---|
-| `loginFailures` map | `routes/authRoutes.js` | **must be shared** — per-process, so N instances is N× looser. Moved to Redis on the Redis branch. |
-| `sendBuckets` | `routes/messageRoutes.js` | **must be shared** — a per-process message throttle, same class as the limiters. |
-| `express-rate-limit` stores | every limiter | **must be shared** — see below. |
+| `loginFailures` counter | `routes/authRoutes.js` | **shared — done.** `createSharedCounter` in `redis/limitStore.js`. Survives a restart, and is the control that actually bounds guessing at one account. |
+| `sendBuckets` | `routes/messageRoutes.js` | **must be shared — still open.** A per-process message throttle, same class as the volume limiters, and the one piece of this table that is neither done nor deliberately deferred. |
+| `express-rate-limit` stores | five security limiters | **shared — done.** See above for which, and why the rest are not. |
+| `express-rate-limit` stores | the volume limiters | **per-process, deliberately.** Costed against the free tier; see above. |
+| Nominatim pacing reservation | `redis/upstreamThrottle.js` | **shared — done.** The limit is one request per second *for this application in total*, so a per-process reservation was wrong with one instance too. |
 | Rerank budget (`rerankMonth`, `rerankSpent`) | `search/discoverSearch.js` | **safe today, would need attention if reranking is ever switched on.** See below. |
 | `lastBackupAlertAt` | `alerting.js` | **safe** — an alert-dedupe timestamp. N instances means up to N copies of a backup alert. Noisy, never wrong, and the alert is rare. |
 | Legal content cache | `legalContent.js` | **safe** — derived from files on disk and hash-verified at boot. Every instance computes the same answer. |
-| Weather / geocode / travel caches | their route files | **safe but wasteful** — third-party response caches; each instance re-warms its own. Handled on the Redis branch. |
+| Weather / geocode caches | their route files | **shared — done.** Two tiers: the in-process cache is still first, with Redis behind it, so a deploy no longer discards a warm cache. |
+| Travel-time cache | `routes/travelRoutes.js` | **safe, and deliberately NOT shared.** Its key derives from a minor's location, and that module promises the coordinate is never persisted. `redis.privacy.test.js` fails the build if this route ever imports `server/redis/`. |
 | Telemetry sink and buffers | `telemetry.js`, `telemetrySink.js` | **safe** — each instance ships its own records, which is what a per-instance access log should do. |
+| OpenTelemetry SDK, tail sampler, meters | `observability/` | **safe** — a per-process exporter is what the collector expects; traces are correlated by trace id, not by process. Instance identity rides on the resource attributes. |
 | Pinecone config cache, SMTP provider handle, outbox handle | `search/pineconeConfig.js`, `emailService.js` | **safe** — connection handles and parsed config, per process by nature. |
 | Boot flags (`postgresSchemaPending`, `demoSeedPending`, `shuttingDown`) | `db.js`, `shutdown.js` | **safe** — per-process lifecycle, meaningless to share. |
 | Async-context connection (`defaultConnection`) | `db/connectionContext.js` | **safe** — the process's own database handle. |
