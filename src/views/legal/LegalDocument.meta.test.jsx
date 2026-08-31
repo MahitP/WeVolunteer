@@ -106,4 +106,37 @@ describe('the version line', () => {
     expect(meta).toHaveTextContent('last revised September 1, 2026');
     expect(meta).not.toHaveTextContent('August 31');
   });
+
+  /**
+   * The version comes from the REGISTRY, not from the markdown.
+   *
+   * ── Why this case is load-bearing ──
+   *
+   * Twelve of the thirteen published documents repeat their version inside the
+   * body as `**Version 1.0 · Last updated …**`. The AI and On-Device Processing
+   * Policy does not, and `legalVersioning.test.js` carries it as the single
+   * documented exception to that convention.
+   *
+   * That exception is only safe because of this: the page states the version
+   * itself, above the body, from the record an acceptance actually points at. If
+   * this line ever started being derived from the markdown instead, the one
+   * document without the duplicate would silently stop telling readers which
+   * version they are being held to — and the server-side allowlist would go on
+   * calling that acceptable.
+   *
+   * The body here deliberately carries no version line at all, which is the
+   * shape of the real document.
+   */
+  it('shows the version even when the body does not mention one', async () => {
+    const meta = await renderDoc(DOC({
+      slug: 'ai-and-on-device-processing',
+      title: 'AI and On-Device Processing Policy',
+      version: '1.0',
+      effectiveAt: '2026-08-15',
+      markdown: '# AI and on-device processing\n\nWeVolunteer has an optional assistant.\n',
+    }));
+
+    expect(meta).toHaveTextContent('Version 1.0');
+    expect(meta).toHaveTextContent('in effect since August 15, 2026');
+  });
 });

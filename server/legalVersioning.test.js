@@ -48,12 +48,33 @@ const HEADER = /^\*\*Version\s+([0-9]+\.[0-9]+)/m;
 /**
  * The one document that prints no version line in its published half.
  *
- * `ai-and-on-device-processing` states "Scope at v1.0" in its specification
- * block, above the `## Draft` marker, and carries nothing below it. Adding a
- * line would change a hash-enforced published body, which is not a change to
- * make in passing during a hardening pass — it is recorded here instead so that
- * a SECOND document losing its line fails the build rather than joining a
- * silent exemption.
+ * ── Why this is safe, rather than merely tolerated ──
+ *
+ * The version a reader sees does not come from the markdown. `LegalDocument.jsx`
+ * renders `Version {doc.version} · in effect since …` from the REGISTRY, above
+ * the document body, for every document — and its own docstring says that is
+ * deliberate: "an acceptance record says 'this user agreed to terms-of-service
+ * v2.0'… that record is worth something only if the reader can tell which
+ * version they are looking at."
+ *
+ * So the in-markdown line is a second, hand-maintained copy of a fact the page
+ * already states authoritatively. `ai-and-on-device-processing` simply does not
+ * carry the copy: it states "Scope at v1.0" in its specification block, above
+ * the `## Draft` marker, and nothing below it. Nobody is deprived of the
+ * version, which is why this is an exception and not a defect, and why adding
+ * a thirteenth duplicate to a hash-enforced published body — changing a legal
+ * document for source-file tidiness — is the wrong trade.
+ *
+ * `LegalDocument.meta.test.jsx` holds the half that makes this true: a document
+ * whose markdown carries no version line still renders the registry's version.
+ * If that ever stops being true, the exception below stops being safe.
+ *
+ * ── What the allowlist is for ──
+ *
+ * It has exactly one member, and a second document losing its line fails the
+ * build rather than joining a silent exemption. The case below also fails if
+ * this document GAINS a line, so the allowlist cannot quietly outlive its
+ * reason.
  */
 const NO_PRINTED_VERSION = new Set(['ai-and-on-device-processing']);
 

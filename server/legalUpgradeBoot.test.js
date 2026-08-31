@@ -163,3 +163,195 @@ describe('booting the current registry against a database that already published
     await expect(boot(file)).rejects.toThrow(/already published with a different content hash/);
   });
 });
+
+/**
+ * A catalogue row for a version the registry no longer declares.
+ *
+ * ── Why this is not cosmetic ──
+ *
+ * The Privacy Policy was briefly at 1.1 and was returned to 1.0, because before
+ * launch every document stays at 1.0. A database that booted while it was 1.1
+ * has a `legal_documents` row for a `(slug, version)` the registry no longer
+ * knows about, and the first instinct is that it is inert: `syncLegalDocuments`
+ * never compares it, so it cannot stop a boot, and the API serves 1.0.
+ *
+ * It is not inert. `highestVersion()` in `legalStore.js` reads
+ * `legal_documents` BY SLUG with no version filter, and the Legal Center editor
+ * uses it as the floor a new revision must clear. Measured against a database
+ * carrying the row: publishing 1.0.1 is refused with "Version 1.0.1 is lower
+ * than 1.1, which is already published", and the first accepted version is
+ * 1.1.1. So the next real revision of the Privacy Policy would be numbered as a
+ * revision of a 1.1 no reader was ever shown — the exact misleading answer the
+ * collapse to 1.0 was performed to avoid, arrived at from the other direction.
+ *
+ * ── Why there is no new migration ──
+ *
+ * 061 already removes it. It clears every `(slug, version)` nobody has accepted
+ * and lets `syncLegalDocuments` republish what the registry declares — and an
+ * unregistered version is not republished, so it simply goes. 061 has never
+ * shipped (origin/main predates it), so no database anywhere has run it, and
+ * every real upgrade therefore runs it once against the final registry and
+ * lands clean.
+ *
+ * That makes the correct behaviour an accident of 061's breadth rather than
+ * something anybody asserted, which is what this case fixes. A future 062 that
+ * repairs only named slugs, or a narrowing of 061, would reintroduce the version
+ * floor silently and no other test would notice.
+ */
+describe('a catalogue row the registry no longer declares', () => {
+  it('is removed by the upgrade, not merely ignored', async () => {
+    const file = path.join(dir, 'orphan.db');
+
+    const first = await boot(file);
+    /* A database that published privacy-policy@1.1, as one booted between
+       386c9e9 and the revert would have. Columns are read off the row the
+       registry did publish so this cannot drift from the schema. */
+    const seed = new DatabaseSync(file);
+    const row = seed.prepare("SELECT * FROM legal_documents WHERE slug = 'privacy-policy'").get();
+    expect(row, 'fixture: the registry version is published').toBeTruthy();
+    seed.prepare(`
+      INSERT INTO legal_documents (slug, version, title, consent_type, content_hash, effective_at, published_at)
+      VALUES ('privacy-policy', '1.1', ?, ?, 'orphaned-hash', ?, ?)
+    `).run(row.title, row.consent_type, row.effective_at, new Date().toISOString());
+    /* Un-apply only the newest repair, so this is a database that has not seen
+       it — the same rewind the cases above use, and the same reason. */
+    seed.prepare('DELETE FROM schema_migrations WHERE version = 61').run();
+    seed.close();
+    expect(first).toBeTruthy();
+
+    await boot(file);
+
+    const after = new DatabaseSync(file);
+    const versions = after.prepare(
+      "SELECT version FROM legal_documents WHERE slug = 'privacy-policy' ORDER BY version"
+    ).all().map(r => r.version);
+    after.close();
+
+    const { LEGAL_DOCUMENTS } = await import('./legalDocuments.js');
+    const registered = LEGAL_DOCUMENTS.find(d => d.slug === 'privacy-policy').version;
+
+    expect(
+      versions,
+      'an unregistered catalogue row survived the upgrade. It is not harmless: '
+      + 'highestVersion() reads legal_documents by slug, so it raises the floor '
+      + 'the Legal Center editor makes the next revision clear.',
+    ).toEqual([registered]);
+  });
+
+  it('leaves the editor free to publish the next ordinary revision', async () => {
+    /**
+     * The consequence, asserted directly rather than inferred from the row
+     * being gone. This is the thing a reader would eventually see, and it is
+     * what makes the case above worth having.
+     */
+    const file = path.join(dir, 'orphan-editor.db');
+    await boot(file);
+    const mod = await import('./db.js');
+    const store = await import('./legalStore.js');
+
+    await expect(
+      store.publishRevision(mod.db, {
+        slug: 'privacy-policy',
+        version: '1.0.1',
+        body: '# Privacy Policy\n\nA revision published by the editor.',
+        effectiveAt: '2027-01-01',
+        actorId: 'system-cli',
+      }),
+      'the next ordinary revision of the Privacy Policy is 1.0.1; a database '
+      + 'still carrying a 1.1 catalogue row refuses it and demands 1.1.1',
+    ).resolves.toBeTruthy();
+  });
+});
+
+/**
+ * The workflow an owner actually uses to change a published document.
+ *
+ * ── Why this needed auditing ──
+ *
+ * Everything else in this file is about the FILE-edit path: change the markdown,
+ * re-pin the hash, and — when a published version's hash moves — write a
+ * migration, because `syncLegalDocuments` refuses the boot otherwise. That
+ * friction is deliberate, and it reads like a production hazard: a policy change
+ * that needs a schema migration and a deploy is a policy change nobody makes in
+ * a hurry.
+ *
+ * It is not the production workflow. `/admin/legal` is, owner-only, and it
+ * publishes into `legal_document_revisions` with a version the server requires
+ * to be strictly greater. Measured against a copy of the pilot database:
+ * publishing 1.1.0 of the Organizer Agreement took no migration, no deploy and
+ * no restart, and a subsequent boot came up clean and served the new revision.
+ *
+ * So there is no gap to close, and this is the invariant that makes that true
+ * rather than an architecture change nobody needs.
+ *
+ * ── What must never happen ──
+ *
+ * The Organizer Agreement is the one document with a real acceptance behind it
+ * on the pilot database. Publishing a NEW version must leave the OLD one exactly
+ * as it was — same row, same hash — because that row is what the acceptance
+ * record points at. A `publishRevision` that ever "tidied up" superseded rows
+ * would rewrite what somebody is recorded as having agreed to, silently, with no
+ * boot failure to notice it.
+ */
+describe('publishing a revision through the editor', () => {
+  it('adds a version without disturbing the one somebody accepted', async () => {
+    const file = path.join(dir, 'editor.db');
+    const mod = await boot(file);
+    const store = await import('./legalStore.js');
+    const { LEGAL_DOCUMENTS } = await import('./legalDocuments.js');
+
+    const target = LEGAL_DOCUMENTS.find(d => d.slug === 'organizer-agreement');
+    const seed = new DatabaseSync(file);
+    const now = new Date().toISOString();
+    seed.prepare(`
+      INSERT INTO users (id, username, email, password_hash, name, grade, role, created_at)
+      VALUES ('user-accepted-1','accepted1','accepted1@example.invalid','x','Accepted One','Adult','organizer',?)
+    `).run(now);
+    seed.prepare(`
+      INSERT INTO legal_acceptances (id, user_id, document_slug, version, content_hash, accepted_at, method)
+      VALUES ('acc-editor-1','user-accepted-1',?,?,?,?,'organizer_agreement')
+    `).run(target.slug, target.version, target.contentHash, now);
+    seed.close();
+
+    await store.publishRevision(mod.db, {
+      slug: target.slug,
+      version: '1.1.0',
+      body: '# Organizer Agreement\n\nA revision published through the editor.',
+      effectiveAt: '2027-02-01',
+      userId: 'system-cli',
+    });
+
+    const after = new DatabaseSync(file);
+    const original = after.prepare(
+      'SELECT content_hash FROM legal_documents WHERE slug = ? AND version = ?'
+    ).get(target.slug, target.version);
+    const acceptance = after.prepare(
+      "SELECT version, content_hash FROM legal_acceptances WHERE id = 'acc-editor-1'"
+    ).get();
+    const versions = after.prepare(
+      'SELECT version FROM legal_documents WHERE slug = ? ORDER BY version'
+    ).all(target.slug).map(r => r.version);
+    after.close();
+
+    expect(original?.content_hash, 'the accepted version was rewritten by a new revision')
+      .toBe(target.contentHash);
+    expect(acceptance.version).toBe(target.version);
+    expect(acceptance.content_hash, 'the acceptance no longer points at what it agreed to')
+      .toBe(target.contentHash);
+    expect(versions, 'the new version is added alongside, not over the top')
+      .toEqual([target.version, '1.1.0']);
+  });
+
+  it('still boots cleanly afterwards, with no migration in between', async () => {
+    /* The half that makes "no deploy needed" true rather than merely likely:
+       hash enforcement runs on every boot and must not object to a document
+       whose live text now comes from a revision. */
+    const file = path.join(dir, 'editor.db');
+    await expect(boot(file)).resolves.toBeTruthy();
+
+    const store = await import('./legalStore.js');
+    const mod = await import('./db.js');
+    const current = await store.currentRevision(mod.db, 'organizer-agreement', { withBody: false });
+    expect(current?.version, 'the reboot did not serve the published revision').toBe('1.1.0');
+  });
+});
