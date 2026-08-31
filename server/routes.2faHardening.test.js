@@ -185,6 +185,68 @@ describe('2FA Security Hardening Regressions', () => {
     });
 
     /**
+     * …and can still reach the enrolment that fixes it.
+     *
+     * ── Why this is the case that matters ──
+     *
+     * The refusal above is only half a policy. An owner or administrator whose
+     * account has no second factor is refused every capability — and if the
+     * enrolment endpoints were gated the same way, the only accounts that could
+     * turn 2FA on would be the ones that already had it. That is a permanent
+     * lockout of the platform's owners, reachable on the very first production
+     * boot, and the refusal test passes happily while it is true.
+     *
+     * It is not true today because `/api/2fa/*` is gated by `requireAAL2` —
+     * "prove it is still you" — and not by `requireCap`, which is the gate that
+     * consults `tfaRequired`. That distinction is load-bearing and nothing else
+     * asserted it, so a `tfaRequired` check added to `requireAAL2` by somebody
+     * tightening the screws would lock the owners out and go green.
+     *
+     * Written against a real deployment question: `pilot.db` carries two owners
+     * (`wevolunteer` and `Mahit`), both verified and active, and both with
+     * `tfa_enabled = 0`. On the first production boot — where `REQUIRE_ADMIN_2FA`
+     * cannot be false — this path is how they get in.
+     */
+    it('lets an administrator with no second factor reach 2FA enrolment', async () => {
+      const email = 'leo.chen@example.com';
+      const token = await srv.login(email);
+
+      await db.prepare(
+        "UPDATE users SET role = 'admin', tfa_enabled = 0, tfa_email_enabled = 0, tfa_secret = NULL WHERE email = ?"
+      ).run(email);
+
+      try {
+        /* Refused where it should be — the precondition, so this case cannot
+           pass by the account simply being unaffected by the policy. */
+        const gated = await srv.call('GET', '/api/admin/organizers/pending', undefined, token);
+        expect(gated.status, 'precondition: the account is under the policy').toBe(403);
+        expect(gated.body.code).toBe('tfa_required');
+
+        /* Status is readable: the settings screen has to be able to render. */
+        const status = await srv.call('GET', '/api/2fa/status', undefined, token);
+        expect(status.status, JSON.stringify(status.body)).toBe(200);
+        expect(status.body.roleRequires2FA, 'the account is told the rule applies').toBe(true);
+
+        /**
+         * And enrolment is reachable. The refusal here must be
+         * `reauth_required` — "prove yourself and try again" — and never
+         * `tfa_required`, which would be the dead end: an instruction to enable
+         * the thing you are trying to enable.
+         */
+        const generate = await srv.call('POST', '/api/2fa/generate', {}, token);
+        expect(
+          generate.body?.code,
+          'enrolment refused with tfa_required — an administrator with no second '
+          + 'factor can never obtain one, which locks the platform owners out',
+        ).not.toBe('tfa_required');
+        expect([200, 403]).toContain(generate.status);
+        if (generate.status === 403) expect(generate.body.code).toBe('reauth_required');
+      } finally {
+        await db.prepare("UPDATE users SET role = 'student' WHERE email = ?").run(email);
+      }
+    });
+
+    /**
      * The exemption, from the other side.
      *
      * The demo administrator has no mailbox anybody can read — `admin@example.gov`
