@@ -62,7 +62,7 @@ no district-specific facts — that branch is gone.
 
 # Privacy at WeVolunteer
 
-**Version 1.1 · Last updated 2026-08-30** · Applies to WeVolunteer version 1.2 and later
+**Version 1.0 · Last updated 2026-08-06** · Applies to WeVolunteer version 1.2 and later
 
 > **THE OPERATOR — the only place in this document that names the legal entity.**
 > WeVolunteer is operated by **Mahit Pulavarthi, a sole proprietor doing business as

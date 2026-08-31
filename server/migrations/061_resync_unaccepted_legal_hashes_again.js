@@ -64,28 +64,43 @@
  * nothing here touches it.
  */
 /**
- * ── Why there is no `sqlite_master` guard, where 054 has one ──
+ * Is the table there? Asked in SQL that both engines speak.
  *
- * `sqliteDialect.test.js` counts every SQLite-only construct in the tree and
- * fails the build when the total goes UP, because "a migration that pauses and
- * quietly gets larger is one that never finishes". A sixteenth hand-rolled
- * `SELECT … FROM sqlite_master` is exactly the growth it exists to refuse, and
- * raising its number to accommodate this would be spending the PostgreSQL port's
- * budget on a branch that cannot execute.
+ * 054 asks this with `SELECT name FROM sqlite_master …`, and a sixteenth copy of
+ * that is precisely the growth `sqliteDialect.test.js` exists to refuse — it
+ * counts SQLite-only constructs across the tree and fails when the total rises,
+ * because "a migration that pauses and quietly gets larger is one that never
+ * finishes". Raising its number to add a guard would spend the PostgreSQL port's
+ * budget rather than pay into it.
  *
- * It cannot execute because migrations apply in ascending version order in a
- * single pass, so 007 — which creates both tables — has always run by the time
- * this does, on a database migrating from any version and on one provisioned
- * from the baseline. 054 predates the ratchet and is defensive rather than
- * responding to a reachable case.
+ * `SELECT 1 FROM <table> LIMIT 0` needs no dialect at all: it is valid
+ * everywhere, plans nothing, returns nothing, and raises on a missing relation —
+ * which is the whole question. So the guard costs the ratchet zero and works on
+ * both engines rather than only one.
  *
- * The PostgreSQL half DOES guard, and not out of symmetry:
- * `migrations.postgres.test.js` provisions a deliberately partial baseline where
- * `legal_documents` really is absent, which refuted this same reasoning there
- * the first time it was written. `to_regclass` is not SQLite debt and costs the
- * ratchet nothing.
+ * The first version of this migration had no SQLite guard, on the reasoning that
+ * migrations apply in ascending order so 007 has always run. That is true of the
+ * RUNNER and not of `up()`, which `legalResyncUnaccepted.test.js` calls directly
+ * for exactly this case against 054 — and an adversarial probe during the
+ * hardening pass duly got `no such table: legal_documents` out of it. A
+ * migration should survive a database that stops short of it.
  */
+function missingLegalTables(db) {
+  for (const table of ['legal_documents', 'legal_acceptances']) {
+    try {
+      db.prepare(`SELECT 1 FROM ${table} LIMIT 0`).all();
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function up(db) {
+  /* Migration 007 creates both. A database that has not reached it yet has no
+     rows to reconcile. */
+  if (missingLegalTables(db)) return;
+
   /**
    * Versions with no acceptance at all.
    *

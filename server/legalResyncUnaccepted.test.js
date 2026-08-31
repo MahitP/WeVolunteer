@@ -145,3 +145,70 @@ describe('databases it must not disturb', () => {
     expect(() => resync(bare)).not.toThrow();
   });
 });
+
+/**
+ * Migration 061 — the same repair, for the documents edited after 054 ran.
+ *
+ * 054 is self-limiting but not self-repeating: a migration runs once, so it
+ * reconciled the drift that existed the day it ran and nothing after it. Three
+ * published policies were corrected by 16a7a1d and the Privacy Policy was
+ * returned to 1.0 during the hardening pass, so an existing database needs the
+ * repair again.
+ *
+ * The behaviour is deliberately identical and the cases above already pin it in
+ * detail. What is asserted here is what DIFFERS: the guard.
+ */
+describe('migration 061', () => {
+  let resync61;
+
+  beforeEach(async () => {
+    ({ up: resync61 } = await import('./migrations/061_resync_unaccepted_legal_hashes_again.js'));
+  });
+
+  it('clears an unaccepted version, exactly as 054 does', () => {
+    seed();
+    doc('privacy-policy', '1.0', 'stale-hash');
+    resync61(db);
+    expect(db.prepare('SELECT COUNT(*) c FROM legal_documents').get().c).toBe(0);
+  });
+
+  it('leaves an accepted version alone, exactly as 054 does', () => {
+    seed();
+    doc('terms-of-service', '1.0', 'stale-hash');
+    db.prepare('INSERT INTO legal_acceptances VALUES (?,?,?,?,?)')
+      .run('acc-1', 'user-1', 'terms-of-service', '1.0', 'stale-hash');
+
+    resync61(db);
+
+    const row = db.prepare("SELECT content_hash FROM legal_documents WHERE slug = 'terms-of-service'").get();
+    expect(row?.content_hash, 'an accepted version was rewritten').toBe('stale-hash');
+  });
+
+  /**
+   * The guard, which 061 nearly shipped without.
+   *
+   * It was left out on the reasoning that migrations apply in ascending order,
+   * so 007 has always created the tables by the time this runs. True of the
+   * RUNNER; not true of `up()`, which this very file calls directly against 054
+   * for the same case — and an adversarial probe during the hardening pass got
+   * `no such table: legal_documents` straight out of it.
+   *
+   * The guard is `SELECT 1 FROM <table> LIMIT 0` rather than a `sqlite_master`
+   * lookup because `sqliteDialect.test.js` holds the count of SQLite-only
+   * constructs and fails when it rises. The portable form costs that ratchet
+   * nothing and works on both engines.
+   */
+  it('skips a database too early to have the tables', () => {
+    db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE users (id TEXT PRIMARY KEY)');
+
+    expect(() => resync61(db)).not.toThrow();
+  });
+
+  it('skips a database that has only one of the two tables', () => {
+    db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE legal_documents (slug TEXT, version TEXT, content_hash TEXT)');
+
+    expect(() => resync61(db)).not.toThrow();
+  });
+});
