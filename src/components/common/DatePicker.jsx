@@ -515,8 +515,34 @@ export default function DatePicker({
           disabled={disabled}
           aria-invalid={error ? 'true' : undefined}
           aria-describedby={describedByIds || undefined}
+          /**
+           * `aria-haspopup`, but NOT `aria-expanded`.
+           *
+           * This element is a plain text box, and ARIA does not allow
+           * `aria-expanded` on `role="textbox"` — only on roles that own an
+           * expandable region, such as `button` or `combobox`. Setting it here
+           * was invalid ARIA, which axe rates CRITICAL under `aria-allowed-attr`
+           * (WCAG 4.1.2), and an attribute a screen reader is entitled to ignore
+           * is not state anybody was actually being told.
+           *
+           * Nothing is lost by removing it. The toggle immediately below is a
+           * real `button` carrying `aria-expanded={open}`, where the attribute
+           * is both valid and announced, and it is the control whose whole
+           * purpose is opening this calendar — `DatePicker.test.jsx` asserts the
+           * state transition against that button, not against this input.
+           * `aria-haspopup` stays: it IS allowed on a text box, and it is the
+           * part that tells somebody a dialog is available from here.
+           *
+           * The violation predates this change and was invisible until the
+           * accessibility sweep learned to render `/events/new`, which is the
+           * argument for the sweep rather than against the fix. Making this a
+           * `combobox` instead would satisfy the rule too, but a combobox
+           * promises a controlled popup of options and would want
+           * `aria-controls` and `aria-autocomplete` to go with it — a larger
+           * change to how the field is announced, for a state the adjacent
+           * button already conveys correctly.
+           */
           aria-haspopup={openOnClick ? 'dialog' : undefined}
-          aria-expanded={openOnClick ? open : undefined}
           onChange={onTextChange}
           onBlur={onTextBlur}
           /* Opt-in, and only opens — never closes. A second click lands inside a

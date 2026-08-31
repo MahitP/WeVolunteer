@@ -270,10 +270,29 @@ test('the Accessibility Statement is reachable and says what it must', async ({ 
   const { ctx, page } = await openAccessibilitySettings(browser, request, baseURL);
 
   await page.getByRole('link', { name: /accessibility statement/i }).click();
-  await page.locator('main, #main-content').first().waitFor({ state: 'visible', timeout: 20000 });
 
   await expect(page, 'the statement link does not reach the Legal Center document')
     .toHaveURL(/\/legal\/accessibility-statement/);
+
+  /**
+   * Wait for the DOCUMENT, not for `main`.
+   *
+   * `main` is the app shell and was already visible on the Settings page this
+   * navigated from, so `waitFor({ state: 'visible' })` on it returns
+   * immediately and proves nothing. The URL changes synchronously and the
+   * published body is fetched after, which left a window of roughly 300ms where
+   * every assertion below read the Settings panel's own text and the test failed
+   * claiming the statement does not name WCAG 2.2. Measured in the browser: the
+   * stale text at 0ms, an empty main at 100ms, the rendered document by 300ms.
+   *
+   * The version line is the wait because it is part of the published document
+   * and cannot be on the page before the document is. Waiting on the WCAG
+   * sentence instead would make the assertion below tautological — it would be
+   * waiting for the very thing it then claims to check.
+   */
+  await page.locator('main, #main-content').first()
+    .getByText(/in effect since/i).first()
+    .waitFor({ state: 'visible', timeout: 20000 });
 
   const text = (await page.locator('main, #main-content').first().innerText()).toLowerCase();
 
