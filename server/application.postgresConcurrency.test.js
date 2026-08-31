@@ -351,13 +351,35 @@ describe.skipIf(!RUNNING_ON_POSTGRES)('the application under real PostgreSQL con
       for (let round = 0; round < 3; round += 1) {
         const tag = `wl${round}-${Math.random().toString(36).slice(2, 7)}`;
         const organizer = await srv.login(ORGANIZER);
-        const start = new Date(Date.now() + 45 * 864e5).toISOString();
+        /**
+         * A different WEEK per round, and the rounds break without it.
+         *
+         * Every round reuses the same five students, so the two people promoted
+         * in round 0 hold a place at that time from then on. When all three
+         * rounds sat at `now + 45 days` those places overlapped the next round's
+         * shift exactly, and `promoteFromWaitlist` correctly refused to promote
+         * anybody into a clash — two of the three waiting were already busy, so
+         * round 1 promoted one person and the assertion below failed.
+         *
+         * That refusal is the behaviour `autoSelect.overlappingShifts.test.js`
+         * exists to protect, and it is right. The fault was here: this test is
+         * about the LOCK — two spots released at the same instant must promote
+         * exactly two, never three and never the same person twice — and the
+         * rounds are meant to be independent repetitions of that race. Sharing
+         * one timeslot across them coupled the rounds so that round 0's outcome
+         * decided who was eligible in round 1.
+         *
+         * Seven days apart is enough that no round can overlap another, and
+         * comfortably clear of the seeded events.
+         */
+        const startMs = Date.now() + (45 + round * 7) * 864e5;
+        const start = new Date(startMs).toISOString();
         const made = await srv.call('POST', '/api/events', {
           title: `Waitlist race ${tag}`, description: 'd', category: 'Other', location: 'Somewhere',
           applicationDeadline: new Date(Date.now() + 30 * 864e5).toISOString(),
           slots: [{
             name: 'S', description: 'd', startDatetime: start,
-            endDatetime: new Date(Date.now() + 45 * 864e5 + 108e5).toISOString(), maxSpots: 2,
+            endDatetime: new Date(startMs + 108e5).toISOString(), maxSpots: 2,
           }],
         }, organizer);
         expect(made.status, `fixture: event (${JSON.stringify(made.body)})`).toBe(201);

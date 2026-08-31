@@ -69,6 +69,7 @@ import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
+import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -403,7 +404,8 @@ export const MIGRATIONS = [
    * earlier would leave it silently absent afterwards. Additive on both engines
    * and order-independent beyond that.
    */
-  leaderboardCandidates
+  leaderboardCandidates,
+  resyncUnacceptedLegalHashesAgain
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
