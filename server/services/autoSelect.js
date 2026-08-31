@@ -28,7 +28,7 @@
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
-import { usersWithClashingAcceptance } from '../shiftOverlap.js';
+import { usersWithClashingAcceptance, shiftsOverlap } from '../shiftOverlap.js';
 import { notificationService } from './notificationService.js';
 import '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
@@ -48,9 +48,60 @@ export async function computeDraw(db, eventId, { runNumber }) {
   const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
   if (!event) throw new Error(`Event not found: ${eventId}`);
 
-  const slots = await db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
+  /**
+   * Slots in a DEFINED order, which they were not in before.
+   *
+   * The bare `SELECT * FROM slots WHERE event_id = ?` returned rows in whatever
+   * order the engine felt like — b-tree order on SQLite, physical order on
+   * PostgreSQL, and neither is promised. That was tolerable while each slot's
+   * draw was independent. It stops being tolerable now that a selection on one
+   * slot can exclude the same volunteer from an overlapping one: WHICH slot they
+   * keep would have been decided by storage layout, and the same event could
+   * resolve differently on the two engines.
+   *
+   * Chronological, then by id. "The earlier shift is the one they keep" is a
+   * rule that can be said out loud to the volunteer who asks, and `id` breaks
+   * the tie between two shifts starting at the same moment so the order is total
+   * rather than merely mostly-defined.
+   *
+   * This does not change who is drawn on any single slot. The seed is
+   * `${eventId}:${slotId}:run-${runNumber}` — per slot, not per position — so
+   * every slot's own lottery is exactly what it was.
+   */
+  const slots = await db.prepare(
+    'SELECT * FROM slots WHERE event_id = ? ORDER BY start_datetime ASC, id ASC'
+  ).all(eventId);
   const selectedIds = [];
   const waitlistIds = [];
+
+  /**
+   * Who this execution has already seated, and when.
+   *
+   * ── The gap this closes ──
+   *
+   * `usersWithClashingAcceptance` reads ACCEPTED rows, and a draw writes
+   * nothing — `computeDraw` is pure with respect to the database by design, so a
+   * result can be reviewed before it takes effect. So the committed-acceptance
+   * check cannot see a selection made two slots ago in this same loop, and a
+   * volunteer pending on two overlapping shifts of one event was selected for
+   * both. One execution, one double-booking, no human involved: the same defect
+   * the cross-event check was written for, reached by the one path that check
+   * structurally cannot see.
+   *
+   * ── Why in memory and not another query ──
+   *
+   * The facts are already here. Re-reading them would mean writing selections
+   * down mid-draw, which would make the draw no longer pure and would need a
+   * transaction around a computation that deliberately has none. An array of
+   * `{userId, start, end}` bounded by the places on one event answers the same
+   * question with no query at all.
+   *
+   * The PREDICATE is the shared one. `shiftsOverlap` is the JavaScript form of
+   * `OVERLAPS_SHIFT_SQL`, asserted equal to it over every arrangement two
+   * intervals can be in, so a shift that touches at the boundary is not a clash
+   * here for exactly the reason it is not a clash anywhere else.
+   */
+  const seatedHere = [];
 
   for (const slot of slots) {
     /**
@@ -187,6 +238,10 @@ export async function computeDraw(db, eventId, { runNumber }) {
     const pendingApps = [];
     for (const a of allPending) {
       if (clashing.has(a.user_id)) continue;
+      /* And anybody this same execution has already seated at this time. Same
+         treatment, same reason, same predicate — see `seatedHere` above. */
+      if (seatedHere.some(s => s.userId === a.user_id
+        && shiftsOverlap(s.start, s.end, slot.start_datetime, slot.end_datetime))) continue;
       if ((await eventApplicationEligibility(event, a.user_id)).ok) pendingApps.push(a);
     }
     for (const refused of allPending) {
@@ -229,6 +284,21 @@ export async function computeDraw(db, eventId, { runNumber }) {
       const draw = performWeightedSelection(pendingApps, remainingSpots, randomFn);
       selectedIds.push(...draw.selectedIds);
       waitlistIds.push(...draw.waitlistIds);
+
+      /* Recorded AFTER the draw and only for who it actually chose, so a later
+         overlapping slot sees this one's outcome. Looked up by application id
+         against the pool the draw was given, which is the only place the
+         user behind an id is known here. */
+      const byId = new Map(pendingApps.map(a => [a.id, a]));
+      for (const id of draw.selectedIds) {
+        const chosen = byId.get(id);
+        if (!chosen) continue;
+        seatedHere.push({
+          userId: chosen.user_id,
+          start: slot.start_datetime,
+          end: slot.end_datetime,
+        });
+      }
     }
   }
 
