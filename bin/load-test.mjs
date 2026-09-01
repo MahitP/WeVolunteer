@@ -45,6 +45,12 @@
  *   --only A,C,F     run a subset of scenarios
  *   --json PATH      write the raw results
  *   --label TEXT     a name for this run, printed and stored in the JSON
+ *
+ *   --latency-profile NAME   local | same-region | pooled | distant (default local)
+ *   --db-latency N           a FIXED delay in ms with no jitter, for a reproducible
+ *                            before/after table; overrides --latency-profile
+ *   --soak N                 run the soak instead of the scenarios, for N seconds
+ *   --pool-max N             override DATABASE_POOL_MAX for this run
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
@@ -153,6 +159,71 @@ const SOAK_SECONDS = Number(arg('soak', 0));
 
 /** The application's connection-pool ceiling for this run. */
 const POOL_MAX = arg('pool-max', null);
+
+/**
+ * Whether to run with OpenTelemetry ON, against a LOCAL stub.
+ *
+ * ── Why this exists ──
+ *
+ * OTel is disabled unless Better Stack credentials are present, and this harness
+ * deliberately strips those (see `startServer`) so a developer's shell cannot
+ * ship spans from a load run. Correct — but it means every number this file has
+ * ever printed was measured with tracing OFF, while production runs with it on.
+ * "Instrumentation is cheap" was therefore an assumption the harness was
+ * structurally incapable of checking.
+ *
+ * `--otel` points the exporters at a loopback sink that accepts and discards, so
+ * the cost being measured is the SDK's: span creation, attribute building,
+ * sampling, batching and serialisation. It is not a measurement of Better
+ * Stack's network path, and it is not meant to be — that cost is asynchronous
+ * and off the request path by design, which is exactly the claim worth testing
+ * separately.
+ *
+ * No real credential is involved: the token is synthetic and the host is
+ * 127.0.0.1, so this cannot reach a vendor even if one is configured.
+ */
+const OTEL_ON = process.argv.includes('--otel');
+
+/** Counts from the stub, so a run can PROVE instrumentation was actually live. */
+const otelSink = { traceRequests: 0, metricRequests: 0, bytes: 0, server: null, port: 0 };
+
+/**
+ * A loopback OTLP receiver.
+ *
+ * Answers 200 to `/v1/traces` and `/v1/metrics` and throws the payload away,
+ * counting what arrived. The counts are the important part: a run that reported
+ * "no measurable overhead" while the exporter was silently disabled would be
+ * worse than no measurement at all, so the summary prints these and the run
+ * fails loudly if nothing was received.
+ */
+async function startOtelSink() {
+  const { createServer } = await import('node:http');
+  await new Promise((resolve) => {
+    otelSink.server = createServer((req, res) => {
+      let n = 0;
+      req.on('data', (c) => { n += c.length; });
+      req.on('end', () => {
+        otelSink.bytes += n;
+        if (req.url?.includes('/v1/traces')) otelSink.traceRequests++;
+        else if (req.url?.includes('/v1/metrics')) otelSink.metricRequests++;
+        /* An empty 200 is a valid OTLP/HTTP response for both signals. */
+        res.writeHead(200, { 'Content-Type': 'application/x-protobuf' });
+        res.end();
+      });
+    });
+    otelSink.server.listen(0, '127.0.0.1', () => {
+      otelSink.port = otelSink.server.address().port;
+      resolve();
+    });
+  });
+  return otelSink.port;
+}
+
+async function stopOtelSink() {
+  if (!otelSink.server) return;
+  await new Promise((resolve) => otelSink.server.close(() => resolve()));
+  otelSink.server = null;
+}
 
 if (!DB_URL) {
   console.error('LOAD_DB_URL is required. Use a throwaway database:');
@@ -410,6 +481,23 @@ async function startServer(port, databaseUrl) {
   for (const k of ['PINECONE_API_KEY', 'RESEND_API_KEY', 'UPSTASH_REDIS_REST_URL',
     'UPSTASH_REDIS_REST_TOKEN', 'BETTERSTACK_SOURCE_TOKEN', 'SMTP_HOST']) {
     delete env[k];
+  }
+
+  /**
+   * Pointed at the loopback stub, AFTER the strip above rather than before, so
+   * the ordering cannot be reversed by a later edit into something that leaks a
+   * real token into a load run. The host is unconditionally 127.0.0.1.
+   *
+   * `OTEL_TRACE_SAMPLE_RATE=1` on purpose: the default ratio would sample a
+   * fraction of the load and report a fraction of the cost, which is the
+   * flattering answer rather than the true one. This measures the ceiling.
+   */
+  if (OTEL_ON) {
+    env.BETTERSTACK_SOURCE_TOKEN = `load-test-synthetic-${randomUUID()}`;
+    env.BETTERSTACK_INGESTING_HOST = `http://127.0.0.1:${otelSink.port}`;
+    env.OTEL_TRACE_SAMPLE_RATE = '1';
+  } else {
+    delete env.BETTERSTACK_INGESTING_HOST;
   }
 
   child = spawn(process.execPath, ['server/server.js'], {
@@ -1137,6 +1225,11 @@ async function fanOutScenario() {
 async function main() {
   await refuseNonEmpty();
 
+  if (OTEL_ON) {
+    const p = await startOtelSink();
+    console.log(`[load] OpenTelemetry ON, exporting to a loopback stub on ${p}.`);
+  }
+
   const port = 5100 + Math.floor(Math.random() * 300);
   const appDbUrl = (LATENCY.base > 0 || LATENCY.jitter > 0)
     ? await startLatencyProxy(DB_URL, LATENCY)
@@ -1373,7 +1466,29 @@ try {
   }
   process.exitCode = 1;
 } finally {
+  /**
+   * The server is stopped BEFORE the sink, so the shutdown flush
+   * (`shutdownOtel`, step 8 in shutdown.js) has somewhere to land. Closing the
+   * sink first would make every instrumented run end in a connection-refused
+   * error that belongs to the harness rather than the application.
+   */
   await stopServer();
+  if (OTEL_ON) {
+    console.log(
+      `[load] OTLP stub received ${otelSink.traceRequests} trace and `
+      + `${otelSink.metricRequests} metric exports (${otelSink.bytes} bytes).`
+    );
+    /* A run that measured "no overhead" because the exporter was quietly off is
+       worse than no measurement, so this is an error rather than a note. */
+    if (otelSink.traceRequests === 0 && otelSink.metricRequests === 0) {
+      console.error(
+        '[load] ** --otel was requested but NOTHING was exported. The numbers '
+        + 'from this run do not describe an instrumented server. **'
+      );
+      process.exitCode = 1;
+    }
+    await stopOtelSink();
+  }
   await pool.end();
   await latencyProxy?.terminate();
 }

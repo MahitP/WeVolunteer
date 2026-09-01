@@ -23,11 +23,36 @@
  *
  *   • No new service, no new credential, no new free-tier ceiling to watch.
  *   • `pg` is already a dependency, at a version the adapter accepts.
- *   • The Redis branch measured a **222 ms warm round trip** to the Upstash
+ *   • The Redis work measured a **222 ms warm round trip** to the Upstash
  *     database as configured (`docs/operations/upstash.md` §1.2). An adapter sits
  *     on the message path, so every realtime event would pay that twice. A
  *     regional Redis would fix the number, but "buy a second service and move it
  *     closer" is a worse answer than "use the database that is already there".
+ *
+ * ── Re-examined once Redis was actually in the tree, and the answer got firmer ──
+ *
+ * The obvious question after the Upstash integration merged is whether the
+ * Socket.IO **Redis** adapter is now the cheaper option, since the service is
+ * already paid for and configured. It is not, and the reason is structural
+ * rather than a matter of degree.
+ *
+ * `server/redis/redisClient.js` speaks Upstash's **REST API** — `fetch` to
+ * `/pipeline`, one HTTPS request per batch, no persistent socket. There is no
+ * Redis client library in the dependency tree at all, by design.
+ * `@socket.io/redis-adapter` needs `SUBSCRIBE`, which is a connection that stays
+ * open and streams; the REST API cannot express it in any number of round trips.
+ *
+ * So adopting it would mean a new dependency (`ioredis` or `node-redis`), a
+ * second and different connection to the same vendor, pub/sub traffic metered
+ * against the same 500,000-command monthly allowance the volume limiters were
+ * already excluded from — and the 222 ms, on the message path. Against a
+ * LISTEN/NOTIFY bus on a database that is already open, already regional and
+ * already required.
+ *
+ * Having Redis available made the Redis adapter LESS attractive, not more,
+ * because it revealed that the transport chosen for Redis here cannot carry a
+ * bus. That is worth writing down, because "we have Redis now, use the Redis
+ * one" is the reasonable-sounding change somebody will otherwise propose.
  *
  * The cost is one real constraint, and it is in §Connection below.
  *
