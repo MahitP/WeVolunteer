@@ -529,3 +529,70 @@ describe('distributed token bucket', () => {
     for (const k of redis.keys()) expect(k).not.toContain('organizer-device-9911');
   });
 });
+
+/**
+ * Abuse economics: an attacker must not be able to spend our Redis allowance.
+ *
+ * ── The vector being closed ──
+ *
+ * A limiter that meters every request turns "send more requests" into "cost the
+ * operator more money". On a plan billed per command that is a denial-of-wallet
+ * vector, and it is the reason this design coordinates on approach rather than
+ * on every call. These tests assert the bound rather than trusting the
+ * intention, because the intention is one refactor away from being wrong.
+ */
+describe('abuse cannot buy Redis commands', () => {
+  it('a caller who is already refused costs NOTHING to refuse again', async () => {
+    /* The single most important property here. Once local knows the ceiling is
+       spent, refusing needs no agreement from anybody. */
+    const a = instance();
+    await drive(a, 'attacker', LIMIT + 10);
+    const spent = redis.state.calls;
+
+    await drive(a, 'attacker', 5_000);
+    expect(redis.state.calls, 'knocking after a refusal spent commands').toBe(spent);
+  });
+
+  it('the commands one key can ever cost in a window are bounded', async () => {
+    /**
+     * The ceiling is `(limit - escalateAt) / batch + 1` reports. Everything
+     * below the threshold is free, everything above the limit is free, and the
+     * middle is batched — so no amount of traffic against ONE key exceeds it.
+     */
+    const a = instance();
+    await drive(a, 'bounded', LIMIT * 50);
+
+    const worstCase = Math.ceil((LIMIT - ESCALATE) / 10) + 1;
+    expect(
+      redis.state.calls,
+      `one key cost ${redis.state.calls} commands against a bound of ${worstCase}`,
+    ).toBeLessThanOrEqual(worstCase);
+  });
+
+  it('spend scales with DISTINCT keys, not with request volume', async () => {
+    /**
+     * The honest statement of the residual: an attacker who can mint distinct
+     * keys pays per key. `apiLimiterKey` keys on the VERIFIED session, so
+     * minting one means holding a signed token; an anonymous caller keys on the
+     * address, so minting one means holding another address. Neither is free,
+     * and that is what bounds this.
+     */
+    const a = instance();
+
+    for (let i = 0; i < 5; i++) await drive(a, `k${i}`, ESCALATE - 1);
+    expect(redis.state.calls, 'quiet keys cost commands').toBe(0);
+
+    for (let i = 0; i < 5; i++) await drive(a, `loud${i}`, LIMIT * 2);
+    const perKey = redis.state.calls / 5;
+    expect(perKey).toBeLessThanOrEqual(Math.ceil((LIMIT - ESCALATE) / 10) + 1);
+  });
+
+  it('a Redis outage does not turn into a retry storm against Redis', async () => {
+    /* The breaker means an outage costs one timeout per window rather than one
+       per request — so an attack DURING an outage cannot amplify either. */
+    const a = instance();
+    redis.state.fail = true;
+    await drive(a, 'outage-attack', LIMIT * 5);
+    expect(redis.state.calls, 'the breaker did not stop the retries').toBeLessThanOrEqual(2);
+  });
+});
