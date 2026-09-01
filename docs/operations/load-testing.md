@@ -330,6 +330,27 @@ Nothing leaked in either run. The first 15-minute run *looked* like it had found
 something — 20 req/s and 1,220 timeouts — and that turned out to be the harness
 starving itself (§2.1), which is why the `local` control matters.
 
+**Re-run on the integrated tree** (Redis + OpenTelemetry + this work), same
+15 minutes, same profile, 2,015 users / 1,002 events / 8,092 applications:
+
+| | result |
+|---|---|
+| resident memory | 241 MB → 229 MB (fell again; no leak) |
+| errors | **0**, on every one of the ninety ten-second samples |
+| pooled connections | steady at 21 open, **peak waiting 0** for the whole run |
+| pending notification jobs | 0 → 0 |
+| pool at exit | 25 total, 25 idle, 0 waiting |
+
+Resident memory is higher than the pre-integration run in absolute terms, which
+is expected and not a finding: the process now also holds the OpenTelemetry SDK
+and its batch processors. What matters is the slope, and the slope is flat to
+slightly negative over fifteen minutes — it oscillates in a 224–245 MB band with
+no trend.
+
+`waiting` never left zero, which is the number worth watching: it says the pool
+was never the constraint at this concurrency, and it is consistent with the
+sweep below finding the knee below 25.
+
 ### Connection pool sizing
 
 This is what the soak actually found, and it changed a production default.
@@ -365,10 +386,91 @@ design, and the healthy loopback runs show waiting of 7–10 with zero errors. I
 is sustained waiting *together with* climbing p95 that says the pool is the
 constraint.
 
+**Re-validated on the integrated tree** (Redis + OpenTelemetry + this work),
+at the `pooled` profile — 8 ms base and 4 ms jitter, the closest thing here to a
+real Supavisor path — with scenarios A, C, D and E2:
+
+| pool | A | C | D | E2 | connections actually opened |
+|---|---|---|---|---|---|
+| 10 | 60.0 | 96 | 92 | 40.8 | 10 of 10 |
+| **25** *(default)* | **133.6** | **192** | **184** | **40.2** | 21 of 25 |
+| 40 | 134.8 | 192 | 188.2 | 40.6 | 21 of 40 |
+
+Two things worth reading off this. **10 is half the throughput** on every
+pool-bound scenario, so the change still earns its place. And **25 and 40 are
+identical** — both stop at 21 open connections under 20 concurrent requests — so
+25 is not merely better than the old default, it is *sufficient*: the knee is
+below it, and raising it further buys nothing.
+
+E2 is flat at ~40 req/s across all three, which is the control. Admin stats is
+one consolidated statement, so it is bound by the round trip and not by the
+pool; a number that moved there would have meant the sweep was measuring
+something other than pool contention.
+
 25 is per process. Supabase's entry sizes allow 60 direct connections and 200
 Supavisor pooler clients, so it leaves room for eight instances through the
 pooler — and only two through a direct connection, which is another reason to
 use the pooler.
+
+**Neither integrated component changes that arithmetic.** Redis speaks the
+Upstash REST API over `fetch` and opens no PostgreSQL connection at all;
+OpenTelemetry's `instrumentation-pg` wraps the connections that already exist
+rather than making its own. The one thing that does add to the count is the
+Socket.IO adapter, which opens its **own** pool of 4 on a separate session-mode
+connection when enabled — so an adapter-enabled instance is 25 + 4, and two such
+instances are 58, still inside the 60 direct-connection ceiling and comfortably
+inside the pooler's 200.
+
+---
+
+### 7.3 Instrumentation overhead — measured, not assumed
+
+`startServer` deletes `BETTERSTACK_SOURCE_TOKEN` before spawning the child, so a
+developer's shell cannot ship spans from a load run. Correct — and it had a
+consequence worth stating plainly: **every number in this document above was
+measured with tracing off, while production runs with it on.** The harness was
+structurally unable to check its own assumption that instrumentation is cheap.
+
+`--otel` closes that. It stands up a loopback OTLP receiver, points the exporters
+at `http://127.0.0.1:<port>` with a synthetic token, and forces
+`OTEL_TRACE_SAMPLE_RATE=1` — fifty times the production default of `0.02` — so
+the figure is a ceiling rather than a flattering sample. The environment is set
+*after* the credential strip, so no ordering change can turn this into a path
+that leaks a real token.
+
+The sink counts what arrives and **the run fails if nothing did**. A run
+reporting "no measurable overhead" because the exporter was quietly disabled
+would be worse than no measurement at all.
+
+Same-region profile, same seed, tracing off versus on:
+
+| | off req/s | on req/s | delta |
+|---|---|---|---|
+| A public browse | 381.6 | 374.2 | −1.9% |
+| B authentication | 32.6 | 32.4 | −0.6% |
+| C student activity | 594.2 | 607.0 | +2.2% |
+| C2 applications, paginated | 605.8 | 589.0 | −2.8% |
+| C3 applications, unpaginated | 573.8 | 557.6 | −2.8% |
+| C4 certificates | 1,097.2 | 1,104.4 | +0.7% |
+| D organizer | 608.0 | 606.2 | −0.3% |
+| E admin dashboard | 127.2 | 129.6 | +1.9% |
+| E2 admin stats | 110.2 | 112.2 | +1.8% |
+| E3 appeals queue | 106.2 | 112.4 | +5.8% |
+| G fan-out, 150 | 65 ms | 69 ms | +6% |
+
+The instrumented run genuinely exported: **1,507 trace requests and 7.9 MB**
+reached the sink.
+
+Worst case −2.8%, and several scenarios came out *faster* with tracing on, which
+is the shape of run-to-run noise rather than a cost. At the ceiling sampling
+ratio, on every scenario. The conclusion is that OpenTelemetry as configured here
+is not on the critical path in any measurable way — and it is now a measurement
+rather than a hope.
+
+What this does **not** measure is Better Stack's network path. The exporter is
+batched and asynchronous by design, so that cost is off the request path; the
+loopback sink deliberately removes it so what is left is the SDK's own work —
+span creation, attribute building, sampling and serialisation.
 
 ---
 
@@ -376,16 +478,25 @@ use the pooler.
 
 - **Real network latency to a real provider.** §5 injects a plausible constant.
   A real link has jitter, occasional retransmits, and a pooler in the path.
-- **Sustained soak.** Scenarios run for seconds, not hours, so this says nothing
-  about leaks, WAL growth, or index bloat over a term.
+- **A long soak.** `--soak` runs for as long as it is told and §7 reports a
+  fifteen-minute one, which is enough to expose a leak with a steep slope. It is
+  not a term: WAL growth and index bloat over months are still unmeasured.
 - **The rate limiters, by default.** `--api-limit` is raised so scenarios measure
   the application. Pass `--api-limit 600` to measure the production ceiling
   instead — a different and also legitimate question.
 - **Realistic data distribution.** Applications are spread evenly across events.
   A real pilot has a few popular events with far more than the rest.
 - **The client.** This measures the API. Bundle size and render cost are not here.
-- **Redis and OpenTelemetry.** Neither is on this branch; a deployment running
-  them should re-measure.
+- **Redis.** The Upstash integration is in the tree, but the harness strips
+  `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` before booting the
+  server, so every run measures the in-process fallback. That is the honest
+  default — a load test must not spend a metered allowance or depend on a vendor
+  being reachable — but it means the five Redis-backed security limiters are
+  measured in their fallback mode, not their deployed one. They sit on
+  low-volume paths this harness barely touches, so the gap is small; it is still
+  a gap.
+
+  **OpenTelemetry is no longer in this list** — see §7.3.
 
 ---
 
