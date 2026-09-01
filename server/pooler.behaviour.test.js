@@ -50,8 +50,14 @@ describe.skipIf(!POOLER_URL)('through a transaction-mode pooler', () => {
   }, 60_000);
 
   afterAll(async () => {
-    try { await db?.prepare('DROP TABLE IF EXISTS pooler_probe').run(); } catch { /* closing */ }
-    await db?.close();
+    if (db) {
+      /* Spelled without optional chaining on purpose: `db?.prepare(...)` reads
+         as an unawaited chain to `asyncShapes.test.js`, which cannot see
+         through the `?.` — and a guard that has to be argued with is one that
+         stops being run. */
+      try { await db.prepare('DROP TABLE IF EXISTS pooler_probe').run(); } catch { /* closing */ }
+      await db.close();
+    }
   });
 
   it('runs ordinary statements', async () => {
@@ -65,8 +71,13 @@ describe.skipIf(!POOLER_URL)('through a transaction-mode pooler', () => {
      * anything holds session state. 200 statements through a pool of 6 means
      * the backend under a client changes repeatedly.
      */
+    /* Prepared once and executed 200 times, rather than prepared 200 times.
+       That is closer to what the application does, and it keeps the statement
+       out of the `Promise.all` where `asyncShapes.test.js` cannot see that the
+       chain is awaited. */
+    const stmt = await db.prepare('SELECT CAST(? AS int) AS n');
     const results = await Promise.all(
-      Array.from({ length: 200 }, (_, i) => db.prepare('SELECT CAST(? AS int) AS n').get(i)),
+      Array.from({ length: 200 }, async (_, i) => await stmt.get(i)),
     );
     expect(results.map(r => r.n)).toEqual([...Array(200).keys()]);
   });
@@ -125,7 +136,7 @@ describe.skipIf(!POOLER_URL)('through a transaction-mode pooler', () => {
     await db.prepare('DELETE FROM pooler_probe').run();
     await db.prepare('INSERT INTO pooler_probe (id, n) VALUES (2, 0)').run();
 
-    await Promise.all(Array.from({ length: 20 }, () => runInTransaction(db, async (tx) => {
+    await Promise.all(Array.from({ length: 20 }, async () => await runInTransaction(db, async (tx) => {
       const row = await tx.prepare('SELECT n FROM pooler_probe WHERE id = 2 FOR UPDATE').get();
       await tx.prepare('UPDATE pooler_probe SET n = ? WHERE id = 2').run(row.n + 1);
     })));
@@ -152,7 +163,14 @@ describe.skipIf(!POOLER_URL)('through a transaction-mode pooler', () => {
      * is the same failure that broke migration 063's first guard, so it is
      * worth asserting the POOL recovers rather than only the statement.
      */
-    await expect(db.prepare('SELECT * FROM no_such_relation_here').all()).rejects.toThrow();
+    /* try/catch rather than `expect(...).rejects`, so the `await` sits directly
+       on the execution where `asyncShapes.test.js` can see it. An execution
+       hidden inside `expect()` reads as unawaited, and that guard is right far
+       more often than it is wrong. */
+    const doomed = await db.prepare('SELECT * FROM no_such_relation_here');
+    let threw = false;
+    try { await doomed.all(); } catch { threw = true; }
+    expect(threw, 'a query against a missing relation did not throw').toBe(true);
     const row = await db.prepare('SELECT 2 AS two').get();
     expect(row.two, 'the pool did not recover from a failed statement').toBe(2);
   });
@@ -160,8 +178,9 @@ describe.skipIf(!POOLER_URL)('through a transaction-mode pooler', () => {
   it('survives more concurrent work than the pool has clients', async () => {
     /* Requests queue for a client rather than erroring — the behaviour
        `HEALTH_POOL_STATS` exists to make visible under load. */
+    const stmt = await db.prepare('SELECT CAST(? AS int) AS n');
     const out = await Promise.all(
-      Array.from({ length: 60 }, (_, i) => db.prepare('SELECT CAST(? AS int) AS n').get(i)),
+      Array.from({ length: 60 }, async (_, i) => await stmt.get(i)),
     );
     expect(out).toHaveLength(60);
     expect(db.stats.waiting).toBe(0);
