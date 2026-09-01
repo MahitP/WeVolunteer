@@ -14,6 +14,25 @@ is not, and what each remaining item would cost to fix.
 
 ---
 
+## 0. What is proven, and how
+
+Claims in this document are not all backed by the same strength of evidence, and
+conflating them is how a deployment gets surprised. Four levels:
+
+| Level | Meaning | Examples |
+|---|---|---|
+| **Production-proven** | Executed against the real third-party service | The Upstash path: 11/11 checks live, including the token-bucket Lua spending atomically and refilling by elapsed time (3.0000 of 5 tokens after two spends 1 ms apart). Latency avg **234 ms**, max 332 ms — which is the number the Socket.IO adapter decision rests on. |
+| **Integration-proven** | Two real processes, real database, real protocol | Two backend instances against one PostgreSQL and one Redis (`bin/multi-instance-check.mjs`, 10/10). The transaction pooler (`pooler.behaviour.test.js`, 8/8 through pgbouncer). Cross-instance Socket.IO broadcast through real PostgreSQL LISTEN/NOTIFY. |
+| **Locally proven** | Real code, simulated dependency | The limiter bounds across 2–4 simulated instances; the abuse-cost ceilings; Redis outage and breaker behaviour. |
+| **Unverified** | Stated, not measured | **Supabase's own network path and Supavisor's particular build.** pgbouncer proves transaction pooling as a *protocol*; it is not the same implementation. No Supabase credentials are configured in this repository, so this cannot currently be closed. |
+
+The honest summary: everything the application does *itself* is proven at one of
+the top three levels. The single unverified item is one vendor's implementation
+of a protocol whose behaviour is proven against another implementation of the
+same protocol.
+
+---
+
 ## 1. Why one instance is still the answer
 
 The deployment is a single systemd unit on one VM (`deploy/wevolunteer.service`).
@@ -203,6 +222,43 @@ Asserted, not intended: a caller already refused costs nothing to refuse again
 scales with distinct KEYS rather than volume, and minting a key means holding a
 verified session or another address; and an attack during a Redis outage cannot
 amplify, because the breaker costs one timeout per window.
+
+#### The sign-in path is a LAYERED system, and the layering is the security argument
+
+Four controls guard sign-in, and the two in-process ones are safe under any
+number of instances for a specific, testable reason rather than by assumption:
+
+| Control | Scope | Where |
+|---|---|---|
+| `authLimiter` | 10 failures / 15 min per address | in-process |
+| `loginLimiter` | ~5 failures / 15 min per address+account | in-process |
+| `loginFailures` | 10 failures / 15 min per **account** | **shared** |
+| IP-failure ceiling | 200 failures / 15 min per **address block** | **shared** |
+
+Each in-process limiter is strictly *tighter* than a shared control covering the
+same dimension. With N instances a local limiter degrades to N × its budget, but
+the global bound is `min(N × local, shared)` and the shared cap does not move:
+
+```
+per account        min(N x 5, 10)    <=  10, whatever N is
+per address block  min(N x 10, 200)  <= 200, whatever N is
+```
+
+So the local limiters are a free, fast rejection path in front of an
+authoritative cap — not a security boundary of their own. Distributing them
+would spend Redis commands on `skipSuccessfulRequests` traffic (an increment on
+every request and a decrement on every success) to buy a bound that already
+holds. `auth.abuseArchitecture.test.js` asserts it: twenty instances attacking
+one account still stop at ten; five instances credential-stuffing from one
+address still stop at two hundred.
+
+**Address keying is `ipKeyGenerator`, everywhere.** A raw `req.ip` is a correct
+key for IPv4 and no control at all for IPv6 — a residential allocation is a /64,
+so an attacker rotating inside their own prefix would draw a fresh ceiling per
+attempt. The shared ceiling keyed on `req.ip` for one pass and that was a real
+bypass; it now collapses IPv6 to a 56-bit prefix like every other IP-keyed
+limiter here, and the module's own key function is tested rather than the
+library's.
 
 #### Still per-process, deliberately
 

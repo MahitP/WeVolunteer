@@ -411,6 +411,20 @@ design, and the healthy loopback runs show waiting of 7–10 with zero errors. I
 is sustained waiting *together with* climbing p95 that says the pool is the
 constraint.
 
+**The default browse is no longer the slow path.** After the maintained
+`first_slot_start`, an order-leading index and splitting the exact count out of
+the page query (`EXPLAIN (ANALYZE, BUFFERS)` for each step is in
+`server/eventQuery.js`):
+
+| | before | after |
+|---|---|---|
+| 10,000 events | 127.9 ms | **3.5 ms** |
+| 50,000 events | 601.1 ms | **5.0 ms** |
+
+3.5 ms at 10,000 and 5.0 ms at 50,000 is near-flat — the linear term is gone,
+including from the exact total. The count is still exact: same predicate, same
+statement, same snapshot, cheaper plan. No counter, no cache, nothing stale.
+
 **Re-validated on the integrated tree** (Redis + OpenTelemetry + this work),
 at the `pooled` profile — 8 ms base and 4 ms jitter, the closest thing here to a
 real Supavisor path — with scenarios A, C, D and E2:

@@ -228,6 +228,48 @@ async function main() {
       check('the counter script sets a TTL on creation only',
         Array.isArray(second.result) && Number(second.result[1]) > 0 && Number(second.result[1]) <= 10_000);
 
+      /**
+       * The TOKEN BUCKET script, against the real service.
+       *
+       * `server/redis/volumeLimit.js` distributes `checkinScanLimiter` with a
+       * Lua script that reads a hash, refills by elapsed time, spends a token
+       * and writes back — atomically, because two instances doing that as
+       * read-modify-write would issue two tokens for one AND refill faster than
+       * configured.
+       *
+       * It uses HMGET/HSET rather than the INCR the counter above exercises, so
+       * "EVAL works here" was not evidence that THIS script does. Two calls a
+       * millisecond apart must spend exactly two tokens: refill over that
+       * interval is far below one, so any accidental over-refill shows up
+       * immediately.
+       */
+      const bucket = [
+        "local b = redis.call('HMGET', KEYS[1], 't', 'a')",
+        'local cap = tonumber(ARGV[1])',
+        'local rate = tonumber(ARGV[2])',
+        'local now = tonumber(ARGV[3])',
+        'local tokens = tonumber(b[1])',
+        'local at = tonumber(b[2])',
+        'if tokens == nil then tokens = cap; at = now end',
+        'local elapsed = now - at',
+        'if elapsed < 0 then elapsed = 0 end',
+        'tokens = math.min(cap, tokens + elapsed * rate)',
+        'local ok = 0',
+        'if tokens >= 1 then tokens = tokens - 1; ok = 1 end',
+        "redis.call('HSET', KEYS[1], 't', tostring(tokens), 'a', tostring(now))",
+        "redis.call('PEXPIRE', KEYS[1], ARGV[4])",
+        'return {ok, tostring(tokens)}',
+      ].join(' ');
+
+      const now = Date.now();
+      const b1 = await redisEval(bucket, [k('bucket')], ['5', '0.00001', String(now), '10000'], 4);
+      const b2 = await redisEval(bucket, [`${prefix}bucket`], ['5', '0.00001', String(now + 1), '10000'], 4);
+      check('the token-bucket script spends a token atomically',
+        b1.ok && b2.ok && Number(b1.result?.[0]) === 1 && Number(b2.result?.[0]) === 1);
+      check('the token bucket refills by elapsed time, not per call',
+        Array.isArray(b2.result) && Number(b2.result[1]) > 2.9 && Number(b2.result[1]) < 3.1,
+        `${Number(b2.result?.[1]).toFixed(4)} tokens left of 5`);
+
       const pipe = await redisPipeline([['SET', k('p1'), '1'], ['SET', k('p2'), '2'], ['GET', `${prefix}p1`]]);
       check('pipelines return results in order', pipe.ok && pipe.results[2] === '1');
 
