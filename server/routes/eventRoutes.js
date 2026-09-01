@@ -459,8 +459,12 @@ router.get('/api/events', authenticateToken, async (req, res) => {
     const events = split
       ? await db.prepare(
         `WITH ${buildEventPageCte(filters, aggScope, { paginated })}, ${restrictAggToPage(aggCte)} `
-        + `${SELECT.replace('COUNT(*) OVER () AS total_count', 'page.total_count')} `
+        + `${SELECT.replace('COUNT(*) OVER () AS total_count', 'page_total.total_count')} `
         + `FROM events e JOIN page ON page.event_id = e.id `
+        /* CROSS JOIN, because `page_total` is exactly one row — the exact count
+           over the same predicate in the same statement and therefore the same
+           snapshot. */
+        + `CROSS JOIN page_total `
         + `JOIN users u ON e.organizer_id = u.id JOIN agg ON agg.event_id = e.id `
         + `LEFT JOIN organizations org ON org.id = e.organization_id ${order}`
       ).all(paginated

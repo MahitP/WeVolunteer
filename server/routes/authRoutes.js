@@ -6,6 +6,7 @@ import '../email.js';
 import { JWT_SECRET, DEMO_MODE, COOKIE_NAME, cookieOptions, clearCookieOptions } from '../config.js';
 
 import { authenticateToken, selfUserResponse, revokeSession, isSessionRevoked, enabledSecondFactors } from '../utils.js';
+import { ipKeyGenerator } from 'express-rate-limit';
 import { createSharedCounter, __resetLocalCounters } from '../redis/limitStore.js';
 import { assertConsent, recordAcceptances, ConsentMissing } from '../consent.js';
 import '../organizerAgreement.js';
@@ -120,10 +121,61 @@ const loginIpFailureCounter = createSharedCounter({
   windowMs: LOGIN_FAILURE_WINDOW_MS,
 });
 
-/** The address this request came from, as the limiters compute it. */
+/**
+ * The address this request came from, keyed the way every OTHER limiter here
+ * keys it — through `ipKeyGenerator`, not `req.ip`.
+ *
+ * ── The bypass this closes ──
+ *
+ * The first version of this counter used `req.ip` directly. For IPv4 that is
+ * the same thing; for IPv6 it is a trivially evadable control. A single
+ * residential IPv6 allocation is a /64 — eighteen quintillion addresses — so an
+ * attacker rotating within their own prefix would get a fresh 200-failure
+ * ceiling per attempt and the control would bound nothing at all.
+ *
+ * `ipKeyGenerator` collapses IPv6 to a 56-bit prefix and leaves IPv4 addresses
+ * alone, which is why `apiLimiter`, `loginLimiter` and `mailIpCeilingLimiter`
+ * all route through it. This counter is the shared, authoritative version of
+ * exactly that ceiling, so keying it differently from the middleware in front
+ * of it was the worst of both: the local limiter grouped the attacker and the
+ * global one did not.
+ */
 function addressOf(req) {
-  return String(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+  const raw = req.ip ?? req.socket?.remoteAddress;
+  /* No address at all — a socket already gone, or a synthetic request. One
+     shared bucket is the conservative answer: it cannot let anybody past the
+     ceiling, and there is nothing else to key on. */
+  if (!raw) return 'unknown';
+
+  try {
+    return String(ipKeyGenerator(raw));
+  } catch {
+    /**
+     * A malformed address, and ONLY that.
+     *
+     * This catch used to be wide enough to swallow a `ReferenceError` — the
+     * import above was missing, every call threw, and every address in the
+     * world collapsed into the single `unknown` bucket. The tests passed,
+     * because a shared ceiling that is too TIGHT still refuses attackers; lint
+     * is what caught it. The narrow behaviour is kept because an unparseable
+     * address genuinely has to land somewhere, but the failure is now visible
+     * rather than silent.
+     */
+    console.warn('[auth] could not normalise a client address for the failure ceiling');
+    return 'unparseable';
+  }
 }
+
+/**
+ * Test seam for the address key.
+ *
+ * Exported because the bug this guards against was invisible from outside: the
+ * `ipKeyGenerator` import was missing, every call threw, the catch below turned
+ * it into one shared bucket, and the whole suite still passed — a ceiling that
+ * is too tight refuses attackers just as well. Asserting the LIBRARY's grouping
+ * proves nothing about whether this module reaches it.
+ */
+export const __addressKeyForTests = (req) => addressOf(req);
 
 /**
  * Whether this ADDRESS has spent its failure ceiling.

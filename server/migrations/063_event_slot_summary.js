@@ -118,6 +118,34 @@ export default {
         ON events(status, first_slot_start, id)
     `);
 
+    /**
+     * A SECOND index, ordered the other way round, and both are used.
+     *
+     * `EXPLAIN (ANALYZE, BUFFERS)` at 50,000 events settled this rather than
+     * taste. `status IN ('open','closed')` splits a status-leading index into
+     * two ranges, and the concatenation of two ordered ranges is not ordered —
+     * so the planner scanned all 33,334 matching rows and top-N sorted them,
+     * even though the ORDER BY was on the very next column.
+     *
+     * With `first_slot_start` leading, the scan walks in sort order and stops
+     * after sixty: **12.7 ms -> 0.105 ms**, zero heap fetches, 90 index entries
+     * read for a page of 60.
+     *
+     * The status-leading index stays because the exact COUNT still wants it —
+     * that one seeks straight to the 33,334 matching entries instead of
+     * filtering 50,000. Two indexes on a table written by organizers a few
+     * times a day, each with a measured plan behind it, which is the standard
+     * `docs/operations/postgres-scale-measurements.md` sets for adding one.
+     *
+     * `status` is INCLUDEd rather than a key column: it is only ever a filter
+     * here, never a range or an ordering, so it needs to be present for the
+     * scan to stay index-only and does not need to be sorted on.
+     */
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_events_browse_order
+        ON events(first_slot_start, id, status)
+    `);
+
     db.exec(`
       UPDATE events
          SET first_slot_start = (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = events.id)
@@ -135,6 +163,14 @@ export default {
       await db.prepare(`
         CREATE INDEX IF NOT EXISTS idx_events_first_slot_start
           ON events(status, first_slot_start, id)
+      `).run();
+      /* The order-leading twin — see the SQLite half for the query plans.
+         `INCLUDE` on PostgreSQL, so `status` is stored for the filter without
+         entering the b-tree key. SQLite has no INCLUDE and takes it as a
+         trailing key column, which is equivalent for this access pattern. */
+      await db.prepare(`
+        CREATE INDEX IF NOT EXISTS idx_events_browse_order
+          ON events(first_slot_start, id) INCLUDE (status)
       `).run();
       await db.prepare(`
         UPDATE events

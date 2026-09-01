@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 67 tables, 99 indexes, 20 triggers
+ * Contents: 67 tables, 100 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -1059,6 +1059,9 @@ CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
 
 CREATE INDEX IF NOT EXISTS idx_events_audience
       ON events(audience, organization_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_browse_order
+        ON events(first_slot_start, id, status);
 
 CREATE INDEX IF NOT EXISTS idx_events_first_slot_start
         ON events(status, first_slot_start, id);

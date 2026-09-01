@@ -323,9 +323,10 @@ function twoPhaseSql(filters, userId, limit, offset) {
     SELECT e.id, e.title, e.status,
            ${spotsSelect}, ${distanceSelect},
            agg.min_start, agg.max_end, agg.total_spots, agg.total_hours, agg.accepted,
-           page.total_count
+           page_total.total_count
     FROM events e
     JOIN page ON page.event_id = e.id
+    CROSS JOIN page_total
     JOIN users u ON e.organizer_id = u.id
     JOIN agg ON agg.event_id = e.id
     LEFT JOIN organizations org ON org.id = e.organization_id
