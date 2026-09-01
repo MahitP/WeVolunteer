@@ -8,6 +8,7 @@ import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthRespon
 import { recordAudit } from '../auditLog.js';
 import rateLimit from 'express-rate-limit';
 import fs from 'fs';
+import { createRedisLimitStore } from '../redis/limitStore.js';
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ const router = express.Router();
  * enough of them to hit it.
  */
 const exportLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'export' }),
   windowMs: 15 * 60 * 1000, // 15 minutes
   limit: Number(process.env.EXPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 3),
   message: { error: 'Too many export requests from this IP, please try again after 15 minutes' }

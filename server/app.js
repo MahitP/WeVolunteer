@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createRedisLimitStore } from './redis/limitStore.js';
+import { createVolumeLimitStore } from './redis/volumeLimit.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -629,6 +630,7 @@ export const authLimiter = rateLimit({
  * account inert.
  */
 export const signupLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'signup' }),
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.SIGNUP_RATE_LIMIT) || (DEMO_MODE ? 10000 : 300),
   standardHeaders: 'draft-7',
@@ -812,13 +814,26 @@ function apiLimiterKey(req, res) {
  * brake, both are acceptable — and `docs/operations/horizontal-scaling.md`
  * records it as such rather than as a solved problem.
  */
+const API_LIMIT = Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600);
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+  /**
+   * Shared, but not metered per request — see `redis/volumeLimit.js`.
+   *
+   * This limiter sits on every `/api` call, so metering each one exactly would
+   * cost about 6,600 Redis commands per user per month against a free plan that
+   * allows 500 per user at a thousand users. Instead the count is exact
+   * locally, and is reconciled through Redis only once a caller passes a
+   * quarter of the ceiling — which almost nobody ever does, so almost nobody
+   * ever costs a command.
+   */
+  store: createVolumeLimitStore({ name: 'api', limit: API_LIMIT }),
   /* `API_RATE_LIMIT` follows the convention the four limiters above already use
      (`LOGIN_RATE_LIMIT`, `LOGIN_IP_CEILING`, `MAIL_RATE_LIMIT`,
      `REAUTH_RATE_LIMIT`): a deployment that knows its own population can say so,
      and `bin/load-test.mjs` can hold the production number while it measures. */
-  limit: Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600),
+  limit: API_LIMIT,
   keyGenerator: apiLimiterKey,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -1022,6 +1037,7 @@ export const appealLimiter = rateLimit({
    than a guessing control. `appealLimiter`, which bounds actually filing, is
    the one that carries a shared counter. */
 export const appealReadLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'appeal-read' }),
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 1000 : 60,
   standardHeaders: 'draft-7',
@@ -1053,6 +1069,7 @@ export const appealReadLimiter = rateLimit({
    500-group storage ceiling in errorReporter.js is the bound that matters here,
    and it is already durable. */
 export const errorReportLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'error-report' }),
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.ERROR_REPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 20),
   standardHeaders: 'draft-7',
@@ -1065,6 +1082,7 @@ export const errorReportLimiter = rateLimit({
    allowance as every failure-counting limiter above put together, to harden a
    control whose real protection is that it answers slowly and generically. */
 export const lookupLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'lookup' }),
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 5000 : 60,
   standardHeaders: 'draft-7',

@@ -173,10 +173,30 @@ describe('Redis is never a source of truth', () => {
   });
 
   it('the set of modules that touch Redis at all is the reviewed one', () => {
-    /* Four callers, and each is a deliberate decision recorded in
-       docs/operations/upstash.md: two limiter surfaces, two third-party caches,
-       and a read-only status panel. A fifth should arrive with a note here
-       rather than by accident — this list is the review, not a formality. */
+    /**
+     * Every module that may speak to Redis, and why. This list IS the review:
+     * a new entry means somebody decided that concern belongs in shared state,
+     * and had to say so here.
+     *
+     * The set grew when the volume limiters were distributed. Two mechanisms
+     * are in play and the distinction matters more than the count:
+     *
+     *   • EXACT sharing (`redis/limitStore.js`) — every increment metered. Used
+     *     where the limiter ticks rarely and the thing it bounds is abuse:
+     *     mail, re-authentication, appeals, certificate checks, signup, data
+     *     export, issue reports, moderation reports, check-in codes,
+     *     applications, error reports, lookups.
+     *   • APPROXIMATE sharing (`redis/volumeLimit.js`) — exact locally, and
+     *     reconciled through Redis only once a caller approaches the ceiling.
+     *     Used where the limiter ticks on every request and exact metering
+     *     would cost more than the whole free plan: `apiLimiter`, and the
+     *     message send throttle.
+     *
+     * What did NOT change: no route reads or writes user CONTENT through
+     * Redis, nothing here is a source of truth, and `travelRoutes.js` is still
+     * absent by design — its key would derive from a minor's location, which
+     * the test above enforces separately.
+     */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
       .filter(f => /from\s+['"][^'"]*redis\/[a-zA-Z]+\.js['"]/.test(read(f)))
@@ -184,10 +204,16 @@ describe('Redis is never a source of truth', () => {
       .sort();
 
     expect(callers).toEqual([
-      path.join('server', 'app.js'),                      // limiter stores
+      path.join('server', 'app.js'),                      // limiter stores, exact + volume
+      path.join('server', 'applicationLimiter.js'),       // exact: applications per user
+      path.join('server', 'checkinLimiters.js'),          // exact: check-in CODE guessing
+      path.join('server', 'messageThrottle.js'),          // volume: 20 messages a minute
+      path.join('server', 'reportLimiter.js'),            // exact: moderation report abuse
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter
       path.join('server', 'routes', 'geocodeRoutes.js'),  // address cache + throttle
+      path.join('server', 'routes', 'issueRoutes.js'),    // exact: issue reports per hour
+      path.join('server', 'routes', 'privacyRoutes.js'),  // exact: data export requests
       path.join('server', 'routes', 'weatherRoutes.js'),  // forecast cache
     ]);
   });

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 
 import { DEMO_MODE } from './config.js';
 import { limitHandler } from './rateLimitResponse.js';
+import { createRedisLimitStore } from './redis/limitStore.js';
 
 /**
  * Rate limits for check-in codes and for scanning them.
@@ -137,6 +138,7 @@ class TokenBucketStore {
 }
 
 export const checkinScanLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'checkin-scan' }),
   windowMs: 60 * 1000,
   limit: CHECKIN_SCAN_BURST_LIMIT,
   standardHeaders: 'draft-7',
@@ -163,6 +165,7 @@ export const CHECKIN_CODE_RATE_LIMIT = Number(process.env.CHECKIN_CODE_RATE_LIMI
   || (DEMO_MODE ? 1000 : 20);
 
 export const checkinCodeLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'checkin-code' }),
   windowMs: 15 * 60 * 1000,
   limit: CHECKIN_CODE_RATE_LIMIT,
   standardHeaders: 'draft-7',

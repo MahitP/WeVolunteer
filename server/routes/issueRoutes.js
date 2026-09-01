@@ -13,6 +13,7 @@ import {
   validateIssue, sanitiseContext, newIssueId, newReference,
   replyToKeyFor, isSensitive, ISSUE_CATEGORIES,
 } from '../issueReports.js';
+import { createRedisLimitStore } from '../redis/limitStore.js';
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ const router = express.Router();
  * honest use and well short of a useful flood.
  */
 const issueLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'issue' }),
   windowMs: 60 * 60 * 1000,
   limit: Number(process.env.ISSUE_REPORT_LIMIT) || 10,
   standardHeaders: 'draft-7',

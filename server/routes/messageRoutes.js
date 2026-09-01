@@ -15,43 +15,16 @@ import { areFriends, removeFriend } from '../relationships.js';
 import { notificationService } from '../services/notificationService.js';
 import { emitToUser } from '../realtime/events.js';
 import { db } from '../db.js';
+import { checkMessageRateLimit } from '../messageThrottle.js';
 import { recordAudit } from '../auditLog.js';
 import { MESSAGE_MAX_LENGTH, MESSAGE_PAGE_LIMIT, computeConversationLifecycle, decorateConversation, formatMessage, getConversation, getParticipant, isConversationParticipant, listConversationsForUser, newId, otherParticipant, resolveAdminConversation, resolveConversation, resolvePeerConversation } from '../messaging.js';
 
 const router = express.Router();
 
-const sendBuckets = new Map();
-function checkMessageRateLimit(userId) {
-  const now = Date.now();
-  const windowMs = 60_000;
-  const limit = 20;
-  const bucket = (sendBuckets.get(userId) || []).filter(ts => now - ts < windowMs);
-  if (bucket.length >= limit) {
-    sendBuckets.set(userId, bucket);
-    return false;
-  }
-  bucket.push(now);
-  sendBuckets.set(userId, bucket);
-
-  // Opportunistic sweep to prevent unbounded growth from stale buckets
-  if (sendBuckets.size > 5000) {
-    for (const [k, v] of sendBuckets) {
-      const active = v.filter(ts => now - ts < windowMs);
-      if (active.length === 0) sendBuckets.delete(k);
-      else sendBuckets.set(k, active);
-    }
-    // Force eviction if still too large
-    if (sendBuckets.size > 5000) {
-      for (const k of sendBuckets.keys()) {
-        sendBuckets.delete(k);
-        if (sendBuckets.size <= 4000) break;
-      }
-    }
-  }
-
-  return true;
-}
-
+/* The send throttle lives in `server/messageThrottle.js` now — 20 a minute per
+   sender, on a sliding window, shared across instances above half the limit.
+   It was a Map and a closure here, and it was the last piece of rate-limiting
+   state in the application that no instance could see but its own. */
 async function participantIds(conversationId) {
   return (await db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ?')
     .all(conversationId)).map(r => r.user_id);
@@ -244,7 +217,7 @@ router.get('/api/messages/conversations/:id/messages', authenticateToken, async 
 
 router.post('/api/messages/conversations/:id/messages', authenticateToken, async (req, res) => {
   try {
-    if (!checkMessageRateLimit(req.user.id)) {
+    if (!await checkMessageRateLimit(req.user.id)) {
       return res.status(429).json({
         error: 'Too many messages sent too quickly. Please pause for a minute.',
         code: 'rate_limited'
