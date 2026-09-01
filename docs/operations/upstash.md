@@ -405,6 +405,54 @@ is capped by the limit rather than by the attacker's persistence.
 
 ---
 
+### 7.5 What the final pass added, and the setting that removes the constraint
+
+Three more controls became shared, and one became configurable.
+
+| Source | Commands / user / month | Why |
+|---|---|---|
+| Login IP-failure ceiling | ~10 | Counted on FAILURE only. Giving `loginIpCeilingLimiter` a Redis store instead would have billed an increment on every request and a decrement on every success — the 107% figure below — for an identical security property. |
+| `checkinScanLimiter` token bucket | ~2 | 4 commands per scan, and scans are organizer-device actions at events. |
+| Everything from §7.4 | ~130 | |
+
+**About 140 commands per user per month, or 28% of the free plan at 1,000
+users.** The first bottleneck is still not the command allowance.
+
+#### The constraint is the provider's, and it is now one setting
+
+Everything approximate in this design exists because Upstash bills per COMMAND
+and `apiLimiter` sits on every request. Checked 2026-09-01, the free plan is
+500,000 commands, 256 MB, 10 GB bandwidth, **one database**, and pay-as-you-go is
+**$0.20 per 100K commands** — so exact enforcement at the modelled traffic is
+about 6.6M commands, roughly **$13 a month**, which is a real cost rather than an
+impossible one.
+
+Other free tiers meter differently. Aiven and Layerbase both offer Valkey
+(Redis-compatible) free plans that meter storage and connections rather than
+commands. On one of those, exact enforcement is free.
+
+So the strength is a setting, not a property of the code:
+
+```
+RATE_LIMIT_MODE=exact
+```
+
+`rateLimit.multiInstance.test.js` proves that path is exact across two, three and
+four instances today. Moving provider is that variable and a connection string —
+not a design somebody has to do under pressure, which is the state this
+integration was in before.
+
+#### And abuse cannot spend the allowance
+
+A limiter that meters every request turns "send more requests" into "cost the
+operator money". Asserted rather than intended: a caller already refused costs
+nothing to refuse again; one key's spend in a window is capped regardless of
+traffic; spend scales with distinct KEYS, and minting one means holding a
+verified session or another address; and an attack during an outage cannot
+amplify, because the breaker costs one timeout per window.
+
+---
+
 The right-hand column is the version of this integration that was built first
 and then measured. It is kept here because it is the whole argument for §4's
 scoping: the intuitive choice — share every security limiter — breaks the free

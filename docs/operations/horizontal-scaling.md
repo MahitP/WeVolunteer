@@ -147,65 +147,73 @@ Socket.IO servers over a real PostgreSQL and checks that a broadcast made on one
 reaches a client attached to the other — which is precisely the delivery a second
 instance cannot do without it.
 
-### The rate limiters' STORE — all of them are shared now, by two mechanisms
+### The rate limiters — all shared, by three mechanisms
 
-This section has said three different things across three passes, which is worth
-noting because each change was a measurement rather than a change of mind. It
-was "every limiter is per-process". Then it was a split: the security ones
-shared, the volume ones not, on the arithmetic below. It is now a split between
-two ways of sharing, and nothing is left unshared by accident.
+This section has now said four things across four passes, each a measurement
+rather than a change of mind: every limiter per-process; then a split by
+security-versus-volume; then a split between two ways of sharing; and now three,
+with nothing left unshared by accident.
 
 **Exact sharing** (`redis/limitStore.js`) — every increment metered, 3 commands
-each. Used where a limiter ticks rarely and the thing it bounds is abuse:
-`mailLimiter`, `mailIpCeilingLimiter`, `verifyLimiter`, `reauthLimiter`,
-`appealLimiter`, `signupLimiter`, `appealReadLimiter`, `errorReportLimiter`,
-`lookupLimiter`, `exportLimiter`, `issueLimiter`, `reportLimiter`,
-`applicationLimiter`, `checkinScanLimiter`, `checkinCodeLimiter` — and the
-`loginFailures` counter, which is not middleware but is the control that
-actually bounds guessing at one account.
-
-`checkinCodeLimiter` deserves its name in that list. Guessing a check-in code is
-credential guessing, so it is metered exactly rather than approximately, even
-though it looks like a volume limiter from the route table.
+each. For limiters that tick rarely and bound abuse: `mailLimiter`,
+`mailIpCeilingLimiter`, `verifyLimiter`, `reauthLimiter`, `appealLimiter`,
+`signupLimiter`, `appealReadLimiter`, `errorReportLimiter`, `lookupLimiter`,
+`exportLimiter`, `issueLimiter`, `reportLimiter`, `applicationLimiter`,
+`checkinCodeLimiter` — plus the `loginFailures` counter and, new here, the
+**login IP-failure ceiling**.
 
 **Approximate sharing** (`redis/volumeLimit.js`) — exact locally, reconciled
-through Redis only once a caller approaches the ceiling. Used for `apiLimiter`
-and the message send throttle, and the reason is arithmetic:
+only once a caller approaches the ceiling. For `apiLimiter` and the message send
+throttle, because metering every `/api` request costs about 6,600 commands per
+user per month against a plan that allows 500 at a thousand users.
 
-> `apiLimiter` allows 600 requests a quarter hour and sits on every `/api` call.
-> At the traffic modelled in [`upstash.md`](upstash.md) §7.3 — about 2,200 API
-> requests per user per month — metering each one costs 3 commands, so **6,600
-> commands per user per month**. The free plan is 500,000 a month, which at
-> 1,000 users is 500 per user. The naive design is off by more than **thirteen
-> times**. No amount of pipelining fixes a factor of thirteen.
+**A distributed token bucket** (`redis/volumeLimit.js`) — for
+`checkinScanLimiter`, whose policy is burst-plus-refill and cannot be expressed
+by a fixed window without changing it. One Lua script, because refill is
+read-compute-write and two instances doing that with GET/SET issue two tokens
+for one — and the second write restores the first's spent token, so a sustained
+two-instance attack would refill *faster* than configured.
 
-So the volume limiters keep an exact local count, share nothing below a
-threshold, and above it report in batches taking `max(local, shared)` — which
-can only tighten a limit, never loosen one. At the ceiling, refusal is decided
-locally, so a caller being refused cannot drain the allowance by knocking.
+#### The approximation is a setting, not a property of the code
 
-**What this guarantees, honestly.** It is not exact across instances. Each
-instance may serve up to `escalateAt - 1` unreported requests, so the global
-ceiling is bounded by `limit + N x (escalateAt - 1)` against `N x limit` before.
-Measured on two real backend instances with `bin/multi-instance-check.mjs` at a
-limit of 60: instance A allowed 59, instance B then allowed 19, **combined 78
-against a bound of 88 — where two independent limiters would have allowed 120.**
+`RATE_LIMIT_MODE` chooses the strength:
 
-That trade is right for a volume brake and wrong for a credential control, which
-is why the credential controls are in the exact list.
+| mode | across N instances | cost |
+|---|---|---|
+| `coordinated` *(default)* | bounded by `limit + N x (escalateAt - 1)` | zero for callers below the threshold |
+| `exact` | **exactly `limit`**, for any N | 3 commands per request |
+| `local` | `N x limit` | zero |
 
-**Still per-process, deliberately:** `authLimiter`, `loginLimiter` and
-`loginIpCeilingLimiter`. All three set `skipSuccessfulRequests`, which bills an
-increment on every request and a decrement on every success — so the common case,
-somebody signing in correctly, is the expensive one, and sharing them comes to
-107% of the monthly allowance at 1,000 users on its own (upstash.md §7.3). They
-are the per-device layer over `loginFailures`, which IS shared.
+The default is approximate for **one** reason: Upstash bills per COMMAND, and
+`apiLimiter` sits on every request. That is the provider's pricing model, not a
+fact about Redis — Aiven's and Layerbase's free Valkey tiers meter connections
+and storage instead, and on one of those `exact` costs nothing extra. Moving to
+such a provider is therefore one environment variable, not a rewrite, and
+`rateLimit.multiInstance.test.js` proves the exact path works today across two,
+three and four instances.
 
-**And the keying interacts with this.** `apiLimiter` is keyed on the verified
-session rather than the address, so the live bucket count tracks concurrent
-users rather than egress addresses — more buckets, each smaller. That makes
-sharing more expensive, not less, which is another reason the volume path
-coordinates on approach instead of on every request.
+`local` exists so an operator can take a limiter out of a Redis incident without
+a deploy. An unrecognised value stops the boot rather than defaulting.
+
+#### Abuse cannot buy commands
+
+Asserted, not intended: a caller already refused costs nothing to refuse again
+(5,000 further requests spent zero); one key's spend in a window is capped at
+`(limit - escalateAt) / batch + 1` reports however much traffic it sends; spend
+scales with distinct KEYS rather than volume, and minting a key means holding a
+verified session or another address; and an attack during a Redis outage cannot
+amplify, because the breaker costs one timeout per window.
+
+#### Still per-process, deliberately
+
+`authLimiter` and `loginLimiter`. Both set `skipSuccessfulRequests`, which bills
+an increment on every request and a decrement on every success — so the common
+case, somebody signing in correctly, is the expensive one, and sharing the
+sign-in limiters that way comes to 107% of the monthly allowance at a thousand
+users (`upstash.md` §7.3). They are the per-device fast path in front of two
+controls that ARE shared: `loginFailures` per account, and the IP-failure
+ceiling. Counting failures explicitly costs commands only when a sign-in fails —
+about ten per user per month for an identical security property.
 
 ### Other process-local state, classified
 
@@ -219,7 +227,9 @@ Re-audited after the adapter work. Every piece of module-level mutable state in
 | `express-rate-limit` stores | five security limiters | **shared — done.** See above for which, and why the rest are not. |
 | `express-rate-limit` stores | the volume limiters | **shared, approximately — done.** `redis/volumeLimit.js`; bounded error, see above. |
 | `express-rate-limit` stores | the three sign-in limiters | **per-process, deliberately.** Sharing them alone is 107% of the monthly allowance; the per-account control they sit over IS shared. |
-| `checkinScanLimiter`'s token bucket | `checkinLimiters.js` | **per-process, deliberately.** A token bucket — burst capacity plus sustained refill — not a fixed window, so the shared store cannot express it without changing the policy. Keyed per organizer device, and it protects a kiosk from a scanner held down rather than an account from being guessed at. On a second instance this becomes per-instance burst; a distributed token bucket is expressible in Lua if that ever matters. |
+| `checkinScanLimiter`'s token bucket | `checkinLimiters.js` | **shared — done.** A distributed token bucket in one Lua script, preserving burst capacity and refill rate exactly. The in-process bucket remains as the fallback, so a Redis outage is a continuation rather than a fresh capacity. |
+| Login IP-failure ceiling | `routes/authRoutes.js` | **shared — done.** Was `loginIpCeilingLimiter`'s in-process store, so N instances allowed N x 200 failures per address — the gap that matters for credential stuffing, which never trips a per-account cap. |
+| `events.first_slot_start` | `eventSummary.js` | **safe — it is derived, not shared state.** A maintained MIN over each event's slots, written in the same transaction as every slot mutation and identical on every instance because it is a function of rows they all see. `bin/verify-event-summaries.mjs` detects and repairs drift. |
 | `typingBuckets` | `realtime/socketServer.js` | **safe, and not what its name suggests.** Declared inside the per-connection handler, so it is per SOCKET rather than per process — a user with two tabs gets two typing budgets today, on one instance. Typing indicators are ephemeral and unlogged; distributing them would cost commands to bound something nobody can abuse meaningfully. |
 | Nominatim pacing reservation | `redis/upstreamThrottle.js` | **shared — done.** The limit is one request per second *for this application in total*, so a per-process reservation was wrong with one instance too. |
 | Rerank budget (`rerankMonth`, `rerankSpent`) | `search/discoverSearch.js` | **safe today, would need attention if reranking is ever switched on.** See below. |
@@ -259,26 +269,29 @@ In order, because each depends on the one before it:
 
 1. **Configure Redis.** `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
    Without them every shared limiter falls back to a correct PER-INSTANCE
-   limiter, which is right for one instance and multiplies for several. This is
-   now a setting, not a build.
+   limiter, which is right for one instance and multiplies across several.
 2. **Turn the Socket.IO adapter on** — `REALTIME_ADAPTER=postgres` plus a
    session-mode or direct `REALTIME_ADAPTER_URL`. Built and tested; see above.
-3. **Lower `escalateAt` if the approximation is too loose for the population.**
-   The volume limiters' bound is `limit + N x (escalateAt - 1)`; the default
-   threshold is a quarter of the limit. Halving it halves the slop and roughly
-   doubles the commands spent by heavy callers. Re-read upstash.md §7.3 against
-   the real population before moving it.
+3. **Decide the limiter strength.** `RATE_LIMIT_MODE=coordinated` (the default)
+   is bounded by `limit + N x (escalateAt - 1)`; `exact` is exactly `limit` for
+   any N and costs 3 commands a request, which the Upstash free plan cannot
+   carry and a connection-metered provider would not notice.
 4. **A shared rerank counter**, but only if reranking is enabled by then.
 5. **Re-check `DATABASE_POOL_MAX` against the real concurrency**, not against
    this document. The knee moves with concurrent requests — §5.
 6. **Lift the refusal in `instanceLock.js`**, which is one line and must be last,
    not first.
 
-Everything above except step 6 is now a setting rather than a build. The
-scheduler leases, the job queues, the capacity guard, the realtime adapter and
-the shared limiters are all ready — and `bin/multi-instance-check.mjs` boots two
-real instances against one database and one Redis and asserts it, rather than
-this document asserting it.
+Every step except the last is a setting rather than a build. The scheduler
+leases, the job queues, the capacity guard, the realtime adapter, the shared
+limiters, the distributed token bucket and the login ceiling are all ready — and
+`bin/multi-instance-check.mjs` boots two real instances against one database and
+one Redis and asserts it, rather than this document asserting it.
+
+**What is left is a judgement, not an implementation.** Running two instances
+means choosing between a bounded approximation and a per-request Redis cost, and
+that choice depends on the population and the plan. Both are implemented and
+both are tested; the setting is `RATE_LIMIT_MODE`.
 
 ---
 

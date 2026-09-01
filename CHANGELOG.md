@@ -75,6 +75,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is one environment variable. Tested with two real Socket.IO servers proving a
   broadcast on one reaches a client attached to the other.
 
+### Scaling — the last known gaps
+
+> Six limitations were carried out of the previous pass. All six are closed.
+> The method for each is in `docs/operations/horizontal-scaling.md`.
+
+- **The events browse is no longer linear in event count.** It sorted by the
+  earliest slot, a value computed per row, so the top sixty could not be chosen
+  without computing it for every candidate — and no index could help, because
+  the value existed nowhere to index. `events.first_slot_start` stores it and
+  the sort becomes a range scan: **66.6 ms → 5.7 ms at 10,000 events, 361.5 ms →
+  19.1 ms at 50,000.** The only derived value the schema stores, and the
+  distinction that permits it is that it is a derived *index*, not a derived
+  *fact*: exactly reconstructible from the same database, unlike credited hours,
+  which are a claim about the world. A checker detects drift and repairs it.
+- **Check-in scanning is a distributed token bucket.** Its burst-plus-refill
+  policy cannot be expressed by a fixed window, so the bucket itself is
+  distributed — one Lua script, because two instances doing read-compute-write
+  refill would issue two tokens for one and refill faster than configured.
+- **The sign-in address ceiling is shared.** It was in-process, so N instances
+  allowed N × 200 failures per address — the gap that matters for credential
+  stuffing, which never trips a per-account cap.
+- **The volume-limiter approximation is now a setting.** `RATE_LIMIT_MODE=exact`
+  is globally exact for any number of instances, proved for two, three and four.
+  It is not the default only because Upstash bills per command; on a plan that
+  meters connections instead, exact costs nothing. Changing provider is one
+  environment variable rather than a rewrite.
+- **Abuse cannot buy Redis commands.** A refused caller costs nothing to refuse
+  again; one key's spend in a window is capped however much traffic it sends.
+- **The transaction pooler is tested rather than argued.** Eight properties
+  against a real pooler, including that no named prepared statement survives —
+  the compatibility decision the whole PostgreSQL deployment rests on.
+
 ### Deliberately measured and left alone
 
 - **Two notification loops were not batched.** `notifyPromotions` and the bulk

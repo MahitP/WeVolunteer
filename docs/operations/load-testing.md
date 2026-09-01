@@ -582,6 +582,35 @@ the first version of this check did exactly that.
 
 ---
 
+### 7.7 The pooler, as a behaviour suite rather than a load run
+
+§7.5 runs the scenarios through pgbouncer in transaction mode, which proves the
+application WORKS there. `server/pooler.behaviour.test.js` proves the specific
+properties the deployment depends on, and is gated on `TEST_POOLER_URL` the way
+the PostgreSQL suites are gated on `TEST_POSTGRES_URL`:
+
+```
+pool_mode = transaction
+TEST_POOLER_URL=postgres://you@127.0.0.1:6543/wv_pool
+```
+
+| property | why it matters |
+|---|---|
+| 200 statements through a pool of 6 | the backend under a client changes repeatedly |
+| **`pg_prepared_statements` empty** after 120 executions | the compatibility decision in `postgresConnection.js`, measured |
+| a transaction stays on one backend | `SELECT … FOR UPDATE` then UPDATE — the capacity guard means nothing otherwise |
+| 20 concurrent transactions total exactly 20 | no lost update through the pooler |
+| rollback leaves nothing | |
+| the pool recovers after a failed statement | the abort behaviour that broke migration 063's first guard |
+| more work than clients queues rather than errors | |
+
+**Still unverified:** Supabase's own network path and Supavisor's particular
+build. This proves the application is correct against transaction pooling as a
+protocol behaviour, which is the part that was in doubt — not that one vendor's
+implementation of it behaves identically.
+
+---
+
 ## 8. What the load test does not cover
 
 - **Real network latency to a real provider.** §5 injects a plausible constant.
