@@ -275,6 +275,34 @@ test('the Accessibility Statement is reachable and says what it must', async ({ 
   await expect(page, 'the statement link does not reach the Legal Center document')
     .toHaveURL(/\/legal\/accessibility-statement/);
 
+  /**
+   * Wait for the DOCUMENT, not for the shell.
+   *
+   * This test was order-dependent: green alone, red alongside its siblings. The
+   * reason is that all three waits above can be satisfied while the previous
+   * page is still on screen. Routing is client-side, so the URL changes
+   * immediately — `toHaveURL` passes — and the settings page's own `<main>` is
+   * still mounted, so the `waitFor({ state: 'visible' })` matches THAT element
+   * rather than the one the statement will render into.
+   *
+   * `innerText` was therefore read from the accessibility settings page, and the
+   * assertions below ran against its copy. Alone the fetch usually won the race;
+   * with eight tests' worth of work ahead of it, it usually lost. The captured
+   * failure snapshot is the settings page, which is what made it legible.
+   *
+   * An auto-retrying assertion is the fix rather than a longer fixed wait: it
+   * polls until the content is actually present and fails at the deadline with
+   * the same requirement, so the test's meaning is unchanged and only its timing
+   * assumption is gone. The redundant-looking assertion below is kept anyway —
+   * it carries the message that says WHY the target matters, and if the document
+   * ever stopped naming WCAG both would fail together.
+   */
+  await expect(
+    page.locator('main, #main-content').first(),
+    'the statement document never rendered — the assertions below would have '
+    + 'measured whatever page was still on screen'
+  ).toContainText(/wcag 2\.2/i, { timeout: 20000 });
+
   const text = (await page.locator('main, #main-content').first().innerText()).toLowerCase();
 
   expect(text, 'the statement does not name its WCAG target').toContain('wcag 2.2');

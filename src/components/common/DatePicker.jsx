@@ -515,8 +515,33 @@ export default function DatePicker({
           disabled={disabled}
           aria-invalid={error ? 'true' : undefined}
           aria-describedby={describedByIds || undefined}
+          /**
+           * `aria-haspopup` but deliberately NOT `aria-expanded`.
+           *
+           * axe (WCAG 2.2 AA, rule `aria-allowed-attr`) rejects
+           * `aria-expanded` here, and it is right to: this element's implicit
+           * role is `textbox`, which supports `aria-haspopup` — a text field may
+           * legitimately announce that a dialog can be opened from it — but does
+           * NOT support `aria-expanded`. That attribute belongs to the roles
+           * whose own expanded state is the point, `button` and `combobox`.
+           *
+           * It conveyed nothing before being removed. An invalid attribute is
+           * not a fact a screen reader relays; it is one it discards, so nothing
+           * is lost here and one AA violation goes away.
+           *
+           * The expanded state IS exposed, on the toggle button below, which is
+           * a `button` and therefore supports it — and that button is the
+           * control whose state a reader actually needs.
+           *
+           * Making the input `role="combobox"` would also satisfy the rule and
+           * would be the wrong fix: a combobox promises arrow keys navigate the
+           * popup and that the popup is the primary way to pick a value. Neither
+           * is true here — the popup takes focus separately, and `openOnClick`
+           * only ever OPENS (see the handler below), because closing a calendar
+           * out from under someone placing a caret is not what they asked for.
+           * This is a text field you type a date into, with a calendar beside it.
+           */
           aria-haspopup={openOnClick ? 'dialog' : undefined}
-          aria-expanded={openOnClick ? open : undefined}
           onChange={onTextChange}
           onBlur={onTextBlur}
           /* Opt-in, and only opens — never closes. A second click lands inside a
