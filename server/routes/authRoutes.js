@@ -81,6 +81,64 @@ const loginFailureCounter = createSharedCounter({
   windowMs: LOGIN_FAILURE_WINDOW_MS,
 });
 
+/**
+ * The same counter, keyed on the ADDRESS rather than the account.
+ *
+ * ── The gap this closes ──
+ *
+ * `loginIpCeilingLimiter` in app.js caps failed sign-ins per address at 200 a
+ * quarter hour, and it is `express-rate-limit` with the default in-process
+ * store — so with N instances an attacker gets N x 200. The per-ACCOUNT counter
+ * above is already shared and caps each account at ten however many instances
+ * exist, which stops password guessing at one account. What it does not stop is
+ * credential stuffing: many accounts, a handful of attempts each, which never
+ * trips a per-account cap and is exactly what the address ceiling is for.
+ *
+ * ── Why this is a counter and not a shared store on that limiter ──
+ *
+ * `loginIpCeilingLimiter` sets `skipSuccessfulRequests`, which bills an
+ * increment on EVERY request and a decrement on every success — so the common
+ * case, somebody signing in correctly, becomes the expensive one. Modelled in
+ * `docs/operations/upstash.md` §7.3, sharing the three sign-in limiters that way
+ * comes to 107% of the monthly allowance at a thousand users on its own.
+ *
+ * Counting failures explicitly costs commands only when a sign-in FAILS. At the
+ * modelled 10% failure rate that is about ten commands per user per month
+ * rather than a hundred and fifty, and the security property is identical —
+ * `skipSuccessfulRequests` exists precisely so that only failures count.
+ *
+ * The in-process limiter stays in front of this as the per-device fast path: it
+ * refuses without a network call, and it is a subset of what this enforces.
+ *
+ * The address is hashed before it reaches Redis, for the reason `hashSegment`
+ * gives — a limiter key made of addresses is a list of who tried to sign in.
+ */
+const LOGIN_IP_CEILING = Number(process.env.LOGIN_IP_CEILING) || (DEMO_MODE ? 10000 : 200);
+
+const loginIpFailureCounter = createSharedCounter({
+  name: 'login-ip-failure',
+  windowMs: LOGIN_FAILURE_WINDOW_MS,
+});
+
+/** The address this request came from, as the limiters compute it. */
+function addressOf(req) {
+  return String(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
+}
+
+/**
+ * Whether this ADDRESS has spent its failure ceiling.
+ *
+ * Returns the same shape as `loginLockState` so the caller can treat the two
+ * the same way. Never throws: `createSharedCounter` falls back to its in-process
+ * mirror when Redis is unreachable, which is the behaviour a single instance has
+ * always had.
+ */
+async function ipCeilingState(req) {
+  const { count, resetAt } = await loginIpFailureCounter.peek(addressOf(req));
+  if (count < LOGIN_IP_CEILING) return { locked: false };
+  return { locked: true, minutes: Math.max(1, Math.ceil((resetAt - Date.now()) / 60000)) };
+}
+
 /** Bucket key for a resolved account, or for an identifier that matched none. */
 function throttleKey(userRow, identifier) {
   return userRow ? `id:${userRow.id}` : `anon:${String(identifier).trim().toLowerCase()}`;
@@ -92,8 +150,18 @@ async function loginLockState(key) {
   return { locked: true, minutes: Math.max(1, Math.ceil((resetAt - Date.now()) / 60000)) };
 }
 
-async function recordLoginFailure(key) {
+/**
+ * Records one failure against BOTH buckets: the account (or typed identifier)
+ * and the address.
+ *
+ * Both, not one — they answer different questions. The account bucket stops
+ * guessing at one person's password; the address bucket stops one machine
+ * working through a list of accounts. An attacker who defeats either by
+ * spreading their attempts is still caught by the other.
+ */
+async function recordLoginFailure(key, req = null) {
   await loginFailureCounter.hit(key);
+  if (req) await loginIpFailureCounter.hit(addressOf(req));
 }
 
 /** Clears an account's bucket. Takes the user id, not a typed identifier. */
@@ -584,6 +652,21 @@ router.post('/api/auth/login', async (req, res) => {
      * gated at all. A lock that only covers the password comparison is not a
      * lock on the endpoint.
      */
+    /**
+     * The ADDRESS ceiling is checked alongside the account lock, and before any
+     * branch that describes the account — same reasoning as the note above.
+     * A caller who has exhausted the address ceiling must not still be able to
+     * read the no_such_account / suspended / oauth_only oracles.
+     */
+    const ipCeiling = await ipCeilingState(req);
+    if (ipCeiling.locked) {
+      return res.status(429).json({
+        error: `Too many failed sign-in attempts from this network. Try again in about ${ipCeiling.minutes} minute${ipCeiling.minutes === 1 ? '' : 's'}.`,
+        code: 'network_throttled',
+        retryAfterMinutes: ipCeiling.minutes,
+      });
+    }
+
     const lock = await loginLockState(key);
     if (lock.locked) {
       return res.status(429).json({
@@ -594,7 +677,7 @@ router.post('/api/auth/login', async (req, res) => {
     }
 
     if (!userRow || userRow.account_status === 'deleted') {
-      await recordLoginFailure(key);
+      await recordLoginFailure(key, req);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS
           ? GENERIC_MESSAGE
@@ -677,7 +760,7 @@ router.post('/api/auth/login', async (req, res) => {
     }
 
     if (!await bcrypt.compare(password, userRow.password_hash)) {
-      await recordLoginFailure(key);
+      await recordLoginFailure(key, req);
       return res.status(401).json({
         error: GENERIC_LOGIN_ERRORS ? GENERIC_MESSAGE : 'Incorrect password.',
         code: 'wrong_password'

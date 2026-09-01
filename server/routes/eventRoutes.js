@@ -15,6 +15,7 @@ import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
 import { canSplitEventPage, buildEventPageCte, restrictAggToPage } from '../eventQuery.js';
+import { refreshEventSummary } from '../eventSummary.js';
 import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
@@ -1148,6 +1149,11 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
         );
       }
 
+      /* B2. The slot summary, in the SAME transaction as the slots.
+         Outside it, a concurrent reader sees slots and summary disagreeing —
+         and the browse list's ordering is exactly what that corrupts. */
+      await refreshEventSummary(tx, eventId);
+
       /* C. Tags. Inside the same transaction as the event and its slots: an
          event that saved without the tags the organizer typed is a silent partial
          write, and they would have no way to tell other than reopening it. */
@@ -1530,6 +1536,14 @@ router.put('/api/events/:id', authenticateToken, requireCapAny(['event.edit.own'
           `).run(slotId, eventId, slot.name, slot.description, slot.startDatetime, slot.endDatetime, Number(slot.maxSpots));
         }
       }
+
+      /* 4. The slot summary, last and inside the same transaction.
+         Last because it reads the slots this block has just finished changing;
+         inside because a reader that saw the new slots and the old summary
+         would order the browse list by a value that no longer describes the
+         event. An edit can move the earliest slot later, delete it outright, or
+         introduce a new earliest one, so all three branches above reach here. */
+      await refreshEventSummary(tx, eventId);
     });
 
     let notified = 0;
@@ -1928,6 +1942,7 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
       `).run(newSlotId, newEventId, s.name, s.description,
         shiftIso(s.start_datetime), shiftIso(s.end_datetime), s.max_spots);
     }
+    await refreshEventSummary(db, newEventId);
 
     res.status(201).json({ success: true, id: newEventId });
   } catch (err) {

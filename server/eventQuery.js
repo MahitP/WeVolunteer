@@ -660,8 +660,29 @@ const PHASE1_ORDER = {
   alpha: 'e.title COLLATE nocase ASC',
 };
 
-/** A per-event `MIN(start_datetime)` as a correlated seek, not a fold. */
-const MIN_START_EXPR = '(SELECT MIN(s2.start_datetime) FROM slots s2 WHERE s2.event_id = e.id)';
+/**
+ * The per-event earliest slot, read from the MAINTAINED column.
+ *
+ * ── Why not the correlated subquery it replaced ──
+ *
+ * `(SELECT MIN(s2.start_datetime) FROM slots s2 WHERE s2.event_id = e.id)` is
+ * correct and was an index-only seek, but it is still a value computed PER ROW —
+ * so ordering by it means computing it for every candidate before the top sixty
+ * can be chosen. That is the O(n) the default browse could not shake: 63 ms at
+ * 10,000 events, 370 ms at 50,000.
+ *
+ * `events.first_slot_start` is the same number, stored, so
+ * `idx_events_first_slot_start (status, first_slot_start, id)` answers the whole
+ * ORDER BY as a range scan and the sort disappears.
+ *
+ * The column is maintained inside the same transaction as every slot mutation
+ * (`server/eventSummary.js`), rebuildable from the slots at any time, and
+ * checked for drift by `verifyEventSummaries` — which
+ * `eventSummary.invariant.test.js` runs after exercising every mutation the API
+ * offers. It is an index, not a fact: `agg.min_start` is still computed for the
+ * rows actually returned, and remains what the response reports.
+ */
+const MIN_START_EXPR = 'e.first_slot_start';
 
 /**
  * Whether this request's page can be chosen BEFORE the aggregate is computed.

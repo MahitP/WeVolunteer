@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { DEMO_MODE } from './config.js';
 import { limitHandler } from './rateLimitResponse.js';
 import { createRedisLimitStore } from './redis/limitStore.js';
+import { createTokenBucket } from './redis/volumeLimit.js';
 
 /**
  * Rate limits for check-in codes and for scanning them.
@@ -75,14 +76,31 @@ export const CHECKIN_SCAN_RATE_LIMIT = Number(process.env.CHECKIN_SCAN_RATE_LIMI
  * not depend on whether it compares with `>` or `>=`.
  */
 class TokenBucketStore {
-  constructor({ capacity, refillPerMinute }) {
+  constructor({ name, capacity, refillPerMinute }) {
     this.capacity = capacity;
     this.refillPerMs = refillPerMinute / 60000;
     this.buckets = new Map();
-    /* Declares that this store is per-process, which is what the library's
-       double-counting check reads. One process per database is enforced by
-       instanceLock, so per-process is application-wide here. */
-    this.localKeys = true;
+    /**
+     * The SHARED bucket, when Redis is configured.
+     *
+     * This store used to be purely per-process, on the argument that
+     * `instanceLock` allows only one instance so per-process is
+     * application-wide. That argument is true today and stops being true the
+     * moment a second instance runs — and unlike the window limiters, a token
+     * bucket cannot be approximated by a fixed window without changing the
+     * policy, because the burst allowance is the whole point of scanning a
+     * queue of people at a door.
+     *
+     * So the bucket itself is distributed, atomically, in one Lua script. See
+     * `redis/volumeLimit.js` for why read-modify-write would let two instances
+     * issue two tokens for one — and, worse, refill faster than configured.
+     */
+    this.shared = createTokenBucket({
+      name: name ?? 'bucket', capacity, refillPerMinute,
+    });
+    /* False once a shared bucket exists: the count is no longer this process's
+       own, which is what the library's double-counting check reads. */
+    this.localKeys = false;
   }
 
   init(options) {
@@ -106,17 +124,32 @@ class TokenBucketStore {
 
   async increment(key) {
     const now = Date.now();
-    const bucket = this.#bucket(key, now);
 
+    /**
+     * The local bucket is advanced on EVERY call, whether or not Redis answers.
+     *
+     * That is what makes an outage a continuation rather than a reset: an
+     * instance that loses Redis mid-burst carries on from the tokens it has
+     * been tracking all along, instead of handing the caller a fresh capacity
+     * at exactly the moment coordination stopped. Same reasoning as the local
+     * mirror in `redis/limitStore.js`.
+     */
+    const bucket = this.#bucket(key, now);
     bucket.tokens = Math.min(this.capacity, bucket.tokens + (now - bucket.at) * this.refillPerMs);
     bucket.at = now;
+    const localAllowed = bucket.tokens >= 1;
+    if (localAllowed) bucket.tokens -= 1;
 
-    if (bucket.tokens >= 1) {
-      bucket.tokens -= 1;
-      return { totalHits: 1, resetTime: undefined };
-    }
+    /* The shared bucket decides when it can. It can only ever be at or below
+       this instance's own view — every other instance's scans have also been
+       taken from it — so deferring to it never loosens the limit. */
+    const shared = await this.shared.take(key, now);
+    const allowed = shared ? shared.allowed : localAllowed;
+    const remaining = shared ? shared.tokens : bucket.tokens;
 
-    const msToNextToken = Math.ceil((1 - bucket.tokens) / this.refillPerMs);
+    if (allowed) return { totalHits: 1, resetTime: undefined };
+
+    const msToNextToken = Math.ceil((1 - Math.max(0, remaining)) / this.refillPerMs);
     return {
       totalHits: (this.limit ?? this.capacity) + 1,
       resetTime: new Date(now + msToNextToken),
@@ -138,21 +171,17 @@ class TokenBucketStore {
 }
 
 /**
- * Deliberately NOT moved to the shared Redis store, unlike every other limiter
- * in this file and in app.js.
+ * The burst limiter for check-in scanning — now a DISTRIBUTED token bucket.
  *
- * The store below is a TOKEN BUCKET: a burst capacity that refills at a
- * sustained rate. `createRedisLimitStore` is a fixed window, and swapping one
- * for the other would not be a change of storage, it would be a change of
- * policy — the burst allowance and the refill are the whole point of scanning
- * a queue of people at a door.
+ * This carried a note saying it was deliberately left process-local because a
+ * fixed-window store cannot express burst-plus-refill. That reasoning was right
+ * about the window and wrong about the conclusion: the answer is not to
+ * approximate the bucket with a window, it is to distribute the bucket. See
+ * `redis/volumeLimit.js`.
  *
- * A distributed token bucket is expressible as a Lua script, and is not worth
- * it here: this is keyed per organizer device, it protects a check-in kiosk
- * from a scanner being held down rather than an account from being guessed at,
- * and one process per database is what `instanceLock` enforces today. If a
- * second instance is ever run, this becomes per-instance burst — noted in
- * `docs/operations/horizontal-scaling.md` rather than silently accepted.
+ * The policy is unchanged — same capacity, same refill, same retry-after — and
+ * with Redis unconfigured or unreachable it is exactly the per-process bucket
+ * it has always been.
  */
 export const checkinScanLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -161,6 +190,7 @@ export const checkinScanLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: hashedUserKey,
   store: new TokenBucketStore({
+    name: 'checkin-scan',
     capacity: CHECKIN_SCAN_BURST_LIMIT,
     refillPerMinute: CHECKIN_SCAN_RATE_LIMIT,
   }),

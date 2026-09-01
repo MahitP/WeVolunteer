@@ -4,6 +4,7 @@ import { resolveEngine, postgresConfig, SQLITE, POSTGRES } from './db/engine.js'
 import { PostgresDatabase } from './db/postgresConnection.js';
 import { translatePlaceholders } from './db/sqlPlaceholders.js';
 import { applyPostgresSchema } from './db/postgresSchema.js';
+import { refreshAllEventSummaries } from './eventSummary.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -621,6 +622,12 @@ export function initDatabase() {
       auto_approve INTEGER DEFAULT 0,
       selection_summary TEXT,
       created_at TEXT NOT NULL,
+      /* MIN(start_datetime) over this event's slots, maintained by
+         server/eventSummary.js at every slot mutation and rebuildable from the
+         slots at any time. Stored because the browse list's default sort is on
+         it, and a sort key computed per row cannot be indexed — see that
+         module's header for why this is the one derived value kept here. */
+      first_slot_start TEXT,
       FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
@@ -1888,6 +1895,12 @@ async function seedDatabase() {
   await insertAnnouncement.run('ann-1', 'event-softball', 'user-org-1',
     'Park at the Reichler Park south lot and check in at the snack shack window. ' +
     'Wear closed-toe shoes — anyone on the grill also needs long sleeves.', nowStr);
+
+  /* The slot summary for every seeded event, once, rather than per slot.
+     `refreshEventSummary` is called at each slot mutation on the live write
+     paths; a seeder that inserts hundreds of slots in a row would pay an
+     UPDATE per slot for a value only the last one determines. */
+  await refreshAllEventSummaries(db);
 }
 
 export { db };

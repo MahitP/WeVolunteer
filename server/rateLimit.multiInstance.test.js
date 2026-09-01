@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { __resetRedisConfig } from './redis/redisConfig.js';
 import { __resetRedisUsage, redisUsage } from './redis/redisClient.js';
-import { createVolumeLimitStore } from './redis/volumeLimit.js';
+import { createVolumeLimitStore, createTokenBucket, rateLimitMode } from './redis/volumeLimit.js';
 
 /**
  * Two backend instances, one Redis, one budget.
@@ -62,6 +62,23 @@ function fakeRedis() {
       store.set(key, { value: next, expiresAt });
       return next;
     }
+    if (script.startsWith("local b = redis.call('HMGET'")) {
+      /* The token bucket, reproduced faithfully — a stub that returned a canned
+         "allowed" would pass while the refill arithmetic was wrong. */
+      const e = live(key);
+      const h = e ? e.value : {};
+      const cap = Number(argv[0]);
+      const rate = Number(argv[1]);
+      const now = Number(argv[2]);
+      let tokens = h.t === undefined ? cap : Number(h.t);
+      const at = h.a === undefined ? now : Number(h.a);
+      const elapsed = Math.max(0, now - at);
+      tokens = Math.min(cap, tokens + elapsed * rate);
+      let ok = 0;
+      if (tokens >= 1) { tokens -= 1; ok = 1; }
+      store.set(key, { value: { t: String(tokens), a: String(now) }, expiresAt: Date.now() + Number(argv[3]) });
+      return [ok, String(tokens)];
+    }
     throw new Error(`fakeRedis: unknown script ${script.slice(0, 40)}`);
   }
 
@@ -112,7 +129,10 @@ async function drive(store, key, n) {
 
 let redis;
 beforeEach(() => { __resetRedisUsage(); redis = fakeRedis(); enableRedis(); });
-afterEach(() => { globalThis.fetch = realFetch; disableRedis(); vi.restoreAllMocks(); });
+afterEach(() => {
+  globalThis.fetch = realFetch; disableRedis(); vi.restoreAllMocks();
+  delete process.env.RATE_LIMIT_MODE;
+});
 
 describe('one instance — unchanged, and free', () => {
   it('enforces the limit exactly', async () => {
@@ -351,5 +371,161 @@ describe('message throttle — two instances, one sender', () => {
     for (const k of redis.keys()) {
       expect(k, `raw sender id in a Redis key: ${k}`).not.toContain('user-student-12345');
     }
+  });
+});
+
+/**
+ * `RATE_LIMIT_MODE=exact` — the escape hatch that makes the approximation a
+ * setting rather than a property of the code.
+ *
+ * The default is approximate for one reason only: Upstash bills per command and
+ * `apiLimiter` sits on every request. That is the PROVIDER's pricing model, not
+ * a fact about Redis — several managed Redis and Valkey offerings meter
+ * connections instead. On one of those, exact enforcement is free.
+ *
+ * These tests are what make "upgrade the provider later" true rather than
+ * hopeful: they prove the exact path works today, so the change is one
+ * environment variable and not a rewrite somebody has to design under pressure.
+ */
+describe('exact mode — globally exact for any number of instances', () => {
+  beforeEach(() => { process.env.RATE_LIMIT_MODE = 'exact'; });
+
+  it('two instances together allow exactly the limit, not the bound', async () => {
+    const a = instance();
+    const b = instance();
+    const total = (await drive(a, 'k', LIMIT)) + (await drive(b, 'k', LIMIT));
+    /* Not `<= limit + N x (escalateAt - 1)`. Exactly the limit. */
+    expect(total, 'exact mode allowed more than the limit').toBe(LIMIT);
+  });
+
+  it('three instances together allow exactly the limit', async () => {
+    const [a, b, c] = [instance(), instance(), instance()];
+    const total = (await drive(a, 'k3', LIMIT))
+      + (await drive(b, 'k3', LIMIT))
+      + (await drive(c, 'k3', LIMIT));
+    expect(total).toBe(LIMIT);
+  });
+
+  it('holds when the instances interleave request by request', async () => {
+    const insts = [instance(), instance(), instance(), instance()];
+    let allowed = 0;
+    for (let i = 0; i < LIMIT * 3; i++) {
+      const { totalHits } = await insts[i % insts.length].increment('inter-exact');
+      if (totalHits <= LIMIT) allowed++;
+    }
+    expect(allowed).toBe(LIMIT);
+  });
+
+  it('costs a command per request — which is the trade being made', async () => {
+    const a = instance();
+    await drive(a, 'cost', 20);
+    expect(redis.state.calls, 'exact mode did not meter every request').toBe(20);
+  });
+
+  it('still falls back to a correct per-instance limiter when Redis is down', async () => {
+    const a = instance();
+    redis.state.fail = true;
+    expect(await drive(a, 'exact-outage', LIMIT + 50)).toBe(LIMIT);
+  });
+});
+
+describe('the mode is validated, not guessed', () => {
+  it('refuses a mode it does not know rather than defaulting', () => {
+    /* A typo here would silently change how strictly every volume limit is
+       enforced, which is the kind of thing nobody notices until it matters. */
+    expect(() => rateLimitMode({ RATE_LIMIT_MODE: 'exactly' })).toThrow(/not a known mode/);
+  });
+
+  it('defaults to coordinated when unset', () => {
+    expect(rateLimitMode({})).toBe('coordinated');
+  });
+
+  it('local takes a limiter off Redis without a deploy', async () => {
+    process.env.RATE_LIMIT_MODE = 'local';
+    const a = instance();
+    await drive(a, 'off', LIMIT);
+    expect(redis.state.calls, 'local mode still spoke to Redis').toBe(0);
+  });
+});
+
+/**
+ * The distributed token bucket, which is a different problem from a window.
+ *
+ * Refilling is read-compute-write, so two instances doing it with GET/SET
+ * interleave: both read the same tokens, both refill from the same timestamp,
+ * both write — and the bucket issues two tokens for one while the second write
+ * restores the first's spent token. A sustained two-instance attack would
+ * refill FASTER than the configured rate. One Lua script cannot interleave.
+ */
+describe('distributed token bucket', () => {
+  const CAPACITY = 10;
+  const REFILL_PER_MIN = 60; // one token per second
+
+  function bucketPair() {
+    return [
+      createTokenBucket({ name: 'scan', capacity: CAPACITY, refillPerMinute: REFILL_PER_MIN }),
+      createTokenBucket({ name: 'scan', capacity: CAPACITY, refillPerMinute: REFILL_PER_MIN }),
+    ];
+  }
+
+  it('two instances share ONE burst, not one each', async () => {
+    const [a, b] = bucketPair();
+    const now = Date.now();
+    let allowed = 0;
+    for (let i = 0; i < CAPACITY * 2; i++) {
+      const r = await (i % 2 === 0 ? a : b).take('door', now);
+      if (r?.allowed) allowed++;
+    }
+    expect(allowed, 'the burst was issued twice').toBe(CAPACITY);
+  });
+
+  it('refills at the configured rate, once, across instances', async () => {
+    const [a, b] = bucketPair();
+    const t0 = Date.now();
+    for (let i = 0; i < CAPACITY; i++) await a.take('refill', t0);
+    expect((await a.take('refill', t0))?.allowed, 'the burst did not run out').toBe(false);
+
+    /* Five seconds at one token a second: five tokens, shared — not five each. */
+    const t1 = t0 + 5_000;
+    let allowed = 0;
+    for (let i = 0; i < 20; i++) {
+      const r = await (i % 2 === 0 ? a : b).take('refill', t1);
+      if (r?.allowed) allowed++;
+    }
+    expect(allowed, 'the refill was applied per instance').toBe(5);
+  });
+
+  it('never exceeds capacity however long it idles', async () => {
+    const [a] = bucketPair();
+    const t0 = Date.now();
+    await a.take('idle', t0);
+    /* A year later the bucket must hold `capacity`, not a year of tokens. */
+    const t1 = t0 + 365 * 24 * 3600 * 1000;
+    let allowed = 0;
+    for (let i = 0; i < CAPACITY * 3; i++) if ((await a.take('idle', t1))?.allowed) allowed++;
+    expect(allowed).toBe(CAPACITY);
+  });
+
+  it('a clock that steps backwards does not remove tokens', async () => {
+    /* Clamped in the script deliberately: negative elapsed would DRAIN the
+       bucket, refusing a legitimate scan for a reason nobody could diagnose. */
+    const [a] = bucketPair();
+    const t0 = Date.now();
+    await a.take('clock', t0);
+    const back = await a.take('clock', t0 - 60_000);
+    expect(back?.allowed).toBe(true);
+    expect(back.tokens).toBeLessThanOrEqual(CAPACITY);
+  });
+
+  it('returns null rather than throwing when Redis is unavailable', async () => {
+    const [a] = bucketPair();
+    redis.state.fail = true;
+    expect(await a.take('down')).toBeNull();
+  });
+
+  it('keys are hashed — a door scanner id never reaches Redis in clear', async () => {
+    const [a] = bucketPair();
+    await a.take('organizer-device-9911', Date.now());
+    for (const k of redis.keys()) expect(k).not.toContain('organizer-device-9911');
   });
 });

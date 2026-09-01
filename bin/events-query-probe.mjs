@@ -42,6 +42,7 @@ import { PostgresDatabase } from '../server/db/postgresConnection.js';
 import { translatePlaceholders } from '../server/db/sqlPlaceholders.js';
 import {
   eventQueryFragments, buildEventWhere, buildEventOrder, parseEventFilters, buildAggScope,
+  canSplitEventPage, buildEventPageCte, restrictAggToPage,
 } from '../server/eventQuery.js';
 
 const arg = (name, fallback) => {
@@ -295,37 +296,30 @@ function inline2Sql(filters, userId, limit, offset) {
  * display-only.
  */
 function twoPhaseSql(filters, userId, limit, offset) {
-  const scope = buildAggScope(filters, userId, PG);
   const { where, params } = buildEventWhere(filters, userId, PG);
-  const sort = filters.sort || 'soonest';
 
-  /* The outer WHERE still mentioning `agg` means the split is unavailable. */
-  const needsAggInWhere = /\bagg\./.test(where);
-  const needsAggInSort = sort === 'spots' || sort === 'hours';
-  if (needsAggInWhere || needsAggInSort) return currentSql(filters, userId, limit, offset);
+  /**
+   * The SHIPPED predicate and the SHIPPED builders, not a copy.
+   *
+   * This variant had its own hard-coded phase-1 ordering, and it silently
+   * measured the wrong thing: production moved to the maintained
+   * `events.first_slot_start` column while the probe kept the correlated
+   * subquery it replaced, so the default browse looked barely improved when the
+   * shipped query was doing something else entirely.
+   *
+   * That is the second time a copy in this file has drifted from the route —
+   * the first was its own split predicate, which tested a filter that did not
+   * exist. A probe that reimplements what it measures is measuring itself.
+   */
+  if (!canSplitEventPage(filters, where)) return currentSql(filters, userId, limit, offset);
 
+  const aggScope = buildAggScope(filters, userId, PG);
   const { distanceSelect, spotsSelect, aggCte } = eventQueryFragments({ ...filters, db: PG });
-
-  /* Phase 1's ORDER BY, over event columns and a correlated min_start. */
-  const PHASE1_SORT = {
-    soonest: 'p.min_start IS NULL, p.min_start ASC',
-    deadline: 'e.application_deadline ASC',
-    alpha: 'e.title COLLATE nocase ASC',
-  };
-  const order1 = PHASE1_SORT[sort] || PHASE1_SORT.soonest;
+  const order = buildEventOrder(filters.sort, filters.semanticIds);
 
   const sql = `
-    WITH page AS (
-      SELECT e.id AS event_id,
-             (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS min_start,
-             COUNT(*) OVER () AS total_count
-      FROM events e
-      ${scope?.needsUsers ? 'JOIN users u ON e.organizer_id = u.id' : ''}
-      ${scope?.where ?? ''}
-      ORDER BY ${order1.replace(/\bp\.min_start\b/g, '(SELECT MIN(s2.start_datetime) FROM slots s2 WHERE s2.event_id = e.id)')}, e.id ASC
-      LIMIT @limit OFFSET @offset
-    ),
-    ${aggCte.replace('FROM events e', 'FROM events e JOIN page ON page.event_id = e.id')}
+    WITH ${buildEventPageCte(filters, aggScope, { paginated: true })},
+    ${restrictAggToPage(aggCte)}
     SELECT e.id, e.title, e.status,
            ${spotsSelect}, ${distanceSelect},
            agg.min_start, agg.max_end, agg.total_spots, agg.total_hours, agg.accepted,
@@ -335,17 +329,10 @@ function twoPhaseSql(filters, userId, limit, offset) {
     JOIN users u ON e.organizer_id = u.id
     JOIN agg ON agg.event_id = e.id
     LEFT JOIN organizations org ON org.id = e.organization_id
-    ORDER BY ${SORT_OUTER[sort] || SORT_OUTER.soonest}, e.id ASC
+    ${order}
   `;
   return { sql, params: { ...params, limit, offset } };
 }
-
-/** The outer ordering, re-applied so the page comes back in the right order. */
-const SORT_OUTER = {
-  soonest: 'agg.min_start IS NULL, agg.min_start ASC',
-  deadline: 'e.application_deadline ASC',
-  alpha: 'e.title COLLATE nocase ASC',
-};
 
 const VARIANTS = {
   current: currentSql,
@@ -461,6 +448,16 @@ async function seed(events) {
     WHERE g % 5 <> 0
     ON CONFLICT DO NOTHING
   `, [iso(14), events]);
+
+  /* The maintained summary, backfilled the way migration 063 does it. The
+     seeder writes slots in bulk rather than through the API, so nothing has
+     called `refreshEventSummary`; without this the default browse would order
+     by a column that is NULL everywhere and the probe would measure the
+     tie-break rather than the sort. */
+  await q(`
+    UPDATE events
+       SET first_slot_start = (SELECT MIN(s.start_datetime)::text FROM slots s WHERE s.event_id = events.id)
+  `);
 
   await q(`
     INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)

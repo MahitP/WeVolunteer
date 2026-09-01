@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 67 tables, 98 indexes, 20 triggers
+ * Contents: 67 tables, 99 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -618,7 +618,13 @@ CREATE TABLE IF NOT EXISTS events (
       status TEXT CHECK(status IN ('open', 'closed', 'completed', 'cancelled')) DEFAULT 'open',
       auto_approve INTEGER DEFAULT 0,
       selection_summary TEXT,
-      created_at TEXT NOT NULL, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
+      created_at TEXT NOT NULL,
+      /* MIN(start_datetime) over this event's slots, maintained by
+         server/eventSummary.js at every slot mutation and rebuildable from the
+         slots at any time. Stored because the browse list's default sort is on
+         it, and a sort key computed per row cannot be indexed — see that
+         module's header for why this is the one derived value kept here. */
+      first_slot_start TEXT, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
       FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -1054,6 +1060,9 @@ CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_events_audience
       ON events(audience, organization_id);
 
+CREATE INDEX IF NOT EXISTS idx_events_first_slot_start
+        ON events(status, first_slot_start, id);
+
 CREATE INDEX IF NOT EXISTS idx_events_organization ON events(organization_id);
 
 CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id);
@@ -1419,7 +1428,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 62;
+export const LATEST_MIGRATION_VERSION = 63;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

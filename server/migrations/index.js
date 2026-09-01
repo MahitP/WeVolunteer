@@ -71,6 +71,7 @@ import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
 import schedulerLeases from './062_scheduler_leases.js';
+import eventSlotSummary from './063_event_slot_summary.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -425,7 +426,14 @@ export const MIGRATIONS = [
    * version has been recorded in `schema_migrations` anywhere real, its number
    * is no longer yours to change.
    */
-  schedulerLeases
+  schedulerLeases,
+  /**
+   * 063 — `events.first_slot_start`, and the index the browse sort needs.
+   *
+   * Additive, with its backfill in the same migration so no deployment serves
+   * a page ordered by a column that is NULL everywhere.
+   */
+  eventSlotSummary
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
