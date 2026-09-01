@@ -13,6 +13,7 @@ import { friendsToNotify } from '../relationships.js';
    figures — see the header on `participationCountsFor`. */
 import { participationCountsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
+import { OVERLAPS_SHIFT_SQL } from '../shiftOverlap.js';
 import { db } from '../db.js';
 import { canRunEvent } from '../organizations.js';
 import { slotHasStarted } from '../attendance.js';
@@ -531,7 +532,14 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
 
     // Schedule Conflict Detection
     // Check if the user has any pending, accepted, or waitlisted slots that overlap
-    // with this slot's time. Overlap occurs if existing_start < new_end AND existing_end > new_start.
+    // with this slot's time.
+    /* `OVERLAPS_SHIFT_SQL` rather than the predicate written out here, so that
+       where a clash begins and ends is defined once. This warning and the two
+       automatic paths — the Auto Select draw and waitlist promotion — must agree
+       about the same pair of times, because a student who is told two shifts are
+       back-to-back and is then passed over by a draw for clashing has been given
+       two different answers. The statuses stay wider here on purpose: this is
+       advice to a human who may override it, not a refusal. */
     const overlap = await db.prepare(`
       SELECT a.id as app_id, a.status, e.title, s.name as slot_name, s.start_datetime, s.end_datetime
       FROM applications a
@@ -540,8 +548,7 @@ router.post('/api/events/:id/apply', authenticateToken, requireCap('event.apply'
       WHERE a.user_id = ?
         AND a.status IN ('pending', 'accepted', 'waitlisted')
         AND a.slot_id != ?
-        AND s.start_datetime < ?
-        AND s.end_datetime > ?
+        AND ${OVERLAPS_SHIFT_SQL}
       LIMIT 1
     `).get(req.user.id, slotId, slot.end_datetime, slot.start_datetime);
 

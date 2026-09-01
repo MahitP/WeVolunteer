@@ -99,7 +99,19 @@ export default defineConfig({
         ...shared,
         API_PORT: String(API_PORT),
         BIND_ADDRESS: '127.0.0.1',
-        DEMO_MODE: 'true'
+        DEMO_MODE: 'true',
+        /**
+         * Named explicitly because this `env` is an allowlist, not a spread of
+         * `process.env` — a variable not listed here does not reach the server.
+         *
+         * Forwarded rather than hardcoded to `'1'`, so it is on only when
+         * `bin/a11y-audit.mjs` set it. Running `npx playwright test` directly
+         * gets the ordinary volume limiter, which is the honest default: the
+         * exemption belongs to the audited run, not to the config file. See
+         * A11Y_HARNESS in server/config.js for what it does and does not
+         * exempt.
+         */
+        WEV_A11Y_HARNESS: process.env.WEV_A11Y_HARNESS ?? ''
       }
     },
     {

@@ -9,6 +9,7 @@ import { SERVICE_HOUR_GOAL } from './milestones.js';
 import { creditedHoursFor } from './volunteerStats.js';
 import { grantsFor } from './userCapabilities.js';
 import { eventApplicationEligibility } from './eventEligibility.js';
+import { usersWithClashingAcceptance } from './shiftOverlap.js';
 import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
@@ -1352,6 +1353,7 @@ export async function promoteFromWaitlist(slotId) {
    */
   const slot = await db.prepare(`
     SELECT s.id, s.name, s.max_spots, s.event_id,
+           s.start_datetime, s.end_datetime,
            e.title AS event_title, e.organizer_id, e.status AS event_status,
            e.organization_id, e.audience
     FROM slots s JOIN events e ON e.id = s.event_id
@@ -1393,6 +1395,35 @@ export async function promoteFromWaitlist(slotId) {
    * Skipped rows stay `waitlisted` and keep their position — the queue moves
    * past them rather than dropping them, so a lifted ban or a new membership
    * puts them back in line where they were.
+   *
+   * ── And why a clashing acceptance is asked about in the same breath ──
+   *
+   * It is the same argument with a different fact. Promotion is a new seating
+   * decision taken by the platform, and somebody who has since been accepted to
+   * a shift at this time cannot take this one; promoting them anyway hands the
+   * organizer a name who will not arrive, and it happens with nobody deciding.
+   *
+   * The rule is `usersWithClashingAcceptance`, which is the same rule and the
+   * same boundary the Auto Select draw applies — the two paths must agree,
+   * because they are the same platform making the same automatic decision at
+   * two different moments, and a student passed over by one and seated by the
+   * other would be the platform contradicting itself.
+   *
+   * The skip-don't-drop behaviour above is exactly what makes this humane and
+   * self-healing: this is re-asked on every freed place, so when the clashing
+   * acceptance is withdrawn the student is promoted at the position they held.
+   * That is the reason the draw waitlists a clash rather than rejecting it.
+   *
+   * ── One query, and no lock on the other slot ──
+   *
+   * Asked once for the whole queue rather than per row. The other slots'
+   * acceptances are read without locking them, so in principle somebody could
+   * be accepted elsewhere between this read and the UPDATE below. Locking them
+   * would mean taking row locks on slots in an order set by the data, and two
+   * promotions on two mutually-overlapping slots would each hold what the other
+   * wants — a deadlock in place of a rare and self-correcting stale read, which
+   * the next call to this function fixes. The pre-existing eligibility read
+   * above has the same shape for the same reason.
    */
   const waiting = await db.prepare(`
     SELECT a.id, a.user_id, u.name AS volunteer_name
@@ -1401,9 +1432,14 @@ export async function promoteFromWaitlist(slotId) {
     ORDER BY a.waitlist_order IS NULL, a.waitlist_order ASC, a.applied_at ASC, a.id ASC
   `).all(slotId);
 
+  const clashing = await usersWithClashingAcceptance(
+    db, waiting.map(row => row.user_id), slot,
+  );
+
   const queue = [];
   for (const row of waiting) {
     if (queue.length >= free) break;
+    if (clashing.has(row.user_id)) continue;
     if ((await eventApplicationEligibility(slot, row.user_id)).ok) queue.push(row);
   }
   if (queue.length === 0) return [];

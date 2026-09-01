@@ -35,7 +35,10 @@ test('every route is keyboard-navigable with a visible focus indicator', async (
       /* An off-screen control legitimately has no painted ring — it is not
          rendered where a ring could be seen. Skipping it keeps the finding list
          about controls a person is actually looking at. */
-      if (!step.visibleRing && !step.offScreen) {
+      /* `reallyFocused` guards a stale `document.activeElement`: see the note
+         in measure.mjs. An element that is no longer `:focus`ed has already had
+         its focus styles withdrawn, so reading a ring off it says nothing. */
+      if (!step.visibleRing && !step.offScreen && step.reallyFocused) {
         noRing.push(`${route.path} — ${step.tag} "${step.name}" ${step.outerHTML}`);
       }
       if (step.obscuredBy) {

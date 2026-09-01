@@ -176,7 +176,7 @@ is that the list of reasons it must is short, evidenced and written down in
 [`docs/operations/horizontal-scaling.md`](docs/operations/horizontal-scaling.md).
 
 - **Leader leases for the four periodic sweeps** (`server/schedulerLease.js`,
-  migration 061). The notification sweep, Auto Select, retention and the search
+  migration 062). The notification sweep, Auto Select, retention and the search
   indexer each do a whole scan on a timer, and there is no row for a sweep to
   claim, so two processes would both do the whole scan. Retention is the one that
   matters: the other three are idempotent by construction, and retention deletes.

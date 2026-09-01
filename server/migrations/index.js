@@ -69,7 +69,8 @@ import widenEventCategories from './057_widen_event_categories.js';
 import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
-import schedulerLeases from './061_scheduler_leases.js';
+import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
+import schedulerLeases from './062_scheduler_leases.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -405,16 +406,24 @@ export const MIGRATIONS = [
    * and order-independent beyond that.
    */
   leaderboardCandidates,
+  resyncUnacceptedLegalHashesAgain,
   /**
-   * 061 — leader leases for the four periodic sweeps.
+   * 062 — leader leases for the four periodic sweeps.
    *
    * A standalone table with no foreign keys, so it is order-independent.
    *
-   * Numbered 061 while 060 was still on an unmerged branch, precisely so the
-   * two could not collide — two migrations sharing a version is refused at boot
-   * ("Duplicate migration version"). Both are now here, in order, and the
-   * reservation did its job: nothing had to be renumbered after either had been
-   * applied somewhere.
+   * **Renumbered from 061**, which is why the number is worth a note. This was
+   * written as 061 while 060 was still on an unmerged branch, precisely so the
+   * two could not collide — and then 061 was taken as well, by the legal-hash
+   * repair above, on another branch and at the same time. Two migrations
+   * sharing a version is refused at boot ("Duplicate migration version").
+   *
+   * Renumbering was clean here only because neither had been applied to a real
+   * database from this branch yet. That is the whole lesson: reserving a gap
+   * protects against the collision you can see coming, and nothing protects
+   * against a parallel branch except merging often enough to find out. Once a
+   * version has been recorded in `schema_migrations` anywhere real, its number
+   * is no longer yours to change.
    */
   schedulerLeases
 ];

@@ -105,7 +105,7 @@ async function postgresUp(db) {
 }
 
 export default {
-  version: 61,
+  version: 62,
   name: 'scheduler_leases',
   up,
   postgres: { up: postgresUp },

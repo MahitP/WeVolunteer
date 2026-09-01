@@ -2311,7 +2311,7 @@ larger and would have made the application slower.
   them needed a second service:
 
   - **The scheduler no longer double-runs.** All four periodic sweeps take a
-    leader lease from `scheduler_leases` (migration 061) before running — the
+    leader lease from `scheduler_leases` (migration 062) before running — the
     same conditional-claim idiom `instanceLock.js` and the job workers already
     use. A distributed lock in Redis would have replaced a correct database
     claim with a networked one.

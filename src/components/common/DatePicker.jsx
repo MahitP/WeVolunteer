@@ -516,30 +516,31 @@ export default function DatePicker({
           aria-invalid={error ? 'true' : undefined}
           aria-describedby={describedByIds || undefined}
           /**
-           * `aria-haspopup` but deliberately NOT `aria-expanded`.
+           * `aria-haspopup`, but NOT `aria-expanded`.
            *
-           * axe (WCAG 2.2 AA, rule `aria-allowed-attr`) rejects
-           * `aria-expanded` here, and it is right to: this element's implicit
-           * role is `textbox`, which supports `aria-haspopup` — a text field may
-           * legitimately announce that a dialog can be opened from it — but does
-           * NOT support `aria-expanded`. That attribute belongs to the roles
-           * whose own expanded state is the point, `button` and `combobox`.
+           * This element is a plain text box, and ARIA does not allow
+           * `aria-expanded` on `role="textbox"` — only on roles that own an
+           * expandable region, such as `button` or `combobox`. Setting it here
+           * was invalid ARIA, which axe rates CRITICAL under `aria-allowed-attr`
+           * (WCAG 4.1.2), and an attribute a screen reader is entitled to ignore
+           * is not state anybody was actually being told.
            *
-           * It conveyed nothing before being removed. An invalid attribute is
-           * not a fact a screen reader relays; it is one it discards, so nothing
-           * is lost here and one AA violation goes away.
+           * Nothing is lost by removing it. The toggle immediately below is a
+           * real `button` carrying `aria-expanded={open}`, where the attribute
+           * is both valid and announced, and it is the control whose whole
+           * purpose is opening this calendar — `DatePicker.test.jsx` asserts the
+           * state transition against that button, not against this input.
+           * `aria-haspopup` stays: it IS allowed on a text box, and it is the
+           * part that tells somebody a dialog is available from here.
            *
-           * The expanded state IS exposed, on the toggle button below, which is
-           * a `button` and therefore supports it — and that button is the
-           * control whose state a reader actually needs.
-           *
-           * Making the input `role="combobox"` would also satisfy the rule and
-           * would be the wrong fix: a combobox promises arrow keys navigate the
-           * popup and that the popup is the primary way to pick a value. Neither
-           * is true here — the popup takes focus separately, and `openOnClick`
-           * only ever OPENS (see the handler below), because closing a calendar
-           * out from under someone placing a caret is not what they asked for.
-           * This is a text field you type a date into, with a calendar beside it.
+           * The violation predates this change and was invisible until the
+           * accessibility sweep learned to render `/events/new`, which is the
+           * argument for the sweep rather than against the fix. Making this a
+           * `combobox` instead would satisfy the rule too, but a combobox
+           * promises a controlled popup of options and would want
+           * `aria-controls` and `aria-autocomplete` to go with it — a larger
+           * change to how the field is announced, for a state the adjacent
+           * button already conveys correctly.
            */
           aria-haspopup={openOnClick ? 'dialog' : undefined}
           onChange={onTextChange}

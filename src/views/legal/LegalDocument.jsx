@@ -7,6 +7,7 @@ import PolicyBody from '../../components/legal/PolicyBody';
 /* Shared, so the reason it parses a plain date rather than a timestamp lives in
    one place. See legalDates.js. */
 import { formatLegalDate } from './legalDates';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 
 /**
  * One published document, with its version, effective date and contents list.
@@ -99,6 +100,36 @@ export default function LegalDocument() {
     // carry `tabIndex={-1}` from PolicyBody, which is what makes this land.
     el.focus?.({ preventScroll: true });
   }, [doc, hash]);
+
+  /**
+   * The browser tab says which document this is.
+   *
+   * ── Why it cannot come from PAGE_META ──
+   *
+   * `App.jsx` titles a route from the table, and every document here is the
+   * same route — `/legal/:slug`. The table can say "Legal Center" (and now
+   * does, which is what a reader sees while this is loading and what the
+   * catalogue page itself gets); it cannot say "Privacy Policy", because the
+   * only thing that knows is the document, and the document is fetched.
+   *
+   * ── Why the failure states are titled too ──
+   *
+   * A reader who followed a dead link is the one who most needs the tab to say
+   * something. `doc.title` is the registry's own name for the document, so this
+   * cannot invent a title or drift from the catalogue. "No such document" is
+   * the page's `h1` verbatim; the unavailable case shortens its heading ("This
+   * document is temporarily unavailable") because a tab strip truncates, and
+   * the two words that survive truncation should be the two that matter.
+   *
+   * Falsy while the fetch is in flight, which `useDocumentTitle` treats as
+   * "leave the tab alone" — so the reader keeps the previous page's title for a
+   * moment rather than watching it flicker through a placeholder.
+   */
+  useDocumentTitle(
+    doc?.title
+    || (failure === 'missing' ? 'No such document' : null)
+    || (failure === 'unavailable' ? 'Document unavailable' : null)
+  );
 
   const contents = React.useMemo(
     () => (doc?.markdown ? tableOfContents(parsePolicyMarkdown(doc.markdown)) : []),

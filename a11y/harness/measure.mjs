@@ -14,6 +14,38 @@ export const INTERACTIVE = 'a[href], button, input:not([type="hidden"]), select,
   + ' [tabindex]:not([tabindex="-1"])';
 
 /**
+ * How many Tabs one control may legitimately swallow before it is a trap.
+ *
+ * ── Why this is not a flat number ──
+ *
+ * A native `<input type="date">` is one element containing three SEGMENTS, and
+ * Chromium moves between month, day and year with Tab before letting focus
+ * leave. `document.activeElement` is the same input throughout, so the flat
+ * "three Tabs that do not move focus" rule calls a perfectly escapable date
+ * field a WCAG 2.1.2 keyboard trap. It is not one: a keyboard user tabs through
+ * the segments and out the other side, which is the behaviour the platform
+ * gives every date input on the web.
+ *
+ * Reported on `/hours/external`'s `#ext-date` the moment the sweep started
+ * waiting for content to load — before that it measured the page while the
+ * field was still a skeleton and never reached it, which is how a false
+ * positive and a missing measurement hid each other.
+ *
+ * ── Why it still catches a real trap ──
+ *
+ * The allowance is a small finite number, not an exemption. A date input that
+ * genuinely never releases focus keeps matching and still trips the rule; all
+ * this buys is enough headroom for the segments a browser actually implements
+ * (three for `date`, up to four for `datetime-local` with seconds). Everything
+ * else keeps the original threshold.
+ */
+const SEGMENTED_INPUTS = new Set(['date', 'time', 'datetime-local', 'month', 'week']);
+
+function allowedRepeats(step) {
+  return step.tag === 'INPUT' && SEGMENTED_INPUTS.has(step.type) ? 5 : 2;
+}
+
+/**
  * Presses Tab up to `max` times, recording what focus lands on.
  *
  * Stops early when focus stops moving — a control that keeps focus on Tab is a
@@ -50,6 +82,29 @@ export async function walkFocus(page, max = 150) {
        */
       const sameAsLast = window.__a11yPrevFocused === el;
       window.__a11yPrevFocused = el;
+
+      /**
+       * Whether this element is REALLY focused, and not merely the last thing
+       * `document.activeElement` remembers.
+       *
+       * A native `<input type="date">` holds focus across its month, day and
+       * year segments. On the Tab that finally leaves it, Chromium has already
+       * withdrawn `:focus` — so every focus style reverts — while
+       * `document.activeElement` still reports the input for an instant. Read
+       * in that window the control looks like one with no indicator at all.
+       *
+       * Measured on `/hours/external`: three consecutive reads of `#ext-date`
+       * with `:focus` true and `box-shadow: rgb(237, 248, 242) 0 0 0 3px`, then
+       * a fourth with `:focus` false and `box-shadow: none`. Only the fourth was
+       * reported, as a WCAG 2.4.7 failure against a field that plainly has a
+       * ring, and it cost two CSS "fixes" for a defect that never existed.
+       *
+       * The sweep skips the unfocused read rather than trusting it. A control
+       * that is genuinely focused and genuinely ring-less is untouched by this —
+       * which is how the two real findings on this same run, a dashboard button
+       * and a calendar segment, were still caught.
+       */
+      const reallyFocused = el.matches(':focus');
       const s = getComputedStyle(el);
       const r = el.getBoundingClientRect();
 
@@ -120,6 +175,7 @@ export async function walkFocus(page, max = 150) {
         name,
         outerHTML: el.outerHTML.slice(0, 140).replace(/\s+/g, ' '),
         offScreen: r.bottom < 0 || r.top > innerHeight,
+        reallyFocused,
         visibleRing,
         obscuredBy,
         sameAsLast
@@ -133,7 +189,7 @@ export async function walkFocus(page, max = 150) {
       /* Three consecutive Tabs that do not move focus is a trap, not a slow
          widget. Recorded once, then stop — continuing would record the same
          element ninety more times and bury the finding in its own noise. */
-      if (repeats >= 2) {
+      if (repeats >= allowedRepeats(step)) {
         seen.push({ index: i, ...step, trapped: true });
         break;
       }

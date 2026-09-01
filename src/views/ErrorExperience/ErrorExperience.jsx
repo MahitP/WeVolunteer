@@ -8,6 +8,7 @@ import { copyFor } from './errorCopy';
 import { denialDetail } from './denialDetail';
 import { selectTheme, themeForSeed, modeFor } from './selector';
 import { getTheme } from './themes/index.js';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 
 /**
  * The fullscreen error experience.
@@ -148,14 +149,14 @@ export default function ErrorExperience({
    * the shell (the catch-all 404) or over it (OfflineOverlay), the page's own
    * title is the right one and this must not overwrite it.
    */
-  useEffect(() => {
-    if (!standalone) return;
-    const previous = document.title;
-    document.title = `${title} · ${APP_NAME}`;
-    /* Restored on unmount so navigating away from an error does not leave the
-       error's title on the next page. */
-    return () => { document.title = previous; };
-  }, [standalone, title]);
+  /* `useDocumentTitle` rather than the effect this used to write by hand. The
+     Legal Center needs the same behaviour for a title that comes from data
+     rather than from the route, and two hand-written copies would drift on
+     exactly the details that matter here — whether the app name is appended and
+     whether the previous title is restored. Passing `null` when not standalone
+     is what the hook reads as "leave the tab alone", which is the same
+     condition the guard above expressed. */
+  useDocumentTitle(standalone ? title : null);
 
 
   const experience = (

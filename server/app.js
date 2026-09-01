@@ -11,7 +11,9 @@ import { readFileSync } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import jwt from 'jsonwebtoken';
-import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, JWT_SECRET } from './config.js';
+import {
+  DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, JWT_SECRET, A11Y_HARNESS
+} from './config.js';
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
@@ -835,7 +837,16 @@ export const apiLimiter = rateLimit({
    * parsed or written, and an unsigned request costs one HMAC and a 401. There
    * is nothing to flood.
    */
-  skip: (req) => req.path === '/webhooks/resend',
+  /**
+   * The accessibility harness is the second exemption, and the only other one.
+   *
+   * `A11Y_HARNESS` is false unless `WEV_A11Y_HARNESS=1` is set AND this is not
+   * production, and `server.js` refuses to boot on the combination — see the
+   * constant's own comment in `config.js` for the measurement that motivated it
+   * and for why the ceiling was not simply raised. Nothing else is exempted:
+   * every credential limiter still counts the harness.
+   */
+  skip: (req) => req.path === '/webhooks/resend' || A11Y_HARNESS,
   handler: limitHandler('Too many requests from this device.'),
 });
 

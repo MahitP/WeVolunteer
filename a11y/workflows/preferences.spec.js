@@ -270,38 +270,29 @@ test('the Accessibility Statement is reachable and says what it must', async ({ 
   const { ctx, page } = await openAccessibilitySettings(browser, request, baseURL);
 
   await page.getByRole('link', { name: /accessibility statement/i }).click();
-  await page.locator('main, #main-content').first().waitFor({ state: 'visible', timeout: 20000 });
 
   await expect(page, 'the statement link does not reach the Legal Center document')
     .toHaveURL(/\/legal\/accessibility-statement/);
 
   /**
-   * Wait for the DOCUMENT, not for the shell.
+   * Wait for the DOCUMENT, not for `main`.
    *
-   * This test was order-dependent: green alone, red alongside its siblings. The
-   * reason is that all three waits above can be satisfied while the previous
-   * page is still on screen. Routing is client-side, so the URL changes
-   * immediately — `toHaveURL` passes — and the settings page's own `<main>` is
-   * still mounted, so the `waitFor({ state: 'visible' })` matches THAT element
-   * rather than the one the statement will render into.
+   * `main` is the app shell and was already visible on the Settings page this
+   * navigated from, so `waitFor({ state: 'visible' })` on it returns
+   * immediately and proves nothing. The URL changes synchronously and the
+   * published body is fetched after, which left a window of roughly 300ms where
+   * every assertion below read the Settings panel's own text and the test failed
+   * claiming the statement does not name WCAG 2.2. Measured in the browser: the
+   * stale text at 0ms, an empty main at 100ms, the rendered document by 300ms.
    *
-   * `innerText` was therefore read from the accessibility settings page, and the
-   * assertions below ran against its copy. Alone the fetch usually won the race;
-   * with eight tests' worth of work ahead of it, it usually lost. The captured
-   * failure snapshot is the settings page, which is what made it legible.
-   *
-   * An auto-retrying assertion is the fix rather than a longer fixed wait: it
-   * polls until the content is actually present and fails at the deadline with
-   * the same requirement, so the test's meaning is unchanged and only its timing
-   * assumption is gone. The redundant-looking assertion below is kept anyway —
-   * it carries the message that says WHY the target matters, and if the document
-   * ever stopped naming WCAG both would fail together.
+   * The version line is the wait because it is part of the published document
+   * and cannot be on the page before the document is. Waiting on the WCAG
+   * sentence instead would make the assertion below tautological — it would be
+   * waiting for the very thing it then claims to check.
    */
-  await expect(
-    page.locator('main, #main-content').first(),
-    'the statement document never rendered — the assertions below would have '
-    + 'measured whatever page was still on screen'
-  ).toContainText(/wcag 2\.2/i, { timeout: 20000 });
+  await page.locator('main, #main-content').first()
+    .getByText(/in effect since/i).first()
+    .waitFor({ state: 'visible', timeout: 20000 });
 
   const text = (await page.locator('main, #main-content').first().innerText()).toLowerCase();
 

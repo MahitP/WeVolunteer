@@ -252,12 +252,48 @@ export const LEGAL_DOCUMENTS = [
   },
   {
     slug: 'privacy-policy',
-    version: '1.1',
+    /**
+     * 1.0, like every other document, and it did not stay that way by itself.
+     *
+     * 386c9e9 took this to 1.1 when it added Upstash to the subprocessor table.
+     * That is new sharing rather than a wording fix, so the bump was a
+     * defensible reading of MAJOR/MINOR — but MAJOR/MINOR is not the rule that
+     * applies yet. The one that does is two paragraphs up and in
+     * docs/legal/policies/README.md: "Every document is at version 1.0, and
+     * stays there until launch."
+     *
+     * The reasoning behind the reset decides this. A version number exists to
+     * answer "what did this person agree to, and when", and nobody has agreed to
+     * any version of this document — measured on the pilot database, which holds
+     * one acceptance row in total and it belongs to the Organizer Agreement.
+     * Shipping a Privacy Policy at 1.1 would tell the first real reader they are
+     * looking at the second revision of a document whose first revision nobody
+     * can produce, which is the exact misleading answer the collapse to 1.0 was
+     * performed to avoid.
+     *
+     * The Upstash text itself is untouched and stays. It is correct and it is
+     * the sort of thing a guardian should be able to read; what is wrong is
+     * numbering it as a revision of something nobody was shown. Three sibling
+     * documents were edited in the same week by 16a7a1d — the Terms, the Youth
+     * Safety Guidelines and the Cookie Notice — and all three kept 1.0 and
+     * 2026-08-06 for this reason. This was the only one that did not, and the
+     * only document in the set carrying a version other than 1.0.
+     *
+     * `effectiveAt` returns to 2026-08-06 with it: the field is the date the
+     * version takes effect, not the date of the last edit, which is why the
+     * documents written later carry their own dates (08-13, 08-15, 08-22) and
+     * the ones edited later do not move.
+     *
+     * `legalVersioning.test.js` now fails the build if any document leaves 1.0
+     * while `LEGAL_HASHES_ENFORCED` describes a set nobody has accepted, so this
+     * cannot drift back in quietly the next time a policy changes.
+     */
+    version: '1.0',
     title: 'Privacy Policy',
     consentType: 'acknowledge',
     scope: 'signup',
     summary: 'What we collect, why, who can see it, how long we keep it, and how to get it back or have it deleted.',
-    effectiveAt: '2026-08-30',
+    effectiveAt: '2026-08-06',
     file: '01-privacy-policy.md',
     /* Re-pinned because the Auto Select disclosure was false. It said the draw
        uses "only" total credited hours; v1.3 added the attendance term, which
@@ -270,7 +306,7 @@ export const LEGAL_DOCUMENTS = [
        now carries both edits and hashes to neither branch's value. Computed
        from the merged file with `hashPolicyFile`, which is what
        `legalContent.test.js` checks it against. */
-    contentHash: '55f2e4e72aaea38942506251853224b1b4997b0a079918c36392f340b25be36d',
+    contentHash: '6a186a1a3118b845ccb0bf39bb7ae444fb84108c341c057c15cb2f71ddbe2da0',
     bundledWith: null,
   },
   {

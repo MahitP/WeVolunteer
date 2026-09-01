@@ -57,7 +57,7 @@ whole scan on a timer. There is no row for a sweep to claim, so two processes
 both did the whole scan.
 
 Each now runs inside `withLease()` (`server/schedulerLease.js`), a leader lease
-in the `scheduler_leases` table (migration 061). The lease is taken by a
+in the `scheduler_leases` table (migration 062). The lease is taken by a
 conditional upsert claimed by `WHERE expires_at <= …`, which is the same idiom
 `instanceLock.js` and `notificationWorker.reclaimStaleJobs` already use: the
 **write is the claim**, so two processes issuing it at the same moment produce

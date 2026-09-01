@@ -28,6 +28,7 @@
 import { createRandom, performWeightedSelection } from '../weighting.js';
 import { attendanceRecordsFor } from '../volunteerStats.js';
 import { eventApplicationEligibility } from '../eventEligibility.js';
+import { usersWithClashingAcceptance, shiftsOverlap } from '../shiftOverlap.js';
 import { notificationService } from './notificationService.js';
 import '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
@@ -47,9 +48,60 @@ export async function computeDraw(db, eventId, { runNumber }) {
   const event = await db.prepare('SELECT * FROM events WHERE id = ?').get(eventId);
   if (!event) throw new Error(`Event not found: ${eventId}`);
 
-  const slots = await db.prepare('SELECT * FROM slots WHERE event_id = ?').all(eventId);
+  /**
+   * Slots in a DEFINED order, which they were not in before.
+   *
+   * The bare `SELECT * FROM slots WHERE event_id = ?` returned rows in whatever
+   * order the engine felt like — b-tree order on SQLite, physical order on
+   * PostgreSQL, and neither is promised. That was tolerable while each slot's
+   * draw was independent. It stops being tolerable now that a selection on one
+   * slot can exclude the same volunteer from an overlapping one: WHICH slot they
+   * keep would have been decided by storage layout, and the same event could
+   * resolve differently on the two engines.
+   *
+   * Chronological, then by id. "The earlier shift is the one they keep" is a
+   * rule that can be said out loud to the volunteer who asks, and `id` breaks
+   * the tie between two shifts starting at the same moment so the order is total
+   * rather than merely mostly-defined.
+   *
+   * This does not change who is drawn on any single slot. The seed is
+   * `${eventId}:${slotId}:run-${runNumber}` — per slot, not per position — so
+   * every slot's own lottery is exactly what it was.
+   */
+  const slots = await db.prepare(
+    'SELECT * FROM slots WHERE event_id = ? ORDER BY start_datetime ASC, id ASC'
+  ).all(eventId);
   const selectedIds = [];
   const waitlistIds = [];
+
+  /**
+   * Who this execution has already seated, and when.
+   *
+   * ── The gap this closes ──
+   *
+   * `usersWithClashingAcceptance` reads ACCEPTED rows, and a draw writes
+   * nothing — `computeDraw` is pure with respect to the database by design, so a
+   * result can be reviewed before it takes effect. So the committed-acceptance
+   * check cannot see a selection made two slots ago in this same loop, and a
+   * volunteer pending on two overlapping shifts of one event was selected for
+   * both. One execution, one double-booking, no human involved: the same defect
+   * the cross-event check was written for, reached by the one path that check
+   * structurally cannot see.
+   *
+   * ── Why in memory and not another query ──
+   *
+   * The facts are already here. Re-reading them would mean writing selections
+   * down mid-draw, which would make the draw no longer pure and would need a
+   * transaction around a computation that deliberately has none. An array of
+   * `{userId, start, end}` bounded by the places on one event answers the same
+   * question with no query at all.
+   *
+   * The PREDICATE is the shared one. `shiftsOverlap` is the JavaScript form of
+   * `OVERLAPS_SHIFT_SQL`, asserted equal to it over every arrangement two
+   * intervals can be in, so a shift that touches at the boundary is not a clash
+   * here for exactly the reason it is not a clash anywhere else.
+   */
+  const seatedHere = [];
 
   for (const slot of slots) {
     /**
@@ -128,12 +180,68 @@ export async function computeDraw(db, eventId, { runNumber }) {
      *
      * Not `rejected`, because the organizer did not reject them.
      */
+    /**
+     * And so is anybody who is already accepted to a shift at this time.
+     *
+     * ── Why this belongs in the same place ──
+     *
+     * The reasoning above transfers word for word. A pending application is a
+     * request; the draw is where the place is given and can run weeks later;
+     * seating somebody who cannot come would happen with no human deciding
+     * anything. The only difference is what makes them unable to come.
+     *
+     * Without this the draw would select them, because it reads `pending` rows
+     * on one slot and never looked at what else the applicant holds. Two draws
+     * on two overlapping events would both select the same student, and nothing
+     * afterwards detected it — the organizer plans staffing around a volunteer
+     * who cannot come and finds out when they do not arrive. A HAND-PICKING
+     * organizer is already covered: the applicant list carries `hasConflict` and
+     * `ApplicantReview` renders a red Conflict tag, so a human sees the clash
+     * and decides. A manual acceptance is deliberately still not blocked; taking
+     * the decision away from somebody who has the fact in front of them would be
+     * worse than the problem. The draw is the path with no human in it.
+     *
+     * Waitlisted rather than rejected is what makes it self-healing, and that is
+     * the point: `promoteFromWaitlist` re-asks the same question on every freed
+     * place and skips without dropping, so if the clashing acceptance is
+     * withdrawn the student returns at the position they held. Rejecting would
+     * let an automated draw permanently destroy an application over a clash the
+     * student might resolve five minutes later.
+     *
+     * ── Fairness, since excluding a candidate changes the odds ──
+     *
+     * It changes them in the direction the draw exists to serve. The excluded
+     * student already holds that time, so the spot is one they could not have
+     * used; passing it to the next applicant is strictly better for everyone
+     * else and neutral for them. They end with exactly one of the two shifts,
+     * which is the right outcome — two is a double-booking, zero would punish
+     * them for applying. Which one they keep depends on which event's draw ran
+     * first: arbitrary, but unbiased, and they chose it by overriding a warning
+     * that named the clash.
+     *
+     * ── What this deliberately does NOT do ──
+     *
+     * It reads committed acceptances, so it cannot see selections made earlier
+     * in THIS draw. A student pending on two overlapping slots of the same event
+     * can still be selected for both. Resolving that means deciding which slot
+     * wins, which is a change to how the draw picks people rather than to who is
+     * eligible for it, and it is not this rule's job.
+     */
+    const clashing = await usersWithClashingAcceptance(
+      db, allPending.map(a => a.user_id), slot,
+    );
+
     /* A loop rather than `.filter`, because the predicate is async now.
        `Array.filter` does not await, so it would have compared a promise: the
        truthiness of `.ok` on a pending promise is `undefined`, and every
        applicant would have been waitlisted instead of selected. */
     const pendingApps = [];
     for (const a of allPending) {
+      if (clashing.has(a.user_id)) continue;
+      /* And anybody this same execution has already seated at this time. Same
+         treatment, same reason, same predicate — see `seatedHere` above. */
+      if (seatedHere.some(s => s.userId === a.user_id
+        && shiftsOverlap(s.start, s.end, slot.start_datetime, slot.end_datetime))) continue;
       if ((await eventApplicationEligibility(event, a.user_id)).ok) pendingApps.push(a);
     }
     for (const refused of allPending) {
@@ -176,6 +284,21 @@ export async function computeDraw(db, eventId, { runNumber }) {
       const draw = performWeightedSelection(pendingApps, remainingSpots, randomFn);
       selectedIds.push(...draw.selectedIds);
       waitlistIds.push(...draw.waitlistIds);
+
+      /* Recorded AFTER the draw and only for who it actually chose, so a later
+         overlapping slot sees this one's outcome. Looked up by application id
+         against the pool the draw was given, which is the only place the
+         user behind an id is known here. */
+      const byId = new Map(pendingApps.map(a => [a.id, a]));
+      for (const id of draw.selectedIds) {
+        const chosen = byId.get(id);
+        if (!chosen) continue;
+        seatedHere.push({
+          userId: chosen.user_id,
+          start: slot.start_datetime,
+          end: slot.end_datetime,
+        });
+      }
     }
   }
 

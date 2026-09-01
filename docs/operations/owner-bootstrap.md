@@ -56,6 +56,33 @@ Both confirm interactively, bump `token_version` so existing sessions die, and w
 `revoke-ownership.mjs` refuses to remove the last owner. A platform with no owner has no way
 to make another except this script, and the person who needs it is usually the one locked out.
 
+## The first sign-in, and the second factor
+
+`REQUIRE_ADMIN_2FA` cannot be `false` in production — `config.js` refuses the boot — so an
+owner account with no second factor is refused **every capability** with
+`403 code: tfa_required` until it enrols. That is the policy working, not a fault, and it
+applies on the first production sign-in: an account created by `bootstrap-owners.mjs`, or
+promoted by `grant-ownership.mjs`, has `tfa_enabled = 0`.
+
+It is not a lockout. The enrolment endpoints are gated by `requireAAL2` — "prove it is still
+you", satisfied by re-entering the password — and **not** by `requireCap`, which is the gate
+that consults `tfaRequired`. So the order on first sign-in is:
+
+1. Sign in with the password.
+2. Open Settings → Security. `GET /api/2fa/status` is readable and reports
+   `roleRequires2FA: true`.
+3. Re-verify the password when prompted, then `POST /api/2fa/generate` and
+   `POST /api/2fa/enable` with a code from the authenticator.
+4. Store the recovery codes. Every capability unlocks once a factor is enabled.
+
+Administrative surfaces will refuse with `tfa_required` until step 3 completes, so do this
+before anything else rather than reading the refusal as a broken deployment.
+
+`routes.2faHardening.test.js` pins both halves — that an administrator without a factor is
+refused, **and** that the same account can still reach enrolment. The second case exists
+because adding a `tfaRequired` check to `requireAAL2` would lock every owner out permanently
+while leaving the first case green.
+
 ## Rotation
 
 **Rotate owner passwords on a schedule.** An owner account is the only one on this platform

@@ -43,6 +43,20 @@ if (IS_PRODUCTION && DEMO_MODE) {
   process.exit(1);
 }
 
+/**
+ * The accessibility harness's volume-limiter exemption, refused in production.
+ *
+ * `config.js` already declines to honour the variable when `NODE_ENV` is
+ * production, so this cannot change behaviour — it exists so a deployment that
+ * has the variable set says so and stops, rather than running with an operator
+ * believing an exemption is active. Exactly the treatment above, for exactly the
+ * same reason.
+ */
+if (IS_PRODUCTION && process.env.WEV_A11Y_HARNESS === '1') {
+  console.error('FATAL: WEV_A11Y_HARNESS cannot be enabled in production.');
+  process.exit(1);
+}
+
 import { startNotificationWorker } from './workers/notificationWorker.js';
 import { startExportWorker } from './workers/exportWorker.js';
 import { installShutdownHandlers } from './shutdown.js';

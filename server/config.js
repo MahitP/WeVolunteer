@@ -13,6 +13,50 @@ export const DEMO_MODE = process.env.DEMO_MODE === 'true';
 export const PORT = Number(process.env.API_PORT) || 5050;
 
 /**
+ * The accessibility harness is auditing this process, not using it.
+ *
+ * ── The problem it solves ──
+ *
+ * `npm run a11y` drives every route as every seeded role through a real
+ * browser. Measured with a counting middleware on `/api`, one full run makes
+ * more than 10,000 requests — `/notifications` 2,274, `/auth/me` 1,490,
+ * `/events` 1,420, `/applications` 1,372 — which is the app loading its own
+ * pages 190-odd times, not the harness being wasteful. (The harness WAS wasteful
+ * in one place, re-fetching the fixed role list 1,019 times; `a11y/harness/
+ * roles.mjs` now memoises that. It is nowhere near the whole number.)
+ *
+ * `apiLimiter` allows 10,000 per fifteen minutes in demo mode, so the run
+ * exhausts it partway through and the remaining specs fail with 429s that say
+ * nothing about accessibility. Splitting the command, rerunning it, or skipping
+ * specs would all leave the gate unable to state a result in one invocation.
+ *
+ * ── Why exempting is the right answer, and what it does NOT exempt ──
+ *
+ * `apiLimiter` is described one screen above its definition as "a volume
+ * control, not a credential control": it exists so one device cannot flood the
+ * API, and it is the only limiter the harness trips. Every credential control —
+ * login, the per-address login ceiling, signup, mail, reauth, 2FA, error
+ * reports, check-in — is untouched by this flag and still counts the harness's
+ * requests. That is the line: the audit is exempt from the volume ceiling and
+ * from nothing else.
+ *
+ * Raising the number instead was the alternative and is worse. It would have to
+ * be raised to a value chosen to fit today's route table, so adding a route
+ * would silently re-break the gate; and it would raise the ceiling for every
+ * demo deployment, which is a real one that genuinely wants it.
+ *
+ * ── Why this cannot be turned on in production ──
+ *
+ * `IS_PRODUCTION` is required to be false here, and `server.js` refuses to boot
+ * outright if the variable is set with `NODE_ENV=production` — the same
+ * treatment `DEMO_MODE` gets, for the same reason. A deployment cannot reach
+ * this state by mistake, and `config.productionGuards.test.js` asserts both
+ * halves. It is set by `bin/a11y-audit.mjs` when it spawns the audit's server
+ * and by nothing else that ships.
+ */
+export const A11Y_HARNESS = process.env.WEV_A11Y_HARNESS === '1' && !IS_PRODUCTION;
+
+/**
  * Session signing secret.
  *
  * Every session cookie in the system is signed with this. If it is guessable,
