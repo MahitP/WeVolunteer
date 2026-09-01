@@ -14,6 +14,7 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
+import { canSplitEventPage, buildEventPageCte, restrictAggToPage } from '../eventQuery.js';
 import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
@@ -416,10 +417,58 @@ router.get('/api/events', authenticateToken, async (req, res) => {
      * that needs everything must page — which is what the warning below has been
      * telling them to do.
      */
-    const events = paginated
-      ? await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
+    /**
+     * Two phases when the page can be chosen before the fold, one when it cannot.
+     *
+     * ── What the split buys ──
+     *
+     * The single-phase query folds `agg` over every event that survives the
+     * event-only predicates — a MIN, a MAX, two SUMs over slots and a correlated
+     * `COUNT(*)` over `applications`, per event — and then `LIMIT 60` discards
+     * almost all of it. At 50,000 events that is fifty thousand application
+     * counts computed in order to display sixty. Those values are display fields
+     * on an event card; nothing outside the page reads them.
+     *
+     * So phase 1 picks the page's ids using only the event-only predicates and
+     * an ordering that does not need the fold, and phase 2 folds over those ids.
+     * Measured on a throwaway PostgreSQL at 50,000 events / 80,000 slots /
+     * 320,000 applications, with `bin/events-query-probe.mjs` comparing every
+     * row of both forms:
+     *
+     *     sort: alpha       297.1 ms -> 10.9 ms
+     *     sort: deadline    302.3 ms -> 15.9 ms
+     *     empty result      292.5 ms -> 30.3 ms
+     *     category          323.4 ms -> 61.3 ms
+     *     text search       357.2 ms -> 93.4 ms
+     *
+     * ── And where it does not apply ──
+     *
+     * `canSplitEventPage` refuses when the WHERE mentions the fold — `openOnly`
+     * reads `spots_remaining`, the date range reads `agg.min_start`, `minHours`
+     * reads `agg.total_hours` — or when the sort orders by it. Those requests
+     * take the original statement unchanged, which is what makes this safe to
+     * adopt: it can only alter the paths where the aggregate is display-only.
+     *
+     * The two forms are asserted to return identical rows, at four scales and
+     * across every filter and sort, by the probe and by
+     * `routes.eventsTwoPhase.test.js`.
+     */
+    const split = canSplitEventPage(filters, where);
+
+    const events = split
+      ? await db.prepare(
+        `WITH ${buildEventPageCte(filters, aggScope, { paginated })}, ${restrictAggToPage(aggCte)} `
+        + `${SELECT.replace('COUNT(*) OVER () AS total_count', 'page.total_count')} `
+        + `FROM events e JOIN page ON page.event_id = e.id `
+        + `JOIN users u ON e.organizer_id = u.id JOIN agg ON agg.event_id = e.id `
+        + `LEFT JOIN organizations org ON org.id = e.organization_id ${order}`
+      ).all(paginated
+        ? { ...rowParams, limit, offset }
+        : { ...rowParams, hardCap: EVENTS_MAX_LIMIT })
+      : paginated
+        ? await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
           .all({ ...rowParams, limit, offset })
-      : await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
+        : await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
           .all({ ...rowParams, hardCap: EVENTS_MAX_LIMIT });
 
     /**

@@ -51,6 +51,9 @@
  *                            before/after table; overrides --latency-profile
  *   --soak N                 run the soak instead of the scenarios, for N seconds
  *   --pool-max N             override DATABASE_POOL_MAX for this run
+ *   --otel                   run with OpenTelemetry on, against a loopback sink
+ *   --redis                  run with Redis on, against a loopback Upstash stub
+ *   --redis-latency N        inject N ms per Redis call, to model the real service
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
@@ -183,6 +186,40 @@ const POOL_MAX = arg('pool-max', null);
  * 127.0.0.1, so this cannot reach a vendor even if one is configured.
  */
 const OTEL_ON = process.argv.includes('--otel');
+
+/**
+ * Whether to run with Redis ON, against a LOCAL Upstash-protocol server.
+ *
+ * ── Why local, and why this is not a weaker test ──
+ *
+ * `startServer` strips `UPSTASH_REDIS_REST_URL` and `_TOKEN` so a developer's
+ * shell cannot carry a production credential into a load run, which means every
+ * number this harness has printed was measured with the limiters in their
+ * in-process fallback rather than their deployed mode.
+ *
+ * `--redis` points the real client at `bin/lib/upstash-stub.mjs`, which speaks
+ * Upstash's REST protocol. Every byte the client builds, every Lua script it
+ * sends and every response shape it parses is the real one — only the host is
+ * local. That covers the whole application side, and deliberately leaves out
+ * the wire, which is the part `--redis-latency` puts back: the Redis work
+ * measured a 222 ms warm round trip to the database as configured, and this can
+ * reproduce it without the database.
+ *
+ * It also buys two things the real service cannot give a test safely: failure on
+ * demand, and a command counter that counts what actually arrived rather than
+ * what the application believed it sent.
+ *
+ * Using the REAL Upstash endpoint is refused rather than supported. A load run
+ * is bounded neither in requests nor in keys, the free plan is 500,000 commands
+ * a month for the whole application, and there is one database per account —
+ * so a load test against it would spend production's allowance and write into
+ * production's keyspace.
+ */
+const REDIS_ON = process.argv.includes('--redis');
+const REDIS_LATENCY = Number(arg('redis-latency', 0));
+
+/** The stub, when one is running. */
+let redisStub = null;
 
 /** Counts from the stub, so a run can PROVE instrumentation was actually live. */
 const otelSink = { traceRequests: 0, metricRequests: 0, bytes: 0, server: null, port: 0 };
@@ -498,6 +535,20 @@ async function startServer(port, databaseUrl) {
     env.OTEL_TRACE_SAMPLE_RATE = '1';
   } else {
     delete env.BETTERSTACK_INGESTING_HOST;
+  }
+
+  /**
+   * Redis, pointed at the loopback stub — again AFTER the strip, so the ordering
+   * cannot later be reversed into something that inherits a real credential.
+   * The token is synthetic and the host is unconditionally 127.0.0.1.
+   *
+   * The key prefix is per-run, so nothing this writes could collide with another
+   * environment's keys even if the endpoint were somehow not the stub.
+   */
+  if (REDIS_ON) {
+    env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${redisStub.port}`;
+    env.UPSTASH_REDIS_REST_TOKEN = `load-test-synthetic-${randomUUID()}`;
+    env.UPSTASH_KEY_PREFIX = `loadtest${Date.now()}`;
   }
 
   child = spawn(process.execPath, ['server/server.js'], {
@@ -1230,6 +1281,30 @@ async function main() {
     console.log(`[load] OpenTelemetry ON, exporting to a loopback stub on ${p}.`);
   }
 
+  if (REDIS_ON) {
+    /* Refused explicitly rather than by omission: somebody will try this. */
+    for (const k of ['UPSTASH_REDIS_REST_URL']) {
+      const v = process.env[k];
+      if (v && /upstash\.io/i.test(v)) {
+        console.error(
+          `REFUSING: ${k} in this shell points at a real Upstash database.\n`
+          + '  A load run is bounded neither in requests nor in keys, the free plan is\n'
+          + '  500,000 commands a month for the whole application, and the plan allows one\n'
+          + '  database per account — so this would spend production\'s allowance and write\n'
+          + '  into production\'s keyspace. --redis always uses a local stub.'
+        );
+        process.exit(1);
+      }
+    }
+    const { createUpstashStub } = await import('./lib/upstash-stub.mjs');
+    redisStub = createUpstashStub({ latencyMs: REDIS_LATENCY });
+    redisStub.port = await redisStub.listen();
+    console.log(
+      `[load] Redis ON, against a loopback Upstash stub on ${redisStub.port}`
+      + (REDIS_LATENCY ? ` (+${REDIS_LATENCY}ms injected latency).` : '.')
+    );
+  }
+
   const port = 5100 + Math.floor(Math.random() * 300);
   const appDbUrl = (LATENCY.base > 0 || LATENCY.jitter > 0)
     ? await startLatencyProxy(DB_URL, LATENCY)
@@ -1473,6 +1548,27 @@ try {
    * error that belongs to the harness rather than the application.
    */
   await stopServer();
+  if (REDIS_ON && redisStub) {
+    const st = redisStub.stats();
+    const top = Object.entries(st.byCommand).slice(0, 6)
+      .map(([k, v]) => `${k}=${v}`).join(' ');
+    console.log(
+      `[load] Redis: ${st.requests} requests, ${st.commands} commands `
+      + `(${top}), peak ${st.maxKeys} keys.`
+    );
+    /* A run that reported "Redis was on" while nothing reached it would be
+       worse than no measurement, exactly as with the OTLP sink. */
+    if (st.requests === 0) {
+      console.error(
+        '[load] ** --redis was requested but NOTHING reached the stub. The numbers '
+        + 'from this run do not describe a Redis-enabled server. **'
+      );
+      process.exitCode = 1;
+    }
+    /* Test keys are discarded with the stub itself; nothing outlives the run. */
+    redisStub.clear();
+    await redisStub.close();
+  }
   if (OTEL_ON) {
     console.log(
       `[load] OTLP stub received ${otelSink.traceRequests} trace and `

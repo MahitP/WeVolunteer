@@ -264,11 +264,95 @@ function inline2Sql(filters, userId, limit, offset) {
   return { sql, params: { ...full.params, limit, offset } };
 }
 
+
+/**
+ * Two-phase: choose the page's event ids first, aggregate only those.
+ *
+ * ── The hypothesis ──
+ *
+ * The `agg` CTE computes, for EVERY event, a MIN, a MAX, two SUMs over slots
+ * and a correlated `COUNT(*)` over `applications`. At 50,000 events and 320,000
+ * applications that is fifty thousand correlated counts — and then `LIMIT 60`
+ * throws away 49,940 of them. The aggregate values are only ever DISPLAYED, so
+ * nothing outside the page needs them.
+ *
+ * Phase 1 selects the page using only what the ordering and the event-only
+ * predicates require. `min_start` is still needed to sort by "soonest", but as a
+ * correlated scalar subquery it is an index seek on `idx_slots_event` per
+ * candidate rather than a hash aggregate over the whole slots table — and,
+ * crucially, the four other aggregates and the applications count are not
+ * computed at all.
+ *
+ * Phase 2 folds `agg` over the page's ids only.
+ *
+ * ── Where it does NOT apply ──
+ *
+ * When a filter or a sort needs an aggregate the outer query cannot be split:
+ * `openOnly` reads spots_remaining, the date range reads min_start/max_end,
+ * `minHours` reads total_hours, and the `spots`/`hours` sorts read the fold. In
+ * those cases this variant returns the current SQL unchanged, which is what
+ * makes it safe to adopt — it can only change the paths where the aggregate is
+ * display-only.
+ */
+function twoPhaseSql(filters, userId, limit, offset) {
+  const scope = buildAggScope(filters, userId, PG);
+  const { where, params } = buildEventWhere(filters, userId, PG);
+  const sort = filters.sort || 'soonest';
+
+  /* The outer WHERE still mentioning `agg` means the split is unavailable. */
+  const needsAggInWhere = /\bagg\./.test(where);
+  const needsAggInSort = sort === 'spots' || sort === 'hours';
+  if (needsAggInWhere || needsAggInSort) return currentSql(filters, userId, limit, offset);
+
+  const { distanceSelect, spotsSelect, aggCte } = eventQueryFragments({ ...filters, db: PG });
+
+  /* Phase 1's ORDER BY, over event columns and a correlated min_start. */
+  const PHASE1_SORT = {
+    soonest: 'p.min_start IS NULL, p.min_start ASC',
+    deadline: 'e.application_deadline ASC',
+    alpha: 'e.title COLLATE nocase ASC',
+  };
+  const order1 = PHASE1_SORT[sort] || PHASE1_SORT.soonest;
+
+  const sql = `
+    WITH page AS (
+      SELECT e.id AS event_id,
+             (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS min_start,
+             COUNT(*) OVER () AS total_count
+      FROM events e
+      ${scope?.needsUsers ? 'JOIN users u ON e.organizer_id = u.id' : ''}
+      ${scope?.where ?? ''}
+      ORDER BY ${order1.replace(/\bp\.min_start\b/g, '(SELECT MIN(s2.start_datetime) FROM slots s2 WHERE s2.event_id = e.id)')}, e.id ASC
+      LIMIT @limit OFFSET @offset
+    ),
+    ${aggCte.replace('FROM events e', 'FROM events e JOIN page ON page.event_id = e.id')}
+    SELECT e.id, e.title, e.status,
+           ${spotsSelect}, ${distanceSelect},
+           agg.min_start, agg.max_end, agg.total_spots, agg.total_hours, agg.accepted,
+           page.total_count
+    FROM events e
+    JOIN page ON page.event_id = e.id
+    JOIN users u ON e.organizer_id = u.id
+    JOIN agg ON agg.event_id = e.id
+    LEFT JOIN organizations org ON org.id = e.organization_id
+    ORDER BY ${SORT_OUTER[sort] || SORT_OUTER.soonest}, e.id ASC
+  `;
+  return { sql, params: { ...params, limit, offset } };
+}
+
+/** The outer ordering, re-applied so the page comes back in the right order. */
+const SORT_OUTER = {
+  soonest: 'agg.min_start IS NULL, agg.min_start ASC',
+  deadline: 'e.application_deadline ASC',
+  alpha: 'e.title COLLATE nocase ASC',
+};
+
 const VARIANTS = {
   current: currentSql,
   restricted: restrictedSql,
   inline: inlineSql,
   inline2: inline2Sql,
+  twophase: twoPhaseSql,
   /* `indexed` and `both` reuse the SQL above; what varies is whether the
      composite index exists when they run. */
   indexed: currentSql,

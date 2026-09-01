@@ -641,3 +641,102 @@ export function buildEventOrder(sort, semanticIds = null) {
 
   return `ORDER BY ${SORTS[sort] || SORTS.soonest}, ${tiebreak}`;
 }
+
+/* ── The two-phase page ───────────────────────────────────────────────────── */
+
+/**
+ * Sorts whose ORDER BY reads only EVENT columns, plus `soonest`, which reads a
+ * per-event MIN over slots that a correlated subquery can supply directly.
+ *
+ * `spots` and `hours` are absent on purpose: both order by the fold itself
+ * (`spots_remaining`, `agg.total_hours`), so the page cannot be chosen before
+ * the fold exists. `distance` is absent because the distance expression needs
+ * the SELECT list's bound parameters, and `relevance` because its CASE is built
+ * from a candidate list that already bounds the result to a few hundred ids.
+ */
+const PHASE1_ORDER = {
+  soonest: null,   // supplied by MIN_START_EXPR below
+  deadline: 'e.application_deadline ASC',
+  alpha: 'e.title COLLATE nocase ASC',
+};
+
+/** A per-event `MIN(start_datetime)` as a correlated seek, not a fold. */
+const MIN_START_EXPR = '(SELECT MIN(s2.start_datetime) FROM slots s2 WHERE s2.event_id = e.id)';
+
+/**
+ * Whether this request's page can be chosen BEFORE the aggregate is computed.
+ *
+ * ── The problem being solved ──
+ *
+ * The browse query folds `agg` over every event that survives the event-only
+ * predicates: a MIN, a MAX, two SUMs over slots and a correlated `COUNT(*)`
+ * over `applications`, per event. Then `LIMIT 60` throws almost all of it away.
+ * At 50,000 events that is fifty thousand application counts computed to
+ * display sixty.
+ *
+ * Nothing outside the page needs those values — they are display fields on an
+ * event card. So when the page can be chosen without them, it should be, and
+ * the fold should run over sixty ids instead of fifty thousand.
+ *
+ * ── When it CANNOT be split, and why each case is real ──
+ *
+ * `openOnly` filters on `spots_remaining`; the date range filters on
+ * `agg.min_start`/`agg.max_end`; `minHours` filters on `agg.total_hours`. A
+ * predicate that reads the fold has to run after it. The `spots` and `hours`
+ * sorts order by the fold for the same reason.
+ *
+ * Rather than enumerate those filters here — the mistake that produced a 500
+ * the first time this query was restructured, because the hard-coded list named
+ * a filter that did not exist and missed one that did — this ASKS the WHERE
+ * clause that `buildEventWhere` actually produced whether it mentions the
+ * aggregate. One definition, and it cannot drift from the builder.
+ */
+export function canSplitEventPage(filters, where) {
+  const sort = filters.sort || 'soonest';
+  if (!(sort in PHASE1_ORDER)) return false;
+  /* `agg.` covers the CTE's columns; `spots_remaining` is the SELECT alias the
+     openOnly predicate uses. Either means the fold has to come first. */
+  return !/\bagg\.|spots_remaining/.test(where);
+}
+
+/**
+ * Phase 1: the ids on this page, and the total, without touching the fold.
+ *
+ * `COUNT(*) OVER ()` is evaluated across the whole filtered set before
+ * LIMIT/OFFSET, exactly as it is in the single-phase query, so the total is the
+ * same number and costs nothing extra.
+ *
+ * The tiebreak is `e.id ASC`, unconditionally and identically to
+ * `buildEventOrder` — without a total order `OFFSET` is unsound, and a page
+ * chosen here with a different tiebreak than the one the outer query re-applies
+ * would reorder rows within the page.
+ */
+export function buildEventPageCte(filters, aggScope, { paginated }) {
+  const sort = filters.sort || 'soonest';
+  const order = sort === 'soonest'
+    ? `${MIN_START_EXPR} IS NULL, ${MIN_START_EXPR} ASC`
+    : PHASE1_ORDER[sort];
+
+  return `
+    page AS (
+      SELECT e.id AS event_id, COUNT(*) OVER () AS total_count
+      FROM events e
+      ${aggScope?.needsUsers ? 'JOIN users u ON e.organizer_id = u.id' : ''}
+      ${aggScope?.where ?? ''}
+      ORDER BY ${order}, e.id ASC
+      ${paginated ? 'LIMIT @limit OFFSET @offset' : 'LIMIT @hardCap'}
+    )
+  `;
+}
+
+/**
+ * The aggregate CTE, restricted to the page's ids.
+ *
+ * Takes the same fragment the single-phase query uses and joins `page` into its
+ * FROM, so there is one definition of what the fold computes. Re-deriving it
+ * here would be a second place for the hours floor and the accepted count to
+ * drift.
+ */
+export function restrictAggToPage(aggCte) {
+  return aggCte.replace('FROM events e', 'FROM events e JOIN page ON page.event_id = e.id');
+}
