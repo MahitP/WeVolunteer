@@ -98,6 +98,27 @@ const LABEL = arg('label', 'unlabelled');
  * shared address survives before the ceiling bites.
  */
 const API_LIMIT = Number(arg('api-limit', 1_000_000));
+
+/**
+ * The soak needs a far higher ceiling than a scenario run, and finding that out
+ * took a wasted fifteen minutes.
+ *
+ * `apiLimiter` is keyed on the SESSION, and the soak drives one session for the
+ * whole run — so every request lands in one bucket. A default of a million over
+ * a 900-second soak is about 1,100 requests a second, and once the events query
+ * got fast enough to pass that the limiter began refusing. Refusals are instant,
+ * so throughput then EXPLODED to 10,115 req/s and the run recorded 9.1 million
+ * requests of which 8.8 million were 429s: a soak that measured the rate
+ * limiter's rejection path rather than the application, and therefore said
+ * nothing about leaks.
+ *
+ * The harness noticed — it printed its own "mostly non-2xx" warning — which is
+ * the only reason this was caught rather than published as a memory figure.
+ *
+ * Scaled by duration and headroom rather than raised to a constant, so a longer
+ * soak does not quietly re-enter the same state.
+ */
+const SOAK_API_LIMIT = Number(arg('api-limit', Math.max(1_000_000, Number(arg('soak', 0)) * 50_000)));
 /**
  * Synthetic database round-trip latency, as a named profile.
  *
@@ -518,7 +539,7 @@ async function startServer(port, databaseUrl) {
     REQUIRE_ADMIN_2FA: 'false',
     /* The pool numbers are the point of the exercise. */
     HEALTH_POOL_STATS: 'true',
-    API_RATE_LIMIT: String(API_LIMIT),
+    API_RATE_LIMIT: String(Number(arg('soak', 0)) > 0 ? SOAK_API_LIMIT : API_LIMIT),
     ...(POOL_MAX ? { DATABASE_POOL_MAX: String(POOL_MAX) } : {}),
     /* Sweeps and workers stay ON — they are part of the load. The search
        indexer is a no-op without Pinecone credentials, which is correct: this

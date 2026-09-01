@@ -330,8 +330,33 @@ Nothing leaked in either run. The first 15-minute run *looked* like it had found
 something — 20 req/s and 1,220 timeouts — and that turned out to be the harness
 starving itself (§2.1), which is why the `local` control matters.
 
-**Re-run on the integrated tree** (Redis + OpenTelemetry + this work), same
-15 minutes, same profile, 2,015 users / 1,002 events / 8,092 applications:
+**Final run, with Redis on** (`--soak 900 --redis`), 15 minutes, same profile,
+610,620 requests at 678.5 req/s:
+
+| | result |
+|---|---|
+| non-2xx / errors / timeouts | **0 / 0 / 0** |
+| resident memory | 264 MB → 258 MB; mean of the first half 278 MB, second half **269 MB** |
+| pooled connections | steady at 21 open, **peak waiting 0** |
+| pending notification jobs | 0 → 0 |
+| Redis | 84 requests, 84 commands, 0 keys left behind |
+
+> **The first attempt at this run was invalid, and the harness caught it.** The
+> soak drives ONE session, `apiLimiter` is keyed on the session, and the default
+> ceiling of a million over 900 seconds is about 1,100 requests a second. Once
+> the two-phase events query made the soak fast enough to pass that, the limiter
+> began refusing — and refusals are instant, so throughput exploded to 10,115
+> req/s and the run recorded 9.1 million requests of which 8.8 million were 429s.
+> It measured the rejection path and said nothing about leaks.
+>
+> The harness printed its own "mostly non-2xx" warning, which is the only reason
+> this was noticed rather than published as a memory figure. The soak's ceiling
+> now scales with its duration, so a longer run cannot quietly re-enter that
+> state. **A load harness that cannot tell you it measured the wrong thing is
+> worse than no harness.**
+
+**Earlier run on the integrated tree** (before the volume limiters were shared),
+same 15 minutes, same profile, 2,015 users / 1,002 events / 8,092 applications:
 
 | | result |
 |---|---|
