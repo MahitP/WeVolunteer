@@ -223,7 +223,17 @@ function makeLocalState() {
 
   return {
     counts,
-    bump(localKey, resetAt, delta) {
+    /**
+     * Named `applyDelta` and not `bump`, which is what it wanted to be called.
+     *
+     * `limitStore.js` has an ASYNC `bump`, and `asyncShapes.test.js` guards
+     * unawaited calls by collecting names that are unambiguously async across
+     * the codebase. A second, synchronous `bump` makes that name ambiguous and
+     * the guard starts reporting this file's correct synchronous calls as
+     * abandoned promises. Renaming keeps the guard sharp; adding an exception to
+     * it would have blunted a check that has caught real defects.
+     */
+    applyDelta(localKey, resetAt, delta) {
       const entry = counts.get(localKey);
       if (!entry || entry.resetAt !== resetAt) {
         const fresh = { count: Math.max(0, delta), reported: 0, lastGlobal: 0, resetAt };
@@ -280,7 +290,7 @@ export function createVolumeLimitStore({ name, limit, escalateAt, batch = 25 }) 
          map grows with distinct callers for as long as the process runs. */
       if (now - sweptAt > windowMs) { local.sweep(now); sweptAt = now; }
 
-      const entry = local.bump(localKey, resetAt, 1);
+      const entry = local.applyDelta(localKey, resetAt, 1);
       const { total, reported, lastGlobal } =
         await coordinator.coordinate(key, entry.count, entry, windowMs, now);
       entry.reported = reported;
@@ -297,7 +307,7 @@ export function createVolumeLimitStore({ name, limit, escalateAt, batch = 25 }) 
          operation on the hot path to undo one this design mostly never made.
          No limiter using this store sets that option — asserted in
          `rateLimit.volume.test.js`. */
-      local.bump(`${key}:${resetAt}`, resetAt, -1);
+      local.applyDelta(`${key}:${resetAt}`, resetAt, -1);
     },
 
     async get(key) {

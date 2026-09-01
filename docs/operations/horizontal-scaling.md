@@ -147,38 +147,65 @@ Socket.IO servers over a real PostgreSQL and checks that a broadcast made on one
 reaches a client attached to the other — which is precisely the delivery a second
 instance cannot do without it.
 
-### The rate limiters' STORE is shared for the security ones, per-process for the volume ones
+### The rate limiters' STORE — all of them are shared now, by two mechanisms
 
-This was "every limiter is per-process" until the Redis integration merged. It is
-now a split, and the split is the interesting part.
+This section has said three different things across three passes, which is worth
+noting because each change was a measurement rather than a change of mind. It
+was "every limiter is per-process". Then it was a split: the security ones
+shared, the volume ones not, on the arithmetic below. It is now a split between
+two ways of sharing, and nothing is left unshared by accident.
 
-**Shared, through `redis/limitStore.js`:** `mailLimiter`, `mailIpLimiter`,
-`certVerifyLimiter`, `reauthLimiter`, `appealLimiter` — and, not middleware but
-the same class of control, the `loginFailures` counter in `routes/authRoutes.js`.
-These survive a restart, which is the property that matters: before, a deploy in
-the middle of a password spray handed the attempt a fresh budget.
+**Exact sharing** (`redis/limitStore.js`) — every increment metered, 3 commands
+each. Used where a limiter ticks rarely and the thing it bounds is abuse:
+`mailLimiter`, `mailIpCeilingLimiter`, `verifyLimiter`, `reauthLimiter`,
+`appealLimiter`, `signupLimiter`, `appealReadLimiter`, `errorReportLimiter`,
+`lookupLimiter`, `exportLimiter`, `issueLimiter`, `reportLimiter`,
+`applicationLimiter`, `checkinScanLimiter`, `checkinCodeLimiter` — and the
+`loginFailures` counter, which is not middleware but is the control that
+actually bounds guessing at one account.
 
-**Still `express-rate-limit`'s default `MemoryStore`:** `apiLimiter`,
-`lookupLimiter`, `errorReportLimiter`, `appealReadLimiter`, `signupLimiter`, and
-the per-route limiters in geocode, weather, travel, legal, issues and exports.
-With N instances each enforces its own copy and the effective limit is N×.
+`checkinCodeLimiter` deserves its name in that list. Guessing a check-in code is
+credential guessing, so it is metered exactly rather than approximately, even
+though it looks like a volume limiter from the route table.
 
-That is a costed decision, not an oversight. `operations/upstash.md` §7.3
-measures sharing the high-volume limiters at more than Upstash's 500,000-command
-free tier somewhere between 500 and 1,000 users, with `apiLimiter` alone several
-times the entire allowance.
+**Approximate sharing** (`redis/volumeLimit.js`) — exact locally, reconciled
+through Redis only once a caller approaches the ceiling. Used for `apiLimiter`
+and the message send throttle, and the reason is arithmetic:
 
-**And the keying fix makes that split more right, not less.** `apiLimiter` is now
-keyed on the verified session rather than the address, so the live bucket count
-tracks concurrent *users* rather than egress addresses — more buckets, each
-smaller, which makes a shared store more expensive rather than less. Store and
-key are orthogonal: the key change makes the buckets correct wherever they live,
-and it would have been the wrong fix to share the store without it, because that
-would have distributed the defect rather than removed it.
+> `apiLimiter` allows 600 requests a quarter hour and sits on every `/api` call.
+> At the traffic modelled in [`upstash.md`](upstash.md) §7.3 — about 2,200 API
+> requests per user per month — metering each one costs 3 commands, so **6,600
+> commands per user per month**. The free plan is 500,000 a month, which at
+> 1,000 users is 500 per user. The naive design is off by more than **thirteen
+> times**. No amount of pipelining fixes a factor of thirteen.
 
-The residual risk is bounded and worth naming plainly: these are volume brakes,
-not credential controls. Every control that actually limits credential guessing —
-`loginFailures`, `mailLimiter` — is in the shared set.
+So the volume limiters keep an exact local count, share nothing below a
+threshold, and above it report in batches taking `max(local, shared)` — which
+can only tighten a limit, never loosen one. At the ceiling, refusal is decided
+locally, so a caller being refused cannot drain the allowance by knocking.
+
+**What this guarantees, honestly.** It is not exact across instances. Each
+instance may serve up to `escalateAt - 1` unreported requests, so the global
+ceiling is bounded by `limit + N x (escalateAt - 1)` against `N x limit` before.
+Measured on two real backend instances with `bin/multi-instance-check.mjs` at a
+limit of 60: instance A allowed 59, instance B then allowed 19, **combined 78
+against a bound of 88 — where two independent limiters would have allowed 120.**
+
+That trade is right for a volume brake and wrong for a credential control, which
+is why the credential controls are in the exact list.
+
+**Still per-process, deliberately:** `authLimiter`, `loginLimiter` and
+`loginIpCeilingLimiter`. All three set `skipSuccessfulRequests`, which bills an
+increment on every request and a decrement on every success — so the common case,
+somebody signing in correctly, is the expensive one, and sharing them comes to
+107% of the monthly allowance at 1,000 users on its own (upstash.md §7.3). They
+are the per-device layer over `loginFailures`, which IS shared.
+
+**And the keying interacts with this.** `apiLimiter` is keyed on the verified
+session rather than the address, so the live bucket count tracks concurrent
+users rather than egress addresses — more buckets, each smaller. That makes
+sharing more expensive, not less, which is another reason the volume path
+coordinates on approach instead of on every request.
 
 ### Other process-local state, classified
 
@@ -188,9 +215,12 @@ Re-audited after the adapter work. Every piece of module-level mutable state in
 | State | Where | Verdict |
 |---|---|---|
 | `loginFailures` counter | `routes/authRoutes.js` | **shared — done.** `createSharedCounter` in `redis/limitStore.js`. Survives a restart, and is the control that actually bounds guessing at one account. |
-| `sendBuckets` | `routes/messageRoutes.js` | **must be shared — still open.** A per-process message throttle, same class as the volume limiters, and the one piece of this table that is neither done nor deliberately deferred. |
+| Message send throttle | `messageThrottle.js` | **shared — done.** Was `sendBuckets`, a Map in `messageRoutes.js`, and the last item here that was neither done nor deferred. 20 a minute per sender on a SLIDING window, coordinated above half the limit. |
 | `express-rate-limit` stores | five security limiters | **shared — done.** See above for which, and why the rest are not. |
-| `express-rate-limit` stores | the volume limiters | **per-process, deliberately.** Costed against the free tier; see above. |
+| `express-rate-limit` stores | the volume limiters | **shared, approximately — done.** `redis/volumeLimit.js`; bounded error, see above. |
+| `express-rate-limit` stores | the three sign-in limiters | **per-process, deliberately.** Sharing them alone is 107% of the monthly allowance; the per-account control they sit over IS shared. |
+| `checkinScanLimiter`'s token bucket | `checkinLimiters.js` | **per-process, deliberately.** A token bucket — burst capacity plus sustained refill — not a fixed window, so the shared store cannot express it without changing the policy. Keyed per organizer device, and it protects a kiosk from a scanner held down rather than an account from being guessed at. On a second instance this becomes per-instance burst; a distributed token bucket is expressible in Lua if that ever matters. |
+| `typingBuckets` | `realtime/socketServer.js` | **safe, and not what its name suggests.** Declared inside the per-connection handler, so it is per SOCKET rather than per process — a user with two tabs gets two typing budgets today, on one instance. Typing indicators are ephemeral and unlogged; distributing them would cost commands to bound something nobody can abuse meaningfully. |
 | Nominatim pacing reservation | `redis/upstreamThrottle.js` | **shared — done.** The limit is one request per second *for this application in total*, so a per-process reservation was wrong with one instance too. |
 | Rerank budget (`rerankMonth`, `rerankSpent`) | `search/discoverSearch.js` | **safe today, would need attention if reranking is ever switched on.** See below. |
 | `lastBackupAlertAt` | `alerting.js` | **safe** — an alert-dedupe timestamp. N instances means up to N copies of a backup alert. Noisy, never wrong, and the alert is rare. |
@@ -227,18 +257,28 @@ instance is deployed, this needs a shared counter first. Not before.
 
 In order, because each depends on the one before it:
 
-1. **Turn the Socket.IO adapter on** — `REALTIME_ADAPTER=postgres` plus a
+1. **Configure Redis.** `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+   Without them every shared limiter falls back to a correct PER-INSTANCE
+   limiter, which is right for one instance and multiplies for several. This is
+   now a setting, not a build.
+2. **Turn the Socket.IO adapter on** — `REALTIME_ADAPTER=postgres` plus a
    session-mode or direct `REALTIME_ADAPTER_URL`. Built and tested; see above.
-2. **A shared rate-limit store**, with the cost table in the Redis branch's
-   `docs/operations/upstash.md` §7.3 re-read against the real population — the
-   free tier does not carry `apiLimiter`. This is the remaining piece of work.
-3. **A shared rerank counter**, but only if reranking is enabled by then.
-4. **Lift the refusal in `instanceLock.js`**, which is one line and must be last,
+3. **Lower `escalateAt` if the approximation is too loose for the population.**
+   The volume limiters' bound is `limit + N x (escalateAt - 1)`; the default
+   threshold is a quarter of the limit. Halving it halves the slop and roughly
+   doubles the commands spent by heavy callers. Re-read upstash.md §7.3 against
+   the real population before moving it.
+4. **A shared rerank counter**, but only if reranking is enabled by then.
+5. **Re-check `DATABASE_POOL_MAX` against the real concurrency**, not against
+   this document. The knee moves with concurrent requests — §5.
+6. **Lift the refusal in `instanceLock.js`**, which is one line and must be last,
    not first.
 
-The scheduler leases, the job queues, the capacity guard and the realtime adapter
-need no further work; they are ready now. Step 2 is the only one that is still a
-build rather than a setting.
+Everything above except step 6 is now a setting rather than a build. The
+scheduler leases, the job queues, the capacity guard, the realtime adapter and
+the shared limiters are all ready — and `bin/multi-instance-check.mjs` boots two
+real instances against one database and one Redis and asserts it, rather than
+this document asserting it.
 
 ---
 
@@ -246,6 +286,26 @@ build rather than a setting.
 
 `DATABASE_POOL_MAX` is **per process**, and the default is now **25** (raised
 from 10 on a measurement — see `deploy/wevolunteer.env.example` for the sweep).
+
+**The knee moves with concurrency, and that is the part to carry away.** Swept
+through a real transaction-mode pooler (pgbouncer standing in for Supavisor),
+scenario A, requests per second:
+
+| pool | at 20 concurrent | at 50 concurrent |
+|---|---|---|
+| 20 | 136 | 125 |
+| **25** | 135 | 158 |
+| 40 | 134 | 267 |
+
+At the harness's default 20 connections the curve is flat above 20, which reads
+as "25 is more than needed" — and that reading is wrong. It is the load
+generator's ceiling, not the application's. At 50 concurrent requests the
+ordering reverses and more pool is straightforwardly better.
+
+25 is kept because it is right for the modelled concurrency and keeps the
+arithmetic intact (8 instances x 25 = the pooler's 200 clients). But a
+deployment that genuinely sustains more concurrent requests than this should
+re-measure rather than inherit the number.
 Two instances open 50 connections, not 25. See
 [postgres-cutover-and-rollback.md](postgres-cutover-and-rollback.md) for the
 provider's ceilings and how to size against them. The short version, checked

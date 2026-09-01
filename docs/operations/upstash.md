@@ -366,6 +366,45 @@ That works out at **~98 commands per user per month**.
 | 500 | ~48,800 | 9.8% — comfortable | ~268,000 (54%) — **warning** |
 | 1,000 | ~97,600 | 19.5% — comfortable | ~535,800 (107%) — **exceeded** |
 
+### 7.4 What distributing the volume limiters added
+
+The table above predates the volume limiters being shared. Adding them the
+obvious way — the exact store, on every request — is the design that does not
+fit, and the arithmetic is worth keeping because it is the argument for the
+shape that shipped:
+
+> `apiLimiter` allows 600 requests a quarter hour and sits on every `/api` call.
+> At the traffic modelled above, roughly **2,200 API requests per user per
+> month**, metering each costs 3 commands: **6,600 commands per user per month**,
+> against an allowance that at 1,000 users is 500 per user. **Off by more than
+> thirteen times.** Request volume is the problem, so no amount of pipelining
+> helps.
+
+What shipped instead (`server/redis/volumeLimit.js`) shares nothing until a
+caller passes a quarter of the ceiling, then reports in batches, and decides
+refusals locally once at the limit. Measured against the loopback stub in a load
+run: **161,408 requests produced 15 `EVAL`s.**
+
+Per user per month, added to the ~98 above:
+
+| Source | Commands | Why |
+|---|---|---|
+| Exact-shared low-volume limiters | ~28 | signup, application, export, issue, report, check-in code, error report, lookup, appeal read — 3 commands each, and each ticks a handful of times a month |
+| `apiLimiter` coordination | ~1 | zero for anybody under 150 requests a quarter hour, which is nearly everybody; ~57 for a full 600-request window |
+| Message throttle coordination | ~0.5 | escalates above ten messages a minute, which ordinary use never reaches |
+
+**About 128 commands per user per month, or 25.6% of the free plan at 1,000
+users** — against 19.5% before, and against the >1,300% the naive design would
+have cost. The first bottleneck is still not the command allowance.
+
+Two costs are deliberately variable rather than fixed, and that is the honest
+caveat: both coordination figures scale with ABUSE rather than with users. A
+sustained attack raises them, which is the correct direction — the commands are
+spent bounding the attacker — and refusals themselves cost nothing, so the spend
+is capped by the limit rather than by the attacker's persistence.
+
+---
+
 The right-hand column is the version of this integration that was built first
 and then measured. It is kept here because it is the whole argument for §4's
 scoping: the intuitive choice — share every security limiter — breaks the free

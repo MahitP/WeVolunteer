@@ -137,8 +137,24 @@ class TokenBucketStore {
   }
 }
 
+/**
+ * Deliberately NOT moved to the shared Redis store, unlike every other limiter
+ * in this file and in app.js.
+ *
+ * The store below is a TOKEN BUCKET: a burst capacity that refills at a
+ * sustained rate. `createRedisLimitStore` is a fixed window, and swapping one
+ * for the other would not be a change of storage, it would be a change of
+ * policy — the burst allowance and the refill are the whole point of scanning
+ * a queue of people at a door.
+ *
+ * A distributed token bucket is expressible as a Lua script, and is not worth
+ * it here: this is keyed per organizer device, it protects a check-in kiosk
+ * from a scanner being held down rather than an account from being guessed at,
+ * and one process per database is what `instanceLock` enforces today. If a
+ * second instance is ever run, this becomes per-instance burst — noted in
+ * `docs/operations/horizontal-scaling.md` rather than silently accepted.
+ */
 export const checkinScanLimiter = rateLimit({
-  store: createRedisLimitStore({ name: 'checkin-scan' }),
   windowMs: 60 * 1000,
   limit: CHECKIN_SCAN_BURST_LIMIT,
   standardHeaders: 'draft-7',

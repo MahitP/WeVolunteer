@@ -474,6 +474,89 @@ span creation, attribute building, sampling and serialisation.
 
 ---
 
+### 7.4 Redis, exercised rather than stripped
+
+`--redis` points the real client at `bin/lib/upstash-stub.mjs`, a loopback server
+speaking Upstash's REST protocol. Every byte the client builds, every Lua script
+it sends and every response it parses is the real one; only the host is local.
+
+It speaks real **TLS**, because `redis/redisConfig.js` refuses any non-HTTPS URL
+— the token is a bearer credential and a plaintext URL would put it on the wire.
+That rule is a security control, so the stub gets a throwaway self-signed
+certificate and the child verifies it through `NODE_EXTRA_CA_CERTS`.
+`NODE_TLS_REJECT_UNAUTHORIZED=0` would also have worked and is deliberately not
+used: it disables verification for every connection the process makes, including
+the ones to the database.
+
+**The real Upstash endpoint is refused, not supported.** A load run is bounded in
+neither requests nor keys, the free plan is 500,000 commands a month for the
+whole application, and the plan allows one database per account — so a load test
+against it would spend production's allowance and write into production's
+keyspace.
+
+| scenario | result |
+|---|---|
+| **R1 healthy** | 262 requests, 262 commands (`GET`=131, `DEL`=131) — exactly the login-failure `peek`/`clear` pair the cost table predicts |
+| **R2 concurrency** | A 392 req/s, C 589 req/s, zero non-2xx — indistinguishable from Redis off |
+| **R3/R4 cache** | the geocode and weather caches are not on these scenarios' paths; their hit/miss behaviour is covered by `redis.lookupCache.test.js` |
+| **R5 outage** (`--redis-fail`) | **zero non-2xx**, throughput unchanged (A 390.8 vs 392, C 591.2 vs 589.4), and **one** request attempted in the whole run — the breaker opened and suppressed the rest |
+| **R6 recovery** | the breaker reopens after `UPSTASH_BREAKER_MS`; asserted in `rateLimit.multiInstance.test.js` rather than in a load run, because it needs a controllable clock |
+| **R7 two instances** | `bin/multi-instance-check.mjs` — see §7.6 |
+
+The outage row is the important one. **A Redis outage is invisible to users**:
+every limiter falls back to a correct per-instance limiter, and the breaker means
+an outage costs one timeout per window rather than one per request.
+
+**Command economics under load.** With `--api-limit 600`, a run that made
+**161,408 requests produced 15 `EVAL`s** — because once a caller is over the
+limit, refusal is decided locally and costs nothing. An attacker cannot drain the
+command allowance by continuing to knock.
+
+---
+
+### 7.5 Through a real transaction pooler
+
+The runbook tells operators to point `DATABASE_URL` at Supavisor in TRANSACTION
+mode, and `postgresConnection.js` leaves `pg`'s named prepared statements off
+precisely because such a pooler can put a different backend under a client
+between checkouts. That was reasoned and never run.
+
+pgbouncer in transaction mode is the same protocol behaviour, locally:
+
+```
+pool_mode = transaction
+listen_port = 6543
+LOAD_DB_URL=postgres://you@127.0.0.1:6543/wv_load node bin/load-test.mjs
+```
+
+The full scenario suite through it: **every scenario zero non-2xx**, capacity held
+at 1 of 40 concurrent accepts, fan-out to 150 volunteers in 11 ms, migrations and
+seeding all through the pooler. The prepared-statement decision is now evidence
+rather than argument.
+
+---
+
+### 7.6 Two real backend instances
+
+`bin/multi-instance-check.mjs` boots two copies of `server/server.js` against one
+PostgreSQL and one Redis. This is possible because `instanceLock`'s
+`shouldRefuseBoot` refuses only in production, which is exactly the seam it
+leaves for a test like this — the production posture is unchanged.
+
+10/10 checks, including: a session minted on A accepted by B; the API limiter
+shared (**A allowed 59/60, then B allowed 19/60; combined 78 against a bound of
+88, where two independent limiters would have allowed 120**); an unexpired lease
+not stolen; both instances declining a sweep held elsewhere; no fail-open; and
+the shared state demonstrably passing through Redis.
+
+Contention for the lease has to be **manufactured** — the sweeps acquire, find
+nothing to do, and release, so two instances essentially never overlap naturally.
+The check inserts a lease owned by an instance that does not exist and asserts
+both real instances decline. Waiting for a natural collision proves nothing, and
+the first version of this check did exactly that.
+
+---
+
 ## 8. What the load test does not cover
 
 - **Real network latency to a real provider.** §5 injects a plausible constant.
@@ -487,16 +570,14 @@ span creation, attribute building, sampling and serialisation.
 - **Realistic data distribution.** Applications are spread evenly across events.
   A real pilot has a few popular events with far more than the rest.
 - **The client.** This measures the API. Bundle size and render cost are not here.
-- **Redis.** The Upstash integration is in the tree, but the harness strips
-  `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` before booting the
-  server, so every run measures the in-process fallback. That is the honest
-  default — a load test must not spend a metered allowance or depend on a vendor
-  being reachable — but it means the five Redis-backed security limiters are
-  measured in their fallback mode, not their deployed one. They sit on
-  low-volume paths this harness barely touches, so the gap is small; it is still
-  a gap.
+- **Redis and OpenTelemetry are no longer in this list** — see §7.3 and §7.4.
+  Both now have explicit modes, and the credential strip still applies: neither
+  ever talks to a real vendor.
 
-  **OpenTelemetry is no longer in this list** — see §7.3.
+- **A real Supabase/Supavisor endpoint.** §7.5 runs through pgbouncer in
+  transaction mode, which is the same protocol behaviour, on loopback. What is
+  still unmeasured is Supabase's own network path and Supavisor's specific
+  implementation.
 
 ---
 
