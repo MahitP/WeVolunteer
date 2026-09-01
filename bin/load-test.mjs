@@ -54,6 +54,7 @@
  *   --otel                   run with OpenTelemetry on, against a loopback sink
  *   --redis                  run with Redis on, against a loopback Upstash stub
  *   --redis-latency N        inject N ms per Redis call, to model the real service
+ *   --redis-fail             make every Redis call fail, to measure an outage
  */
 import { spawn, execFileSync } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
@@ -217,6 +218,17 @@ const OTEL_ON = process.argv.includes('--otel');
  */
 const REDIS_ON = process.argv.includes('--redis');
 const REDIS_LATENCY = Number(arg('redis-latency', 0));
+
+/**
+ * Simulate a Redis outage for the whole run.
+ *
+ * The question this answers is the one that matters about a shared limiter: when
+ * the shared store is unreachable, does the application still serve, and does
+ * the limiter become a correct per-instance limiter rather than no limiter at
+ * all? There is no safe way to make the real service fail, which is most of why
+ * the stub exists.
+ */
+const REDIS_FAIL = process.argv.includes('--redis-fail');
 
 /** The stub, when one is running. */
 let redisStub = null;
@@ -546,9 +558,17 @@ async function startServer(port, databaseUrl) {
    * environment's keys even if the endpoint were somehow not the stub.
    */
   if (REDIS_ON) {
-    env.UPSTASH_REDIS_REST_URL = `http://127.0.0.1:${redisStub.port}`;
+    /* HTTPS, because `redis/redisConfig.js` refuses anything else — the token is
+       a bearer credential and a plaintext URL would put it on the wire. That
+       rule is a security control, so the stub speaks real TLS and the child is
+       given its certificate to verify against, rather than the rule being
+       relaxed for a test. NODE_TLS_REJECT_UNAUTHORIZED is deliberately NOT used:
+       it would disable verification for every connection this process makes,
+       including the ones to the database. */
+    env.UPSTASH_REDIS_REST_URL = `https://127.0.0.1:${redisStub.port}`;
     env.UPSTASH_REDIS_REST_TOKEN = `load-test-synthetic-${randomUUID()}`;
     env.UPSTASH_KEY_PREFIX = `loadtest${Date.now()}`;
+    env.NODE_EXTRA_CA_CERTS = redisStub.caPath;
   }
 
   child = spawn(process.execPath, ['server/server.js'], {
@@ -1299,9 +1319,11 @@ async function main() {
     const { createUpstashStub } = await import('./lib/upstash-stub.mjs');
     redisStub = createUpstashStub({ latencyMs: REDIS_LATENCY });
     redisStub.port = await redisStub.listen();
+    if (REDIS_FAIL) redisStub.setFailing(true);
     console.log(
       `[load] Redis ON, against a loopback Upstash stub on ${redisStub.port}`
-      + (REDIS_LATENCY ? ` (+${REDIS_LATENCY}ms injected latency).` : '.')
+      + (REDIS_LATENCY ? ` (+${REDIS_LATENCY}ms injected latency)` : '')
+      + (REDIS_FAIL ? ' — SIMULATING A TOTAL OUTAGE' : '') + '.'
     );
   }
 
@@ -1558,7 +1580,7 @@ try {
     );
     /* A run that reported "Redis was on" while nothing reached it would be
        worse than no measurement, exactly as with the OTLP sink. */
-    if (st.requests === 0) {
+    if (st.requests === 0 && !REDIS_FAIL) {
       console.error(
         '[load] ** --redis was requested but NOTHING reached the stub. The numbers '
         + 'from this run do not describe a Redis-enabled server. **'

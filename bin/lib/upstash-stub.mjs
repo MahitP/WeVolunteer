@@ -29,7 +29,44 @@
  * answers an error, deliberately — a stub that silently accepted an unknown
  * command would let a wrong call site pass a load run.
  */
-import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+/**
+ * A throwaway self-signed certificate for 127.0.0.1.
+ *
+ * ── Why the stub needs TLS at all ──
+ *
+ * `redis/redisConfig.js` refuses any URL that is not `https://`, and it is right
+ * to: the Upstash token is a bearer credential with full database privileges, so
+ * a plaintext URL would put it on the wire. Quietly rewriting it to HTTPS would
+ * hide exactly the configuration mistake an operator needs to see.
+ *
+ * That rule is a security control and the harness does not get to weaken it —
+ * not even behind a test flag, because a flag that disables a credential
+ * protection is a flag somebody eventually sets in the wrong place. So the stub
+ * speaks real TLS instead, and the child process is given the certificate
+ * through `NODE_EXTRA_CA_CERTS` so it can verify it properly.
+ *
+ * `NODE_TLS_REJECT_UNAUTHORIZED=0` would also have worked and is deliberately
+ * not used: it disables verification for EVERY connection the process makes, in
+ * a process that also talks to a database.
+ */
+function selfSignedCert() {
+  const dir = mkdtempSync(path.join(tmpdir(), 'wev-stub-tls-'));
+  const key = path.join(dir, 'key.pem');
+  const cert = path.join(dir, 'cert.pem');
+  execFileSync('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', key, '-out', cert, '-days', '1',
+    '-subj', '/CN=127.0.0.1',
+    '-addext', 'subjectAltName=IP:127.0.0.1,DNS:localhost',
+  ], { stdio: 'ignore' });
+  return { dir, keyPath: key, certPath: cert, key: readFileSync(key), cert: readFileSync(cert) };
+}
 
 export function createUpstashStub({ latencyMs = 0 } = {}) {
   /** key -> { value, expiresAt } for strings; sorted sets are not used here. */
@@ -129,7 +166,9 @@ export function createUpstashStub({ latencyMs = 0 } = {}) {
     }
   }
 
-  const server = createServer((req, res) => {
+  const tls = selfSignedCert();
+
+  const handler = (req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', async () => {
@@ -163,14 +202,21 @@ export function createUpstashStub({ latencyMs = 0 } = {}) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(answer));
     });
-  });
+  };
+
+  const server = createHttpsServer({ key: tls.key, cert: tls.cert }, handler);
 
   return {
     async listen() {
       await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
       return server.address().port;
     },
-    async close() { await new Promise(r => server.close(() => r())); },
+    async close() {
+      await new Promise(r => server.close(() => r()));
+      rmSync(tls.dir, { recursive: true, force: true });
+    },
+    /** The CA the child process must trust, and nothing else. */
+    caPath: tls.certPath,
     setFailing(v) { state.failing = v; },
     setLatency(ms) { state.latencyMs = ms; },
     stats() {
