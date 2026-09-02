@@ -24,12 +24,34 @@ conflating them is how a deployment gets surprised. Four levels:
 | **Production-proven** | Executed against the real third-party service | The Upstash path: 11/11 checks live, including the token-bucket Lua spending atomically and refilling by elapsed time (3.0000 of 5 tokens after two spends 1 ms apart). Latency avg **234 ms**, max 332 ms — which is the number the Socket.IO adapter decision rests on. |
 | **Integration-proven** | Two real processes, real database, real protocol | Two backend instances against one PostgreSQL and one Redis (`bin/multi-instance-check.mjs`, 10/10). The transaction pooler (`pooler.behaviour.test.js`, 8/8 through pgbouncer). Cross-instance Socket.IO broadcast through real PostgreSQL LISTEN/NOTIFY. |
 | **Locally proven** | Real code, simulated dependency | The limiter bounds across 2–4 simulated instances; the abuse-cost ceilings; Redis outage and breaker behaviour. |
-| **Unverified** | Stated, not measured | **Supabase's own network path and Supavisor's particular build.** pgbouncer proves transaction pooling as a *protocol*; it is not the same implementation. No Supabase credentials are configured in this repository, so this cannot currently be closed. |
+| **Unverified** | Stated, not measured | **Supavisor's transaction-pooling BEHAVIOUR** — prepared-statement handling, backend swapping between checkouts, concurrent transaction isolation. pgbouncer proves transaction pooling as a *protocol*; it is not the same implementation. Everything in front of that behaviour is now proven — see below. |
 
 The honest summary: everything the application does *itself* is proven at one of
 the top three levels. The single unverified item is one vendor's implementation
 of a protocol whose behaviour is proven against another implementation of the
 same protocol.
+
+### What the real Supabase path has now been tested against — 2026-09-03
+
+A disposable Supabase project was pointed at with `DATABASE_ENGINE=postgres` and
+a `DATABASE_URL`. The credential in it is rejected (`28P01`) on both of the two
+projects offered, so the *behavioural* half of the validation is still open. But
+everything the connection needs BEFORE the password was exercised for real, and
+three of those were assumptions until now:
+
+| Checked against the live service | Result |
+|---|---|
+| The pinned CA in `deploy/certs/supabase-root-2021.crt` still validates Supabase's pooler certificate | **Yes**, with `rejectUnauthorized: true` on both 5432 and 6543. The connection reaches authentication. |
+| Whether the pin is load-bearing or decoration | **Load-bearing.** The system CA store rejects the same certificate: `SELF_SIGNED_CERT_IN_CHAIN`. Without `DATABASE_SSL_CA` a verified connection fails. |
+| Whether `db.<ref>.supabase.co` is reachable | **Not on IPv4.** AAAA only, no A record. From a host without global IPv6 the application's own driver fails at `ENOTFOUND`, before TLS. |
+| Which pooler shard a project lives on | Not guessable, and the wrong one answers `Tenant or user not found` rather than a password error — a useful way to tell "wrong host" from "wrong password" apart during an incident. |
+| `pg`'s handling of an un-encoded `@` in a password | **Correct.** `pg-connection-string` splits the authority at the LAST `@`, so an un-encoded password parses to the same value as a percent-encoded one. Checked because the credential offered contains one, and it is not the explanation for the auth failure. |
+| Round trip from a developer laptop (India) to us-east-2 | TCP **231 ms** median, TLS handshake **458 ms**. Not a production number — the VM sits beside the database — but it is the number for anyone running migrations, `pg_dump` or the load test from a laptop. |
+
+So the ladder now reads: DNS, address family, TLS, certificate pinning, hostname
+verification, Supavisor tenant routing and the application's own driver are all
+**production-proven** against the real service. What remains unverified is what
+happens *after* a successful login, which needs a working password.
 
 ---
 
