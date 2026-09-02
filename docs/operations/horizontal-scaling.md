@@ -53,6 +53,29 @@ verification, Supavisor tenant routing and the application's own driver are all
 **production-proven** against the real service. What remains unverified is what
 happens *after* a successful login, which needs a working password.
 
+`bin/supabase-check.mjs` walks that ladder and reports which rung broke, because
+every one of those failures presents identically from the outside — "it will not
+connect" — and each is diagnosed completely differently:
+
+```bash
+SUPABASE_CHECK_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres' \
+  node bin/supabase-check.mjs --write-probe
+```
+
+It reads `SUPABASE_CHECK_URL` and deliberately NOT `DATABASE_URL`: a tool that
+picks up the deployment's own configuration is a tool that eventually runs
+against production because somebody had a shell open in the wrong directory. The
+write probe refuses any database holding real users, creates one randomly-named
+table, and drops it.
+
+Once it reaches `authenticates`, the behavioural half is two existing suites
+pointed at the same target:
+
+```bash
+TEST_POOLER_URL=…   npx vitest run server/pooler.behaviour.test.js
+TEST_POSTGRES_URL=… WEV_POSTGRES_APP_TEST=1 npx vitest run --project server
+```
+
 ---
 
 ## 1. Why one instance is still the answer
