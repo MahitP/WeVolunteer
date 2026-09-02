@@ -70,7 +70,17 @@ export async function fetchJson(url, { headers = {}, method = 'GET', body = null
     return fail(err?.name === 'TimeoutError' ? 'timeout' : 'unavailable');
   }
 
-  if (!res.ok) return fail(classifyStatus(res.status));
+  /**
+   * The numeric status travels with the failure; the BODY still does not.
+   *
+   * A caller occasionally needs to tell two failures apart in a way the state
+   * word cannot express — Amplitude answers 400 for an event it has never
+   * recorded, which is a fact about the data rather than a fault. A status code
+   * is a number this repository generated no content for, so carrying it does
+   * not weaken the rule in `providerResult.js`, which is about response
+   * content. Nothing renders it.
+   */
+  if (!res.ok) return { ...fail(classifyStatus(res.status)), status: res.status };
 
   let text;
   try {

@@ -340,6 +340,39 @@ describe('Amplitude', () => {
     }
   });
 
+  /**
+   * Amplitude's answer for an event it has never received.
+   *
+   * Verified against the live account on 2026-09-03: a segmentation query for
+   * an unknown `event_type` returns HTTP 400 `{"error": {"http_code": 400,
+   * "type": "invalid", "message": "Invalid chart definition", ...}}`, not a 200
+   * with zeros. Reading that as a failure made three of the four registry rows
+   * say "Unavailable" on a correctly working installation — the page's word for
+   * "we could not ask", when the truth is that we asked and the answer is none.
+   */
+  it('reads Amplitude\'s 400 for an unknown event as zero, not as a failure', async () => {
+    const { ANALYTICS_EVENT_NAMES } = await import('./analyticsEvents.js');
+    const known = new URLSearchParams({
+      e: JSON.stringify({ event_type: ANALYTICS_EVENT_NAMES[0] }),
+    }).toString();
+
+    stubFetch(async (url) => (url.includes(known)
+      ? json({ data: { series: [[8]], xValues: ['2026-08-01'] } })
+      : {
+        ok: false,
+        status: 400,
+        text: async () => JSON.stringify({ error: { http_code: 400, type: 'invalid', message: 'Invalid chart definition' } }),
+      }));
+
+    const res = await fetchEventUsage(env(), NOW);
+    expect(res.state).toBe('ok');
+    expect(res.events[0]).toMatchObject({ total: 8, neverRecorded: false });
+    /* Zero, and flagged — so the page can say "not recorded yet" rather than
+       leaving an owner unsure whether tracking is wired up at all. */
+    expect(res.events[1]).toMatchObject({ total: 0, neverRecorded: true });
+    expect(res.events[1].total).not.toBeNull();
+  });
+
   it('shows an unread event as unavailable rather than as zero usage', async () => {
     const { ANALYTICS_EVENT_NAMES } = await import('./analyticsEvents.js');
     /* Built the way the module builds it. `URLSearchParams` encodes a space as
@@ -348,6 +381,8 @@ describe('Amplitude', () => {
     const first = new URLSearchParams({
       e: JSON.stringify({ event_type: ANALYTICS_EVENT_NAMES[0] }),
     }).toString();
+    /* A 500, deliberately: that is a fault and must stay "Unavailable". Only
+       the documented 400 above means "never recorded". */
     stubFetch(async (url) => (url.includes(first)
       ? { ok: false, status: 500, text: async () => 'nope' }
       : json({ data: { series: [[4]], xValues: ['2026-08-01'] } })));
@@ -361,6 +396,12 @@ describe('Amplitude', () => {
     /* A fact about the credential, not about the events. Four identical error
        rows would send the reader looking for four problems. */
     stubFetch(async () => ({ ok: false, status: 401, text: async () => '{}' }));
-    await expect(fetchEventUsage(env(), NOW)).resolves.toEqual({ state: 'unauthorized' });
+    const res = await fetchEventUsage(env(), NOW);
+    expect(res.state).toBe('unauthorized');
+    /* The numeric status rides along so a caller can tell two failures apart —
+       Amplitude's 400 for an unknown event is the reason — but the response
+       BODY still must not, which is the boundary `providerResult.js` sets. */
+    expect(res.status).toBe(401);
+    expect(res.events).toBeUndefined();
   });
 });

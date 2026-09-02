@@ -215,7 +215,13 @@ function relative(at, now = Date.now()) {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
   const hours = Math.round(minutes / 60);
-  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  /* Beyond two days, hours stop being readable: a long-running incident showed
+     "started 476 hours ago", which a reader has to divide before it means
+     anything. Real data surfaced this — Better Stack's onboarding sample
+     incident had been open for twenty days. */
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
 /**
@@ -524,7 +530,22 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
       icon: HeartPulse,
       label: 'Uptime monitoring',
       ...(monitors.state === 'ok'
-        ? (monitors.down > 0
+        /**
+         * No monitors is not "operational" — it is nothing being watched.
+         *
+         * The card body already says so in full ("No monitors are set up yet"),
+         * but the summary row is the line somebody scans, and it read
+         * "Operational · 0 up" on an account with no monitoring configured at
+         * all. That is a green tick for the absence of the very check it claims
+         * to report, which is the false green this grid exists to avoid.
+         *
+         * Surfaced by pointing the integration at the real account, where the
+         * count is genuinely zero. Muted rather than red: not having set up
+         * external monitoring yet is a normal state for a pilot, not a fault.
+         */
+        ? (monitors.monitors.length === 0
+          ? { tone: 'muted', state: 'No monitors', detail: 'Nothing is being checked from outside' }
+          : monitors.down > 0
           ? { tone: 'danger', state: 'Monitor down', detail: `${monitors.down} of ${monitors.monitors.length} down` }
           /* A stale reading is reported as stale rather than as operational:
              the summary row is the line somebody scans, and it must not say a
@@ -981,7 +1002,20 @@ function FeatureUsage({ events }) {
     <ul className="owner-usage">
       {events.map(e => (
         <li key={e.name} className="owner-usage-row">
-          <span className="owner-usage-label" title={e.description}>{e.label}</span>
+          <span className="owner-usage-label" title={e.description}>
+            {e.label}
+            {/**
+              * "Amplitude has no record of this event yet", which is a
+              * different sentence from "nobody used it this month" and from
+              * "we could not ask".
+              *
+              * Without it, a newly added event reads as a flat zero and an
+              * owner cannot tell whether the feature is unused or the tracking
+              * was never wired up. It is the normal state of every event in the
+              * registry until somebody fires the first one.
+              */}
+            {e.neverRecorded && <span className="owner-usage-note"> · not recorded yet</span>}
+          </span>
           <span className="owner-usage-track" aria-hidden="true">
             {/**
               * A bar is drawn only for a total that was READ and is above zero.

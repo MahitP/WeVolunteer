@@ -13341,6 +13341,9 @@ a.btn {
   font-size: 0.8125rem;
 }
 .owner-usage-label { color: var(--ink-2); min-width: 0; }
+/* Quieter than the label it qualifies: it explains the zero beside it rather
+   than competing with the event's name. */
+.owner-usage-note { color: var(--ink-3); font-size: 0.75rem; }
 .owner-usage-track {
   height: 8px;
   border-radius: var(--r-full);

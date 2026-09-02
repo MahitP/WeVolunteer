@@ -219,6 +219,49 @@ describe('the systems grid', () => {
     expect(screen.queryByText(/systems need attention/i)).toBeNull();
   });
 
+  /**
+   * The state a real, freshly-connected Better Stack account is in.
+   *
+   * Found by pointing the integration at the live account: it has a valid token
+   * and zero monitors, and the row read "Operational · 0 up" — a green tick for
+   * the absence of the check it reports on.
+   */
+  it('reports a long-open incident in days rather than hundreds of hours', async () => {
+    /* Better Stack's own sample incident had been open for 476 hours when this
+       was found against the live account — a figure a reader has to divide
+       before it means anything. */
+    stubApi({
+      m: monitoring({
+        incidents: {
+          state: 'ok', recentAvailable: true, recent: [],
+          active: [{
+            id: '1', name: 'google.com', cause: 'Sample incident',
+            startedAt: new Date(Date.now() - 476 * 3600_000).toISOString(),
+            acknowledgedAt: null, resolvedAt: null,
+          }],
+        },
+      }),
+    });
+    renderOwner();
+    expect(await screen.findByText(/20 days ago/)).toBeInTheDocument();
+    expect(screen.queryByText(/476 hours ago/)).toBeNull();
+  });
+
+  it('does not call zero monitors operational', async () => {
+    stubApi({
+      m: monitoring({ monitors: { state: 'ok', monitors: [], up: 0, down: 0, paused: 0 } }),
+    });
+    renderOwner();
+    await screen.findByText(/Systems/);
+
+    const row = systemRow('Uptime monitoring');
+    expect(within(row).getByText('No monitors')).toBeInTheDocument();
+    expect(within(row).queryByText('Operational')).toBeNull();
+    /* And it is not alarming either — a pilot that has not set up external
+       monitoring yet is in a normal state, not a broken one. */
+    expect(screen.queryByText(/systems need attention/i)).toBeNull();
+  });
+
   it('separates a degraded Redis from a healthy one', async () => {
     stubApi({
       i: infrastructure({

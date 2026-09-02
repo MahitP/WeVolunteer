@@ -118,14 +118,15 @@ Endpoints used, and nothing else:
 - `GET https://uptime.betterstack.com/api/v3/incidents?resolved=false&per_page=10`
 - `GET https://uptime.betterstack.com/api/v3/incidents?per_page=10`
 
-**Free-plan position.** The free tier includes 10 monitors and 1 status page
-[documented, 2026-09-02]. Nothing here asks for a paid capability — no
-availability SLA summaries, no report exports, no on-call schedules. Whether the
-Uptime **API** is included on the free plan is **[owner action]**: Better Stack's
-pricing page does not list API access per tier. If this account's plan refuses,
-the card says so and offers the dashboard link, and nothing else on the page is
-affected — which is why the integration was built to degrade rather than to be
-depended on.
+**Free-plan position: the Uptime API works on the free plan** [proven —
+exercised against this account on 2026-09-03; both endpoints answered 200]. That
+settles what the pricing page leaves unstated: it lists 10 monitors and 1 status
+page but says nothing about API access per tier.
+
+Nothing here asks for a paid capability — no availability SLA summaries, no
+report exports, no on-call schedules. If a future plan change refuses one, the
+card says so and offers the dashboard link, and nothing else on the page is
+affected.
 
 ### 4.2 Amplitude — usage
 
@@ -150,14 +151,27 @@ Endpoints used:
 - `GET /api/2/events/segmentation?e=&start=&end=&m=totals&i=1` — once per event
   in `server/analyticsEvents.js`
 
-**Free-plan position.** The Starter plan is free for 10,000 monthly tracked users
-and 2 million events [documented, 2026-09-02]. Amplitude's own documentation does
-**not** state a plan floor for the Dashboard REST API, and community answers say
-the endpoints are reachable "under any plan type" — that is somebody else's
-sentence about somebody else's account, so this repository does not build on it
-**[owner action]**. If the API refuses, the card reads *Not available on your
-Amplitude plan* and offers the dashboard link. Nothing in WeVolunteer depends on
-it answering.
+**Free-plan position: the Dashboard REST API works on the free plan** [proven —
+exercised against this account on 2026-09-03; `/api/2/users` and
+`/api/2/events/segmentation` both answered 200 with real figures]. Amplitude's
+own documentation states no plan floor, and this confirms it for this account.
+The Starter plan is free for 10,000 monthly tracked users and 2 million events
+[documented].
+
+If a future plan change refuses, the card reads *Not available on your Amplitude
+plan* and offers the dashboard link. Nothing in WeVolunteer depends on it
+answering.
+
+**One response shape worth knowing about.** Amplitude answers **HTTP 400**
+(`"Invalid chart definition"`) for an event type it has never recorded — not a
+200 with zeros. That is the normal state of every event in
+`server/analyticsEvents.js` until somebody fires the first one, so reading it as
+a failure made three of the four rows say *Unavailable* on a correctly working
+installation. It is now read as **zero, marked "not recorded yet"**, which
+distinguishes all three of the states that matter: never seen, seen zero times
+this window, and could not be asked. The 400 is safely attributable to the event
+name because every event is queried with the identical parameter shape and the
+known ones return 200.
 
 **Query cost is a real budget.** Amplitude prices Dashboard API calls as
 `(days) × (conditions) × (query type cost)` against an hourly allowance, with at
@@ -269,12 +283,14 @@ seen to work" are different claims, and this table is the difference.
 |---|---|---|
 | **Upstash** | present | **Yes**, 2026-09-02. `fetchRedis()` reached the real database: reachable, breaker closed, ~420 ms round trip. |
 | **Pinecone** | present | **Yes**, 2026-09-02. `fetchVectorSearch()` read the real index (`wevolunteer-discover-v1`, namespace `development`, 6 records). |
-| **Better Stack** | none set | **No.** No Better Stack variable is set in this deployment — the source token included — so telemetry is off and the Uptime API cannot be reached. The transforms are covered against documented response shapes in `server/integrations.test.js`. |
-| **Amplitude** | ingestion only (`VITE_AMPLITUDE_API_KEY`) | **No.** The read pair is not set, so the Dashboard API cannot be reached. Ingestion is configured and unaffected. |
+| **Better Stack** | `BETTERSTACK_UPTIME_API_TOKEN` set | **Yes**, 2026-09-03. Monitors and both incident queries answered 200 on the free plan. The account currently has **no monitors** and one open incident, which is Better Stack's own onboarding sample (`google.com` / "Sample incident"). |
+| **Amplitude** | read pair set | **Yes**, 2026-09-03. `/api/2/users` and `/api/2/events/segmentation` answered 200 with real figures (2 active users in 30 days, 8 home-page events). |
 
-The two unverified rows are **[owner action]** and are the only outstanding
-setup: §4.1 and §4.2 say exactly which credential to create and where. Neither
-blocks anything — both cards render "Not configured" and name their variable.
+All four integrations are now configured and live-verified. The remaining
+**source** telemetry credentials (`BETTERSTACK_SOURCE_TOKEN` /
+`BETTERSTACK_INGESTING_HOST`) are still unset, so logs and traces stay local —
+that is a separate pipeline from the Uptime API above and is documented in
+[`betterstack.md`](betterstack.md).
 
 The frontend's rendering of live data was verified separately by driving the
 page with payloads in the exact shape the server produces: monitors with a

@@ -219,6 +219,31 @@ export async function fetchEventUsage(env = process.env, now = Date.now()) {
       m: 'totals',
       i: '1',
     }, env);
+    /**
+     * A 400 means Amplitude has never recorded this event, and that is ZERO.
+     *
+     * Amplitude answers `{"error": {"http_code": 400, "type": "invalid",
+     * "message": "Invalid chart definition", "metadata": {"details": "Invalid
+     * <event name>"}}}` for an event type it has no record of — verified
+     * against the live account on 2026-09-03.
+     *
+     * Reading that as a failure was wrong in the direction this card is most
+     * careful about elsewhere: it rendered "Unavailable", which this page uses
+     * to mean "we could not ask". The truth is that we asked and the answer is
+     * none. It is also the NORMAL state of every newly added event until the
+     * first person fires one, so three of the four rows read as broken on a
+     * correctly working installation.
+     *
+     * The 400 is safely attributable to the event name rather than to a
+     * malformed query, because every event here is asked for with the identical
+     * parameter shape and the ones Amplitude knows about return 200. If the
+     * query itself were wrong, none of them would work.
+     *
+     * `neverRecorded` is kept separate from a genuine in-window zero so the
+     * page can say "not recorded yet" rather than leaving an owner wondering
+     * whether the tracking is wired up at all.
+     */
+    if (!res.ok && res.status === 400) return { event, total: 0, trend: null, neverRecorded: true };
     if (!res.ok) return { event, failure: res };
     const points = series(res.body);
     return points ? { event, total: sum(points), trend: trend(points) } : { event, failure: fail('bad_response') };
@@ -240,6 +265,10 @@ export async function fetchEventUsage(env = process.env, now = Date.now()) {
          rather than as a zero-length bar. */
       total: r.failure ? null : r.total,
       trend: r.failure ? null : r.trend,
+      /* True only when Amplitude has no record of the event at all — see the
+         400 branch above. A row that is zero because nobody used the feature
+         this month does NOT carry it. */
+      neverRecorded: Boolean(r.neverRecorded),
     })),
   });
 }

@@ -130,6 +130,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes a temp database exactly as `freshApp` in the same file already did.
   Confirmed against `fe0dae6` that this predates the Owner Center work.
 
+- **Four more Owner Center corrections, found by connecting the real accounts.**
+  Better Stack's Uptime API and Amplitude's Dashboard REST API both work on the
+  free plan — verified against the live accounts on 2026-09-03, which settles the
+  two questions neither vendor's pricing page answers. Connecting them surfaced
+  four things no stub would have:
+
+  Amplitude answers **HTTP 400 for an event type it has never recorded**, not a
+  200 with zeros. That was read as a failure, so three of the four tracked events
+  said "Unavailable" on a correctly working installation — the page's phrase for
+  "we could not ask", when the truth is that we asked and the answer is none.
+  They now read **0, marked "not recorded yet"**, which keeps never-seen,
+  zero-this-month and could-not-ask distinguishable.
+
+  An account with **zero monitors** reported "Operational · 0 up" — a green tick
+  for the absence of the check it claims to report. It now reads "No monitors".
+
+  A long-open incident read **"started 476 hours ago"**; relative times now step
+  up to days past two days.
+
+  And `fetchJson` now carries the numeric HTTP status on a failure, which is what
+  lets a provider tell two failures apart. The response *body* still never
+  travels — that boundary is unchanged.
+
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
   cosmetic underneath a 25-row limit: when the students at positions 25 and 26
