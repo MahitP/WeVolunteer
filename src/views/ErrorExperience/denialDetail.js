@@ -78,6 +78,10 @@ const FEATURE_NAMES = Object.freeze({
      guessing a URL is looking for a page. */
   'legal.edit': 'the Legal Center editor',
   'self.read': 'the Welly assistant and personal account records',
+  /* Named for the page, which is what somebody who typed `/owner` was looking
+     for. "third-party service status" would describe what is on it and leave
+     the reader unsure whether they had found the right address at all. */
+  'owner.console': 'the Owner Center',
 });
 
 /**

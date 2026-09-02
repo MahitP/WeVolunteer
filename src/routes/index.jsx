@@ -43,6 +43,7 @@ const CalendarView = React.lazy(() => import('../views/CalendarView'));
 const VolunteerProfile = React.lazy(() => import('../views/VolunteerProfile'));
 const BadgesPage = React.lazy(() => import('../views/BadgesPage'));
 const CertificatesPage = React.lazy(() => import('../views/CertificatesPage'));
+const CertificateView = React.lazy(() => import('../views/CertificateView'));
 const ReportIssue = React.lazy(() => import('../views/ReportIssue'));
 const PublicCertificates = React.lazy(() => import('../views/PublicCertificates'));
 const PublicServiceHistory = React.lazy(() => import('../views/PublicServiceHistory'));
@@ -69,6 +70,7 @@ const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
+const OwnerCenter = React.lazy(() => import('../views/OwnerCenter'));
 const WellyView = React.lazy(() => import('../views/WellyView'));
 
 /**
@@ -294,6 +296,22 @@ export const APP_ROUTES = [
   /* Own certificates only: one carries a full name, an organization, dates and
      a verification code. */
   { path: '/certificates', element: <CertificatesPage />, requiredCap: 'portfolio.write' },
+  /**
+   * One certificate, at its own address.
+   *
+   * Declared AFTER `/certificates` so the collection is never matched as a
+   * code. React Router ranks a static segment above a dynamic one regardless,
+   * but the ordering is stated rather than relied upon — the same convention
+   * `/organizations/new` and `/users/id/:id` already follow here.
+   *
+   * `portfolio.write`, matching the list it is opened from: this is the same
+   * power — a student's own service record — and inventing a name for "one of
+   * them" would be a fifth spelling of an idea this table already has four of.
+   * The server does not use a capability at all; it scopes every query to the
+   * caller and answers 404 for anybody else's code, which is the boundary. This
+   * guard only keeps somebody who typed the URL out of a shell they cannot use.
+   */
+  { path: '/certificates/:code', element: <CertificateView />, requiredCap: 'portfolio.write' },
   { path: '/welly', element: <WellyView />, requiredCap: 'assistant.use' },
   { path: '/settings', element: <Settings /> },
   /**
@@ -366,6 +384,22 @@ export const APP_ROUTES = [
    * handler name, so the rail, the route and the server agree on one word.
    */
   { path: '/admin/impact', element: <AdminImpact />, requiredCap: 'analytics.platform' },
+  /**
+   * The Owner Center — the operational cockpit.
+   *
+   * `/owner` rather than `/admin/owner`: the `/admin/` prefix is where the
+   * administrative AREA lives, and every page under it is reachable by somebody
+   * holding an administrative capability. This one is not, by construction, and
+   * a path that files it under `admin` would say otherwise to the only reader
+   * who matters — the next person deciding where a page belongs.
+   *
+   * `owner.console` is SUPER_ONLY, so `can()` refuses it before it consults
+   * per-user grants: no capability grant can reach this route, and the tile on
+   * the Admin hub that points at it is hidden by the same capability. Neither is
+   * the boundary — `server/routes/ownerRoutes.js` is, and it re-checks on every
+   * one of the four endpoints this page calls.
+   */
+  { path: '/owner', element: <OwnerCenter />, requiredCap: 'owner.console' },
   /**
    * Filing an appeal.
    *

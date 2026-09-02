@@ -173,10 +173,18 @@ describe('Redis is never a source of truth', () => {
   });
 
   it('the set of modules that touch Redis at all is the reviewed one', () => {
-    /* Four callers, and each is a deliberate decision recorded in
+    /* Each of these is a deliberate decision recorded in
        docs/operations/upstash.md: two limiter surfaces, two third-party caches,
-       and a read-only status panel. A fifth should arrive with a note here
-       rather than by accident — this list is the review, not a formality. */
+       and two read-only status panels. A new one should arrive with a note here
+       rather than by accident — this list is the review, not a formality.
+
+       `integrations/upstash.js` is the Owner Center's read, added with the
+       Owner Center. It is read-only in the strongest sense available: it calls
+       `redisStatus()` (which owns the allowlist of what an operator may know)
+       and `redisPing()`, and nothing else. No key is named, no key is read, and
+       there is deliberately no destructive control anywhere on that page — the
+       one an operator would actually want, "clear the rate limits", would also
+       clear every credential-stuffing counter on a service used by children. */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
       .filter(f => /from\s+['"][^'"]*redis\/[a-zA-Z]+\.js['"]/.test(read(f)))
@@ -185,6 +193,7 @@ describe('Redis is never a source of truth', () => {
 
     expect(callers).toEqual([
       path.join('server', 'app.js'),                      // limiter stores
+      path.join('server', 'integrations', 'upstash.js'),  // Owner Center, read-only
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter
       path.join('server', 'routes', 'geocodeRoutes.js'),  // address cache + throttle

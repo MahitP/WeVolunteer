@@ -27,6 +27,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Owner Center (`/owner`), an owner-only operations page.** One page that
+  answers "is WeVolunteer healthy, and what needs my attention?" without opening
+  four vendor dashboards: service health, the 24-hour error trend, uptime
+  monitors and incidents, usage figures, and Redis and vector-search status —
+  each with a link out to the tool it came from.
+
+  Behind `owner.console`, which is in `SUPER_ONLY`. That makes it owner-only
+  *and ungrantable*: the capability check runs before per-user grants and
+  `userCapabilities.js` refuses to store a grant naming one. An ordinary
+  administrator is refused, which is the row an "admins see the admin pages"
+  assumption gets wrong, so it is asserted per role rather than assumed.
+
+  **Nothing on it writes anything, anywhere.** No acknowledging an incident, no
+  pausing a monitor, no Redis administration. The one destructive control
+  anybody would actually want here — "clear the rate limits, I locked myself
+  out" — would also clear every credential-stuffing counter on a service used by
+  children.
+
+  **Every integration is optional and the page works without all of them.** The
+  half that matters most on a bad day — this process, this database, the error
+  trend, mail and queue health — is read locally and contacts nothing, so the
+  page answers on the day every vendor is unreachable. An unconfigured
+  integration renders as *Not configured* and names the variable that would
+  switch it on; a failed one says which of nine states it is in and still offers
+  the external link. **Nothing from the wire reaches the page**: no response
+  body, no URL, no upstream error text, because a 401 body has been observed to
+  echo back a credential prefix.
+
+  **No polling, ever.** Data is fetched on open and on the refresh button.
+  Amplitude prices queries against an hourly budget and Upstash against a
+  monthly command count, and a dashboard left open in a tab overnight is how a
+  free tier is spent by accident. Reads are cached per provider and deduplicated,
+  and a failed refresh serves the last good answer labelled stale rather than
+  emptying the card. Setup and the free-plan position of each integration:
+  `docs/operations/owner-center.md`.
+
+- **A certificate viewer at `/certificates/:code`, and a real PDF to download.**
+  A certificate used to open in a modal, which meant it had no URL — nothing to
+  share, nothing to bookmark, and a back button that closed the page behind the
+  dialog rather than the dialog. It is now a page: the document on its own
+  workspace, a share dialog, and a download control offering a PDF or the
+  printer.
+
+  **The PDF is generated server-side and is a real file** (`server/pdfWriter.js`,
+  `server/certificatePdf.js`), with the QR code drawn as vector squares so it
+  stays sharp at any zoom and on any printer. Written by hand rather than with a
+  library, and the reasoning is recorded in that file: headless Chrome is a
+  170 MB dependency for one page of text, and a client-side screenshot
+  photographs the live DOM, so the artefact would inherit scroll position, hover
+  states and whichever fonts had loaded. The output is checked by opening it with
+  a real PDF parser and asserting the recipient's name is in it.
+
+  **Sharing hands out the public verification link and nothing else.** The
+  message names the achievement and never the person — no name, no school, no
+  grade — because it also lands in the sharing app's history and a group chat's
+  search index. `navigator.share` is used where the browser has it, since that is
+  where the applications people actually message in live; the per-platform links
+  are the desktop fallback, and copying falls back to the legacy path when the
+  clipboard API is refused on an insecure origin.
+
+  **Reading a certificate is scoped in the query, not in a comparison.**
+  Somebody else's code answers 404 identically to a code that does not exist —
+  the code is a bearer credential printed on paper, so a distinguishable refusal
+  would turn the route into an oracle for which codes are live.
+
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
   cosmetic underneath a 25-row limit: when the students at positions 25 and 26

@@ -95,11 +95,11 @@ const STANDALONE = new Set([
   'views/ErrorExperience/ErrorGallery.jsx',
 
   /**
-   * Printed and modal certificates. `printIsolation.test.js` covers the rule
-   * that print hides the shell — so on paper this heading is the only one, and
-   * demoting it would leave the printed document with no heading at all.
+   * Printed certificates. `printIsolation.test.js` covers the rule that print
+   * hides the shell — so on paper this heading is the only one, and demoting it
+   * would leave the printed document with no heading at all.
    */
-  'components/CertificateModal.jsx',
+  'components/CertificateDocument.jsx',
   'views/VolunteerDashboard.jsx',
 
   /* No importers — flagged for separate cleanup, not rendered anywhere. */

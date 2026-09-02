@@ -23,6 +23,7 @@ be updated when behavior changes.
 |---|---|
 | [`pilot-deployment-runbook.md`](operations/pilot-deployment-runbook.md) | Provisioning through incident response. The living operational reference — written for an engineer who has not seen this project before, and kept current. |
 | [`pilot-readiness-review.md`](operations/pilot-readiness-review.md) | The pre-launch engineering gate, dated 2026-07-26. A point-in-time audit rather than a maintained document: every finding in it was addressed before 1.0.0, and it is kept because the reasoning behind each severity call is still useful. |
+| [`owner-center.md`](operations/owner-center.md) | The owner-only operations page at `/owner`: who can open it, what each figure is read from, how to configure the four integrations it surfaces, what happens when one is unreachable, and what it deliberately refuses to do. |
 
 Deployment artifacts referenced by the runbook live in [`../deploy/`](../deploy/).
 

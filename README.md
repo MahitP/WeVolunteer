@@ -231,13 +231,20 @@ Templates for both are in the repository: [`deploy/wevolunteer.env.example`](dep
 
 `VITE_*` values are compiled into the bundle. Changing one requires a rebuild; setting it on a running server has no effect.
 
-Three third-party services are optional and each is off unless its credentials are present. With them unset the application is complete rather than degraded, and none of them is ever required to serve a request:
+Four third-party services are optional and each is off unless its credentials are present. With them unset the application is complete rather than degraded, and none of them is ever required to serve a request:
 
 | Service | What it adds when configured | Docs |
 |---|---|---|
 | Pinecone | Semantic search in Discover; without it, Discover uses the database substring search | [`docs/operations/pinecone.md`](docs/operations/pinecone.md) |
 | Better Stack | Structured logs and errors; without it, logging goes to stdout | [`docs/operations/betterstack.md`](docs/operations/betterstack.md) |
 | Upstash Redis | Security counters survive restarts, and third-party lookup caches survive deploys; without it, both live in process memory | [`docs/operations/upstash.md`](docs/operations/upstash.md) |
+| Amplitude | Usage figures on the Owner Center; without it, that card reads "Not configured" | [`docs/operations/owner-center.md`](docs/operations/owner-center.md) |
+
+The **Owner Center** (`/owner`) reads all four for the platform owner and works
+without any of them — the health, error-trend and queue figures on it come from
+this process and this database, so the page answers on the day every vendor is
+unreachable. Setup, and the free-plan position of each integration:
+[`docs/operations/owner-center.md`](docs/operations/owner-center.md).
 
 None of their credentials may ever carry a `VITE_` prefix — that would compile a live write credential into the browser bundle. A test fails the build if one does.
 

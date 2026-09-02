@@ -4,7 +4,6 @@ import { ArrowLeft, Award, FileText } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
-import CertificateModal from '../components/CertificateModal';
 import { formatDay, formatHours } from '../utils/helpers';
 
 /**
@@ -27,11 +26,10 @@ import { formatDay, formatHours } from '../utils/helpers';
  * A certificate carries a full name, an organization, dates and a verification
  * code. Somebody else's is theirs to show, not yours to browse.
  */
-export default function CertificatesPage({ currentUser, addToast }) {
+export default function CertificatesPage() {
   const [certificates, setCertificates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [certificate, setCertificate] = useState(null);
   const [searchParams] = useSearchParams();
 
   /**
@@ -114,11 +112,22 @@ export default function CertificatesPage({ currentUser, addToast }) {
       {!loading && !error && shown.length > 0 && (
         <div className="list">
           {shown.map(c => (
-            <button
+            /**
+              * A LINK, not a button that opened a dialog.
+              *
+              * The certificate now has an address of its own, which is what
+              * makes it shareable, bookmarkable and reachable with the back
+              * button — see the header of `CertificateView.jsx`. A row that
+              * navigates has to be an anchor: middle-click, ⌘-click and "open
+              * in new tab" all work on one and none of them work on a button
+              * with an onClick, and a keyboard user is told "link" rather than
+              * "button", which is what actually happens next.
+              */
+            <Link
               key={c.eventId}
+              to={`/certificates/${encodeURIComponent(c.code)}`}
               className="list-row"
               style={{ width: '100%', textAlign: 'left' }}
-              onClick={() => setCertificate(c)}
             >
               <span className="notif-icon tone-brand"><Award size={15} aria-hidden="true" /></span>
               <span className="truncate" style={{ flex: 1 }}>
@@ -128,18 +137,9 @@ export default function CertificatesPage({ currentUser, addToast }) {
                 </span>
               </span>
               <span className="small dim nowrap">View</span>
-            </button>
+            </Link>
           ))}
         </div>
-      )}
-
-      {certificate && (
-        <CertificateModal
-          certificate={certificate}
-          volunteer={currentUser}
-          onClose={() => setCertificate(null)}
-          addToast={addToast}
-        />
       )}
     </div>
   );

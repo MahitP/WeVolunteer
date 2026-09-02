@@ -11,6 +11,10 @@ import { getQueueHealth } from '../workers/notificationWorker.js';
 /* Shared with `alerting.js`, which asks the same question for somebody who did
    not come to look. Two definitions of "stale" would drift. */
 import { backupStatus } from '../backupStatus.js';
+/* Moved to hoursLedger.js, where the ledger lives, when the Owner Center became
+   its second reader. Two copies of a parity query is two answers to "do the
+   numbers agree". */
+import { hoursLedgerStatus } from '../hoursLedger.js';
 import { redisStatus } from '../redis/status.js';
 import { weatherCacheStats } from './weatherRoutes.js';
 import { geocodeCacheStats } from './geocodeRoutes.js';
@@ -1302,39 +1306,6 @@ router.get('/api/admin/reports/:id/evidence', authenticateToken, requireCap('rep
 // A6. System Status
 
 /**
- * Whether the append-only ledger still agrees with `attendance`.
- *
- * `attendance` is the source of truth for credited hours and the ledger is the
- * history; a divergence means one of them is wrong about a student's service
- * record. Boot logs a mismatch and carries on by design (taking the platform down
- * over a reporting discrepancy would be worse), and `verifyHours.js` can be run by
- * hand — but neither of those puts the answer in front of the administrator who
- * would be asked to defend the numbers.
- *
- * Counts users rather than rows so the cost stays flat as the ledger grows.
- */
-async function hoursLedgerStatus() {
-  try {
-    const row = await db.prepare(`
-      SELECT COUNT(*) AS mismatches FROM (
-        SELECT a.user_id
-        FROM attendance a
-        WHERE a.present = 1
-        GROUP BY a.user_id
-        HAVING COALESCE(SUM(a.hours_awarded), 0) <> COALESCE((
-          SELECT SUM(l.delta) FROM hours_ledger l WHERE l.user_id = a.user_id
-        ), 0)
-      )
-    `).get();
-
-    return { inParity: row.mismatches === 0, mismatchedUsers: row.mismatches };
-  } catch (err) {
-    console.error('[Admin] Could not check hours ledger parity:', err);
-    return { inParity: null, mismatchedUsers: null, error: true };
-  }
-}
-
-/**
  * Operational status for the admin dashboard.
  *
  * This used to return `{ smtpConfigured }` and nothing else — which reports that
@@ -1402,7 +1373,7 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
       weather: weatherCacheStats(),
       geocode: geocodeCacheStats(),
     }),
-    hoursLedger: await hoursLedgerStatus()
+    hoursLedger: await hoursLedgerStatus(db)
   });
 });
 

@@ -1,5 +1,13 @@
 # Upstash Redis
 
+> **The Owner Center reads this too.** `/owner` shows Redis reachability and
+> latency using the credentials configured here — one `PING`, cached to at most
+> one a minute, which is under 0.3% of the monthly allowance for a page left
+> open all day. It is read-only: there is deliberately no key browsing and no
+> destructive control, because the one an operator would actually want ("clear
+> the rate limits") would also clear every credential-stuffing counter. See
+> [`owner-center.md`](owner-center.md).
+
 **Status:** implemented, optional, off by default.
 **Free-tier figures read:** 2026-08-28 (Upstash pricing and documentation).
 **Live validation against a real database:** performed 2026-08-30 — all nine

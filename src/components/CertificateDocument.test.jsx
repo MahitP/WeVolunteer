@@ -1,15 +1,20 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import CertificateModal from './CertificateModal';
+import CertificateDocument from './CertificateDocument';
 
 /**
  * The document a volunteer prints and hands to a college.
  *
- * It had no tests, and the thing most worth pinning about it is not that it
- * renders — it is that nothing on it is ever silently blank. A certificate with
- * an empty name or an empty signature line still prints, still looks finished,
- * and is indistinguishable from one that was filled in. Every assertion here is
- * about a value that is wrong rather than absent when it goes missing.
+ * The thing most worth pinning about it is not that it renders — it is that
+ * nothing on it is ever silently blank. A certificate with an empty name or an
+ * empty signature line still prints, still looks finished, and is
+ * indistinguishable from one that was filled in. Every assertion here is about
+ * a value that is wrong rather than absent when it goes missing.
+ *
+ * These cases were written against `CertificateModal`, which the viewer at
+ * `/certificates/:code` replaced. They moved with the document rather than being
+ * deleted with its container: the dialog was the part that went away, and every
+ * property below is a property of the paper.
  */
 
 function certificate(overrides = {}) {
@@ -21,6 +26,8 @@ function certificate(overrides = {}) {
     hours: 6,
     organizerName: 'Dana Whitfield',
     organizerVerified: false,
+    verifyLabel: 'wevolunteers.org/verify/WV-4K2P-9QX7',
+    verifyUrl: 'https://wevolunteers.org/verify/WV-4K2P-9QX7',
     ...overrides,
   };
 }
@@ -34,7 +41,7 @@ function signatureBlockFor(capacity) {
 
 describe('the two signatures', () => {
   it('names the volunteer above their own rule, not just in the body', () => {
-    render(<CertificateModal certificate={certificate()} volunteer={volunteer} onClose={vi.fn()} />);
+    render(<CertificateDocument certificate={certificate()} volunteer={volunteer} />);
 
     const block = signatureBlockFor('Volunteer');
     expect(block).not.toBeNull();
@@ -42,7 +49,7 @@ describe('the two signatures', () => {
   });
 
   it('names the organizer above theirs, and keeps the two apart', () => {
-    render(<CertificateModal certificate={certificate()} volunteer={volunteer} onClose={vi.fn()} />);
+    render(<CertificateDocument certificate={certificate()} volunteer={volunteer} />);
 
     const organizer = signatureBlockFor('Program Coordinator');
     expect(within(organizer).getByText(/Dana Whitfield/)).toBeInTheDocument();
@@ -54,18 +61,14 @@ describe('the two signatures', () => {
   });
 
   it('admits a missing volunteer name rather than printing a blank rule', () => {
-    render(<CertificateModal certificate={certificate()} volunteer={undefined} onClose={vi.fn()} />);
+    render(<CertificateDocument certificate={certificate()} volunteer={undefined} />);
 
     expect(within(signatureBlockFor('Volunteer')).getByText('Name unavailable')).toBeInTheDocument();
   });
 
   it('admits a missing organizer name the same way', () => {
     render(
-      <CertificateModal
-        certificate={certificate({ organizerName: null })}
-        volunteer={volunteer}
-        onClose={vi.fn()}
-      />
+      <CertificateDocument certificate={certificate({ organizerName: null })} volunteer={volunteer} />
     );
 
     expect(
@@ -81,14 +84,14 @@ describe('the verification code', () => {
    * always that it quietly stopped being rendered at all.
    */
   it('survives beside the signatures, with somewhere to check it', () => {
-    render(<CertificateModal certificate={certificate()} volunteer={volunteer} onClose={vi.fn()} />);
+    render(<CertificateDocument certificate={certificate()} volunteer={volunteer} />);
 
     expect(screen.getByText('WV-4K2P-9QX7')).toBeInTheDocument();
     expect(screen.getByText(/Verify at/)).toBeInTheDocument();
   });
 
   it('is not mistaken for a third signatory', () => {
-    render(<CertificateModal certificate={certificate()} volunteer={volunteer} onClose={vi.fn()} />);
+    render(<CertificateDocument certificate={certificate()} volunteer={volunteer} />);
 
     expect(screen.getByText('WV-4K2P-9QX7').closest('.certificate-sign-block')).toBeNull();
   });
@@ -97,7 +100,7 @@ describe('the verification code', () => {
 describe('what prints', () => {
   it('keeps the controls out of the printed document', () => {
     const { container } = render(
-      <CertificateModal certificate={certificate()} volunteer={volunteer} onClose={vi.fn()} />
+      <CertificateDocument certificate={certificate()} volunteer={volunteer} />
     );
 
     /* The print rule shows `.certificate` and its descendants and hides

@@ -37,7 +37,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, Gauge,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -137,6 +137,30 @@ export const AREAS = [
     icon: TrendingUp,
     title: 'Platform Impact',
     blurb: 'Programme-wide figures: hours, volunteers, events and how participation has moved over time.',
+  },
+  /**
+   * The Owner Center, and the reason it is the last tile.
+   *
+   * Everything above is about the PROGRAMME — the people on it, what they did,
+   * and the decisions administrators took about them. This one is about the
+   * SERVICE: whether it is up, whether errors are climbing, whether Redis and
+   * the vector index are answering, and how much of each free tier has been
+   * spent. It is the only tile that is not about a person, which is why it sits
+   * apart at the end rather than beside the two impact pages it superficially
+   * resembles.
+   *
+   * `owner.console` is SUPER_ONLY, so this tile is invisible to every
+   * administrator and ungrantable through `capability.grant`. Hiding it is UX;
+   * `server/routes/ownerRoutes.js` is the boundary.
+   */
+  {
+    id: 'owner',
+    to: '/owner',
+    cap: 'owner.console',
+    icon: Gauge,
+    title: 'Owner Center',
+    blurb: 'Whether the platform is healthy: uptime, incidents, errors, analytics, '
+      + 'and the infrastructure it runs on — with links out to each service.',
   },
 ];
 

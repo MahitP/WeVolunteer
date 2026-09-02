@@ -676,7 +676,7 @@ function CertificateModal({ user, shifts, onClose }) {
               * nothing anywhere that said who it was about or who stood behind
               * it. Printed, it reads as two blank signature lines.
               *
-              * `CertificateModal.jsx` has had the right shape all along — name
+              * `CertificateDocument.jsx` has had the right shape all along — name
               * in `.certificate-sign`, caption in `.certificate-sign-label` —
               * and this is now the same.
               */}

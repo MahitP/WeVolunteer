@@ -151,6 +151,23 @@ const EXPECTED = [
   ['GET', '/api/admin/system/status',
     { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
 
+  // ── ownerRoutes.js — the Owner Center ──
+  //
+  // `owner.console` is SUPER_ONLY, so `admin: 403` is the row that matters here
+  // and it is the one an ordinary "admin sees the admin pages" assumption would
+  // get wrong. These four read third-party status; with no credentials
+  // configured (which is the test environment) every provider answers
+  // `not_configured` locally and no request leaves the process, so the rows
+  // exercise the gate rather than the network.
+  ['GET', '/api/owner/health',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+  ['GET', '/api/owner/monitoring',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+  ['GET', '/api/owner/analytics',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+  ['GET', '/api/owner/infrastructure',
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
+
   // ── attendanceRoutes.js (Task 7b) ──
 
   // Fake event id: `role !== organizer && role !== admin` is checked before any

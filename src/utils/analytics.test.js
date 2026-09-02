@@ -299,13 +299,36 @@ describe('the verification event is declared exactly once', () => {
     const path = await import('node:path');
     const serverDir = path.join(process.cwd(), 'server');
 
+    /**
+     * Comments are stripped before the scan.
+     *
+     * ── Why, and why it does not weaken the guard ──
+     *
+     * The rule is that the Express process must never LOAD the SDK, and an
+     * import is code. `server/analyticsEvents.js` — the shared list of event
+     * names the Owner Center queries and the client tracks — explains its own
+     * privacy rule by citing `src/utils/analytics.js` in prose, and an
+     * unstripped scan reads that sentence as the import it forbids. A guard
+     * that fires on a comment about itself gets suppressed, which costs more
+     * than the gap.
+     *
+     * The same treatment, and the same reasoning, as
+     * `src/serverModuleBoundary.test.js`: blank a LINE that begins with `//`,
+     * `/*` or `*`, which cannot swallow real code the way an inline block
+     * matcher can when a string literal opens it.
+     */
+    const withoutComments = (text) => text.split('\n').map((line) => {
+      const t = line.trim();
+      return (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) ? '' : line;
+    }).join('\n');
+
     const offenders = [];
     const walk = (dir) => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(full); continue; }
         if (!/\.js$/.test(entry.name)) continue;
-        const text = fs.readFileSync(full, 'utf8');
+        const text = withoutComments(fs.readFileSync(full, 'utf8'));
         if (/@amplitude|utils\/analytics/.test(text)) offenders.push(path.relative(serverDir, full));
       }
     };

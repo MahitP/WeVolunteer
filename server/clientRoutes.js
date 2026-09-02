@@ -107,6 +107,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      being edited is chosen inside the page rather than in the URL — so a report
      from here names the editor and never which policy was open. */
   '/admin/legal',
+  /* The Owner Center. A literal path with no parameter, and the page reads only
+     aggregate status — so a crash report from here says that the owner opened
+     their operations dashboard, and nothing about anybody else. */
+  '/owner',
 
   // src/routes/index.jsx — SIGNED_OUT_ROUTES
   '/welcome',
@@ -181,6 +185,12 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      not even which student, because the reporter attaches no identity.
      "Somebody opened their own badges" is not a fact about a person. */
   '/certificates',
+  /* One certificate's viewer. Allowed under the rule this whole file rests on:
+     the STORED value is the matched PATTERN, so the verification code — which is
+     a bearer credential — cannot survive matching. The path shape says only that
+     somebody opened one of their own certificates, which is the same fact
+     `/certificates` above already carries. */
+  '/certificates/:code',
   '/report-issue',
   '/profile/badges',
   '/users/:handle/badges',

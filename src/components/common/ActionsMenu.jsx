@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { MoreHorizontal } from 'lucide-react';
+import { ChevronDown, MoreHorizontal } from 'lucide-react';
 
 /**
  * A menu of actions behind one trigger.
@@ -33,11 +33,21 @@ import { MoreHorizontal } from 'lucide-react';
  * the trigger's `getBoundingClientRect()` already is — so the two agree without
  * bookkeeping, and a scroll simply recomputes.
  */
+/**
+ * `triggerText` makes the trigger a LABELLED button rather than an icon.
+ *
+ * Added for the certificate viewer's "Download" control, where the menu is a
+ * primary action on the page rather than an overflow affordance on a row. The
+ * accessible name then comes from the visible text and `aria-label` is dropped:
+ * an `aria-label` that does not contain the visible label is a WCAG 2.5.3
+ * failure, and one that merely duplicates it is noise for a screen reader.
+ */
 export default function ActionsMenu({
   label,
   items,
   icon: Icon = MoreHorizontal,
   triggerClassName = 'btn btn-ghost btn-icon',
+  triggerText = null,
   disabled = false,
 }) {
   const [open, setOpen] = useState(false);
@@ -174,11 +184,13 @@ export default function ActionsMenu({
         className={triggerClassName}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={label}
+        aria-label={triggerText ? undefined : label}
         disabled={disabled}
         onClick={() => setOpen(v => !v)}
       >
-        <Icon size={18} aria-hidden="true" />
+        <Icon size={triggerText ? 15 : 18} aria-hidden="true" />
+        {triggerText && <span>{triggerText}</span>}
+        {triggerText && <ChevronDown size={14} aria-hidden="true" />}
       </button>
       {/* Into `body`, so no ancestor's `overflow` can clip it. */}
       {menu && createPortal(menu, document.body)}

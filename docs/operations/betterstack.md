@@ -21,6 +21,19 @@
 > granted tools mutates anything. Re-run the audit after any Better Stack
 > change.
 
+> **A third reader arrived with the Owner Center.** `/owner` calls Better
+> Stack's **Uptime** API for monitor and incident status, using a FOURTH
+> credential (`BETTERSTACK_UPTIME_API_TOKEN`) that is not interchangeable with
+> the source token below or the Telemetry API token in §7. It reads only, it is
+> optional, and it does not touch the log wire this document describes. Setup and
+> its free-plan position: [`owner-center.md`](owner-center.md).
+>
+> It deliberately does **not** use the ClickHouse SQL API. Those credentials are
+> documented in `.env.example` as operator tooling the application never reads,
+> and the question they would answer — "are errors increasing" — has a better
+> answer locally: `errorReporter.js` writes the same records into `error_events`,
+> exactly rather than sampled, for thirty days rather than three.
+
 Two separate things that share a vendor, and the distinction matters:
 
 - **Telemetry** is how the *product* reports on itself — a batched HTTPS POST
