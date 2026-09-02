@@ -53,6 +53,28 @@ Nothing from Pinecone is ever displayed. It contributes candidate **ids**,
 which widen the text predicate; every filter, every permission and every
 displayed value comes from the database afterwards. See `search/discoverSearch.js`.
 
+## The search is already hybrid, and stays that way
+
+Worth stating plainly, because "add hybrid search" is the obvious next
+suggestion and it is already the architecture. A Discover query runs both
+halves:
+
+* **lexical** — the substring predicate above, which is what finds the event
+  actually called "Chess Club" when somebody types `chess`;
+* **semantic** — Pinecone's candidate ids, which find "something outdoors with
+  animals" when no event contains those words.
+
+They are combined by OR rather than by a blended score, and `rrfFuse` in
+`discoverSearch.js` implements Reciprocal Rank Fusion for the places that need
+an ordering across both lists. RRF and not a weighted blend because the two
+halves produce numbers that are not comparable — a cosine similarity and a
+substring hit are on different scales, and one of them is not a score at all.
+
+So the work below is not "replacing semantic search with lexical search". It is
+making the lexical half — the half that was always there, always correct, and
+answering most queries — stop being linear in event count, and making the
+semantic half stop being asked the same question twice.
+
 ## What was slow
 
 The two-phase page (migration 063) removed the browse endpoint's O(n) sort. It
@@ -89,6 +111,37 @@ bound, so a student typing `100%` searches for those four characters. That was
 the original objection to `LIKE` and it is answered by escaping the needle
 rather than by avoiding the operator — asserted against a table of adversarial
 needles on both engines in `db.dialectSql.test.js`.
+
+### The plan, at 50,000 events
+
+```
+Limit  (actual time=4.077..106.015 rows=60 loops=1)
+  InitPlan 1
+    ->  Bitmap Heap Scan on users ou  (actual rows=0 loops=1)
+          ->  Bitmap Index Scan on idx_users_name_trgm
+                Index Cond: (lower(name) ~~ '%robotics%'::text)
+  ->  Index Scan using idx_events_browse_order on events e
+        Index Cond: (status = ANY ('{open,closed}'::text[]))
+        Filter: ((lower(title) ~~ '%robotics%') OR (lower(description) ~~ '%robotics%')
+              OR (lower(location) ~~ '%robotics%') OR (organizer_id = ANY ((InitPlan 1).col1)))
+        Rows Removed by Filter: 1324
+```
+
+Two things in that plan are the whole design.
+
+**`InitPlan 1 … loops=1`.** The organizer lookup runs ONCE for the statement, not
+once per row, and its result becomes a constant array the filter compares
+against. That is what `ANY(ARRAY(…))` buys over `EXISTS (…)` or `IN (subquery)`,
+both of which are correlated and would put a `users` probe on every event.
+
+**The planner chose to walk the sort order and stop.** It did not use the
+trigram indexes here at all: with a leading `ORDER BY … LIMIT 60` available from
+`idx_events_browse_order`, walking 1,384 index entries to find 60 matches beat
+building a bitmap. For a rarer term it makes the opposite choice, and for
+`café` it goes straight to the trigram index. **That is only possible because
+the predicate is a plain filter on `events`** — the moment it became a semi-join
+(the rejected rewrite below) the planner lost that option and the common cases
+got much worse.
 
 ## Results
 
@@ -265,6 +318,30 @@ upstream costs hundreds of milliseconds and Redis costs tens. Here both sides
 are hundreds of milliseconds — a warm Upstash round trip was measured at 222 ms
 against Pinecone's 311–445 — so an L2 would spend a command and most of the
 saving to avoid a call of the same order.
+
+### Why `topK` stays at 60
+
+Lowering it is the obvious way to spend less, and it is the wrong one here,
+because **the candidates are filtered again after they arrive**. Every id goes
+back through the browse query, where the status scope, the date bounds, the
+audience rule and `openOnly` can each remove it — so the number that matters is
+not how many the index returned but how many survive, and a smaller K reduces
+the survivors, not the cost.
+
+What actually removes the waste is the metadata filter (`buildPineconeFilter`),
+which is already applied: a district's corpus is mostly history, so an
+unfiltered top-60 for "food pantry" can be sixty completed events from two years
+ago and the semantic half contributes nothing. Filtering on the stable fields —
+status, category, tags, start date — spends the K on rows the SQL can actually
+keep. `openOnly` is deliberately NOT among them, because it depends on remaining
+spots, which the index does not store; a stale copy of it would remove events
+that do have space.
+
+`MAX_SEMANTIC_IDS` is 100, so the parameter list has headroom above 60 rather
+than below it. This is a reasoned position rather than a measured one: measuring
+it properly needs a corpus with known relevance judgements, which does not exist
+for this application, and inventing one would produce a number that looks
+measured and is not.
 
 ### Against the free tier
 
