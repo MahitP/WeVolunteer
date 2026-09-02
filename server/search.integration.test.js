@@ -834,6 +834,30 @@ describe('the Pinecone breaker', () => {
     expect(pineconeBreakerState().shortCircuited).toBeGreaterThan(0);
   });
 
+  /**
+   * A timeout is the failure the breaker exists for. A vendor returning 500
+   * fast costs a request nothing much; a vendor that has stopped answering
+   * costs every request the full `SEARCH_TIMEOUT_MS` and holds a socket for it.
+   */
+  it('opens on timeouts, not just on error statuses', async () => {
+    searchDelayMs = 2000;
+    for (const q of ['timeout one here', 'timeout two here', 'timeout three here']) {
+      const res = await search(q);
+      expect(res.status).toBe(200);
+    }
+    expect(searchRequests).toHaveLength(3);
+
+    const { pineconeBreakerState } = await import('./search/pineconeClient.js');
+    expect(pineconeBreakerState().open).toBe(true);
+
+    /* And the point of it: the next search does not wait 1200 ms to find out. */
+    const started = Date.now();
+    const after = await search('after the timeouts');
+    expect(after.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(searchRequests).toHaveLength(3);
+  }, 30000);
+
   it('does not open on a 400, which is this application being wrong', async () => {
     searchStatus = 400;
     for (const q of ['bad request one', 'bad request two', 'bad request three', 'bad request four']) {

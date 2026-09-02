@@ -124,6 +124,41 @@ went from **458.8 ms to 0.9 ms** at 100,000 events.
 
 The default browse, which had to not regress, did not: 4.5 → 4.6 ms.
 
+## The rest of the request: eight serial round trips, now two waves
+
+The SQL above is one statement. The response around it was eight more, one after
+another: the viewer's accepted events, their organization bans, their
+memberships, then the page's slots, accepted counts, attendance and tags. On
+SQLite each was free. On PostgreSQL each is a network hop, and against a managed
+database that is single-digit milliseconds of pure waiting each, on the busiest
+endpoint the platform has.
+
+None of them reads another's output. Three depend only on who is asking, so they
+now run **alongside** the page query rather than after it; the other four take
+the page's ids and run as one wave. Two waves instead of eight hops, four
+concurrent statements at the widest — the ceiling this codebase applies to
+request fan-out.
+
+Measured with `bin/load-test.mjs --db-latency 5`, which injects a fixed 5 ms per
+database call so a before/after is reproducible:
+
+| scenario | before | after |
+|---|---|---|
+| A — public browse (list, search, detail) | 262.5 req/s, p50 75 ms | **329.0 req/s, p50 59 ms** |
+| C — student activity (browse, applications, notifications, profile) | 379.1 req/s, p50 53 ms | **412.5 req/s, p50 49 ms** |
+
+Public browse gains **25% throughput** and loses a fifth of its median latency.
+Pool waiting stayed at zero in both arms and no request failed in either, which
+is the number that had to not move: four concurrent statements per request could
+in principle starve a pool of 25. They do not, because they overlap the one
+expensive query rather than each other — the pool holds them for a quarter of
+the time it held them sequentially, so occupancy is roughly unchanged while
+latency drops.
+
+The p99 for scenario A moved the other way, 90 → 98 ms, on an eight-second run.
+That is within the noise of a single run and is recorded rather than explained
+away; the medians and the throughput moved far outside it.
+
 ## Where the remaining time goes
 
 Three cases are worth naming, because they are the ceiling rather than an
@@ -212,11 +247,24 @@ Neither the cache nor the breaker can change a row: candidate ids are re-filtere
 by the same query with the same viewer, and a search with no candidates at all is
 the lexical search this application shipped for a year.
 
+### What a cache hit is actually worth
+
+`docs/operations/pinecone.md` §6b measured the live service: **311–445 ms warm**
+(median 379) and about **3.2 s cold**, after the index has scaled to zero. So
+the vendor round trip is one to two orders of magnitude larger than the SQL
+above — a cached search saves more time than the entire database query costs,
+and a cache hit during a cold start saves three seconds.
+
+That also settles the shape of the fix. Making the SQL 17x faster is worth
+doing and does not touch the number that dominates a single Discover request;
+not making the call at all is what touches it.
+
 There is deliberately **no Redis tier** under the cache. `redis/lookupCache.js`
 exists for exactly this shape and is right for weather and geocoding, where the
-upstream costs hundreds of milliseconds and Redis costs tens. A warm Upstash
-round trip was measured at 222 ms and a Pinecone search at roughly the same, so
-an L2 would spend a command to save nothing.
+upstream costs hundreds of milliseconds and Redis costs tens. Here both sides
+are hundreds of milliseconds — a warm Upstash round trip was measured at 222 ms
+against Pinecone's 311–445 — so an L2 would spend a command and most of the
+saving to avoid a call of the same order.
 
 ### Against the free tier
 

@@ -25,6 +25,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > of the other nine changes nothing for existing users; there is still no
 > re-consent flow for signup documents.
 
+### Search — the last O(n), and not asking the vendor twice
+
+> Measured before and after at three corpus sizes, with a differential that
+> requires both forms to return identical rows; the full matrix, the rejected
+> rewrites and the plans are in
+> [`docs/operations/search-measurements.md`](docs/operations/search-measurements.md).
+
+- **The search box is no longer linear in event count.** It was the last O(n)
+  left on the browse endpoint after the two-phase page: four `strpos` tests
+  OR-ed together over every event that survived the status filter, with `users`
+  joined in for the organizer's name. At 100,000 events, p50 before → after:
+
+  | | |
+  |---|---|
+  | a rare term | 127.5 ms → **7.5 ms** |
+  | an organizer's name | 129.1 ms → **5.2 ms** |
+  | a common term (34,696 matches) | 105.4 ms → **29.3 ms** |
+  | a search matching nothing | 458.8 ms → **0.9 ms** |
+  | an accented term | 420.9 ms → **3.0 ms** |
+  | `100%` typed literally | 472.1 ms → **1.0 ms** |
+  | the default browse, which had to not regress | 4.5 ms → 4.6 ms |
+
+  Faster in every one of twenty cases at all three scales. What made it possible
+  was noticing that the operator was not the main problem: **one of the four
+  columns is in another table**, so the disjunction spanned two relations and no
+  index on either could ever be used. Indexes were added first and the plan
+  ignored them, which is what sent the work back to the predicate's shape.
+
+- **Typing `%` or `_` still searches for those characters.** That is why the
+  predicate was a position test rather than a `LIKE` in the first place. The
+  needle is now escaped before it is bound instead, and the two forms are run
+  against a table of adversarial needles on both engines and required to select
+  the same rows.
+
+- **A repeated search, a second page, and thirty students searching the same
+  words are now one call to Pinecone rather than thirty-two.** The live service
+  was measured at 311–445 ms warm and about 3.2 s cold, so the vendor round trip
+  dominates a Discover request by an order of magnitude over everything else in
+  it. Candidate ids are remembered for 60 seconds, keyed on a hash of the
+  question and never on the viewer — and re-filtered by the same query with the
+  same permissions on every request, so a shared entry is a shared list of
+  candidates and never a shared answer.
+
+- **A Pinecone outage no longer costs every search 1.2 seconds.** Three
+  consecutive outage-shaped failures and searches skip the vendor for thirty
+  seconds, answering from the database alone — which is what Discover was before
+  the integration existed. One timeout per window instead of one per request.
+
+- **Fixed: a PostgreSQL-only migration would never have reached a new
+  deployment.** The PostgreSQL schema is generated from a booted SQLite
+  database, so anything SQLite cannot express is absent from it — and the
+  baseline seeder recorded every migration as already supplied. A fresh database
+  would have had every table, passed every test, and searched linearly for ever.
+  Such migrations now run rather than being recorded, and a test provisions a
+  database the way a deployment does and checks the indexes are there.
+
+- **`bin/verify-search-indexes.mjs`** answers "are the indexes actually there,
+  and is the planner using them" on a live database. It exists because migration
+  064 is allowed to decline: `CREATE EXTENSION` needs a privilege the
+  application's role may not have, and refusing to boot over an index is the
+  wrong trade for a query that is correct without one.
+
+- **Documented: Supabase's direct database host is IPv6-only and its pooler is
+  IPv4-only** — verified by DNS, and the reason a rotation or a `pg_dump` can
+  fail in a way that looks like a bad password. The credential-rotation runbook
+  now says to check the address family first.
+
 ### Performance and scaling — second pass
 
 > Everything the first pass deliberately left alone, done. Each item was measured

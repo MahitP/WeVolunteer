@@ -361,7 +361,43 @@ router.get('/api/events', authenticateToken, async (req, res) => {
       hardCap: EVENTS_MAX_LIMIT,
     });
 
-    const events = await db.prepare(sql).all(params);
+    /**
+     * Three lookups about the VIEWER, run alongside the page query rather than
+     * after it.
+     *
+     * They depend on `req.user.id` and on nothing the page query returns, so
+     * waiting for the page before asking them is a round trip spent for no
+     * reason. On SQLite that was free; on PostgreSQL every one of them is a
+     * network hop, and against a managed database that is single-digit
+     * milliseconds each, on the busiest endpoint the platform has.
+     *
+     * Started here and handed straight to `Promise.all` below with no `await`
+     * in between, which is what keeps a rejection from being unhandled: only
+     * synchronous code separates the two, so the handlers are attached before
+     * anything else can throw.
+     *
+     * Four concurrent statements at their widest, which is the ceiling this
+     * codebase applies to fan-out on a request — see
+     * `docs/operations/load-testing.md`. They also overlap the ONE expensive
+     * query rather than each other, so the pool holds them for a quarter of the
+     * time it held them sequentially and total occupancy barely moves.
+     */
+    const viewerContext = Promise.all([
+      // Arrival details (instructions) are only for people who are actually
+      // going, or who run the event — not the open internet, and not every
+      // other signed-in student.
+      db.prepare("SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'")
+        .all(req.user.id),
+      /* One lookup for the page rather than two per card — see viewerBansFor. */
+      viewerBansFor(req.user?.id),
+      viewerMembershipsFor(req.user?.id),
+    ]);
+
+    const [events, [acceptedRows, viewerBans, viewerOrgs]] = await Promise.all([
+      db.prepare(sql).all(params),
+      viewerContext,
+    ]);
+    const acceptedEventIds = new Set(acceptedRows.map(r => r.event_id));
 
     /**
      * Zero rows carries no window value, so an empty page reports a zero total.
@@ -393,18 +429,9 @@ router.get('/api/events', authenticateToken, async (req, res) => {
       );
     }
 
-    // Arrival details (instructions) are only for people who are actually
-    // going, or who run the event — not the open internet, and not every
-    // other signed-in student. Batch-loaded once so the per-event mapping
-    // below stays free of an N+1.
-    const acceptedEventIds = new Set(
-      (await db.prepare("SELECT DISTINCT event_id FROM applications WHERE user_id = ? AND status = 'accepted'")
-        .all(req.user.id)).map(r => r.event_id)
-    );
-
     /**
-     * The three batch loads below are scoped to the rows actually being
-     * returned.
+     * The four batch loads below are scoped to the rows actually being
+     * returned, and run together.
      *
      * They previously read `slots`, every accepted application, and every
      * attendance row for the WHOLE table regardless of what was being sent —
@@ -412,47 +439,46 @@ router.get('/api/events', authenticateToken, async (req, res) => {
      * entire slot and attendance history to answer it, and the page would have
      * cost the same as the full list. A parameter list is built from the page's
      * event ids instead.
+     *
+     * They all take the same input and none reads another's output, so they are
+     * one wave rather than four round trips. Not folded into a single statement
+     * with subqueries: they return four different SHAPES — rows, a grouped
+     * count, a distinct id list and a tag map — and a union of those is a query
+     * nobody can read for a saving of one hop.
+     *
+     * The last of them is the page's tags, in one query. Per-event tag reads
+     * here would be an N+1 on the endpoint the browse screen calls on every
+     * keystroke.
      */
     const pageIds = events.map(e => e.id);
     const placeholders = pageIds.length ? pageIds.map(() => '?').join(',') : null;
 
+    const [slotRows, acceptedSlotRows, attendanceRows, tagsByEvent] = placeholders
+      ? await Promise.all([
+        db.prepare(`SELECT * FROM slots WHERE event_id IN (${placeholders})`).all(...pageIds),
+        db.prepare(`
+          SELECT slot_id, COUNT(*) as count FROM applications
+          WHERE status = 'accepted' AND event_id IN (${placeholders})
+          GROUP BY slot_id
+        `).all(...pageIds),
+        // Whether any hours have been recorded against this event. The client
+        // needs it to stop offering a delete button the server will refuse — an
+        // action that is always going to fail should not be presented as
+        // available.
+        db.prepare(`SELECT DISTINCT event_id FROM attendance WHERE event_id IN (${placeholders})`)
+          .all(...pageIds),
+        tagsForEvents(db, pageIds),
+      ])
+      : [[], [], [], new Map()];
+
     const slotsByEvent = new Map();
-    if (placeholders) {
-      for (const s of await db.prepare(`SELECT * FROM slots WHERE event_id IN (${placeholders})`).all(...pageIds)) {
-        if (!slotsByEvent.has(s.event_id)) slotsByEvent.set(s.event_id, []);
-        slotsByEvent.get(s.event_id).push(s);
-      }
+    for (const s of slotRows) {
+      if (!slotsByEvent.has(s.event_id)) slotsByEvent.set(s.event_id, []);
+      slotsByEvent.get(s.event_id).push(s);
     }
 
-    const acceptedBySlot = new Map();
-    if (placeholders) {
-      for (const r of await db.prepare(`
-        SELECT slot_id, COUNT(*) as count FROM applications
-        WHERE status = 'accepted' AND event_id IN (${placeholders})
-        GROUP BY slot_id
-      `).all(...pageIds)) {
-        acceptedBySlot.set(r.slot_id, r.count);
-      }
-    }
-
-    // Whether any hours have been recorded against this event. The client needs
-    // it to stop offering a delete button the server will refuse — an action
-    // that is always going to fail should not be presented as available.
-    const withAttendance = new Set(
-      placeholders
-        ? (await db.prepare(`SELECT DISTINCT event_id FROM attendance WHERE event_id IN (${placeholders})`)
-            .all(...pageIds)).map(r => r.event_id)
-        : []
-    );
-
-    /* Tags for the whole page in ONE query, beside the other per-page batch
-       loads above. Per-event reads here would be an N+1 on the endpoint the
-       browse screen calls on every keystroke. */
-    const tagsByEvent = await tagsForEvents(db, pageIds);
-
-    /* One lookup for the page rather than two per card — see viewerBansFor. */
-    const viewerBans = await viewerBansFor(req.user?.id);
-    const viewerOrgs = await viewerMembershipsFor(req.user?.id);
+    const acceptedBySlot = new Map(acceptedSlotRows.map(r => [r.slot_id, r.count]));
+    const withAttendance = new Set(attendanceRows.map(r => r.event_id));
 
     const formattedEvents = events.map(event => {
       const slots = slotsByEvent.get(event.id) || [];

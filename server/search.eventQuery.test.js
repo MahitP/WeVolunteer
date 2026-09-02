@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 
 import {
-  parseEventFilters, buildEventWhere, buildEventOrder, semanticIdParams, EVENT_SORTS,
+  parseEventFilters, buildEventWhere, buildEventOrder, semanticIdParams, buildAggScope,
+  EVENT_SORTS,
 } from './eventQuery.js';
 
 /**
@@ -154,5 +155,81 @@ describe('what a client may ask for', () => {
     expect(parseEventFilters({ recommended: '1' }).value.recommended).toBe(true);
     expect(parseEventFilters({}).value.recommended).toBe(false);
     expect(parseEventFilters({ recommended: 'no' }).value.recommended).toBe(false);
+  });
+});
+
+/* ── The PostgreSQL shape of the same predicate ───────────────────────────── */
+
+/**
+ * The search box asks one question and the two engines are asked it in
+ * different words: SQLite gets four `instr` tests OR-ed together, PostgreSQL
+ * gets three `LIKE`s over its own columns plus an array of organizer ids.
+ *
+ * These are assertions about the SHAPE, which is where the performance lives.
+ * That the two shapes select the SAME ROWS is asserted where it can be — on
+ * live engines, in `db.dialectSql.test.js` and in `bin/search-bench.mjs`'s
+ * differential — because a string comparison cannot establish it.
+ */
+describe('the predicate PostgreSQL is given', () => {
+  const PG = { dialect: 'postgres' };
+
+  it('keeps every branch on a single relation, so an index can answer it', () => {
+    const { where } = buildEventWhere({ q: 'chess', scope: 'listable' }, 'me', PG);
+
+    for (const column of ['title', 'description', 'location']) {
+      expect(where).toContain(`lower(e.${column}) LIKE ('%' || lower(@q) || '%')`);
+    }
+    /* The organizer branch is an array computed once, not a join: a disjunction
+       spanning `events` and `users` cannot be answered by any index on either. */
+    expect(where).toContain('e.organizer_id = ANY(ARRAY(');
+    expect(where).not.toContain('lower(u.name)');
+  });
+
+  it('drops the users join from the scan that no longer reads it', () => {
+    expect(buildAggScope({ q: 'chess' }, 'me', PG).needsUsers).toBe(false);
+    expect(buildAggScope({ q: 'chess' }, 'me').needsUsers).toBe(true);
+    expect(buildAggScope({ category: 'Animals' }, 'me', PG).needsUsers).toBe(false);
+  });
+
+  it('escapes the needle for PostgreSQL and leaves it alone for SQLite', () => {
+    expect(buildEventWhere({ q: '100% a_b' }, 'me', PG).params.q).toBe('100\\% a\\_b');
+    expect(buildEventWhere({ q: '100% a_b' }, 'me').params.q).toBe('100% a_b');
+  });
+
+  /**
+   * `(A OR B) OR e.id IN (…)` is a disjunction over two semi-joins, which
+   * PostgreSQL answers with a hashed subplan probed once per row of `events` —
+   * the whole-table scan this rewrite exists to remove, returning on exactly
+   * the path that has a vendor attached.
+   */
+  it('folds the candidate ids into the same disjunction rather than around it', () => {
+    const withIds = buildEventWhere({ q: 'chess', semanticIds: ['x-1'], scope: 'listable' }, 'me', PG).where;
+    const without = buildEventWhere({ q: 'chess', scope: 'listable' }, 'me', PG).where;
+
+    /* One more branch in the SAME group — not a new group wrapped around the
+       closed one, which is the spelling SQLite uses and the one that costs a
+       whole-table scan here. */
+    expect(withIds).toBe(without.replace(/\)$/, '\n      OR e.id IN (@sem0))'));
+
+    const sqlite = buildEventWhere({ q: 'chess', semanticIds: ['x-1'], scope: 'listable' }, 'me').where;
+    expect(sqlite).toContain('OR e.id IN (@sem0)');
+    expect(sqlite).not.toBe(withIds);
+  });
+
+  it('still refuses a restricted query with no candidates', () => {
+    const { where } = buildEventWhere(
+      { semanticIds: [], restrictToSemanticIds: true, scope: 'listable' }, 'me', PG,
+    );
+    expect(where).toContain('1 = 0');
+  });
+
+  /** The pre-064 form is still reachable, because the benchmark measures it. */
+  it('can still be built in the form it replaced', () => {
+    const { where, params } = buildEventWhere(
+      { q: '100% a_b', scope: 'listable' }, 'me', PG, { textForm: 'position' },
+    );
+    expect(where).toContain('strpos(lower(e.title), lower(@q))');
+    expect(where).toContain('strpos(lower(u.name), lower(@q))');
+    expect(params.q, 'the position form takes the needle verbatim').toBe('100% a_b');
   });
 });

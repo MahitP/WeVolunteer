@@ -281,6 +281,47 @@ the substring search can answer in eleven milliseconds. The next query is warm.
 Raising the timeout to catch the cold start would make every genuinely slow
 request pay for it.
 
+### Not asking twice — the candidate cache, the single-flight and the breaker
+
+Added 2026-09-02, on the strength of the numbers directly above. A warm search
+costs 311–445 ms and a cold one about 3.2 s, so the cheapest search is the one
+that is not sent.
+
+* **`search/candidateCache.js`** remembers a question's candidate ids for 60
+  seconds (`PINECONE_CANDIDATE_TTL_MS`, 500 entries). Page two of a search, the
+  same search from a second student, and a client that fires twice all become
+  one vendor call. The key is a SHA-256 of the index, namespace, query text,
+  metadata filter and topK — never the viewer, because the answer does not
+  depend on who is asking and the database is what applies who is asking. The
+  hash also means the entries this process holds are not a readable list of what
+  the district searched for.
+* **Single-flight.** Identical questions in the air at the same moment share one
+  request, so a class of thirty told to search the same words produces one call
+  rather than thirty simultaneous cache misses.
+* **A read-path breaker** in `pineconeClient.js`. Three consecutive
+  outage-shaped failures — timeout, 5xx, 429, never a 400 — and searches skip
+  the vendor for 30 seconds. Without it an outage costs **every** search the
+  full 1200 ms timeout and a socket held for it; with it, one search per
+  cooldown window does. The cooldown ends with a single half-open probe, so
+  recovery needs no timer and no polling.
+* **Host prewarm.** `indexHost()` caches, but its first call is a control-plane
+  request to `api.pinecone.io`. `startIndexWorker` now makes it at boot instead
+  of leaving it on whichever student searches first after a deploy.
+
+None of these can change a row. A candidate id is not a permission (§2), so
+whether it came from the vendor, from memory, or not at all, the same query with
+the same filters and the same viewer decides what is returned. A search with no
+candidates is the lexical search this application shipped for a year.
+
+Staleness has one direction: an entry can be missing an event indexed in the
+last minute. It cannot show a cancelled, filled, deleted or hidden one, and the
+lexical half is never cached, so a brand-new event whose title matches what was
+typed is found immediately.
+
+`GET /api/admin/ops/status` reports `search.usage` (read units and embedding
+tokens as Pinecone reported them), `search.breaker` and
+`search.candidateCache.hitRate`.
+
 ### The similarity floor, and the defect that produced it
 
 A vector index returns the K **nearest** records. It has no concept of "nothing
