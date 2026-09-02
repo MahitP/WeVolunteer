@@ -18,7 +18,10 @@
  *     LAST by distance, matching `distance != null` and `?? Infinity`
  *   • per-slot hours carry a 0.1 floor, as formatSlot does
  */
-import { hoursBetween, greatest, least, substringPosition } from './db/dialectSql.js';
+import {
+  hoursBetween, greatest, least, substringContains, substringPosition, escapeLikeLiteral,
+  isPostgres,
+} from './db/dialectSql.js';
 
 import { normaliseTag, MAX_TAGS_PER_EVENT } from './eventTags.js';
 
@@ -322,9 +325,12 @@ export function parseEventFilters(query = {}) {
  * column nothing in that request reads. Measured both ways; this is the version
  * with no regression.
  */
-export function buildAggScope(filters, userId, db = null) {
-  const { where } = buildEventWhere(filters, userId, db, { aggregateAvailable: false });
-  return { where, needsUsers: Boolean(filters.q) };
+export function buildAggScope(filters, userId, db = null, { textForm = null } = {}) {
+  const { where } = buildEventWhere(filters, userId, db, { aggregateAvailable: false, textForm });
+  /* PostgreSQL asks about the organizer's name inside `textMatchClause`'s own
+     subquery, so the outer scan no longer references `u` at all and the join is
+     pure cost. SQLite's four-way OR still reads `u.name` from here. */
+  return { where, needsUsers: Boolean(filters.q) && (textForm === 'position' || !isPostgres(db)) };
 }
 
 export function eventQueryFragments({ lat, lng, db = null, aggScope = null }) {
@@ -392,6 +398,98 @@ export function eventQueryFragments({ lat, lng, db = null, aggScope = null }) {
 }
 
 /**
+ * The search box, as a predicate.
+ *
+ * ── What it has to mean ──
+ *
+ * "Contains what I typed", case-insensitively, in any of four places: the
+ * event's title, its description, its location, or its organizer's name. That
+ * is the promise the box has always made and nothing here changes it. Both
+ * spellings below are exactly the same set of events; `search.eventQuery.test.js`
+ * and `bin/search-bench.mjs` assert row-for-row equality between them.
+ *
+ * ── Why PostgreSQL gets a different SHAPE and not just a different function ──
+ *
+ * The obvious translation of the four-way OR keeps it a four-way OR and swaps
+ * `strpos` for an indexable `LIKE`. That does not work, and the reason is worth
+ * writing down because it is not about the operator at all: **one of the four
+ * columns lives in another table.** A disjunction that spans two relations
+ * cannot be answered by any combination of indexes on either of them — the
+ * planner has no bitmap to OR together — so it joins first and filters after,
+ * which is a scan of every candidate event no matter how selective the words
+ * are. Measured: an index on all four columns changed a 50,000-event search by
+ * nothing at all, because the plan never used one.
+ *
+ * Rewritten as `e.id IN (…)` over a UNION ALL, each branch is a single-relation
+ * predicate that an index can answer, and PostgreSQL turns the whole thing into
+ * a semi-join over the union of three small bitmaps. `UNION ALL` rather than
+ * `UNION`: duplicates cost a little and mean nothing to `IN`, and de-duplicating
+ * them would add a sort or a hash over the very rows being saved.
+ *
+ * ── Why the semantic ids are a BRANCH and not an OR around the outside ──
+ *
+ * `filters.semanticIds` is the list of event ids Pinecone proposed for this
+ * query, and widening the text predicate with them is the entire read-path
+ * integration: every other clause, the sort, the exact total, the LIMIT/OFFSET
+ * and the serialiser are untouched, so a semantically-found event is subject to
+ * exactly the same rules as a lexically-found one.
+ *
+ * It has to be widening rather than replacement because the substring match is
+ * not the weaker half — somebody typing `Chess` wants the event called Chess
+ * Club, and an embedding is not reliably better at that than an exact match is.
+ *
+ * But `(e.id IN (union)) OR (e.id IN (@sem0, …))` is a disjunction spanning two
+ * semi-joins, and PostgreSQL answers it the way it answers any such thing: a
+ * hashed subplan probed once per row of `events`. That is the O(n) scan this
+ * rewrite exists to remove, and the Discover path — the one with the vendor
+ * attached — is exactly where it would have come back. Folded in as a third
+ * UNION ALL branch, the candidate ids arrive as a primary-key lookup inside the
+ * same semi-join, and the plan stays a bitmap.
+ */
+function textMatchClause(db, filters, params, textForm) {
+  const needle = 'lower(@q)';
+
+  if (textForm === 'position') {
+    /* The pre-064 predicate, on whichever engine. Reachable only from
+       `bin/search-bench.mjs`, which measures the rewrite against the thing it
+       replaced and would otherwise have to keep its own copy of it. */
+    const lexical = [
+      substringPosition(db, 'lower(e.title)', needle),
+      substringPosition(db, 'lower(e.description)', needle),
+      substringPosition(db, 'lower(e.location)', needle),
+      substringPosition(db, 'lower(u.name)', needle),
+    ].join('\n      OR ');
+    const proposed = semanticIdParams(filters.semanticIds, params);
+    return proposed ? `((${lexical}) OR ${proposed})` : `(${lexical})`;
+  }
+
+  if (!isPostgres(db)) {
+    /* SQLite: the four-way OR, reading `u` from the caller's own JOIN. There is
+       no index to reach for here, so the shape that reads most plainly is also
+       the fastest one available. */
+    const lexical = [
+      substringContains(db, 'lower(e.title)', needle),
+      substringContains(db, 'lower(e.description)', needle),
+      substringContains(db, 'lower(e.location)', needle),
+      substringContains(db, 'lower(u.name)', needle),
+    ].join('\n      OR ');
+    const semantic = semanticIdParams(filters.semanticIds, params);
+    return semantic ? `((${lexical}) OR ${semantic})` : `(${lexical})`;
+  }
+
+  const branches = ['title', 'description', 'location']
+    .map((column) => substringContains(db, `lower(e.${column})`, needle));
+
+  branches.push(`e.organizer_id = ANY(ARRAY(
+        SELECT ou.id FROM users ou WHERE ${substringContains(db, 'lower(ou.name)', needle)}
+      ))`);
+
+  const proposed = semanticIdParams(filters.semanticIds, params);
+  if (proposed) branches.push(proposed);
+  return `(${branches.join('\n      OR ')})`;
+}
+
+/**
  * Builds the WHERE clause and its named parameters.
  *
  * Named parameters throughout: this clause is assembled from a variable number
@@ -399,7 +497,9 @@ export function eventQueryFragments({ lat, lng, db = null, aggScope = null }) {
  * across every branch — the kind of bookkeeping that silently binds the wrong
  * value once a filter is added in the middle.
  */
-export function buildEventWhere(filters, userId, db = null, { aggregateAvailable = true } = {}) {
+export function buildEventWhere(
+  filters, userId, db = null, { aggregateAvailable = true, textForm = null } = {},
+) {
   const clauses = [];
   const params = {};
 
@@ -408,39 +508,19 @@ export function buildEventWhere(filters, userId, db = null, { aggregateAvailable
   else if (filters.scope === 'open') clauses.push(`e.status = 'open'`);
 
   if (filters.q) {
-    // A position test on lowered text rather than LIKE: no wildcard characters
-    // in user input can change the shape of the match. The engines spell the
-    // function differently, so it comes from the dialect layer.
-    const lexical = `
-      ${substringPosition(db, 'lower(e.title)', 'lower(@q)')}
-      OR ${substringPosition(db, 'lower(e.description)', 'lower(@q)')}
-      OR ${substringPosition(db, 'lower(e.location)', 'lower(@q)')}
-      OR ${substringPosition(db, 'lower(u.name)', 'lower(@q)')}
-    `;
-    params.q = filters.q;
-
     /**
-     * ── The semantic half, added as an OR and nothing more ──
+     * The needle is escaped for PostgreSQL and left alone for SQLite.
      *
-     * `filters.semanticIds` is a list of event ids Pinecone proposed for this
-     * query. Widening the text predicate is the ENTIRE integration on the read
-     * path, and that is deliberate: every other clause in this function, the
-     * sort, the `COUNT(*) OVER ()`, the LIMIT/OFFSET and the serialiser are
-     * untouched, so a semantically-found event is subject to exactly the same
-     * rules as a lexically-found one. There is no second code path to keep in
-     * step and no way for a candidate to arrive with fewer checks applied.
-     *
-     * It is an OR rather than a replacement because the substring match is not
-     * the weaker half. Somebody typing `Chess` wants the event called Chess
-     * Club, and an embedding is not reliably better at that than an exact
-     * match is — see `shouldUseSemantic`, which keeps the shortest and most
-     * literal queries away from the vendor entirely.
-     *
-     * Positional names because SQLite has no array binding, the same reason
-     * the tag facet spells its own IN list out.
+     * One parameter name, two values, because the two engines are asked
+     * different questions about it: PostgreSQL gets a `LIKE` pattern whose
+     * metacharacters have been neutralised (`substringContains`), SQLite gets
+     * the raw string for `instr`. Binding both under different names would
+     * leave one unbound-but-declared on every request, and `node:sqlite`
+     * refuses a parameter the statement never references.
      */
-    const semantic = semanticIdParams(filters.semanticIds, params);
-    clauses.push(semantic ? `((${lexical}) OR ${semantic})` : `(${lexical})`);
+    const indexed = textForm !== 'position' && isPostgres(db);
+    params.q = indexed ? escapeLikeLiteral(filters.q) : filters.q;
+    clauses.push(textMatchClause(db, filters, params, textForm));
   }
 
   /**
@@ -598,13 +678,13 @@ export function buildEventWhere(filters, userId, db = null, { aggregateAvailable
  */
 const MAX_SEMANTIC_IDS = 100;
 
-export function semanticIdParams(ids, params) {
+export function semanticIdParams(ids, params, alias = 'e') {
   if (!Array.isArray(ids) || ids.length === 0) return '';
   const capped = ids.slice(0, MAX_SEMANTIC_IDS).filter((id) => typeof id === 'string' && id);
   if (!capped.length) return '';
   const names = capped.map((_, i) => `@sem${i}`);
   capped.forEach((id, i) => { params[`sem${i}`] = id; });
-  return `e.id IN (${names.join(', ')})`;
+  return `${alias}.id IN (${names.join(', ')})`;
 }
 
 /**
@@ -818,4 +898,186 @@ export function buildEventPageCte(filters, aggScope, { paginated }) {
  */
 export function restrictAggToPage(aggCte) {
   return aggCte.replace('FROM events e', 'FROM events e JOIN page ON page.event_id = e.id');
+}
+
+/**
+ * The whole browse statement: the CTEs, the SELECT, the joins, the order and
+ * the page.
+ *
+ * ── Why this lives here and not in the route ──
+ *
+ * It used to be assembled inline in `GET /api/events`, and everything that
+ * wanted to measure or verify it — `bin/events-query-probe.mjs`,
+ * `bin/search-bench.mjs` — had to assemble its own copy from the same
+ * fragments. Copies drift: the probe spent one whole pass measuring a
+ * correlated subquery this module had already replaced with an indexed column,
+ * and another reading a `total_count` that had moved into its own CTE. Both
+ * times the number was wrong in the harness's favour.
+ *
+ * A benchmark that builds the statement from this function cannot measure a
+ * query the application does not run.
+ *
+ * @param {object}  o
+ * @param {object}  o.filters    parsed filters, from `parseEventFilters`
+ * @param {string}  o.userId     the viewer, for `mine`/`favoritesOnly`
+ * @param {object}  o.db         the database handle, for the dialect
+ * @param {boolean} o.paginated  whether the caller asked for a page
+ * @param {number}  [o.limit]    page size, when paginated
+ * @param {number}  [o.offset]   page offset, when paginated
+ * @param {number}  o.hardCap    the ceiling an unpaginated response is capped to
+ * @returns {{sql: string, params: object, split: boolean}}
+ */
+export function buildEventListStatement({
+  filters, userId, db, paginated, limit = null, offset = 0, hardCap, textForm = null,
+}) {
+  /* The aggregate folds only over events that already match the event-only
+     predicates. `buildAggScope` derives that half from `buildEventWhere`
+     itself, so the two cannot describe different filters. */
+  const aggScope = buildAggScope(filters, userId, db, { textForm });
+  const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db, aggScope });
+  const { where, params } = buildEventWhere(filters, userId, db, { textForm });
+
+  /**
+   * The aggregate keeps the scope even though `page` has already applied it.
+   *
+   * Dropping it looks free — `restrictAggToPage` joins `page`, so the fold is
+   * over sixty ids either way — and it is not. Measured at 50,000 events, an
+   * `agg` with no predicate of its own made a search that matches NOTHING go
+   * from 1.0 ms to 58.3 ms: with the scope present the fold has nothing to fold
+   * and stops, and without it the planner reaches that conclusion only after
+   * building the join. Nine of seventeen cases were slower and one was 58x
+   * slower, so the redundant predicate stays.
+   */
+  const order = buildEventOrder(filters.sort, filters.semanticIds);
+
+  const FROM = `
+    FROM events e
+    JOIN users u ON e.organizer_id = u.id
+    JOIN agg ON agg.event_id = e.id
+    /* LEFT, not JOIN: most events belong to no organization, and an inner
+       join here would silently empty the entire opportunities list. */
+    LEFT JOIN organizations org ON org.id = e.organization_id
+    ${where}
+  `;
+
+  /**
+   * The total comes from the SAME statement as the rows.
+   *
+   * It used to be a second `SELECT COUNT(*)` over the identical FROM/WHERE,
+   * which meant the aggregate over every event and every slot ran TWICE per
+   * request to answer one page. `COUNT(*) OVER ()` is evaluated across the
+   * whole filtered set before LIMIT/OFFSET is applied, so it is exactly the
+   * number the separate query produced — and it costs nothing extra, because
+   * the rows have already been counted to sort them.
+   *
+   * Measured at 10,000 events / 20,000 slots / 60,000 applications: this and
+   * the `acc` fold in eventQuery.js took the default browse page from 186ms
+   * to 79ms, and the filtered pages from ~100-200ms to ~50ms.
+   *
+   * The response shape is unchanged: the serialiser below builds each event
+   * from an explicit field list, so `total_count` never reaches a caller.
+   */
+  const SELECT = `
+    SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
+           u.school as organizer_school,
+           /* One LEFT JOIN rather than a lookup per event. An event card shows
+              the organization's name, and fetching it per row is the N+1 the
+              whole list query is shaped to avoid. */
+           org.name as organization_name, org.slug as organization_slug,
+           ${spotsSelect},
+           ${distanceSelect},
+           COUNT(*) OVER () AS total_count
+  `;
+
+  /**
+   * The row query needs lat/lng for the distance expression in its SELECT list;
+   * the COUNT above does not, and node:sqlite refuses a bound parameter that
+   * the statement never references.
+   */
+  const rowParams = filters.lat != null
+    ? { ...params, lat: filters.lat, lng: filters.lng }
+    : params;
+
+  /**
+   * Even the unpaginated response is bounded.
+   *
+   * Omitting `limit` returns the bare array every existing consumer expects,
+   * and that shape is kept. What changed is that it no longer means "every row
+   * in the table": it is capped at hardCap, the same ceiling a caller
+   * that DOES paginate is clamped to.
+   *
+   * Without the cap this was the largest payload the app sends and it grew
+   * without limit — measured at 690 KB for 503 events, fetched on every session
+   * restore. One forgotten query parameter was the difference between a small
+   * response and a district-sized one, which is not a property worth keeping.
+   *
+   * Nothing observable changes below the ceiling, which is every realistic
+   * pilot deployment, and the SPA already paginates at 60. Above it, a caller
+   * that needs everything must page — which is what the warning the route logs
+   * has been telling them to do.
+   */
+  /**
+   * Two phases when the page can be chosen before the fold, one when it cannot.
+   *
+   * ── What the split buys ──
+   *
+   * The single-phase query folds `agg` over every event that survives the
+   * event-only predicates — a MIN, a MAX, two SUMs over slots and a correlated
+   * `COUNT(*)` over `applications`, per event — and then `LIMIT 60` discards
+   * almost all of it. At 50,000 events that is fifty thousand application
+   * counts computed in order to display sixty. Those values are display fields
+   * on an event card; nothing outside the page reads them.
+   *
+   * So phase 1 picks the page's ids using only the event-only predicates and
+   * an ordering that does not need the fold, and phase 2 folds over those ids.
+   * Measured on a throwaway PostgreSQL at 50,000 events / 80,000 slots /
+   * 320,000 applications, with `bin/events-query-probe.mjs` comparing every
+   * row of both forms:
+   *
+   *     sort: alpha       297.1 ms -> 10.9 ms
+   *     sort: deadline    302.3 ms -> 15.9 ms
+   *     empty result      292.5 ms -> 30.3 ms
+   *     category          323.4 ms -> 61.3 ms
+   *     text search       357.2 ms -> 93.4 ms
+   *
+   * ── And where it does not apply ──
+   *
+   * `canSplitEventPage` refuses when the WHERE mentions the fold — `openOnly`
+   * reads `spots_remaining`, the date range reads `agg.min_start`, `minHours`
+   * reads `agg.total_hours` — or when the sort orders by it. Those requests
+   * take the original statement unchanged, which is what makes this safe to
+   * adopt: it can only alter the paths where the aggregate is display-only.
+   *
+   * The two forms are asserted to return identical rows, at four scales and
+   * across every filter and sort, by the probe and by
+   * `routes.eventsTwoPhase.test.js`.
+   */
+  const split = canSplitEventPage(filters, where);
+  const pageParams = paginated
+    ? { ...rowParams, limit, offset }
+    : { ...rowParams, hardCap };
+
+  if (split) {
+    return {
+      split,
+      params: pageParams,
+      sql: `WITH ${buildEventPageCte(filters, aggScope, { paginated })}, ${restrictAggToPage(aggCte)} `
+        + `${SELECT.replace('COUNT(*) OVER () AS total_count', 'page_total.total_count')} `
+        + `FROM events e JOIN page ON page.event_id = e.id `
+        /* CROSS JOIN, because `page_total` is exactly one row — the exact count
+           over the same predicate in the same statement and therefore the same
+           snapshot. */
+        + `CROSS JOIN page_total `
+        + `JOIN users u ON e.organizer_id = u.id JOIN agg ON agg.event_id = e.id `
+        + `LEFT JOIN organizations org ON org.id = e.organization_id ${order}`,
+    };
+  }
+
+  return {
+    split,
+    params: pageParams,
+    sql: paginated
+      ? `WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`
+      : `WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`,
+  };
 }

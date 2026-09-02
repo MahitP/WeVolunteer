@@ -371,28 +371,89 @@ export function insertionTiebreak(db, alias) {
 }
 
 /**
- * "Does this text contain that text", as a position test.
+ * "Does this text contain that text".
  *
- * The one call site is the browse search box (`eventQuery.buildEventWhere`),
+ * The one call site is the browse search box (`eventQuery.textMatchClause`),
  * which matches the typed string against an event's title, description and
  * location and against the organizer's name.
  *
- * ── Why a position test and not LIKE ──
+ * ── Why the two engines are asked in different words ──
  *
- * `LIKE` gives `%` and `_` meaning, so a user typing `100%` or `a_b` would be
- * running a pattern rather than searching for their own characters. Escaping
- * that correctly on both engines is more moving parts than asking for a
- * position, and the position form has no metacharacters at all.
+ * This used to be a position test on both — `instr` on SQLite, `strpos` on
+ * PostgreSQL — chosen because a position has no metacharacters, so nothing a
+ * user typed could change the shape of the match. That reasoning still holds
+ * for SQLite and is why that half is unchanged.
  *
- * ── The translation ──
+ * On PostgreSQL it was also the reason the search could not be indexed:
+ * `strpos(lower(title), lower($1))` is a function call over a column, and the
+ * only index that could answer it is one built on that whole expression for
+ * that one needle. So every text search read every candidate row and evaluated
+ * four `strpos` calls on it —
+ * `docs/operations/search-measurements.md` records 93 ms at 50,000 events, the
+ * last O(n) left on the browse endpoint after the two-phase page removed the
+ * others.
  *
- * SQLite spells it `instr(haystack, needle)` and PostgreSQL spells it
- * `strpos(haystack, needle)`. The argument order and the result agree exactly:
- * a 1-based index, or 0 when the needle is absent, so `> 0` means "contains" on
- * both. PostgreSQL has no `instr` at all, which is not a silent difference —
- * the browse endpoint answered 500 on every search until this branch existed,
- * and answered correctly the moment a filter other than `q` was used, so it
- * only showed up when someone actually typed in the box.
+ * `LIKE` is the operator `pg_trgm`'s GIN opclass knows how to accelerate. The
+ * objection to it — that `%` and `_` in a user's own typing would become
+ * pattern syntax — is answered by escaping the needle instead of avoiding the
+ * operator: see `escapeLikeLiteral`, which is applied to the VALUE before it is
+ * bound, so what reaches the engine is a pattern that can only match the
+ * characters the user typed.
+ *
+ * ── Why this is exactly equivalent to the position test ──
+ *
+ *     strpos(lower(col), lower(@q)) > 0   ⟺   lower(col) LIKE '%' || lower(@q) || '%'
+ *
+ * for every needle whose metacharacters are escaped, including the empty string
+ * (both true) — and `lower()` stays on both sides rather than being replaced by
+ * `ILIKE`, so the case folding is the same function it always was rather than
+ * `ILIKE`'s internal one. `db.dialectSql.test.js` asserts the two forms agree on
+ * a table of adversarial needles (`%`, `_`, `\`, accents, mixed case) on both
+ * engines.
+ *
+ * ── Why SQLite does not follow ──
+ *
+ * There is no trigram index there to earn the change, `LIKE` on SQLite is
+ * ASCII-case-insensitive by default (a difference that would have to be
+ * suppressed with `PRAGMA case_sensitive_like`, changing an engine-wide setting
+ * for one predicate), and the pilot database is small enough that the scan is
+ * the right plan anyway. One question, two spellings, each the fast one on its
+ * own engine.
+ */
+export function substringContains(db, haystack, needle) {
+  return isPostgres(db)
+    ? `${haystack} LIKE ('%' || ${needle} || '%')`
+    : `instr(${haystack}, ${needle}) > 0`;
+}
+
+/**
+ * Escapes the three characters `LIKE` treats as syntax, so a typed string
+ * matches itself and nothing else.
+ *
+ * Backslash first, or the escapes added for `%` and `_` would themselves be
+ * escaped. Backslash is `LIKE`'s default escape character on PostgreSQL, so no
+ * `ESCAPE` clause is needed — and not writing one keeps the operator the plain
+ * `~~` that the trigram opclass matches.
+ *
+ * Only ever applied to a value that is about to be bound as a PARAMETER. It is
+ * not a quoting function and is no defence against injection; the parameter is.
+ */
+export function escapeLikeLiteral(text) {
+  return String(text ?? '').replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * The same question as `substringContains`, spelled as a position test.
+ *
+ * This is what BOTH engines were asked before migration 064, and it is kept for
+ * one reason: `bin/search-bench.mjs` measures the trigram rewrite against it,
+ * and a benchmark whose baseline is a copy pasted into the harness measures
+ * whatever the harness drifted into. Here it is one function, exercised on both
+ * engines by `db.dialectSql.test.js` alongside the form that replaced it.
+ *
+ * SQLite spells it `instr(haystack, needle)` and PostgreSQL `strpos(…)`. The
+ * argument order and the result agree exactly: a 1-based index, or 0 when the
+ * needle is absent, so `> 0` means "contains" on both.
  */
 export function substringPosition(db, haystack, needle) {
   return `${isPostgres(db) ? 'strpos' : 'instr'}(${haystack}, ${needle}) > 0`;

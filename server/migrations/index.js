@@ -72,6 +72,7 @@ import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
 import schedulerLeases from './062_scheduler_leases.js';
 import eventSlotSummary from './063_event_slot_summary.js';
+import searchTrigramIndexes from './064_search_trigram_indexes.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -433,7 +434,15 @@ export const MIGRATIONS = [
    * Additive, with its backfill in the same migration so no deployment serves
    * a page ordered by a column that is NULL everywhere.
    */
-  eventSlotSummary
+  eventSlotSummary,
+  /**
+   * 064 — the trigram indexes the search box needs, on PostgreSQL only.
+   *
+   * Additive and index-only: nothing reads differently with or without it, and
+   * it declines rather than failing the boot when the role cannot install the
+   * extension.
+   */
+  searchTrigramIndexes
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
@@ -813,6 +822,39 @@ export async function seedPostgresBaseline(db, migrations = MIGRATIONS) {
   await ensurePostgresBookkeeping(db);
   const now = new Date().toISOString();
   for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
+    /**
+     * A `postgresOnly` migration RUNS here, rather than being recorded as
+     * already-present.
+     *
+     * The rest of this function rests on one fact: the generated schema is
+     * derived from a freshly-booted SQLite database, so it already contains
+     * every migration's effect and re-applying one would be the double-apply
+     * this file exists to prevent. That fact has an exception, and the
+     * exception is silent — a change SQLite cannot express is not in the
+     * SQLite database, so it is not in the generated schema either, so a fresh
+     * PostgreSQL database recorded it as applied and never got it.
+     *
+     * Migration 064's trigram indexes are the first of those, and the symptom
+     * was as quiet as it sounds: every table present, every test passing, the
+     * search box correct — and linear, on exactly the databases created after
+     * the fix for it shipped. `migrations.postgres.test.js` now asserts that a
+     * fresh database ends up with the indexes.
+     *
+     * Its checksum is recorded rather than the baseline sentinel, because code
+     * DID run and drift in it is worth catching.
+     */
+    if (m.postgresOnly) {
+      const [already] = await db.prepare(
+        'SELECT version FROM schema_migrations WHERE version = ?'
+      ).all(m.version);
+      if (already) continue;
+      await m.postgres.up(db);
+      await db.prepare(
+        'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)'
+      ).run(m.version, m.name, now, checksumOf(m));
+      continue;
+    }
+
     await db.prepare(
       `INSERT INTO schema_migrations (version, name, applied_at, checksum)
             SELECT ?, ?, ?, ?

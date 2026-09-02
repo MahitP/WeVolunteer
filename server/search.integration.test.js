@@ -103,6 +103,9 @@ beforeAll(async () => {
   /* The interval worker is not started here; every drain in this file is
      explicit, so nothing races the assertions. */
   process.env.PINECONE_SYNC_INTERVAL_MS = '3600000';
+  /* Short enough that the half-open probe can be observed without a fake clock,
+     long enough that it cannot expire between two awaits in one test. */
+  process.env.PINECONE_BREAKER_COOLDOWN_MS = '400';
 
   srv = await startTestServer();
   organizer = await srv.login('jordan.whitfield@example.org');
@@ -114,10 +117,11 @@ afterAll(async () => {
   await srv?.close();
   if (stub) { stub.close(); await once(stub, 'close').catch(() => {}); }
   for (const key of ['PINECONE_API_KEY', 'PINECONE_INDEX_HOST', 'PINECONE_NAMESPACE',
-    'WEV_PINECONE_TEST_SINK', 'PINECONE_SYNC_INTERVAL_MS']) delete process.env[key];
+    'WEV_PINECONE_TEST_SINK', 'PINECONE_SYNC_INTERVAL_MS',
+    'PINECONE_BREAKER_COOLDOWN_MS']) delete process.env[key];
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   upserted.length = 0;
   deleted.length = 0;
   searchHits = [];
@@ -126,6 +130,21 @@ beforeEach(() => {
   searchStatus = 200;
   searchDelayMs = 0;
   searchBody = null;
+
+  /**
+   * The candidate cache and the breaker are process-wide and would otherwise
+   * carry one test's vendor state into the next: a test that arranges a 500
+   * would leave the breaker open for the one after it, and a test that repeats
+   * an earlier query would be answered from memory without the stub being
+   * asked at all. Both are the behaviours those features exist to produce, so
+   * they are reset here and asserted deliberately further down.
+   */
+  const [{ __resetCandidateCache }, { __resetPineconeBreaker }] = await Promise.all([
+    import('./search/candidateCache.js'),
+    import('./search/pineconeClient.js'),
+  ]);
+  __resetCandidateCache();
+  __resetPineconeBreaker();
 });
 
 /** Drains the outbox, the way the background worker does. */
@@ -694,5 +713,155 @@ describe('recommendations', () => {
     received = JSON.stringify(upserted);
     expect(received).not.toContain('leo.chen');
     expect(received).not.toContain('@example.com');
+  });
+});
+
+/* ── The candidate cache ──────────────────────────────────────────────────── */
+
+/**
+ * What the cache is allowed to change, and what it must not.
+ *
+ * It may change how many times Pinecone is asked. It may not change a single
+ * row anybody receives, because the ids it remembers are fed back through the
+ * same authoritative query on every request — see `search/candidateCache.js`.
+ * Both halves are asserted here: the vendor call count, and the rows.
+ */
+describe('the candidate cache', () => {
+  const search = (q, who = student, extra = '') =>
+    srv.call('GET', `/api/events?q=${encodeURIComponent(q)}${extra}`, undefined, who);
+
+  it('asks the vendor once for a repeated search, and answers identically', async () => {
+    const id = await createEvent({ title: 'Trail restoration morning' });
+    await drain();
+    searchHits = [id];
+
+    const first = await search('restoration crew');
+    const second = await search('restoration crew');
+
+    expect(searchRequests).toHaveLength(1);
+    expect(second.status).toBe(200);
+    expect(listFor(second.body).map((e) => e.id)).toEqual(listFor(first.body).map((e) => e.id));
+  });
+
+  it('asks again for a different question', async () => {
+    searchHits = [];
+    await search('restoration crew');
+    await search('something else entirely');
+    expect(searchRequests).toHaveLength(2);
+  });
+
+  it('asks again when a filter changes the question asked of the vendor', async () => {
+    searchHits = [];
+    await search('restoration crew');
+    await search('restoration crew', student, '&category=Animals');
+    /* `category` is part of the Pinecone metadata filter, so it is part of the
+       key: the same words with a different filter are a different question. */
+    expect(searchRequests).toHaveLength(2);
+  });
+
+  it('serves page two of a search from the first page\'s candidates', async () => {
+    searchHits = [];
+    await search('restoration crew', student, '&limit=5&offset=0');
+    await search('restoration crew', student, '&limit=5&offset=5');
+    expect(searchRequests).toHaveLength(1);
+  });
+
+  it('does not remember a failure', async () => {
+    searchStatus = 503;
+    await search('unreliable vendor question');
+    searchStatus = 200;
+    await search('unreliable vendor question');
+    expect(searchRequests).toHaveLength(2);
+  });
+
+  it('collapses simultaneous identical searches into one vendor call', async () => {
+    searchHits = [];
+    searchDelayMs = 40;
+    const [a, b, c] = await Promise.all([
+      search('exactly the same words'),
+      search('exactly the same words'),
+      search('exactly the same words'),
+    ]);
+    expect([a.status, b.status, c.status]).toEqual([200, 200, 200]);
+    expect(searchRequests).toHaveLength(1);
+  });
+
+  /**
+   * The property the cache must not break: a shared entry is a shared list of
+   * CANDIDATES, never a shared answer.
+   */
+  it('never lets a cached candidate escape the database\'s filters', async () => {
+    const hidden = await createEvent({ title: 'Draft only, never listed' });
+    await srv.call('PATCH', `/api/events/${hidden}/status`, { status: 'cancelled' }, organizer);
+    searchHits = [hidden];
+
+    /* `scope=listable` is what BrowseEvents sends. The endpoint's own default
+       is `all`, because the dashboards and the calendar render service history
+       — so a cancelled event coming back from an unscoped call is correct, and
+       asserting against it would have tested the wrong thing. */
+    const first = await search('never listed anywhere', student, '&scope=listable');
+    const second = await search('never listed anywhere', student, '&scope=listable');
+
+    expect(searchRequests).toHaveLength(1);
+    for (const res of [first, second]) {
+      expect(listFor(res.body).map((e) => e.id)).not.toContain(hidden);
+    }
+  });
+});
+
+/* ── The read-path breaker ────────────────────────────────────────────────── */
+
+describe('the Pinecone breaker', () => {
+  const search = (q) => srv.call('GET', `/api/events?q=${encodeURIComponent(q)}`, undefined, student);
+
+  it('stops calling a vendor that keeps failing, and still answers', async () => {
+    searchStatus = 500;
+    for (const q of ['first attempt here', 'second attempt here', 'third attempt here']) {
+      const res = await search(q);
+      expect(res.status).toBe(200);
+    }
+    expect(searchRequests).toHaveLength(3);
+
+    /* Open. The next search must not touch the vendor at all — and must still
+       return a complete lexical answer, which is what Discover was before the
+       integration existed. */
+    const after = await search('fourth attempt here');
+    expect(after.status).toBe(200);
+    expect(searchRequests).toHaveLength(3);
+
+    const { pineconeBreakerState } = await import('./search/pineconeClient.js');
+    expect(pineconeBreakerState().open).toBe(true);
+    expect(pineconeBreakerState().shortCircuited).toBeGreaterThan(0);
+  });
+
+  it('does not open on a 400, which is this application being wrong', async () => {
+    searchStatus = 400;
+    for (const q of ['bad request one', 'bad request two', 'bad request three', 'bad request four']) {
+      await search(q);
+    }
+    const { pineconeBreakerState } = await import('./search/pineconeClient.js');
+    expect(pineconeBreakerState().open).toBe(false);
+    expect(searchRequests).toHaveLength(4);
+  });
+
+  it('lets one probe through after the cooldown and closes on success', async () => {
+    searchStatus = 500;
+    for (const q of ['probe warmup one', 'probe warmup two', 'probe warmup three']) await search(q);
+    expect(searchRequests).toHaveLength(3);
+
+    await search('while it is open');
+    expect(searchRequests).toHaveLength(3);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    searchStatus = 200;
+    searchHits = [];
+    await search('the probe itself');
+    expect(searchRequests).toHaveLength(4);
+
+    const { pineconeBreakerState } = await import('./search/pineconeClient.js');
+    expect(pineconeBreakerState().open).toBe(false);
+
+    await search('and now it is closed again');
+    expect(searchRequests).toHaveLength(5);
   });
 });

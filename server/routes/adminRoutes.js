@@ -12,6 +12,10 @@ import { getQueueHealth } from '../workers/notificationWorker.js';
    not come to look. Two definitions of "stale" would drift. */
 import { backupStatus } from '../backupStatus.js';
 import { redisStatus } from '../redis/status.js';
+import { pineconeStatus } from '../search/pineconeConfig.js';
+import { pineconeUsage, pineconeBreakerState } from '../search/pineconeClient.js';
+import { candidateCacheStats } from '../search/candidateCache.js';
+import { indexWorkerStats } from '../search/indexWorker.js';
 import { weatherCacheStats } from './weatherRoutes.js';
 import { geocodeCacheStats } from './geocodeRoutes.js';
 import { requireCap, can, principalFor, ALL_CAPABILITIES, requireAAL2, ROLE } from '../authz.js';
@@ -1446,6 +1450,27 @@ router.get('/api/admin/system/status', authenticateToken, requireCap('analytics.
       weather: weatherCacheStats(),
       geocode: geocodeCacheStats(),
     }),
+    /**
+     * Semantic search, and the three things that decide whether it is costing
+     * anything.
+     *
+     * `usage` is what Pinecone said it charged — read units and embedding
+     * tokens — rather than a count of calls, because a read unit measures data
+     * scanned. `breaker.open` means searches are currently skipping the vendor
+     * and answering lexically, which users experience as a working search box
+     * and an operator should still know about. `candidateCache.hitRate` is the
+     * share of searches that never left this process.
+     *
+     * No query text and no ids: counters only, for the same reason the Redis
+     * block carries no key names.
+     */
+    search: {
+      ...pineconeStatus(),
+      usage: pineconeUsage(),
+      breaker: pineconeBreakerState(),
+      candidateCache: candidateCacheStats(),
+      indexWorker: indexWorkerStats(),
+    },
     hoursLedger: await hoursLedgerStatus()
   });
 });

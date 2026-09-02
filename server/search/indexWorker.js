@@ -25,6 +25,7 @@
  * exactly the kind of silent waste this integration is arranged to avoid.
  */
 import { syncPending } from './eventIndexer.js';
+import { indexHost } from './pineconeClient.js';
 import { pineconeEnabled, UPSERT_BATCH_SIZE } from './pineconeConfig.js';
 import { logEvent } from './../telemetry.js';
 import { withLease, LEASES } from '../schedulerLease.js';
@@ -47,6 +48,10 @@ let handle = null;
 let running = false;
 let stopped = false;
 const stats = { passes: 0, upserted: 0, deleted: 0, failed: 0, lastError: null };
+
+async function prewarmHost() {
+  try { await indexHost(); } catch { /* Never throws; the try is belt and braces. */ }
+}
 
 async function pass() {
   if (running || stopped) return;
@@ -77,6 +82,17 @@ export function startIndexWorker(db) {
   if (timer || !pineconeEnabled()) return false;
   handle = db;
   stopped = false;
+
+  /**
+   * Resolve the data-plane host now rather than on somebody's search.
+   *
+   * `indexHost()` caches, but the FIRST call is a control-plane request to
+   * api.pinecone.io, and without this it lands on whichever student searches
+   * first after a deploy — who pays a second round trip for a lookup whose
+   * answer never changes. Started here and not awaited: a boot must not wait on
+   * a vendor, and `indexHost` resolves either way rather than throwing.
+   */
+  void prewarmHost();
   /**
    * Behind a leader lease. Unlike the other three sweeps, what a double run
    * costs here is MONEY: a pass reconciles against Pinecone, whose Starter plan

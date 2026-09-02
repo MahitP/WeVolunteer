@@ -1,0 +1,268 @@
+# Event search: the pipeline, and what each part costs
+
+Measured 2026-09-02 with `bin/search-bench.mjs` against PostgreSQL 17.9 on a
+throwaway local database, at three corpus sizes. Reproduce with:
+
+```bash
+createdb wv_search
+SEARCH_DB_URL=postgres://you@localhost:5432/wv_search node bin/search-bench.mjs --scales 10000,50000,100000 --write-cost
+dropdb wv_search
+```
+
+Every number is the p50 of 11 runs after a warm-up, with `EXPLAIN (ANALYZE,
+BUFFERS)` behind it. Local disk, warm cache, no network — so these are a **lower
+bound**, and the Pinecone round trip discussed further down is on top of all of
+them.
+
+The harness is also a differential: both forms of the query are built by
+`eventQuery.buildEventListStatement`, the same function the route calls, and
+every case asserts that they return identical rows in the same order with the
+same exact total. A faster search that answers differently is a defect with a
+good stopwatch.
+
+## The pipeline, as it actually runs
+
+```
+GET /api/events?q=…
+  │
+  ├─ authenticateToken                         (no vendor, no search)
+  ├─ parseEventFilters                          200-character cap on q
+  │
+  ├─ shouldUseSemantic(q)?                      skipped for <3 chars, @handles,
+  │     │                                       #tags and "quoted phrases"
+  │     ├─ candidateCache hit ──────────────┐   0 ms, no vendor call
+  │     ├─ breaker open ────────────────────┤   0 ms, no vendor call
+  │     └─ Pinecone /records/…/search       │   ONE round trip, fields:['_id'],
+  │          topK 60, metadata filter       │   integrated embedding
+  │          → hits, filtered by score ─────┘   → up to 60 candidate ids
+  │
+  ├─ ONE SQL statement                          page + exact total + aggregate
+  │     WITH page      … LIMIT/OFFSET
+  │          page_total… COUNT(*)
+  │          agg       … folded over the page
+  │
+  ├─ four batch loads scoped to the page's ids  tags, favourites, acceptances
+  └─ serialise
+```
+
+Two network round trips in the worst case — one to Pinecone, one to PostgreSQL
+— and one in the common case, because a repeated search, a second page, or an
+outage all skip the vendor.
+
+Nothing from Pinecone is ever displayed. It contributes candidate **ids**,
+which widen the text predicate; every filter, every permission and every
+displayed value comes from the database afterwards. See `search/discoverSearch.js`.
+
+## What was slow
+
+The two-phase page (migration 063) removed the browse endpoint's O(n) sort. It
+left one behind, and it was the search box: `strpos(lower(title), lower($1)) > 0`
+OR three more of the same, evaluated on every event that survived the status
+filter, with `users` joined in so the organizer's name was visible.
+
+No index can answer that. A b-tree orders by prefix and a substring has no
+prefix, and — the part that matters more — **one of the four columns is in
+another table**, so the disjunction spans two relations and no combination of
+indexes on either can be OR-ed into a bitmap. An index on all four columns
+changed a 50,000-event search by nothing at all, because the plan never used
+one.
+
+## What changed
+
+Two things, and neither works without the other:
+
+1. **`eventQuery.textMatchClause`** rewrites the predicate so that every branch
+   is a single-relation qual on `events`: three escaped `LIKE`s over its own
+   columns, plus `organizer_id = ANY(ARRAY(SELECT id FROM users WHERE …))`,
+   which turns the cross-table branch into an array computed once per statement
+   and compared against an indexed column. The semantic candidate ids join the
+   same disjunction rather than wrapping it.
+2. **Migration 064** adds four `pg_trgm` GIN indexes, one per column.
+
+The predicate remains a plain filter on `events`, which is what lets the planner
+choose: a bitmap when the term is selective, an ordered index scan with a filter
+when it is not, a sequential scan when that is genuinely cheapest. That
+adaptability is why there are no regressions below rather than a trade.
+
+`escapeLikeLiteral` neutralises `%`, `_` and `\` in the VALUE before it is
+bound, so a student typing `100%` searches for those four characters. That was
+the original objection to `LIKE` and it is answered by escaping the needle
+rather than by avoiding the operator — asserted against a table of adversarial
+needles on both engines in `db.dialectSql.test.js`.
+
+## Results
+
+p50 milliseconds, before → after:
+
+| case | matched at 100k | 10,000 events | 50,000 events | 100,000 events |
+|---|---|---|---|---|
+| no search (control) | 100,000 | 3.3 → **2.8** | 3.6 → **3.5** | 4.5 → **4.6** |
+| rare term | 4,106 | 18.7 → **14.3** | 61.0 → **5.8** | 127.5 → **7.5** |
+| rare phrase | 4,251 | 18.7 → **5.1** | 63.0 → **7.3** | 125.9 → **11.8** |
+| common noun | 34,696 | 12.5 → **11.7** | 52.3 → **16.5** | 105.4 → **29.3** |
+| common noun, mixed case | 34,696 | 13.8 → **10.8** | 49.0 → **17.1** | 105.9 → **32.1** |
+| very common term | 100,000 | 11.4 → **10.1** | 50.5 → **17.8** | 87.8 → **34.1** |
+| location | 19,802 | 14.2 → **12.7** | 55.3 → **18.2** | 113.7 → **31.6** |
+| organizer name | 1,200 | 29.4 → **10.9** | 67.0 → **6.9** | 129.1 → **5.2** |
+| two characters | 68,211 | 15.3 → **14.3** | 56.2 → **39.1** | 118.3 → **108.2** |
+| unicode | 250 | 39.5 → **12.0** | 195.3 → **2.8** | 420.9 → **3.0** |
+| unicode, lowered | 250 | 37.8 → **12.0** | 197.3 → **4.0** | 399.0 → **4.6** |
+| `100%` typed literally | 0 | 38.9 → **11.0** | 223.0 → **1.0** | 472.1 → **1.0** |
+| `a_b` typed literally | 0 | 42.4 → **21.0** | 229.7 → **86.3** | 488.6 → **164.3** |
+| `back\slash` typed literally | 0 | 38.1 → **11.1** | 213.8 → **3.2** | 457.8 → **4.7** |
+| no results | 0 | 39.3 → **21.9** | 208.9 → **0.9** | 458.8 → **0.9** |
+| long natural language | 0 | 40.0 → **21.2** | 208.5 → **57.0** | 444.1 → **28.5** |
+| search + category | 20,000 | 5.6 → **4.7** | 15.1 → **8.5** | 29.7 → **13.6** |
+| search + open only | 13,951 | 33.0 → **30.8** | 156.0 → **129.1** | 296.7 → **265.5** |
+| search, deep page (offset 600) | 100,000 | 13.5 → **10.5** | 46.7 → **19.5** | 91.9 → **34.2** |
+| search + 60 semantic candidates | 4,306 | 17.7 → **4.9** | 65.6 → **7.1** | 126.5 → **12.1** |
+
+Faster in every case at every scale, and the shape of the curve changed: the old
+form is linear in event count, the new one is close to flat wherever the term is
+selective. A search matching nothing — the most common failed search there is —
+went from **458.8 ms to 0.9 ms** at 100,000 events.
+
+The default browse, which had to not regress, did not: 4.5 → 4.6 ms.
+
+## Where the remaining time goes
+
+Three cases are worth naming, because they are the ceiling rather than an
+oversight.
+
+**`q` with `openOnly` — 265 ms at 100k, the slowest search there is.** This is
+not the text predicate. `openOnly` filters on remaining spots, which is the
+aggregate, so `canSplitEventPage` correctly refuses to split and the fold runs
+over every matching event and its slots. Removing it needs a maintained
+`spots_remaining`, and spare capacity is a derived FACT rather than a derived
+index — the thing the hours-ledger rule (INV-001) says not to store. Out of
+scope deliberately, and the ceiling to raise next if this one starts to matter.
+
+**Two-character terms — 108 ms at 100k, barely improved.** A trigram is three
+characters; a two-character pattern produces none, so `pg_trgm` cannot help and
+the planner correctly scans. Also the case where the semantic half is skipped
+(`MIN_SEMANTIC_LENGTH`), so nothing else absorbs it either. It is the cheap end
+of a scan because there is no `users` join left, which is the whole of the 1.09x.
+
+**`a_b` typed literally — 164 ms at 100k.** The escaped `\_` leaves the pattern
+with few extractable trigrams, so the index returns a large candidate set and the
+recheck does the work. Still 3x faster than before, and a rare shape of query.
+
+## What the indexes cost
+
+| | 10,000 events | 50,000 events | 100,000 events |
+|---|---|---|---|
+| `events` table | 8.4 MB | 42.3 MB | 84.5 MB |
+| `idx_events_description_trgm` | 11.2 MB | 33.4 MB | 58.4 MB |
+| `idx_events_title_trgm` | 5.1 MB | 11.9 MB | 19.1 MB |
+| `idx_events_location_trgm` | 4.6 MB | 8.8 MB | 13.1 MB |
+| `idx_users_name_trgm` | 0.6 MB | 2.9 MB | 4.5 MB |
+| INSERT 2,000 events | 28 → 49 ms (1.75x) | 30 → 46 ms (1.51x) | 31 → 53 ms (1.69x) |
+| UPDATE 2,000 titles | 39 → 55 ms (1.40x) | 39 → 65 ms (1.64x) | 46 → 56 ms (1.23x) |
+
+About 10 µs of extra write per event, against a table organizers write a few
+times a day, and roughly the table's own size again in index. At pilot scale
+(hundreds of events) the indexes are under a megabyte. The description index is
+the expensive one and is also the one that earns most of the recall — it is
+where the words people actually type live.
+
+## Two rewrites that were measured and rejected
+
+Recorded because both look obviously right and both are worse.
+
+**`e.id IN (SELECT … UNION ALL SELECT …)`.** Every branch indexable, no array,
+no cross-table OR — and a semi-join is not a filter, so it stops composing with
+the other predicates and cannot terminate early. At 50,000 events: a common
+noun 52 → 262 ms, a search with a category filter 15 → 509 ms, the most common
+term in the corpus 50 → 519 ms. It won on selective terms and lost catastrophically
+on everything else. `bin/search-bench.mjs --union` still measures it.
+
+**Dropping the scope predicate from the `agg` CTE in the split path.** The page
+CTE has already applied it and `restrictAggToPage` joins the page in, so the fold
+is over sixty ids either way and the predicate looks redundant. Removing it made
+nine of seventeen cases slower and a search matching nothing **58x** slower
+(1.0 → 58.3 ms): with the predicate present the fold has nothing to fold and
+stops; without it the planner reaches that conclusion only after building the
+join.
+
+## The Pinecone half
+
+The SQL above is the part that scales with the corpus. The part that dominates a
+single request is the network: one HTTPS round trip to Pinecone, with a 1200 ms
+timeout, before the database is touched at all.
+
+Three changes, none of which alter what is returned:
+
+* **A 60-second in-process candidate cache** (`search/candidateCache.js`). Page
+  two of a search, the same search from a second student, and a client that
+  fires twice are all one vendor call. Keyed on a SHA-256 of the question — the
+  index, the namespace, the query text, the metadata filter and the topK — and
+  never on the viewer, because the answer does not depend on who is asking and
+  the database is what applies who is asking.
+* **Single-flight.** Identical searches in the air at the same moment share one
+  request, so a class of thirty told to search the same words produces one call
+  rather than thirty cache misses.
+* **A read-path circuit breaker** (`search/pineconeClient.js`). Three
+  consecutive outage-shaped failures — timeouts, 5xx, 429, never a 400 — and
+  searches stop calling the vendor for 30 seconds and answer from the database
+  alone. Without it, an outage costs **every** search the full 1200 ms timeout
+  and holds a socket for it; with it, one search per cooldown window does. The
+  cooldown ends with a single half-open probe, so recovery needs no timer.
+
+Neither the cache nor the breaker can change a row: candidate ids are re-filtered
+by the same query with the same viewer, and a search with no candidates at all is
+the lexical search this application shipped for a year.
+
+There is deliberately **no Redis tier** under the cache. `redis/lookupCache.js`
+exists for exactly this shape and is right for weather and geocoding, where the
+upstream costs hundreds of milliseconds and Redis costs tens. A warm Upstash
+round trip was measured at 222 ms and a Pinecone search at roughly the same, so
+an L2 would spend a command to save nothing.
+
+### Against the free tier
+
+Pinecone's Starter plan (checked 2026-09-02) includes 1M read units/month, 2M
+write units/month, 5M embedding tokens/month, 2 GB storage and 500 rerank
+requests. The application's `PINECONE_RERANK_BUDGET` defaults to 400, under that
+ceiling, and reranking is off unless `PINECONE_RERANK=1`.
+
+Every search that the cache or the breaker answers is a read unit and an
+embedding not spent. Searches are also skipped entirely for queries the vendor
+cannot improve — under three characters, `@handles`, `#tags`, and quoted
+phrases — which was already the case before this pass.
+
+`GET /api/admin/ops/status` now reports `search.usage` (what Pinecone said it
+charged), `search.breaker` and `search.candidateCache.hitRate`, so the answer to
+"is this costing anything" is a request rather than an inference.
+
+## Verifying a live deployment
+
+```bash
+node bin/verify-search-indexes.mjs
+```
+
+Reports whether `pg_trgm` is installed and in which schema, whether each index
+exists and is valid, and — above 2,000 events, where the answer means something
+— whether the planner actually chooses one. `--strict` exits non-zero.
+
+This exists because migration 064 is allowed to decline: `CREATE EXTENSION`
+needs a privilege the application's role may not have, and refusing to boot over
+an index would be the wrong trade for a query that returns correct rows without
+one. The migration warns once, at a boot nobody is reading, and records itself
+as applied. From outside, "the search is slow" and "the search is fine" look
+identical without this tool.
+
+### Two Supabase-specific notes
+
+* **The opclass is schema-qualified.** Supabase installs extensions into a
+  schema called `extensions`, and a bare `gin_trgm_ops` resolves on a developer's
+  machine and fails on the deployment — the shape of supabase/supabase#30503,
+  where `similarity()` is "missing" after the extension is enabled. Migration 064
+  reads the extension's actual schema from the catalogue and qualifies the
+  opclass with it, and installs into `extensions` when that schema exists and is
+  writable, `public` otherwise.
+* **`postgresOnly: true` is load-bearing.** `postgresSchema.js` is generated from
+  a booted SQLite database, so a PostgreSQL-only index is not in it. Without the
+  flag, `seedPostgresBaseline` would record 064 as already supplied and a fresh
+  deployment would never get the indexes — silently, with every table present and
+  every test passing. `migrations.postgres.test.js` asserts a database
+  provisioned from the generated schema ends up with all four.

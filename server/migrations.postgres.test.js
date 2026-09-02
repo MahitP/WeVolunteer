@@ -459,8 +459,38 @@ describe.skipIf(!live)('a fresh PostgreSQL database', () => {
     await seedPostgresBaseline(db);
     const rows = await db.prepare('SELECT version, checksum FROM schema_migrations').all();
     expect(rows).toHaveLength(MIGRATIONS.length);
-    expect(rows.every(r => r.checksum === POSTGRES_BASELINE_CHECKSUM)).toBe(true);
+
+    /* Every version EXCEPT the `postgresOnly` ones, which are not in the
+       generated schema and therefore actually ran — see below. */
+    const onlyPg = new Set(MIGRATIONS.filter(m => m.postgresOnly).map(m => m.version));
+    expect(rows.filter(r => !onlyPg.has(Number(r.version)))
+      .every(r => r.checksum === POSTGRES_BASELINE_CHECKSUM)).toBe(true);
   });
+
+  /**
+   * The exception the baseline seeder has to make, and the reason it exists.
+   *
+   * `postgresSchema.js` is generated from a booted SQLite database, so it
+   * contains everything SQLite can express and nothing it cannot. A migration
+   * whose whole content is a PostgreSQL index — 064's trigram indexes — is
+   * therefore absent from the generated schema, and recording it as
+   * already-supplied would mean a fresh deployment never got it. Silently: the
+   * tables would all be there, the tests would all pass, and the search box
+   * would be correct and linear.
+   */
+  it('RUNS a postgres-only migration rather than recording it as already there', async () => {
+    const onlyPg = MIGRATIONS.filter(m => m.postgresOnly);
+    expect(onlyPg.length, 'this test is meaningless with no postgres-only migrations').toBeGreaterThan(0);
+
+    await seedPostgresBaseline(db);
+    const rows = await db.prepare('SELECT version, checksum FROM schema_migrations').all();
+    for (const m of onlyPg) {
+      const row = rows.find(r => Number(r.version) === m.version);
+      expect(row, `migration ${m.version} was not recorded`).toBeTruthy();
+      expect(row.checksum, 'code ran, so drift in it is worth catching').toBe(checksumFor(m));
+    }
+  });
+
 
   it('leaves nothing outstanding, so no migration re-applies a change the DDL made', async () => {
     await seedPostgresBaseline(db);
@@ -477,4 +507,71 @@ describe.skipIf(!live)('a fresh PostgreSQL database', () => {
     await seedPostgresBaseline(db);
     await expect(runPostgresMigrations(db)).resolves.toBeTruthy();
   });
+});
+
+/**
+ * A database provisioned exactly the way a new deployment is.
+ *
+ * Its own schema and its own connection, because the block above deliberately
+ * seeds bookkeeping into an EMPTY schema — which records the postgres-only
+ * migration before there is an `events` table for it to index, and is not the
+ * order `applyPostgresSchema` uses. The order is the thing being tested: DDL
+ * first, then the baseline, so a postgres-only migration finds its tables.
+ */
+describe.skipIf(!live)('a PostgreSQL database provisioned from the generated schema', () => {
+  let db;
+  const provisionedSchema = `${SCHEMA}_provisioned`;
+
+  beforeAll(async () => {
+    if (!live) return;
+    const bootstrap = new PostgresDatabase({
+      connectionString: BASE_URL, max: 1, translate: translatePlaceholders,
+    });
+    await bootstrap.exec(`DROP SCHEMA IF EXISTS ${provisionedSchema} CASCADE`);
+    await bootstrap.exec(`CREATE SCHEMA ${provisionedSchema}`);
+    await bootstrap.close();
+
+    const u = new global.URL(BASE_URL);
+    u.searchParams.set('options', `-c search_path=${provisionedSchema}`);
+    db = new PostgresDatabase({ connectionString: u.toString(), max: 4, translate: translatePlaceholders });
+
+    const { applyPostgresSchema } = await import('./db/postgresSchema.js');
+    await applyPostgresSchema(db);
+  }, 120000);
+
+  afterAll(async () => {
+    if (!live) return;
+    await db?.close();
+    const cleanup = new PostgresDatabase({
+      connectionString: BASE_URL, max: 1, translate: translatePlaceholders,
+    });
+    await cleanup.exec(`DROP SCHEMA IF EXISTS ${provisionedSchema} CASCADE`);
+    await cleanup.close();
+  });
+
+  it('has the trigram indexes the search box needs', async () => {
+    const { TRIGRAM_INDEXES } = await import('./migrations/064_search_trigram_indexes.js');
+
+    const [{ schema: trgmSchema } = {}] = await db.prepare(`
+      SELECT n.nspname AS schema FROM pg_extension e
+        JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'pg_trgm'
+    `).all();
+
+    /* The migration is allowed to decline when the role cannot install the
+       extension, so the assertion is conditional on the thing it depends on —
+       and states which case it took, rather than passing quietly either way. */
+    if (!trgmSchema) {
+      expect(trgmSchema, 'pg_trgm could not be installed by this role; indexes correctly skipped')
+        .toBeUndefined();
+      return;
+    }
+
+    const present = new Set((await db.prepare(`
+      SELECT c.relname AS name FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = ? AND c.relkind = 'i'
+    `).all(provisionedSchema)).map(r => r.name));
+
+    for (const [name] of TRIGRAM_INDEXES) expect(present, `${name} is missing`).toContain(name);
+  }, 60000);
 });

@@ -14,12 +14,11 @@ import { recordAudit } from '../auditLog.js';
 import { notificationService } from '../services/notificationService.js';
 import { db } from '../db.js';
 import { validateTags, replaceEventTags, tagsForEvent, tagsForEvents, tagVocabulary, BROWSE_TAG_LIMIT } from '../eventTags.js';
-import { canSplitEventPage, buildEventPageCte, restrictAggToPage } from '../eventQuery.js';
 import { refreshEventSummary } from '../eventSummary.js';
 import { EVENT_AUDIENCES, DEFAULT_AUDIENCE, isMemberOf } from '../eventEligibility.js';
 import { validateEventPayload } from '../validation.js';
 import { buildShiftIcs } from '../ics.js';
-import { parseEventFilters, eventQueryFragments, buildAggScope, buildEventWhere, buildEventOrder, semanticIdParams } from '../eventQuery.js';
+import { parseEventFilters, buildEventListStatement } from '../eventQuery.js';
 import { shouldUseSemantic, semanticCandidates, similarEventCandidates } from '../search/discoverSearch.js';
 import { markEventDirty, removeEventFromIndex } from '../search/eventIndexer.js';
 import { recommendationsFor, explanationText } from '../search/recommendations.js';
@@ -344,137 +343,25 @@ router.get('/api/events', authenticateToken, async (req, res) => {
       }
     }
 
-    /* The aggregate folds only over events that already match the event-only
-       predicates. `buildAggScope` derives that half from `buildEventWhere`
-       itself, so the two cannot describe different filters. */
-    const aggScope = buildAggScope(filters, req.user.id, db);
-    const { aggCte, distanceSelect, spotsSelect } = eventQueryFragments({ ...filters, db, aggScope });
-    const { where, params } = buildEventWhere(filters, req.user.id, db);
-    const order = buildEventOrder(filters.sort, filters.semanticIds);
-
-    const FROM = `
-      FROM events e
-      JOIN users u ON e.organizer_id = u.id
-      JOIN agg ON agg.event_id = e.id
-      /* LEFT, not JOIN: most events belong to no organization, and an inner
-         join here would silently empty the entire opportunities list. */
-      LEFT JOIN organizations org ON org.id = e.organization_id
-      ${where}
-    `;
-
     /**
-     * The total comes from the SAME statement as the rows.
+     * The statement itself is built by `eventQuery.buildEventListStatement`.
      *
-     * It used to be a second `SELECT COUNT(*)` over the identical FROM/WHERE,
-     * which meant the aggregate over every event and every slot ran TWICE per
-     * request to answer one page. `COUNT(*) OVER ()` is evaluated across the
-     * whole filtered set before LIMIT/OFFSET is applied, so it is exactly the
-     * number the separate query produced — and it costs nothing extra, because
-     * the rows have already been counted to sort them.
-     *
-     * Measured at 10,000 events / 20,000 slots / 60,000 applications: this and
-     * the `acc` fold in eventQuery.js took the default browse page from 186ms
-     * to 79ms, and the filtered pages from ~100-200ms to ~50ms.
-     *
-     * The response shape is unchanged: the serialiser below builds each event
-     * from an explicit field list, so `total_count` never reaches a caller.
+     * It moved out of this route so that the harnesses which measure it —
+     * `bin/events-query-probe.mjs` and `bin/search-bench.mjs` — build the
+     * statement the application actually runs instead of a copy that drifts
+     * away from it. The reasoning for every part of it is documented there.
      */
-    const SELECT = `
-      SELECT e.*, u.name as organizer_name, u.verified as organizer_verified, u.role as organizer_role,
-             u.school as organizer_school,
-             /* One LEFT JOIN rather than a lookup per event. An event card shows
-                the organization's name, and fetching it per row is the N+1 the
-                whole list query is shaped to avoid. */
-             org.name as organization_name, org.slug as organization_slug,
-             ${spotsSelect},
-             ${distanceSelect},
-             COUNT(*) OVER () AS total_count
-    `;
+    const { sql, params } = buildEventListStatement({
+      filters,
+      userId: req.user.id,
+      db,
+      paginated,
+      limit,
+      offset,
+      hardCap: EVENTS_MAX_LIMIT,
+    });
 
-    /**
-     * The row query needs lat/lng for the distance expression in its SELECT list;
-     * the COUNT above does not, and node:sqlite refuses a bound parameter that
-     * the statement never references.
-     */
-    const rowParams = filters.lat != null
-      ? { ...params, lat: filters.lat, lng: filters.lng }
-      : params;
-
-    /**
-     * Even the unpaginated response is bounded.
-     *
-     * Omitting `limit` returns the bare array every existing consumer expects,
-     * and that shape is kept. What changed is that it no longer means "every row
-     * in the table": it is capped at EVENTS_MAX_LIMIT, the same ceiling a caller
-     * that DOES paginate is clamped to.
-     *
-     * Without the cap this was the largest payload the app sends and it grew
-     * without limit — measured at 690 KB for 503 events, fetched on every session
-     * restore. One forgotten query parameter was the difference between a small
-     * response and a district-sized one, which is not a property worth keeping.
-     *
-     * Nothing observable changes below the ceiling, which is every realistic
-     * pilot deployment, and the SPA already paginates at 60. Above it, a caller
-     * that needs everything must page — which is what the warning below has been
-     * telling them to do.
-     */
-    /**
-     * Two phases when the page can be chosen before the fold, one when it cannot.
-     *
-     * ── What the split buys ──
-     *
-     * The single-phase query folds `agg` over every event that survives the
-     * event-only predicates — a MIN, a MAX, two SUMs over slots and a correlated
-     * `COUNT(*)` over `applications`, per event — and then `LIMIT 60` discards
-     * almost all of it. At 50,000 events that is fifty thousand application
-     * counts computed in order to display sixty. Those values are display fields
-     * on an event card; nothing outside the page reads them.
-     *
-     * So phase 1 picks the page's ids using only the event-only predicates and
-     * an ordering that does not need the fold, and phase 2 folds over those ids.
-     * Measured on a throwaway PostgreSQL at 50,000 events / 80,000 slots /
-     * 320,000 applications, with `bin/events-query-probe.mjs` comparing every
-     * row of both forms:
-     *
-     *     sort: alpha       297.1 ms -> 10.9 ms
-     *     sort: deadline    302.3 ms -> 15.9 ms
-     *     empty result      292.5 ms -> 30.3 ms
-     *     category          323.4 ms -> 61.3 ms
-     *     text search       357.2 ms -> 93.4 ms
-     *
-     * ── And where it does not apply ──
-     *
-     * `canSplitEventPage` refuses when the WHERE mentions the fold — `openOnly`
-     * reads `spots_remaining`, the date range reads `agg.min_start`, `minHours`
-     * reads `agg.total_hours` — or when the sort orders by it. Those requests
-     * take the original statement unchanged, which is what makes this safe to
-     * adopt: it can only alter the paths where the aggregate is display-only.
-     *
-     * The two forms are asserted to return identical rows, at four scales and
-     * across every filter and sort, by the probe and by
-     * `routes.eventsTwoPhase.test.js`.
-     */
-    const split = canSplitEventPage(filters, where);
-
-    const events = split
-      ? await db.prepare(
-        `WITH ${buildEventPageCte(filters, aggScope, { paginated })}, ${restrictAggToPage(aggCte)} `
-        + `${SELECT.replace('COUNT(*) OVER () AS total_count', 'page_total.total_count')} `
-        + `FROM events e JOIN page ON page.event_id = e.id `
-        /* CROSS JOIN, because `page_total` is exactly one row — the exact count
-           over the same predicate in the same statement and therefore the same
-           snapshot. */
-        + `CROSS JOIN page_total `
-        + `JOIN users u ON e.organizer_id = u.id JOIN agg ON agg.event_id = e.id `
-        + `LEFT JOIN organizations org ON org.id = e.organization_id ${order}`
-      ).all(paginated
-        ? { ...rowParams, limit, offset }
-        : { ...rowParams, hardCap: EVENTS_MAX_LIMIT })
-      : paginated
-        ? await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @limit OFFSET @offset`)
-          .all({ ...rowParams, limit, offset })
-        : await db.prepare(`WITH ${aggCte} ${SELECT} ${FROM} ${order} LIMIT @hardCap`)
-          .all({ ...rowParams, hardCap: EVENTS_MAX_LIMIT });
+    const events = await db.prepare(sql).all(params);
 
     /**
      * Zero rows carries no window value, so an empty page reports a zero total.
