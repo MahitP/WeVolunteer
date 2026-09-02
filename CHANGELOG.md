@@ -75,6 +75,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is one environment variable. Tested with two real Socket.IO servers proving a
   broadcast on one reaches a client attached to the other.
 
+### Scaling — the future paths, finished
+
+- **The browse total is exact and no longer costs a scan.** `EXPLAIN (ANALYZE,
+  BUFFERS)` found two problems where there appeared to be one: an `IS NULL` sort
+  prefix that no index can match, and — even after fixing it — that
+  `status IN (…)` splits a status-leading index into two ranges whose
+  concatenation is not ordered. A second index with the sort column leading
+  makes the page a walk that stops after sixty (12.7 ms → 0.105 ms), and moving
+  `COUNT(*) OVER ()` into its own CTE in the same statement lets each half take
+  the plan it wants. **10,000 events 127.9 ms → 3.5 ms; 50,000 events 601.1 ms →
+  5.0 ms.** Near-flat between the two, so the linear term is gone including from
+  the count — which is still exact, from the same predicate in the same
+  statement and the same snapshot. No counter, no cache, nothing stale.
+- **Authentication abuse protection is a layered system, and now says so.** Each
+  in-process limiter is strictly tighter than a shared cap on the same
+  dimension, so with N instances the global bound is `min(N × local, shared)`
+  and the shared cap never moves — at most 10 failures per account and 200 per
+  address block, whatever N is. Twenty instances attacking one account still
+  stop at ten.
+- **An IPv6 bypass is closed.** The shared address ceiling keyed on `req.ip`,
+  which is a correct key for IPv4 and no control at all for IPv6: a residential
+  allocation is a /64, so rotating inside one's own prefix drew a fresh ceiling
+  every attempt. It now groups by 56-bit prefix like every other IP-keyed
+  limiter here.
+- **The Redis path is proven against the real service** — 11/11 live checks
+  including the token-bucket Lua spending atomically and refilling by elapsed
+  time, at an average of 234 ms round trip.
+
 ### Scaling — the last known gaps
 
 > Six limitations were carried out of the previous pass. All six are closed.
