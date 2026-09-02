@@ -145,6 +145,41 @@ describe('one certificate, for the person who earned it', () => {
       expect(disposition.toLowerCase()).not.toContain('patel');
     });
 
+    /**
+     * What the artefact that leaves the building actually says.
+     *
+     * The JSON payload is asserted for absent PII above, but the PDF is the
+     * thing a student emails to a college — it is the copy that travels, and it
+     * is built from a different code path. Structurally it can only contain what
+     * the route hands the builder, which is the point: this pins that, so a
+     * future field added "just for the footer" fails here rather than in
+     * somebody's inbox.
+     */
+    it('contains the certificate and no other fact about the volunteer', async () => {
+      const res = await fetch(`${srv.base}/api/certificates/${code}/pdf`, {
+        headers: { Cookie: `wev_session=${owner}` },
+      });
+      const bytes = Buffer.from(await res.arrayBuffer());
+
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      const doc = await pdfjs.getDocument({
+        data: new Uint8Array(bytes),
+        useSystemFonts: false,
+        standardFontDataUrl: `${process.cwd()}/node_modules/pdfjs-dist/standard_fonts/`,
+      }).promise;
+      const text = (await (await doc.getPage(1)).getTextContent()).items.map(i => i.str).join('');
+
+      /* Present: the document's own claims. */
+      expect(text).toContain('Priya Patel');
+      expect(text).toContain(code);
+
+      /* Absent: everything that is about the ACCOUNT rather than the service. */
+      expect(text).not.toMatch(/@/);
+      expect(text.toLowerCase()).not.toContain('priyapatel');
+      expect(text.toLowerCase()).not.toContain('user-student');
+      expect(text.toLowerCase()).not.toContain('password');
+    });
+
     it('refuses somebody else the file, the same way it refuses the JSON', async () => {
       const res = await fetch(`${srv.base}/api/certificates/${code}/pdf`, {
         headers: { Cookie: `wev_session=${other}` },

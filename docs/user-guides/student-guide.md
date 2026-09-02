@@ -47,9 +47,30 @@ If you realize you can no longer attend an event, please withdraw your applicati
 - You will see a summary of your Total Credited Hours.
 - Hours are credited after you attend an event and the Organizer logs your attendance. 
 
-### Downloading Certificates
-- Once hours are credited for an event, you can download an official Certificate of Volunteering.
-- Go to your Profile, find the completed event under your past events, and click **Download Certificate**. This PDF can be printed or emailed directly to your school counselors!
+### Your certificates
+You earn one certificate for each event you complete, as soon as the organizer
+confirms your attendance.
+
+**To find them:** on your **Dashboard**, look for **Service history** and click
+**My certificates**. (They are also listed on your Profile.)
+
+Click any certificate to open it. From there you can:
+
+- **Download** it as a PDF — the file to keep, attach to an application, or send
+  to a school counsellor.
+- **Print** it, if somebody wants it on paper.
+- **Share** it. This copies a *verification link*: anyone who opens it can check
+  the certificate is genuine, and they see only what is printed on the face of
+  it. Your email address, username and account are never included. On a phone,
+  **Share** hands the link to your usual apps.
+
+Every certificate carries a verification code and a QR code that both point at
+the same check. Nobody can open your certificate from inside WeVolunteer except
+you — the verification link is the only thing meant to be passed on.
+
+> **Not the same as the "Hours certificate" button.** That one, in the hours card
+> on your dashboard, is a single summary of *all* your hours. The certificates
+> above are one per event, and they are the ones that carry a verification code.
 
 ## Managing Your Account
 

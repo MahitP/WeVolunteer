@@ -63,6 +63,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   emptying the card. Setup and the free-plan position of each integration:
   `docs/operations/owner-center.md`.
 
+- **Certificates are reachable from the dashboard.** Every per-event certificate
+  was one avatar menu, one Profile, one scroll and one "Show all N" away — four
+  steps from the page a student lands on, for the artefact this product exists to
+  produce. Worse, the dashboard already carried a button labelled "Hours
+  certificate", which opens the *summary* document and has no verification code,
+  no QR and no download: a student looking for "my certificate" found the one
+  thing that is not it. **Service history** now offers **My certificates** beside
+  **My logged hours**, which is where the shifts those certificates are issued
+  for are already listed.
+
 - **A certificate viewer at `/certificates/:code`, and a real PDF to download.**
   A certificate used to open in a modal, which meant it had no URL — nothing to
   share, nothing to bookmark, and a back button that closed the page behind the
@@ -91,6 +101,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Somebody else's code answers 404 identically to a code that does not exist —
   the code is a bearer credential printed on paper, so a distinguishable refusal
   would turn the route into an oracle for which codes are live.
+
+- **The Owner Center now says when it is not sure.** Four states were rendering
+  as something other than what they were, and each of them made the page more
+  confident than the data justified:
+
+  A **stale reading** — the last good value, served because a refresh failed —
+  rendered as an ordinary live card with nothing saying the figures had stopped
+  moving. That is the one way a status page can be actively misleading rather
+  than merely unhelpful, so it now carries a banner and the summary row reads
+  "Last known good" instead of "Operational". A **failed incidents read**
+  rendered nothing at all, and an absent section is indistinguishable from
+  "nothing has gone wrong"; it now says it could not be checked. A **transport
+  failure** printed its internal identifier ("Unreachable · circuit_open")
+  instead of words. And a **real but tiny usage bar** — 12 against 1,240 — drew a
+  sub-pixel sliver, which is what this card uses to mean "not read"; a nonzero
+  value now has a floor, while a genuine zero still draws nothing.
+
+  Ages are also measured server-clock to server-clock now. Comparing the
+  server's timestamp against the browser's silently folded in clock skew, so a
+  laptop an hour out would have called a ninety-second-old figure an hour old.
+
+- **`email.reliability.test.js` no longer depends on what is on disk.** Two cases
+  asserted the un-queued mail path but had no `WEV_DB_PATH` of their own, so they
+  inherited `server/wevolunteer.db` — which any developer who has run `npm run
+  dev` has, and which *has* an outbox. The send was queued, the return value flipped
+  to `true`, and the file failed on a working machine while passing on CI. It now
+  takes a temp database exactly as `freshApp` in the same file already did.
+  Confirmed against `fe0dae6` that this predates the Owner Center work.
 
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not

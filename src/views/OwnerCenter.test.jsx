@@ -286,6 +286,77 @@ describe('when a provider cannot be read', () => {
     expect(await screen.findByText(/Took too long to answer/i)).toBeInTheDocument();
   });
 
+  /**
+   * The one way this page could be actively misleading rather than merely
+   * unhelpful.
+   *
+   * `providerCache` serves the last good value as `state: 'ok'` with
+   * `stale: true` when a refresh fails — deliberately, so one hiccup does not
+   * empty a card somebody is watching during an incident. The card therefore
+   * renders NORMALLY, and without a banner nothing anywhere says the figures
+   * stopped moving: it keeps showing green while the service has gone quiet.
+   */
+  it('labels a successful-but-stale reading, and does not call it operational', async () => {
+    /* Both stamps come from the SERVER in a real payload, so the fixture pins
+       them the same way: `generatedAt` is when the response was built and
+       `fetchedAt` is when the cached value was last good. */
+    const serverNow = Date.now();
+    stubApi({
+      m: monitoring({
+        generatedAt: new Date(serverNow).toISOString(),
+        monitors: {
+          state: 'ok', up: 1, down: 0, paused: 0, stale: true, staleReason: 'timeout',
+          fetchedAt: serverNow - 180_000,
+          monitors: [{ id: '1', name: 'API', url: 'https://x.test', status: 'up', paused: false }],
+        },
+      }),
+    });
+    renderOwner();
+
+    expect(await screen.findByText(/Showing the last reading/i)).toBeInTheDocument();
+    /* Three minutes, measured server-clock to server-clock, in BOTH places that
+       report it. A browser clock an hour out must not turn a 3-minute-old
+       figure into an hour-old one. */
+    expect(screen.getAllByText(/3 minutes ago/)).toHaveLength(2);
+    /* And the summary row — the line somebody actually scans — must not claim a
+       service is up on the strength of a figure nobody has confirmed since. */
+    expect(within(systemRow('Uptime monitoring')).getByText('Last known good')).toBeInTheDocument();
+    expect(within(systemRow('Uptime monitoring')).queryByText('Operational')).toBeNull();
+  });
+
+  /**
+   * An absent section is indistinguishable from "nothing has gone wrong", which
+   * is the most dangerous thing this particular card could imply.
+   */
+  it('says the incident history could not be read, rather than showing nothing', async () => {
+    stubApi({ m: monitoring({ incidents: { state: 'rate_limited' } }) });
+    renderOwner();
+
+    expect(await screen.findByText(/Rate limited/i)).toBeInTheDocument();
+    /* The monitors half still renders — one failed read costs one section. */
+    expect(screen.getByText('API')).toBeInTheDocument();
+  });
+
+  it('reports a transport failure in words, not as an internal identifier', async () => {
+    stubApi({
+      i: infrastructure({
+        redis: {
+          state: 'ok', reachable: false, reason: 'circuit_open',
+          status: { configured: true, degraded: true, usage: {}, plan: {} },
+        },
+      }),
+    });
+    renderOwner();
+
+    /* `circuit_open` is right for a log line and wrong on a page a person reads
+       — it rendered as "Unreachable · circuit_open". Both the summary row and
+       the infrastructure panel say it, so both are checked and neither may
+       carry the identifier. */
+    const said = await screen.findAllByText(/too many recent failures/i);
+    expect(said.length).toBe(2);
+    expect(screen.queryByText(/circuit_open/)).toBeNull();
+  });
+
   it('still offers the external dashboard when the integration is down', async () => {
     stubApi({ m: monitoring({ monitors: { state: 'unauthorized' } }) });
     renderOwner();
@@ -329,6 +400,51 @@ describe('figures', () => {
     /* "No change" and "not enough history to say" are different things to put
        in front of somebody. */
     expect(within(figure).queryByText(/vs last week/)).toBeNull();
+  });
+
+  it('keeps a real but tiny share visible, so it cannot read as unavailable', async () => {
+    stubApi({
+      a: analytics({
+        events: {
+          state: 'ok', windowDays: 30,
+          events: [
+            { name: 'A', label: 'Busy', description: '', total: 1240, trend: null },
+            { name: 'B', label: 'Rare', description: '', total: 12, trend: null },
+          ],
+        },
+      }),
+    });
+    const { container } = renderOwner();
+    await screen.findByText('Rare');
+
+    /* 12 against 1,240 is a one-percent bar — a sub-pixel sliver that renders as
+       no bar at all, which is the state this card uses to mean "not read". Both
+       events must draw one; the stylesheet's `min-width` is what keeps the
+       second visible. */
+    expect(container.querySelectorAll('.owner-usage-fill')).toHaveLength(2);
+  });
+
+  it('draws no bar for an event that is genuinely zero, and still shows the zero', async () => {
+    stubApi({
+      a: analytics({
+        events: {
+          state: 'ok', windowDays: 30,
+          events: [{ name: 'A', label: 'Unused', description: '', total: 0, trend: null }],
+        },
+      }),
+    });
+    const { container } = renderOwner();
+    await screen.findByText('Unused');
+
+    /* Zero is a fact, and the figure carries it. A bar with a minimum width
+       would turn "nobody used this" into a visible mark. */
+    expect(container.querySelectorAll('.owner-usage-fill')).toHaveLength(0);
+    /* Scoped to the usage row: `0` also appears in the infrastructure panel's
+       failure counter, and an unscoped query would pass or fail on whichever
+       the DOM happened to yield first. */
+    const row = screen.getByText('Unused').closest('.owner-usage-row');
+    expect(within(row).getByText('0')).toBeInTheDocument();
+    expect(within(row).queryByText('Unavailable')).toBeNull();
   });
 
   it('draws no usage bar for an event it could not read', async () => {

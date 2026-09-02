@@ -198,8 +198,19 @@ function UpdatedAgo({ at }) {
   return <p className="dim small owner-updated">Updated {relative(at)}.</p>;
 }
 
-function relative(at) {
-  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+/**
+ * The server's own clock for this response, or the browser's if it did not say.
+ *
+ * Ages on this page are the difference between two SERVER stamps. Measuring one
+ * of them against the browser silently folds in clock skew — see `StaleNotice`.
+ */
+function serverNow(generatedAt) {
+  const at = Date.parse(generatedAt);
+  return Number.isFinite(at) ? at : Date.now();
+}
+
+function relative(at, now = Date.now()) {
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return `${seconds} second${seconds === 1 ? '' : 's'} ago`;
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
@@ -293,6 +304,51 @@ function ProviderNotice({ result, link, linkLabel }) {
       )}
       {link && <ExternalDashboardLink href={link} label={linkLabel} />}
     </div>
+  );
+}
+
+/**
+ * "This is what it said two minutes ago, and it has not answered since."
+ *
+ * ── Why this cannot live inside `ProviderNotice` ──
+ *
+ * A stale result is a SUCCESSFUL one: `providerCache` serves the last good
+ * value with `state: 'ok'` plus `stale: true` when a refresh fails, precisely so
+ * one vendor hiccup does not empty a card an owner is watching during an
+ * incident. So the card renders normally — and without this, nothing anywhere
+ * says the figures stopped moving. That is the one way a status page can be
+ * actively misleading rather than merely unhelpful: it keeps showing green
+ * while the thing it is reporting on has gone quiet.
+ *
+ * `role="status"` so the change is announced when a refresh silently falls back.
+ */
+function StaleNotice({ result, generatedAt }) {
+  if (!result?.stale) return null;
+
+  /**
+   * The age is measured SERVER-clock to SERVER-clock.
+   *
+   * `fetchedAt` is stamped by `providerCache` on the server; `generatedAt` is
+   * stamped by the route handler on the same server for the same response.
+   * Subtracting them gives a true elapsed time. Comparing `fetchedAt` against
+   * the BROWSER's `Date.now()` — which is what the first version did — silently
+   * measures clock skew as well, and a laptop whose clock is off by an hour
+   * would read "Showing the last reading, from an hour ago" about a figure
+   * ninety seconds old. On the one line whose whole job is to say how old
+   * something is, that is worse than not saying.
+   *
+   * `Date.now()` stays the fallback for a payload without `generatedAt`, so an
+   * older response shape degrades to the previous behaviour rather than to NaN.
+   */
+  const now = serverNow(generatedAt);
+  return (
+    <p className="owner-stale" role="status">
+      <AlertTriangle size={13} aria-hidden="true" />
+      <span>
+        Showing the last reading, from {relative(result.fetchedAt, now)}
+        {reasonText(result.staleReason) ? ` — ${reasonText(result.staleReason)}` : ''}.
+      </span>
+    </p>
   );
 }
 
@@ -470,7 +526,14 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
       ...(monitors.state === 'ok'
         ? (monitors.down > 0
           ? { tone: 'danger', state: 'Monitor down', detail: `${monitors.down} of ${monitors.monitors.length} down` }
-          : { tone: 'ok', state: 'Operational', detail: `${monitors.up} up` })
+          /* A stale reading is reported as stale rather than as operational:
+             the summary row is the line somebody scans, and it must not say a
+             service is up on the strength of a figure the vendor stopped
+             confirming minutes ago. */
+          : monitors.stale
+            /* Server clock to server clock — see `StaleNotice`. */
+            ? { tone: 'warn', state: 'Last known good', detail: `${monitors.up} up, as of ${relative(monitors.fetchedAt, serverNow(monitoring.generatedAt))}` }
+            : { tone: 'ok', state: 'Operational', detail: `${monitors.up} up` })
         : monitors.state === 'not_configured'
           ? { tone: 'muted', state: 'Not configured' }
           : { tone: 'warn', state: 'Unavailable' }),
@@ -502,7 +565,7 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
             ? (redis.status?.degraded
               ? { tone: 'warn', state: 'Degraded', detail: 'Falling back to per-process limits.' }
               : { tone: 'ok', state: 'Connected', detail: `${redis.latencyMs} ms` })
-            : { tone: 'danger', state: 'Unreachable', detail: redis.reason }),
+            : { tone: 'danger', state: 'Unreachable', detail: reasonText(redis.reason) }),
     });
 
     const vector = infrastructure.vector || {};
@@ -516,7 +579,7 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
           ? { tone: 'warn', state: 'Unavailable' }
           : vector.reachable
             ? { tone: 'ok', state: 'Connected', detail: `${formatNumber(vector.records)} records` }
-            : { tone: 'warn', state: 'Unreachable', detail: vector.reason }),
+            : { tone: 'warn', state: 'Unreachable', detail: reasonText(vector.reason) }),
     });
   }
 
@@ -583,6 +646,39 @@ function telemetryReason(reason) {
     disabled_by_operator: 'Switched off deliberately.',
     test_environment: 'Refused under a test runner.',
   }[reason] || reason;
+}
+
+/**
+ * Why a client could not reach its service, in words.
+ *
+ * `redisClient.js` and `pineconeClient.js` classify a failure into one of their
+ * own identifiers — `circuit_open`, `malformed_response`, `http_401` — which is
+ * exactly right for a log line and wrong on a page a person reads: it rendered
+ * as "Unreachable · circuit_open", a raw internal token with an underscore in
+ * it. The same defect `telemetryReason` above exists for.
+ *
+ * These are OUR words, never a vendor's response body — see the rule in
+ * `server/integrations/providerResult.js`. An unrecognised one is passed
+ * through rather than dropped: on an owner-only page a new identifier is more
+ * useful shown than hidden, and hiding it would turn a diagnosis into silence.
+ */
+function reasonText(reason) {
+  if (!reason) return null;
+  const known = {
+    circuit_open: 'too many recent failures, so calls are paused',
+    timeout: 'it did not answer in time',
+    network_error: 'the request did not get through',
+    malformed_response: 'it answered something we could not read',
+    command_error: 'it refused the command',
+    disabled: 'the integration is switched off',
+    no_host: 'the index host could not be resolved',
+    unconfigured: 'no credentials are set',
+    incomplete: 'only part of the configuration is set',
+  }[reason];
+  if (known) return known;
+  /* `http_401` and friends: readable enough once the underscore is gone. */
+  const http = /^http_(\d{3})$/.exec(String(reason));
+  return http ? `it answered HTTP ${http[1]}` : String(reason);
 }
 
 function pendingLabel(queue) {
@@ -724,18 +820,36 @@ function MonitoringCard({ state }) {
               <ProviderNotice result={monitors} />
             )}
 
-            {incidents?.state === 'ok' && (
-              <div className="stack-xs">
-                <h4 className="owner-subhead">
-                  {incidents.active.length > 0 ? 'Open incidents' : 'Recent incidents'}
-                </h4>
-                <IncidentList
-                  incidents={incidents.active.length > 0 ? incidents.active : incidents.recent}
-                  active={incidents.active.length > 0}
-                  historyAvailable={incidents.recentAvailable}
-                />
-              </div>
-            )}
+            <StaleNotice result={monitors} generatedAt={data.generatedAt} />
+
+            {/**
+              * The incidents block renders in EVERY state, including its own
+              * failure.
+              *
+              * It used to render only on `ok`, so a refused incidents read
+              * disappeared from the page entirely — and an absent section is
+              * indistinguishable from "nothing has gone wrong", which is the
+              * single most dangerous thing this card could imply. A reader who
+              * cannot tell "no incidents" from "we could not check" has been
+              * given false reassurance rather than missing information.
+              */}
+            <div className="stack-xs">
+              <h4 className="owner-subhead">
+                {incidents?.state === 'ok' && incidents.active.length > 0 ? 'Open incidents' : 'Recent incidents'}
+              </h4>
+              {incidents?.state === 'ok' ? (
+                <>
+                  <IncidentList
+                    incidents={incidents.active.length > 0 ? incidents.active : incidents.recent}
+                    active={incidents.active.length > 0}
+                    historyAvailable={incidents.recentAvailable}
+                  />
+                  <StaleNotice result={incidents} generatedAt={data.generatedAt} />
+                </>
+              ) : (
+                <ProviderNotice result={incidents} />
+              )}
+            </div>
 
             {/**
               * The telemetry pipeline, which is a LOCAL fact and is shown even
@@ -832,6 +946,7 @@ function AnalyticsCard({ state }) {
               <Sparkline points={users.active.points} />
               <span className="small dim">Active users, last {users.windowDays} days</span>
             </div>
+            <StaleNotice result={users} generatedAt={data.generatedAt} />
           </>
         )}
 
@@ -868,7 +983,21 @@ function FeatureUsage({ events }) {
         <li key={e.name} className="owner-usage-row">
           <span className="owner-usage-label" title={e.description}>{e.label}</span>
           <span className="owner-usage-track" aria-hidden="true">
-            {typeof e.total === 'number' && (
+            {/**
+              * A bar is drawn only for a total that was READ and is above zero.
+              *
+              * Three states have to stay distinguishable and two of them draw
+              * nothing: `null` (not read — the value reads "Unavailable") and
+              * `0` (read, and genuinely nobody used it). A zero-length bar for
+              * the first would be a claim; for the second it is the truth.
+              *
+              * The minimum width is the other half. Certificates shared against
+              * home-page views is 12 against 1,240, which is a one-percent bar —
+              * a sub-pixel sliver that renders as no bar at all, i.e. as the
+              * state this component uses to mean "not read". `min-width` in the
+              * stylesheet keeps a real value visible at any ratio.
+              */}
+            {typeof e.total === 'number' && e.total > 0 && (
               <span className="owner-usage-fill" style={{ width: `${Math.round((e.total / max) * 100)}%` }} />
             )}
           </span>
@@ -911,7 +1040,7 @@ function InfrastructureCard({ state }) {
                   <p className={`owner-inline-state tone-${redis.reachable ? (redis.status?.degraded ? 'warn' : 'ok') : 'danger'}`}>
                     {redis.reachable
                       ? `Connected · ${redis.latencyMs} ms`
-                      : `Unreachable · ${redis.reason}`}
+                      : `Unreachable — ${reasonText(redis.reason)}`}
                   </p>
                   <dl className="owner-meta">
                     <div><dt>Commands this boot</dt><dd className="tnum">{formatNumber(redis.status?.usage?.commands)}</dd></div>
@@ -921,6 +1050,7 @@ function InfrastructureCard({ state }) {
                   <p className="small dim">
                     The count is what this process has spent since it started, not the monthly total.
                   </p>
+                  <StaleNotice result={redis} generatedAt={data.generatedAt} />
                   <ExternalDashboardLink href={data.links?.upstash} label="Open Upstash" />
                 </>
               )}
@@ -933,7 +1063,7 @@ function InfrastructureCard({ state }) {
               ) : (
                 <>
                   <p className={`owner-inline-state tone-${vector.reachable ? 'ok' : 'warn'}`}>
-                    {vector.reachable ? 'Connected' : `Unreachable · ${vector.reason}`}
+                    {vector.reachable ? 'Connected' : `Unreachable — ${reasonText(vector.reason)}`}
                   </p>
                   <dl className="owner-meta">
                     <div><dt>Index</dt><dd className="truncate">{vector.index}</dd></div>
@@ -946,6 +1076,7 @@ function InfrastructureCard({ state }) {
                     Discover falls back to keyword search when this is unavailable, so an outage here
                     is quiet rather than visible.
                   </p>
+                  <StaleNotice result={vector} generatedAt={data.generatedAt} />
                   <ExternalDashboardLink href={data.links?.pinecone} label="Open Pinecone" />
                 </>
               )}

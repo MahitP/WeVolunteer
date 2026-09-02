@@ -21,7 +21,24 @@ difference decides what an operator can rely on.
 
 ---
 
-## 1. Who can open it
+## 1. How to get there
+
+**Dashboard → Admin (rail) → Owner Center.** Two clicks, no URL typing.
+
+The Owner Center is a tile on the administrative hub at `/admin/moderation`,
+beside Audit trail, Errors and Platform Impact. That is where every other
+owner-only page already lives, and the rail deliberately carries one
+administrative entry rather than seven — see the note on the `moderation` entry
+in `src/App.jsx`'s `NAV` table, which records that decision and lists the pages
+it moved off the rail.
+
+The tile is filtered by `owner.console`, so an ordinary administrator opening the
+same hub sees Reports, Appeals, Organizer requests and Community impact and no
+Owner Center. Typing `/owner` anyway lands on the platform's own refusal screen,
+which names the page ("This account does not have permission for the Owner
+Center") rather than 404-ing — see `denialDetail.js`.
+
+## 2. Who can open it
 
 `owner.console`, which is in `SUPER_ONLY` (`server/authz.js`). Three consequences,
 and all three are deliberate:
@@ -40,7 +57,7 @@ and all three are deliberate:
   capability and the tile on the Admin hub is hidden by it, but both are UX.
   `server/routes/ownerRoutes.js` is the boundary and re-checks per request.
 
-## 2. What it shows, and where each figure comes from
+## 3. What it shows, and where each figure comes from
 
 | Section | Source | Needs a credential? |
 |---|---|---|
@@ -70,13 +87,13 @@ Counts only — no message, no stack, no fingerprint, no route [proven]. The
 evidence lives at `/errors`, behind `error.read`, and a second surface disclosing
 it under a different capability is how one of the two ends up with weaker rules.
 
-## 3. Configuration
+## 4. Configuration
 
 Everything below is **optional**. With none of it set the Owner Center still
 renders, reports the local half in full, and shows each integration as *Not
 configured* with the variable that would switch it on.
 
-### 3.1 Better Stack — uptime monitors and incidents
+### 4.1 Better Stack — uptime monitors and incidents
 
 ```
 BETTERSTACK_UPTIME_API_TOKEN=
@@ -110,7 +127,7 @@ the card says so and offers the dashboard link, and nothing else on the page is
 affected — which is why the integration was built to degrade rather than to be
 depended on.
 
-### 3.2 Amplitude — usage
+### 4.2 Amplitude — usage
 
 ```
 AMPLITUDE_API_KEY=
@@ -154,7 +171,7 @@ list is `server/analyticsEvents.js`, imported by both the client that tracks the
 and the server that queries them, so a typo cannot make a chart read zero. Every
 event is a bare verb with no properties — see the privacy rule in that file.
 
-### 3.3 Upstash and Pinecone
+### 4.3 Upstash and Pinecone
 
 No new configuration. Both use the credentials the application already has, and
 both cards render as *Not configured* when it does not — a supported, unalarming
@@ -170,7 +187,7 @@ The Pinecone card calls `describe_index_stats`, a control-plane read that is not
 billed in read units and does not touch the 500-reranks-a-month ceiling that is
 the binding constraint on that account (see [`pinecone.md`](pinecone.md)).
 
-### 3.4 One tuning knob
+### 4.4 One tuning knob
 
 ```
 OWNER_PROVIDER_TIMEOUT_MS=6000
@@ -182,7 +199,7 @@ reason: there, a caller has a correct answer available without Redis and waiting
 is strictly worse than falling back; here there is no fallback except
 "unavailable", and these are aggregation APIs that legitimately take a second.
 
-## 4. What happens when something is not working
+## 5. What happens when something is not working
 
 Every integration reduces every failure to one word at its own boundary
 (`server/integrations/providerResult.js`). The page renders a sentence per word:
@@ -212,7 +229,7 @@ a success from the last fifteen minutes is remembered, that value is served with
 back — an operator who has just revoked a credential must not still see
 live-looking figures [proven].
 
-## 5. Cost control
+## 6. Cost control
 
 - **No polling.** There is no timer. Data is fetched on open and on the refresh
   button, and nothing else [proven]. A dashboard left open in a tab overnight is
@@ -225,7 +242,7 @@ live-looking figures [proven].
 - **Refresh bypasses the cache, never the deduplication.** Holding the button
   down produces one request per provider in flight, not one per press.
 
-## 6. What it deliberately does not do
+## 7. What it deliberately does not do
 
 - **No writes to any vendor.** No acknowledging an incident, no resolving one, no
   creating or pausing a monitor, no editing a dashboard. Silently closing an
@@ -243,7 +260,29 @@ live-looking figures [proven].
   read renders *Unavailable*; an unread event draws no bar. Every button acts, and
   everything the API cannot do is an external link that says so.
 
-## 7. When a vendor changes something
+## 8. What has actually been verified, and what has not
+
+Recorded because "the integration is implemented" and "the integration has been
+seen to work" are different claims, and this table is the difference.
+
+| Integration | Credentials in this deployment | Verified against the live service |
+|---|---|---|
+| **Upstash** | present | **Yes**, 2026-09-02. `fetchRedis()` reached the real database: reachable, breaker closed, ~420 ms round trip. |
+| **Pinecone** | present | **Yes**, 2026-09-02. `fetchVectorSearch()` read the real index (`wevolunteer-discover-v1`, namespace `development`, 6 records). |
+| **Better Stack** | none set | **No.** No Better Stack variable is set in this deployment — the source token included — so telemetry is off and the Uptime API cannot be reached. The transforms are covered against documented response shapes in `server/integrations.test.js`. |
+| **Amplitude** | ingestion only (`VITE_AMPLITUDE_API_KEY`) | **No.** The read pair is not set, so the Dashboard API cannot be reached. Ingestion is configured and unaffected. |
+
+The two unverified rows are **[owner action]** and are the only outstanding
+setup: §4.1 and §4.2 say exactly which credential to create and where. Neither
+blocks anything — both cards render "Not configured" and name their variable.
+
+The frontend's rendering of live data was verified separately by driving the
+page with payloads in the exact shape the server produces: monitors with a
+down entry, an open incident, user counts with week-on-week trends, the
+sparkline, and the feature-usage bars. Failure and stale rendering was verified
+the same way — see §5.
+
+## 9. When a vendor changes something
 
 The endpoint shapes, auth schemes and plan positions above were read on
 **2026-09-02**. If a card starts reading *Unexpected answer* after a vendor

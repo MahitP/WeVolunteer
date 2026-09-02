@@ -943,11 +943,29 @@ time { font-variant-numeric: tabular-nums; }
 .page-head h1, .page-head h2 { font-size: 1.5rem; }
 .page-head .lead { margin-top: var(--s1); }
 
-/* Section header with a hairline that fills remaining width */
+/**
+ * A section heading, a hairline that fills the remaining width, and any actions
+ * for that section.
+ *
+ * `flex-wrap` because a head can carry more than one action — Service history
+ * offers both "My certificates" and "My logged hours" — and without it two
+ * buttons plus a heading overflow their card on a phone instead of moving to a
+ * second line.
+ *
+ * Deliberately nothing else. An earlier revision also reordered the actions to
+ * sit after the `::after` rule, so that a wrapped head kept "heading — rule —
+ * actions" on its first line. It read better in the one narrow column that
+ * wraps, and it silently restyled every section head in the application — the
+ * count beside "Waiting on a reply", every tab's applicant tally, every settings
+ * panel — none of which asked to move. Wrapping alone fixes the overflow and
+ * changes nothing at the widths where a head already fits.
+ */
 .section-head {
   display: flex;
   align-items: center;
   gap: var(--s3);
+  flex-wrap: wrap;
+  row-gap: var(--s2);
   margin-bottom: var(--s4);
 }
 .section-head h2 { flex-shrink: 0; }
@@ -13332,6 +13350,10 @@ a.btn {
 .owner-usage-fill {
   display: block;
   height: 100%;
+  /* A real value stays visible however small its share is — see the note at the
+     call site. Rendered only when the total is above zero, so this floor cannot
+     turn "nobody used it" into a visible bar. */
+  min-width: 4px;
   border-radius: var(--r-full);
   background: var(--brand);
 }
@@ -13394,6 +13416,18 @@ a.btn {
 }
 
 .owner-link { align-self: flex-start; }
+
+/* "This is the last reading, and the service has gone quiet since." Warn rather
+   than danger: the figures beside it were true, they have simply stopped being
+   confirmed — which is a different thing from an outage and should not read as
+   one. */
+.owner-stale {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  color: var(--warn);
+}
 
 @media (max-width: 700px) {
   /* The verdict and the refresh control take the full width rather than
