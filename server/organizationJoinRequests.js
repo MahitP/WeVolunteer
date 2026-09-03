@@ -24,12 +24,60 @@
  */
 
 import crypto from 'node:crypto';
+import { NOTE_MAX } from './organizationPolicy.js';
 
 /** Every status the column may hold — mirrors the CHECK in migration 062. */
 export const REQUEST_STATUSES = Object.freeze(['pending', 'accepted', 'rejected', 'withdrawn']);
 
 /** The two things a manager may answer. */
 export const REQUEST_DECISIONS = Object.freeze(['accept', 'reject']);
+
+/**
+ * How long the optional note on a request may be.
+ *
+ * ── Why there is a note ──
+ *
+ * A request-to-join club asks a manager to decide about a person they may not
+ * know, from a name and an avatar — which for a school club is frequently a
+ * choice between two students with the same first name. One line ("I am in Ms
+ * Chen's class and I want to help with the tutoring sessions") is the
+ * difference between an informed decision and a coin toss.
+ *
+ * The bound itself lives in `organizationPolicy.js`, shared with invitation
+ * notes and re-exported to the client so the dialogs' character counters cannot
+ * drift from what the server accepts. Re-exported under the old name because
+ * this module's callers ask it about requests.
+ */
+export { NOTE_MAX as MESSAGE_MAX } from './organizationPolicy.js';
+
+/**
+ * Validates the note. `{ ok, error, field }`, like every other validator here.
+ *
+ * An absent, blank or whitespace-only note is VALID and stores `null` — the note
+ * is optional, and a club that set `join_policy` to `request` must not have
+ * accidentally created a form somebody cannot submit.
+ *
+ * No markup stripping and no sanitiser: the value is stored verbatim and
+ * rendered as text by React, which escapes it. Stripping would be worse than
+ * useless here — it would make `<3` into `3` in a message a child wrote, while
+ * providing no protection that escaping does not already provide.
+ */
+export function validateMessage(value) {
+  if (value === undefined || value === null) return { ok: true, value: null };
+  if (typeof value !== 'string') {
+    return { ok: false, field: 'message', error: 'A note has to be text.' };
+  }
+  const clean = value.trim();
+  if (!clean) return { ok: true, value: null };
+  if (clean.length > NOTE_MAX) {
+    return {
+      ok: false,
+      field: 'message',
+      error: `Keep the note to ${NOTE_MAX} characters or fewer.`,
+    };
+  }
+  return { ok: true, value: clean };
+}
 
 const newId = () => `orq-${crypto.randomUUID()}`;
 
@@ -43,7 +91,7 @@ const newId = () => `orq-${crypto.randomUUID()}`;
 export async function pendingRequestFor(db, organizationId, userId) {
   if (!organizationId || !userId) return null;
   return (await db.prepare(`
-    SELECT id, created_at AS "createdAt"
+    SELECT id, created_at AS "createdAt", message
       FROM organization_join_requests
      WHERE organization_id = ? AND user_id = ? AND status = 'pending'
   `).get(organizationId, userId)) ?? null;
@@ -84,18 +132,18 @@ export async function pendingRequestFor(db, organizationId, userId) {
  *
  * @returns {{ id: string, createdAt: string, created: boolean }}
  */
-export async function requestToJoin(db, organizationId, userId, { now = new Date() } = {}) {
+export async function requestToJoin(db, organizationId, userId, { message = null, now = new Date() } = {}) {
   const id = newId();
   const createdAt = now.toISOString();
 
   const inserted = (await db.prepare(`
     INSERT INTO organization_join_requests
-      (id, organization_id, user_id, status, created_at)
-    VALUES (?, ?, ?, 'pending', ?)
+      (id, organization_id, user_id, status, created_at, message)
+    VALUES (?, ?, ?, 'pending', ?, ?)
     ON CONFLICT (organization_id, user_id) WHERE status = 'pending' DO NOTHING
-  `).run(id, organizationId, userId, createdAt)).changes > 0;
+  `).run(id, organizationId, userId, createdAt, message)).changes > 0;
 
-  if (inserted) return { id, createdAt, created: true };
+  if (inserted) return { id, createdAt, message, created: true };
 
   /* Somebody — possibly this person, one press earlier — already has one. The
      row that exists is authoritative. If it has gone in the meantime, decided
@@ -145,7 +193,7 @@ export async function retireRequestOnJoin(db, organizationId, userId, { now = ne
  */
 export async function pendingRequests(db, organizationId, { limit = 100 } = {}) {
   return await db.prepare(`
-    SELECT r.id, r.created_at AS "createdAt",
+    SELECT r.id, r.created_at AS "createdAt", r.message,
            u.id AS "userId", u.username, u.name, u.avatar,
            u.profile_picture_url, u.role, u.location
       FROM organization_join_requests r

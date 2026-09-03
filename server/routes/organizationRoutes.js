@@ -18,22 +18,32 @@
 import express from 'express';
 import { authenticateToken } from '../utils.js';
 import { runInTransaction } from '../db/connectionContext.js';
+import { isUniqueViolation } from '../db/dialectSql.js';
 import { can, requireCap } from '../authz.js';
 import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
 import {
   validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
   memberRoleOf, formatOrganization, publicOrganizationSnapshot, canInvite, uniqueSlug,
+  handleAvailable, publicOrganizationByHandle,
 } from '../organizations.js';
-import { joinAffordance, affordanceAdmits } from '../organizationPolicy.js';
+import { joinAffordance, affordanceAdmits, normaliseVisibility } from '../organizationPolicy.js';
 import {
-  issueShareLink, revokeShareLink, shareLinkFor, resolveShareToken, tokenOpens,
-  shareLinkPath,
+  createShareLink, revokeShareLink, rotateShareLink, renameShareLink, setShareLinkExpiry,
+  shareLinksFor, shareLinkById, primaryShareLink, liveLinkCount, recordShareLinkUse,
+  resolveShareToken, openingLinkId, shareLinkPath, linkState, linkIsLive,
+  validateLabel, MAX_LIVE_LINKS,
 } from '../organizationShareLinks.js';
+import {
+  inviteUser, resolveInvitation, pendingInvitationFor, pendingInvitations,
+  pendingInvitationCount, acceptInvitationOnJoin, expireLapsedInvitations, invitableUser,
+  NOTE_MAX,
+} from '../organizationInvitations.js';
+import { validateHandle, normaliseHandle } from '../organizationHandles.js';
 import {
   requestToJoin, withdrawRequest, retireRequestOnJoin, pendingRequestFor,
   pendingRequests, pendingRequestCount, decideRequest, requestSubject,
-  REQUEST_DECISIONS,
+  REQUEST_DECISIONS, validateMessage,
 } from '../organizationJoinRequests.js';
 import { joinAttemptLimiter } from '../organizationLimiters.js';
 import { syncOrganizerCapabilities } from '../organizationRoles.js';
@@ -63,10 +73,25 @@ const ORG_SELECT = `
   FROM organizations o
 `;
 
-/** Loads an organization by slug or id, or answers 404. */
+/**
+ * Loads an organization by handle or id, or answers 404.
+ *
+ * ── Why the `@` is stripped here ──
+ *
+ * The canonical public address is `/organizations/@robotics`, and the client
+ * passes the segment through verbatim so that one API route serves both the
+ * canonical form and every link made before it existed. The `@` is punctuation
+ * the URL adds — `organizations.slug` stores `robotics` — exactly as
+ * `users.username` is stored bare and rendered `@name`, and for the same reason:
+ * two spellings of one handle in the column would be two rows the unique index
+ * cannot see are the same.
+ *
+ * The id branch stays, because notification payloads and audit rows written
+ * before handles existed name organizations by id and must keep resolving.
+ */
 async function loadOrganization(req, res) {
-  const key = req.params.key;
-  const row = await db.prepare(`${ORG_SELECT} WHERE (o.slug = ? COLLATE nocase OR o.id = ?)`).get(key, key);
+  const key = normaliseHandle(req.params.key) || String(req.params.key ?? '');
+  const row = await db.prepare(`${ORG_SELECT} WHERE (o.slug = ? COLLATE nocase OR o.id = ?)`).get(key, req.params.key);
   if (!row) {
     res.status(404).json({ error: 'No such organization.', code: 'not_found' });
     return null;
@@ -231,6 +256,11 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
   const organization = formatOrganization(row);
   const ban = await viewerBanState(row.id, req.principal.userId);
   const joinRequest = await pendingRequestFor(db, row.id, req.principal.userId);
+  /* An invitation addressed to THIS reader. Read before the affordance is
+     computed, because holding one is what turns an `invite_required` club into
+     one this person may walk into — and unlike a share token, an invitation is
+     server-side state, so the server can and does decide it here. */
+  const invitation = membership ? null : await pendingInvitationFor(db, row.id, req.principal.userId);
 
   /**
    * What the primary control should say — decided HERE, not in the browser.
@@ -256,7 +286,11 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     isBanned: Boolean(ban),
     hasPendingRequest: Boolean(joinRequest),
     canJoinAtAll: can(req.principal, 'organization.join'),
-    hasInvite: false,
+    /* A direct invitation counts as holding the club's authority to join, the
+       same way a share token does — and it is TRUE here where the token is
+       false, because there is nothing to keep out of the URL: the invitation is
+       a row naming this user, resolved from the session. */
+    hasInvite: Boolean(invitation),
   });
 
   const mayInvite = canInvite({
@@ -273,7 +307,7 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    * organization page load carried a credential, to every reader the roster
    * gate lets through, for a control most of them will never open.
    */
-  const link = mayInvite ? await shareLinkFor(db, row.id) : null;
+  const link = mayInvite ? await primaryShareLink(db, row.id) : null;
 
   res.json({
     organization,
@@ -323,12 +357,32 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
          already on this payload. */
       canInvite: mayInvite,
       shareLink: mayInvite
-        ? { exists: Boolean(link), createdAt: link?.createdAt ?? null, rotations: link?.rotations ?? 0 }
+        ? { exists: Boolean(link), createdAt: link?.createdAt ?? null, label: link?.label ?? null }
         : null,
+      /**
+       * The invitation this reader holds, if any.
+       *
+       * Who sent it is NOT on this payload. The note is, because a note written
+       * to somebody is for them to read; the inviter's identity would make a
+       * declined invitation traceable back to a classmate, and the club — not
+       * the individual member who pressed the button — is what is doing the
+       * inviting as far as the invitee is concerned.
+       */
+      ...(invitation
+        ? {
+          invitation: {
+            id: invitation.id,
+            message: invitation.message ?? null,
+            expiresAt: invitation.expiresAt ?? null,
+          },
+        }
+        : {}),
       /* The badge on the Requests card. A count rather than the queue: the
          queue is its own authenticated route, and a manager who is not looking
          at it should not be paying for it on every page load. */
       pendingRequests: mayManage ? await pendingRequestCount(db, row.id) : null,
+      /* The companion badge, on the same rule: a count, not the list. */
+      pendingInvitations: mayManage ? await pendingInvitationCount(db, row.id) : null,
       hours: viewerHours.hours,
       events: viewerHours.events,
       history: await organizationHistoryForUser(db, row.id, req.principal.userId),
@@ -399,16 +453,48 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   const values = [];
   if (check.value.name !== undefined) {
     updates.push('name = ?'); values.push(check.value.name);
-    /**
-     * A rename re-slugs, and any old link stops resolving.
-     *
-     * The alternative — freezing the slug at creation — leaves a club that
-     * renamed itself permanently addressed by its old name, which is worse for
-     * the people who have to share the link. There is no redirect table because
-     * there is no evidence yet that anybody needs one; adding it later is
-     * additive.
-     */
-    if (check.value.name !== row.name) { updates.push('slug = ?'); values.push(await uniqueSlug(db, check.value.name)); }
+  }
+
+  /**
+   * The handle, changed only when a manager asks for it — never by renaming.
+   *
+   * ── Why a rename no longer moves the address ──
+   *
+   * It used to: a rename recomputed the slug, and the form promised as much.
+   * That was defensible while the slug was a private convenience and became
+   * wrong the moment it was the thing a club prints on a flyer. It was also
+   * already breaking three things, none of them theoretical: stored
+   * notification payloads bake `/organizations/<slug>` into rows that outlive
+   * the rename; `pendingInvite` keys a remembered invitation on the slug, so a
+   * rename between opening a link and finishing signup dropped the token; and
+   * `?organization=<slug>` filters are the kind of URL people bookmark.
+   *
+   * So the handle is now edited on purpose or not at all. `organizationHandles.js`
+   * carries the argument in full.
+   *
+   * The refusal on collision is a 409 naming the handle, which is not an
+   * enumeration concern: every organization's handle is already in its public
+   * URL, and the directory lists them.
+   */
+  /* Held in a local rather than read back out of `values` by
+     `updates.indexOf('slug = ?')`. That worked only because every clause above
+     happens to push exactly one value, which is a property nobody maintaining
+     this file has any reason to preserve. */
+  let newHandle = null;
+  if (req.body?.handle !== undefined) {
+    const handle = validateHandle(req.body.handle);
+    if (!handle.ok) return res.status(400).json({ error: handle.error, field: handle.field });
+    if (handle.value !== row.slug) {
+      if (!await handleAvailable(db, handle.value, { excluding: row.id })) {
+        return res.status(409).json({
+          error: 'Another organization already uses that web address.',
+          field: 'handle',
+          code: 'handle_taken',
+        });
+      }
+      newHandle = handle.value;
+      updates.push('slug = ?'); values.push(newHandle);
+    }
   }
   if (check.value.description !== undefined) { updates.push('description = ?'); values.push(check.value.description); }
   if (check.value.tags !== undefined) { updates.push('tags = ?'); values.push(JSON.stringify(check.value.tags)); }
@@ -426,6 +512,9 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   }
   if (check.value.invitePolicy !== undefined) {
     updates.push('invite_policy = ?'); values.push(check.value.invitePolicy);
+  }
+  if (check.value.visibility !== undefined) {
+    updates.push('visibility = ?'); values.push(check.value.visibility);
   }
   if (req.body?.status !== undefined) {
     if (!['active', 'archived'].includes(req.body.status)) {
@@ -464,33 +553,75 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
     && check.value.joinPolicy !== row.join_policy;
   const inviteChanged = check.value.invitePolicy !== undefined
     && check.value.invitePolicy !== row.invite_policy;
+  const visibilityChanged = check.value.visibility !== undefined
+    && check.value.visibility !== normaliseVisibility(row.visibility);
 
   try {
     await runInTransaction(db, async (tx) => {
       await tx.prepare(`UPDATE organizations SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-      if (check.value.joinPolicy === 'invite' && !await shareLinkFor(tx, row.id)) {
-        await issueShareLink(tx, row.id, { createdBy: req.principal.userId });
+      if (check.value.joinPolicy === 'invite' && !await primaryShareLink(tx, row.id)) {
+        await createShareLink(tx, row.id, { createdBy: req.principal.userId });
         await recordAudit(tx, {
           adminId: req.principal.userId,
           action: 'ORGANIZATION_SHARE_LINK_CREATED',
-          details: `Created the invitation link for ${row.name} (${row.slug}) `
+          details: `Created the invitation link for ${row.name} (@${row.slug}) `
             + 'when switching it to invitation-only.',
         });
       }
 
-      if (policyChanged || inviteChanged) {
+      /**
+       * One audit row for all three settings, because they answer one question.
+       *
+       * "Who can get into this club, and who can see it" is what somebody asks
+       * six months later when a student turns up in a club they should not be
+       * in, or when a parent asks why their child's club is on the open web.
+       * Three separate rows for one save would make the answer a join.
+       *
+       * The handle is written as `@handle`, which is how it appears in the URL
+       * a reader would go and check.
+       */
+      if (policyChanged || inviteChanged || visibilityChanged) {
         const parts = [];
         if (policyChanged) parts.push(`who can join: ${row.join_policy ?? 'open'} to ${check.value.joinPolicy}`);
         if (inviteChanged) parts.push(`who can share the link: ${row.invite_policy ?? 'helpers'} to ${check.value.invitePolicy}`);
+        if (visibilityChanged) {
+          parts.push(`page visibility: ${normaliseVisibility(row.visibility)} to ${check.value.visibility}`);
+        }
         await recordAudit(tx, {
           adminId: req.principal.userId,
           action: 'ORGANIZATION_MEMBERSHIP_POLICY_CHANGED',
-          details: `${row.name} (${row.slug}) — ${parts.join('; ')}.`,
+          details: `${row.name} (@${row.slug}) — ${parts.join('; ')}.`,
+        });
+      }
+
+      /* A rename or a handle change is audited on its own, because it is the
+         one edit that makes every link anybody already has stop working. */
+      if (newHandle) {
+        await recordAudit(tx, {
+          adminId: req.principal.userId,
+          action: 'ORGANIZATION_HANDLE_CHANGED',
+          details: `${row.name} moved from @${row.slug} to @${newHandle}. `
+            + 'Links to the old address no longer work.',
         });
       }
     });
   } catch (err) {
+    /**
+     * Two managers claiming the same handle in the same instant.
+     *
+     * `handleAvailable` is a read, so it cannot be atomic with the write —
+     * `idx_organizations_slug` is what actually decides, and the loser arrives
+     * here. Answering 500 would tell them the product broke when what happened
+     * is that somebody took the address, which is a thing they can act on.
+     */
+    if (isUniqueViolation(err)) {
+      return res.status(409).json({
+        error: 'Another organization already uses that web address.',
+        field: 'handle',
+        code: 'handle_taken',
+      });
+    }
     console.error('Organization update failed:', err);
     return res.status(500).json({ error: 'Could not save those changes.' });
   }
@@ -516,7 +647,7 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
  * and revocation instant — there is no window in which a page opened under an
  * old link still holds permission — and it is why a GET never sees it.
  *
- * `tokenOpens` asks whether the token opens THIS organization, not merely
+ * `openingLinkId` asks whether the token opens THIS organization, not merely
  * whether it resolves to something. A Chess Club link must not admit anybody to
  * the Robotics Club.
  *
@@ -566,8 +697,22 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
     'SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?'
   ).get(row.id, req.principal.userId);
 
+  /**
+   * Which link, if any, opened the door — resolved before the affordance so the
+   * use can be counted against it afterwards.
+   *
+   * `openingLinkId` asks the scoped question: not "is this a valid token
+   * anywhere" but "is this a live link belonging to THIS club". A Chess Club
+   * token must not open the Robotics Club, and a revoked or lapsed one must not
+   * open anything.
+   */
+  const token = typeof req.body?.shareToken === 'string' ? req.body.shareToken : null;
+  const linkId = already ? null : await openingLinkId(db, row.id, token);
+  /* A direct invitation is the other way in. Server-side state naming this
+     user, so unlike the token there is nothing for the client to present. */
+  const invitation = already ? null : await pendingInvitationFor(db, row.id, req.principal.userId);
+
   if (!already) {
-    const token = typeof req.body?.shareToken === 'string' ? req.body.shareToken : null;
     const affordance = joinAffordance({
       joinPolicy: row.join_policy,
       status: row.status,
@@ -575,7 +720,11 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
       isBanned: false,          /* refused above, with its own message */
       hasPendingRequest: false, /* a pending request does not block a link join */
       canJoinAtAll: true,       /* `requireCap` has already said so */
-      hasInvite: await tokenOpens(db, row.id, token),
+      /* Either authority admits: a live link for this club, or an invitation
+         addressed to this person. Both are re-checked HERE, at the moment of
+         the act, rather than trusted from the page load — which is what makes
+         revoking a link or withdrawing an invitation take effect instantly. */
+      hasInvite: Boolean(linkId) || Boolean(invitation),
     });
 
     if (!affordanceAdmits(affordance.action)) {
@@ -604,6 +753,17 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
        manager decided it — see `retireRequestOnJoin`. In the same transaction as
        the membership row, so the two cannot disagree. */
     await retireRequestOnJoin(tx, row.id, req.principal.userId);
+
+    /* An invitation that admitted somebody stops being outstanding. Same
+       transaction, for the same reason: an accepted invitation still pending
+       would be offered back to them on their own page and would count against
+       the club's list for ever. */
+    if (invitation) await acceptInvitationOnJoin(tx, row.id, req.principal.userId);
+
+    /* And the link that opened the door gets its count. Inside the transaction
+       because a counted use with no membership behind it is a lie, and a
+       membership with an uncounted use loses the only number this reports. */
+    if (linkId) await recordShareLinkUse(tx, row.id, linkId);
   });
 
   res.json({ isMember: true, memberCount: await countMembers(row.id) });
@@ -1760,75 +1920,153 @@ async function managerIds(handle, organizationId, { excluding = [] } = {}) {
   return rows.map(r => r.user_id).filter(id => !skip.has(id));
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   Invitation links
+   ────────────────────────────────────────────────────────────────────────── */
+
 /**
- * GET the organization's invitation link.
+ * What a link looks like in a response, and who is allowed to see which half.
  *
- * ── Who may read it, and why that is a setting rather than a rank ──
+ * ── Two projections, one function ──
  *
- * `canInvite` turns the club's own `invite_policy` into a yes or a no. That is
- * the whole of "who can invite": there is no separate per-person invitation and
- * no address book, because the requirement is "hand somebody a link" and one
- * link with a policy on who may pass it on satisfies it without creating a
- * second delivery surface that names students.
+ * A member who may pass the link on needs the URL. A manager needs the URL, what
+ * the link is called, whether it still works, when it lapses and how many people
+ * joined through it. Those are different disclosures, and computing them in one
+ * place is what stops the list endpoint from quietly handing a member the
+ * management view because a new field was added to the SELECT.
  *
- * ── The refusal is a 403 and not a 404 ──
- *
- * Unlike the token endpoint below, the caller has already proved they can see
- * this organization (`directory.read` got them the page). Hiding the existence
- * of a link from a member who may not share it would tell them nothing useful
- * and would make the share control look broken rather than restricted.
+ * `uses` and `lastUsedAt` are managers-only. Not because they are sensitive in
+ * themselves — they are aggregate counts — but because they are the club's
+ * operational record, and a member who may hand out an address has not been
+ * given a reason to read it.
  */
-router.get('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.join'), async (req, res) => {
+const shareLinkView = (link, { forManager, now = new Date() }) => ({
+  id: link.id,
+  path: shareLinkPath(link.token),
+  label: link.label,
+  state: linkState(link, now),
+  createdAt: link.createdAt,
+  expiresAt: link.expiresAt ?? null,
+  ...(forManager
+    ? {
+      revokedAt: link.revokedAt ?? null,
+      uses: Number(link.uses ?? 0),
+      lastUsedAt: link.lastUsedAt ?? null,
+    }
+    : {}),
+});
+
+/**
+ * Who may do what with a club's links, decided once.
+ *
+ * ── Two different questions, deliberately not one setting ──
+ *
+ * **Reading a link to pass it on** is governed by `invite_policy`, because that
+ * is precisely what the setting means: a club that chose "all members" wants its
+ * students handing the address out.
+ *
+ * **Deciding what the links ARE** — creating one, renaming it, setting it to
+ * lapse, revoking it, regenerating it so every printed copy stops working — is
+ * `canManage`. Widening that by an option would mean a club whose setting says
+ * "members may share our address" also says "any member may break the flyer on
+ * the wall", and nobody choosing the first thing is choosing the second.
+ */
+async function shareLinkAccess(row, principal) {
+  const memberRole = await memberRoleOf(db, row.id, principal.userId);
+  const hasModerate = can(principal, 'organization.moderate');
+  return {
+    mayRead: canInvite({ invitePolicy: row.invite_policy, memberRole, hasModerate }),
+    mayManage: hasModerate || memberRole === 'manager',
+  };
+}
+
+/**
+ * GET the club's links.
+ *
+ * A manager gets all of them, live ones first, revoked and lapsed ones after —
+ * see `shareLinksFor` for why the dead ones are included rather than hidden.
+ * Anybody else who may share gets the one primary link and nothing else: the
+ * club's address, which is all the Share control needs.
+ */
+router.get('/api/organizations/:key/share-links', authenticateToken, requireCap('organization.join'), async (req, res) => {
   const row = await loadOrganization(req, res);
   if (!row) return;
 
-  const memberRole = await memberRoleOf(db, row.id, req.principal.userId);
-  const hasModerate = can(req.principal, 'organization.moderate');
-  if (!canInvite({ invitePolicy: row.invite_policy, memberRole, hasModerate })) {
+  const { mayRead, mayManage } = await shareLinkAccess(row, req.principal);
+  if (!mayRead) {
     return res.status(403).json({
       error: 'Only people who help run this organization can share its invitation link.',
       code: 'not_allowed_to_invite',
     });
   }
 
-  const link = await shareLinkFor(db, row.id);
-  if (!link) {
-    /* 200 with `exists: false`, not a 404. "There is no link yet" is a normal
-       state of a club that has never made one, and the dialog's job in that
-       state is to offer a manager the Create control — which a 404 would turn
-       into an error screen. */
-    return res.json({ exists: false, canCreate: hasModerate || memberRole === 'manager' });
+  const now = new Date();
+  const all = await shareLinksFor(db, row.id);
+
+  if (!mayManage) {
+    const primary = await primaryShareLink(db, row.id, { now });
+    /* 200 with an empty list, not a 404. "There is no link yet" is a normal
+       state of a club that never made one, and the dialog's job in that state is
+       to say so — which a 404 would turn into an error screen. */
+    return res.json({
+      links: primary ? [shareLinkView(primary, { forManager: false, now })] : [],
+      canManage: false,
+      canCreate: false,
+      maxLinks: MAX_LIVE_LINKS,
+    });
   }
 
+  /* Live first, then the rest, each group newest first — the order a manager
+     reads: what is working now, then what used to. */
+  const live = all.filter(link => linkIsLive(link, now));
+  const retired = all.filter(link => !linkIsLive(link, now));
+
   res.json({
-    exists: true,
-    path: shareLinkPath(link.token),
-    createdAt: link.createdAt,
-    rotations: link.rotations,
-    canCreate: hasModerate || memberRole === 'manager',
+    links: [...live, ...retired].map(link => shareLinkView(link, { forManager: true, now })),
+    canManage: true,
+    canCreate: live.length < MAX_LIVE_LINKS,
+    maxLinks: MAX_LIVE_LINKS,
   });
 });
 
 /**
- * POST — mint the link, or replace the one there is. Managers only.
+ * Validates an expiry a manager typed.
+ *
+ * `null` is the answer for "no expiry", and it is the DEFAULT — see the
+ * `organizationShareLinks` header for why the flyer on the wall in September
+ * must still work in May. A date in the past is refused rather than accepted
+ * and instantly dead, which would look like a link that never worked.
+ */
+const MAX_EXPIRY_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+
+function validateExpiry(value, { now = new Date() } = {}) {
+  if (value === undefined || value === null || value === '') return { ok: true, value: null };
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) {
+    return { ok: false, field: 'expiresAt', error: 'That is not a date we can read.' };
+  }
+  if (at.getTime() <= now.getTime()) {
+    return { ok: false, field: 'expiresAt', error: 'Choose a date in the future.' };
+  }
+  /* An upper bound, so "never" is expressed by clearing the field rather than by
+     a date in the year 9999 that no manager will ever revisit. */
+  if (at.getTime() - now.getTime() > MAX_EXPIRY_MS) {
+    return { ok: false, field: 'expiresAt', error: 'Choose a date within the next five years, or leave it blank so the link does not expire.' };
+  }
+  return { ok: true, value: at.toISOString() };
+}
+
+/**
+ * POST — mint a link. Managers only.
  *
  * ── Why POST and not a lazily-minting GET ──
  *
- * A GET that created a credential would put it in browser history and hand it
- * to anything that speculatively prefetches links — the argument
- * `POST /api/applications/:id/checkin-code` already makes for the same shape.
- * It also means "look at our link" and "replace our link" cannot be confused,
- * which matters because the second one breaks every copy already handed out.
- *
- * ── Why creating is `canManage` while sharing is `invite_policy` ──
- *
- * Passing an address on is routine. Deciding what the club's front door IS —
- * and, on a regeneration, deciding that every copy in circulation stops working
- * — is not. `canHelpRun` exists for the club's routine work and its own header
- * argues against widening the dangerous question by an option, so this asks the
- * narrow one.
+ * A GET that created a credential would put it in browser history and hand it to
+ * anything that speculatively prefetches links — the argument
+ * `POST /api/applications/:id/checkin-code` already makes for the same shape. It
+ * also keeps "look at our links" and "make another one" from being confused.
  */
-router.post('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+router.post('/api/organizations/:key/share-links', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
   const row = await loadManagedOrganization(req, res);
   if (!row) return;
   if (row.status !== 'active') {
@@ -1838,21 +2076,37 @@ router.post('/api/organizations/:key/share-link', authenticateToken, requireCap(
     });
   }
 
-  let issued;
+  const label = validateLabel(req.body?.label);
+  if (!label.ok) return res.status(400).json({ error: label.error, field: label.field });
+  const expiry = validateExpiry(req.body?.expiresAt);
+  if (!expiry.ok) return res.status(400).json({ error: expiry.error, field: expiry.field });
+
+  if (await liveLinkCount(db, row.id) >= MAX_LIVE_LINKS) {
+    return res.status(409).json({
+      error: `This organization already has ${MAX_LIVE_LINKS} working invitation links. `
+        + 'Switch one off before making another.',
+      code: 'too_many_links',
+    });
+  }
+
+  let created;
   try {
-    issued = await runInTransaction(db, async (tx) => {
-      const link = await issueShareLink(tx, row.id, { createdBy: req.principal.userId });
+    created = await runInTransaction(db, async (tx) => {
+      const link = await createShareLink(tx, row.id, {
+        label: label.value,
+        expiresAt: expiry.value,
+        createdBy: req.principal.userId,
+      });
       await recordAudit(tx, {
         adminId: req.principal.userId,
-        action: link.rotated ? 'ORGANIZATION_SHARE_LINK_ROTATED' : 'ORGANIZATION_SHARE_LINK_CREATED',
+        action: 'ORGANIZATION_SHARE_LINK_CREATED',
         /* No token in the audit trail. The trail is read by administrators who
            are not in this club, and a credential written into it would be a
            credential in a table with a different retention rule and a different
-           audience. What matters six months later is that somebody replaced the
-           link and when — not what it said. */
-        details: link.rotated
-          ? `Regenerated the invitation link for ${row.name} (${row.slug}). The previous link no longer works; members were unaffected.`
-          : `Created the invitation link for ${row.name} (${row.slug}).`,
+           audience. What matters six months later is that somebody made a link
+           and when — not what it said. */
+        details: `Created the invitation link "${link.label}" for ${row.name} (@${row.slug})`
+          + `${expiry.value ? `, expiring ${expiry.value}` : ', with no expiry'}.`,
       });
       return link;
     });
@@ -1861,47 +2115,125 @@ router.post('/api/organizations/:key/share-link', authenticateToken, requireCap(
     return res.status(500).json({ error: 'Could not make an invitation link.' });
   }
 
-  const link = await shareLinkFor(db, row.id);
-  res.status(issued.rotated ? 200 : 201).json({
-    exists: true,
-    path: issued.path,
-    rotated: issued.rotated,
-    createdAt: link?.createdAt ?? null,
-    rotations: link?.rotations ?? 0,
-    canCreate: true,
-  });
+  const link = await shareLinkById(db, row.id, created.id);
+  res.status(201).json({ link: shareLinkView(link, { forManager: true }) });
 });
 
 /**
- * DELETE — switch the link off.
+ * PATCH — rename a link, change when it lapses, or regenerate it.
  *
- * Not step-up gated and deliberately cheaper than creating one, on the rule the
- * invitation routes already state: revocation only ever REMOVES reach, and
- * putting friction in front of the safe action makes it harder than the
- * dangerous one.
- *
- * A club whose policy is `invite` and whose link has just been switched off can
- * be joined by nobody, which is a legitimate thing to want (an intake window
- * that has closed) and is why this does not also change the policy. The client
- * says so plainly in the confirmation.
+ * Three operations on one route because they are three edits to one row and the
+ * client's form submits them together. `rotate` is the one that is not an edit —
+ * it replaces the row — so it is exclusive: a request that both renames and
+ * regenerates would leave a manager unsure which name the new link carries.
  */
-router.delete('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+router.patch('/api/organizations/:key/share-links/:linkId', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
   const row = await loadManagedOrganization(req, res);
   if (!row) return;
 
-  const removed = await runInTransaction(db, async (tx) => {
-    const gone = await revokeShareLink(tx, row.id);
+  const existing = await shareLinkById(db, row.id, req.params.linkId);
+  if (!existing) return res.status(404).json({ error: 'No such invitation link.', code: 'not_found' });
+
+  const rotate = req.body?.rotate === true;
+  const renaming = req.body?.label !== undefined;
+  const reExpiring = req.body?.expiresAt !== undefined;
+
+  if (rotate && (renaming || reExpiring)) {
+    return res.status(400).json({
+      error: 'Regenerate the link on its own, then rename it.',
+      code: 'conflicting_change',
+    });
+  }
+
+  if (rotate) {
+    if (linkState(existing) === 'revoked') {
+      return res.status(409).json({
+        error: 'That link is switched off. Make a new one instead.',
+        code: 'revoked',
+      });
+    }
+    const replacement = await runInTransaction(db, async (tx) => {
+      const fresh = await rotateShareLink(tx, row.id, existing.id, { createdBy: req.principal.userId });
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: 'ORGANIZATION_SHARE_LINK_ROTATED',
+        details: `Regenerated the invitation link "${existing.label}" for ${row.name} (@${row.slug}). `
+          + 'The previous link no longer works; members were unaffected.',
+      });
+      return fresh;
+    });
+    const link = await shareLinkById(db, row.id, replacement.id);
+    return res.json({ link: shareLinkView(link, { forManager: true }), rotated: true });
+  }
+
+  let label = { ok: true, value: existing.label };
+  if (renaming) {
+    label = validateLabel(req.body.label, { fallback: existing.label });
+    if (!label.ok) return res.status(400).json({ error: label.error, field: label.field });
+  }
+  let expiry = { ok: true, value: existing.expiresAt ?? null };
+  if (reExpiring) {
+    expiry = validateExpiry(req.body.expiresAt);
+    if (!expiry.ok) return res.status(400).json({ error: expiry.error, field: expiry.field });
+  }
+
+  await runInTransaction(db, async (tx) => {
+    if (renaming) await renameShareLink(tx, row.id, existing.id, label.value);
+    if (reExpiring) await setShareLinkExpiry(tx, row.id, existing.id, expiry.value);
+    /* Audited only when the expiry moved. A rename changes no permission and
+       nothing a member can observe; an expiry decides whether the link admits
+       anybody next Tuesday, which is the kind of change somebody asks about
+       later. */
+    if (reExpiring && (expiry.value ?? null) !== (existing.expiresAt ?? null)) {
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: 'ORGANIZATION_SHARE_LINK_EXPIRY_SET',
+        details: expiry.value
+          ? `Set the invitation link "${label.value}" for ${row.name} (@${row.slug}) to stop working ${expiry.value}.`
+          : `Removed the expiry from the invitation link "${label.value}" for ${row.name} (@${row.slug}).`,
+      });
+    }
+  });
+
+  const link = await shareLinkById(db, row.id, existing.id);
+  res.json({ link: shareLinkView(link, { forManager: true }) });
+});
+
+/**
+ * DELETE — switch one link off.
+ *
+ * Not step-up gated and deliberately cheaper than creating one, on the rule the
+ * administrator invitation routes already state: revocation only ever REMOVES
+ * reach, and putting friction in front of the safe action makes it harder than
+ * the dangerous one.
+ *
+ * A club whose policy is `invite` and whose last link has just been switched off
+ * can be joined by nobody, which is a legitimate thing to want — an intake
+ * window that has closed — and is why this does not also change the policy. The
+ * client says so plainly in the confirmation.
+ */
+router.delete('/api/organizations/:key/share-links/:linkId', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const existing = await shareLinkById(db, row.id, req.params.linkId);
+  if (!existing) return res.status(404).json({ error: 'No such invitation link.', code: 'not_found' });
+
+  const revoked = await runInTransaction(db, async (tx) => {
+    const gone = await revokeShareLink(tx, row.id, existing.id);
     if (gone) {
       await recordAudit(tx, {
         adminId: req.principal.userId,
         action: 'ORGANIZATION_SHARE_LINK_REVOKED',
-        details: `Switched off the invitation link for ${row.name} (${row.slug}). Members were unaffected.`,
+        details: `Switched off the invitation link "${existing.label}" for ${row.name} (@${row.slug}). `
+          + 'Members were unaffected.',
       });
     }
     return gone;
   });
 
-  res.json({ exists: false, revoked: removed, canCreate: true });
+  const link = await shareLinkById(db, row.id, existing.id);
+  res.json({ link: shareLinkView(link, { forManager: true }), revoked });
 });
 
 /**
@@ -1949,6 +2281,304 @@ router.get('/api/public/organizations/invite/:token', async (req, res) => {
        uniform refusal is willing to say. */
     return gone();
   }
+});
+
+/**
+ * GET the public page of an organization, by its handle. UNAUTHENTICATED.
+ *
+ * ── Why this is a second unauthenticated route and not the invitation one ──
+ *
+ * They answer the same projection and mean completely different things, and
+ * keeping them apart is the point of the whole design:
+ *
+ *   `/invite/:token`  a CREDENTIAL. Holding it is what lets a Join press
+ *                     succeed at an invitation-only club. Unguessable, revocable,
+ *                     and it works whatever the club's visibility is — that is
+ *                     what makes a flyer work.
+ *   `/@handle`        an ADDRESS. Readable, printable, guessable BY DESIGN — it
+ *                     is the club's name — and it carries no authority
+ *                     whatsoever. It opens only a club that chose to be public,
+ *                     and a Join press arriving with nothing but a handle is
+ *                     judged by `join_policy` alone.
+ *
+ * A handle that granted joining authority would be a password anybody can read
+ * off a poster and derive from a club's name, which is why `joinAffordance`
+ * never sees one.
+ *
+ * ── Why an unlisted club answers exactly like a club that does not exist ──
+ *
+ * Same 404, same body. Handles are guessable, so a distinguishable refusal
+ * would turn this into a directory of every club on the platform that has
+ * chosen not to be listed — including which schools have one. "It is not public"
+ * and "there is no such club" are the same answer here on purpose.
+ *
+ * Rate limiting is mounted in app.js ahead of the router.
+ */
+router.get('/api/public/organizations/:handle', async (req, res) => {
+  const gone = () => res.status(404).json({
+    error: 'We could not find an organization at that address.',
+    code: 'not_found',
+  });
+
+  try {
+    const handle = normaliseHandle(req.params.handle);
+    /* Shape-checked before the round trip. `validateHandle` also refuses the
+       reserved segments, which cannot name a club anyway. */
+    if (!validateHandle(handle).ok) return gone();
+
+    /* One function decides "is there a public club at this handle" — see
+       `publicOrganizationByHandle` for the three conditions and why all three
+       failures are the same null. */
+    const row = await publicOrganizationByHandle(db, handle);
+    if (!row) return gone();
+
+    res.json({ organization: await publicOrganizationSnapshot(db, row) });
+  } catch (err) {
+    console.error('Public organization lookup failed:', err);
+    /* The same body as a miss, for the reason the invitation route gives: a 500
+       would tell a caller that the handle matched something and the failure came
+       afterwards. */
+    return gone();
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Direct invitations
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Why inviting a named person is `canManage` and sharing a link is not.
+ *
+ * `invite_policy` answers "who may hand out our address". A club that chose
+ * "all members" is saying its students may pass a URL on — an act with a human
+ * in the middle, aimed at somebody they are talking to anyway.
+ *
+ * Inviting a named individual is different in kind. It reaches into another
+ * person's notifications, it names them in the club's own records, and the
+ * people on both ends are frequently minors. It is a decision about the club's
+ * roster, which is the line `canManage` already draws.
+ *
+ * `organizationInvitations.js` sets out the rest of the model — no token, no
+ * email, and no second invitation after a decline.
+ */
+router.get('/api/organizations/:key/invitations', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  /* Lazily retire the lapsed ones, so the list a manager is reading does not
+     report an invitation as outstanding that `invitationStands` would refuse.
+     Bookkeeping, not enforcement — the refusal does not depend on this having
+     run, which is what makes it safe for it to be lazy rather than a worker. */
+  await expireLapsedInvitations(db, row.id);
+
+  const rows = await pendingInvitations(db, row.id);
+  res.json({
+    invitations: rows.map(invitation => ({
+      /* `invitationId`, not `id` — `profileSummary` writes its own `id` for the
+         person, and spreading it over the invitation's would silently hand the
+         client a person id where it expected an invitation id. The join-request
+         queue names its own field the same way, for the same reason. */
+      invitationId: invitation.id,
+      ...profileSummary({ ...invitation, id: invitation.userId }),
+      message: invitation.message ?? null,
+      createdAt: invitation.createdAt,
+      expiresAt: invitation.expiresAt,
+    })),
+  });
+});
+
+/**
+ * POST — invite somebody.
+ *
+ * The target is a USER ID, obtained from the directory search the caller is
+ * already allowed to use. Never an email address: see the
+ * `organizationInvitations.js` header for the three arguments that decided it,
+ * the first of which is that an address field here would be the platform's only
+ * write oracle over a `PRIVILEGED_FIELDS` column.
+ */
+router.post('/api/organizations/:key/invitations', authenticateToken, requireCap('organization.manage.own'),
+  joinAttemptLimiter, async (req, res) => {
+    const row = await loadManagedOrganization(req, res);
+    if (!row) return;
+    if (row.status !== 'active') {
+      return res.status(409).json({
+        error: 'Unarchive this organization before inviting anybody to it.',
+        code: 'archived',
+      });
+    }
+
+    const userId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+    if (!userId) return res.status(400).json({ error: 'Choose somebody to invite.', field: 'userId' });
+
+    const note = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (note.length > NOTE_MAX) {
+      return res.status(400).json({
+        error: `Keep the note to ${NOTE_MAX} characters or fewer.`,
+        field: 'message',
+      });
+    }
+
+    /* A live account — `invitableUser` carries the rule and the reason it is
+       not a `SELECT *`. */
+    const target = await invitableUser(db, userId);
+    if (!target) return res.status(404).json({ error: 'We could not find that person.', code: 'no_such_user' });
+
+    if (target.id === req.principal.userId) {
+      return res.status(400).json({ error: 'You are already in this organization.', code: 'already_member' });
+    }
+    if (await memberRoleOf(db, row.id, target.id)) {
+      return res.status(409).json({
+        error: `${target.name} is already in this organization.`,
+        code: 'already_member',
+      });
+    }
+    /* A banned person is not invited back by an invitation — lifting the ban is
+       its own deliberate act, with its own audit row, and an invitation that
+       bypassed it would be a second door into a club that closed the first. */
+    if (await viewerBanState(row.id, target.id)) {
+      return res.status(409).json({
+        error: 'That person is banned from this organization. Lift the ban first.',
+        code: 'banned',
+      });
+    }
+
+    const outcome = await runInTransaction(db, async (tx) => {
+      const result = await inviteUser(tx, row.id, target.id, {
+        invitedBy: req.principal.userId,
+        message: note || null,
+      });
+      if (!result.ok) return result;
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: 'ORGANIZATION_INVITATION_SENT',
+        /* The note is NOT in the audit trail. It was written to one person, and
+           the trail is read by administrators who are not in this club. */
+        details: `Invited ${target.name} (@${target.username}) to ${row.name} (@${row.slug}).`,
+      });
+      return result;
+    });
+
+    if (!outcome.ok) {
+      const refusals = {
+        pending: [409, `${target.name} already has an invitation to this organization.`],
+        declined: [409, `${target.name} declined an invitation to this organization. `
+          + 'They can still join using an invitation link if they change their mind.'],
+        full: [409, 'This organization has too many invitations outstanding. '
+          + 'Withdraw some before sending more.'],
+      };
+      const [status, error] = refusals[outcome.reason] ?? [409, 'That invitation could not be sent.'];
+      return res.status(status).json({ error, code: outcome.reason });
+    }
+
+    /* Dispatched OUTSIDE the transaction, on the rule the rest of this file
+       follows: a notification is a side effect, and a mail or push failure must
+       not roll back the invitation it is telling somebody about. */
+    await notificationService.dispatch(
+      'ORGANIZATION_INVITATION_RECEIVED',
+      { organizationName: row.name, organizationSlug: row.slug },
+      target.id,
+      `org-invite:${outcome.invitation.id}`,
+    );
+
+    /* The same shape the list endpoint returns, field for field — see the
+       `invitationId` note there for why the invitation's id is not `id`. One
+       shape means the client renders a newly-sent invitation with the component
+       it already uses for the list. */
+    res.status(201).json({
+      invitation: {
+        invitationId: outcome.invitation.id,
+        ...profileSummary(target),
+        message: outcome.invitation.message ?? null,
+        createdAt: outcome.invitation.createdAt,
+        expiresAt: outcome.invitation.expiresAt,
+      },
+    });
+  });
+
+/**
+ * DELETE — decline the invitation addressed to me.
+ *
+ * ── Why there is no matching "accept" route ──
+ *
+ * Accepting an invitation IS joining, and joining already has a route that
+ * holds the whole story: the capability check, the ban check, the affordance,
+ * the capacity, the transaction that writes the membership row and retires the
+ * request and the invitation together. A second route that also created
+ * memberships would be a second implementation of that, and the one that drifts
+ * is always the newer one.
+ *
+ * So the client's Accept press posts to `…/membership`, exactly as Join does,
+ * and the invitation is what makes it succeed.
+ *
+ * ── Why declining is `organization.join` and not manager-gated ──
+ *
+ * It is the invited person's own answer about their own membership. `:key` is
+ * resolved and the row is matched on `invited_user_id = the caller` inside
+ * `pendingInvitationFor`, so this can only ever decline an invitation addressed
+ * to whoever is asking.
+ */
+router.delete('/api/organizations/:key/invitations/mine', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
+  if (!row) return;
+
+  const invitation = await pendingInvitationFor(db, row.id, req.principal.userId);
+  if (!invitation) {
+    return res.status(404).json({ error: 'You do not have an invitation to this organization.', code: 'not_found' });
+  }
+
+  const outcome = await resolveInvitation(db, row.id, invitation.id, 'declined');
+  if (outcome !== 'resolved') {
+    return res.status(409).json({ error: 'That invitation has already been answered.', code: 'already_resolved' });
+  }
+
+  /* No notification to the club. A decline is a private answer, and a queue of
+     "so-and-so said no" notifications is how a club's managers end up
+     discussing it with them. It disappears from the outstanding list, which is
+     the only thing a manager needs to see. */
+  res.json({ declined: true });
+});
+
+/**
+ * DELETE — withdraw an invitation. Managers only.
+ *
+ * Declared AFTER the `…/invitations/mine` route above, so that `mine` is never
+ * matched as an invitation id — the same ordering discipline `/organizations/new`
+ * and `/users/id/:id` rely on in the client route table. An id can never be the
+ * literal `mine` (they are all `oinv-<hex>`), so the two can never both match.
+ *
+ * Deliberately cheaper than sending one, on the rule the administrator
+ * invitation routes state: revocation only ever removes reach.
+ *
+ * The invited person is NOT notified that their invitation was withdrawn. An
+ * invitation they never opened, withdrawn, is a non-event; telling them would
+ * mean a student's first news of a club is that it changed its mind about them.
+ */
+router.delete('/api/organizations/:key/invitations/:invitationId', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const outcome = await runInTransaction(db, async (tx) => {
+    const result = await resolveInvitation(tx, row.id, req.params.invitationId, 'revoked');
+    if (result === 'resolved') {
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: 'ORGANIZATION_INVITATION_REVOKED',
+        details: `Withdrew an invitation to ${row.name} (@${row.slug}).`,
+      });
+    }
+    return result;
+  });
+
+  if (outcome === 'not_found') {
+    return res.status(404).json({ error: 'No such invitation.', code: 'not_found' });
+  }
+  if (outcome === 'already_resolved') {
+    return res.status(409).json({
+      error: 'That invitation has already been answered.',
+      code: 'already_resolved',
+    });
+  }
+  res.json({ revoked: true });
 });
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -2014,10 +2644,21 @@ router.post('/api/organizations/:key/join-requests', authenticateToken, requireC
       });
     }
 
+    /**
+     * The optional note.
+     *
+     * Validated before anything is written, and stored verbatim — see
+     * `validateMessage` for why there is no sanitiser here: the value is
+     * rendered as text by React, which escapes it, and stripping markup would
+     * mangle a child's message while adding no protection.
+     */
+    const note = validateMessage(req.body?.message);
+    if (!note.ok) return res.status(400).json({ error: note.error, field: note.field });
+
     let request;
     try {
       request = await runInTransaction(db, async (tx) => {
-        const filed = await requestToJoin(tx, row.id, req.principal.userId);
+        const filed = await requestToJoin(tx, row.id, req.principal.userId, { message: note.value });
         if (!filed.created) return filed;
 
         const requester = await tx.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
@@ -2038,6 +2679,11 @@ router.post('/api/organizations/:key/join-requests', authenticateToken, requireC
     res.status(request.created ? 201 : 200).json({
       pending: true,
       submittedAt: request.createdAt,
+      /* The note as STORED, which for a second press is the one already on
+         file rather than the one just typed. A page that echoed the new text
+         while the queue showed the old would be lying to whoever is looking at
+         it about what the manager will read. */
+      message: request.message ?? null,
       created: request.created,
     });
   });
@@ -2087,6 +2733,10 @@ router.get('/api/organizations/:key/join-requests', authenticateToken, requireCa
          notices and cost the decision route its identifier. */
       requestId: r.id,
       submittedAt: r.createdAt,
+      /* The note the student wrote, if they wrote one. Read only by the club's
+         managers — the queue endpoint they are the only callers of — and never
+         published to the roster or to any other member. */
+      message: r.message ?? null,
       /* Handed over as it came out of the database, because `profileSummary`
          reads the column names — it is the same strict subset the roster and
          directory search publish, so a queue cannot disclose a field a profile

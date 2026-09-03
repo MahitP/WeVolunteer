@@ -49,11 +49,35 @@ describe('joining an organization', () => {
     await db.prepare('UPDATE organizations SET join_policy = ? WHERE id = ?').run(joinPolicy, orgId);
   };
 
+  /**
+   * Mints a link and remembers which one it was.
+   *
+   * A club may now hold several, so "switch the link off" and "regenerate the
+   * link" both need to name one. `lastLink` is that name, kept beside the
+   * helper rather than threaded through every caller — every test here works
+   * with the link it just made.
+   */
+  let lastLink = {};
   const mintLink = async (key = orgKey) => {
-    const res = await srv.call('POST', `/api/organizations/${key}/share-link`, {}, manager);
+    const res = await srv.call('POST', `/api/organizations/${key}/share-links`, {}, manager);
     expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
-    return String(res.body.path).split('/').pop();
+    lastLink[key] = res.body.link.id;
+    return String(res.body.link.path).split('/').pop();
   };
+
+  /** Replaces it, which is what Regenerate means: same label, new token. */
+  const rotateLink = async (key = orgKey) => {
+    const res = await srv.call(
+      'PATCH', `/api/organizations/${key}/share-links/${lastLink[key]}`, { rotate: true }, manager,
+    );
+    expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+    lastLink[key] = res.body.link.id;
+    return String(res.body.link.path).split('/').pop();
+  };
+
+  const revokeLink = async (key = orgKey) => srv.call(
+    'DELETE', `/api/organizations/${key}/share-links/${lastLink[key]}`, undefined, manager,
+  );
 
   const attemptJoin = (body, session = student) =>
     srv.call('POST', `/api/organizations/${orgKey}/membership`, body, session);
@@ -183,7 +207,10 @@ describe('joining an organization', () => {
 
     it('refuses a link that has since been regenerated', async () => {
       const first = await mintLink();
-      await mintLink();
+      /* Rotate, not mint. Minting a second link leaves the first one working —
+         that is the whole point of a club having several. Regenerating is what
+         retires the copies already handed out. */
+      await rotateLink();
       const res = await attemptJoin({ shareToken: first });
       expect(res.status).toBe(403);
       expect(await isMember(studentId)).toBe(false);
@@ -191,7 +218,7 @@ describe('joining an organization', () => {
 
     it('refuses a link that has been switched off', async () => {
       const token = await mintLink();
-      await srv.call('DELETE', `/api/organizations/${orgKey}/share-link`, undefined, manager);
+      await revokeLink();
       const res = await attemptJoin({ shareToken: token });
       expect(res.status).toBe(403);
       expect(await isMember(studentId)).toBe(false);
@@ -297,10 +324,15 @@ describe('joining an organization', () => {
 
     it('publishes the club’s own advertisement and its counts', async () => {
       const { organization: o } = (await open()).body;
+      /* The exact field list, so a field cannot reach an unauthenticated
+         reader by being added to `organizations`. `handle` joined it when the
+         canonical public address did: it is the slug with an `@`, built on the
+         server so no client has to know the prefix is punctuation. */
       expect(Object.keys(o).sort()).toEqual([
-        'avatar', 'avatarColor', 'description', 'eventCount', 'imageUrl',
+        'avatar', 'avatarColor', 'description', 'eventCount', 'handle', 'imageUrl',
         'joinPolicy', 'kind', 'memberCount', 'name', 'slug', 'tags', 'upcoming',
       ]);
+      expect(o.handle).toBe(`@${o.slug}`);
       expect(o.memberCount).toBeGreaterThanOrEqual(1);
       expect(o.tags).toEqual(['Coordination']);
     });
@@ -336,10 +368,10 @@ describe('joining an organization', () => {
 
     it('answers the same 404 for a token that never existed, one replaced, and one switched off', async () => {
       const never = await open('a'.repeat(64));
-      const replaced = await (async () => { const t = token; await mintLink(); return open(t); })();
+      const replaced = await (async () => { const t = token; await rotateLink(); return open(t); })();
       const off = await (async () => {
         const t = await mintLink();
-        await srv.call('DELETE', `/api/organizations/${orgKey}/share-link`, undefined, manager);
+        await revokeLink();
         return open(t);
       })();
 

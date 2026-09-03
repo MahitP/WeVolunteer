@@ -21,10 +21,14 @@ export {
   JOIN_POLICIES,
   INVITE_POLICIES,
   JOIN_AFFORDANCES,
+  VISIBILITIES,
   DEFAULT_JOIN_POLICY,
   DEFAULT_INVITE_POLICY,
+  DEFAULT_VISIBILITY,
+  NOTE_MAX,
   normaliseJoinPolicy,
   normaliseInvitePolicy,
+  normaliseVisibility,
 } from '../server/organizationPolicy.js';
 
 /**
@@ -51,12 +55,39 @@ export const JOIN_POLICY_COPY = Object.freeze({
   invite: {
     label: 'Invitation only',
     consequence: 'Students need this organization’s invitation link to join.',
-    note: 'It still appears in search. People without the link are told they need one, '
-      + 'rather than being unable to find you.',
+    note: 'Signed-in students can still find you in search and are told they need a link, '
+      + 'rather than being unable to find you at all. Whether you have a page somebody '
+      + 'without an account can open is the separate setting below.',
   },
   request: {
     label: 'Request to join',
     consequence: 'Students ask to join, and a manager accepts or declines.',
+  },
+});
+
+/**
+ * Whether the club has a page a stranger can open.
+ *
+ * ── Written in terms of who can SEE, never of who can join ──
+ *
+ * The mistake this copy exists to prevent is a manager reading "public" as
+ * "anybody can join". They are separate settings on purpose — a public club
+ * that admits by invitation is the combination a school club actually asks for
+ * — so each sentence here says what changes about LOOKING and explicitly leaves
+ * joining to the setting above it.
+ */
+export const VISIBILITY_COPY = Object.freeze({
+  public: {
+    label: 'Anyone can see this page',
+    consequence: 'This organization has a web address that works without an account, so you '
+      + 'can put it on a poster or in a bio.',
+    note: 'It shows your name, description, logo, how many members you have and what you have '
+      + 'coming up — never who is in it, and never where an event is.',
+  },
+  unlisted: {
+    label: 'Only signed-in members of WeVolunteer',
+    consequence: 'Somebody without an account sees nothing at all. Your invitation links still '
+      + 'work for anybody you send them to.',
   },
 });
 

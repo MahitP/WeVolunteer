@@ -71,6 +71,7 @@ import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
 import organizationMembershipPolicy from './062_organization_membership_policy.js';
+import organizationPublicIdentity from './063_organization_public_identity.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -415,7 +416,18 @@ export const MIGRATIONS = [
    * which rebuilds `users`. Nothing else depends on its order, and it is
    * additive on both engines.
    */
-  organizationMembershipPolicy
+  organizationMembershipPolicy,
+  /**
+   * 063 — the club's public identity, its named invitation links, direct
+   * invitations, and the sentence a student may send with a request.
+   *
+   * MUST run after 062, which created the two tables it alters and the one it
+   * rebuilds. The rebuild is `organization_share_links`, moving its primary key
+   * off `organization_id` so a club can have more than one link; nothing
+   * references that table, so §8.3's child-row guards do not apply, and the copy
+   * is row-counted regardless.
+   */
+  organizationPublicIdentity
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

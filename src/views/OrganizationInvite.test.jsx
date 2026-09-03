@@ -157,8 +157,11 @@ describe('a reader who is already signed in', () => {
     api.fetchOrganizationInvite.mockResolvedValue({ organization: ORG });
     render(<MemoryRouter><OrganizationInvite /></MemoryRouter>);
 
+    /* The CANONICAL address. A member arriving through an invitation link
+       lands on `/organizations/@chess-club`, which is the address they would
+       copy out of the location bar and send to somebody else. */
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith(
-      '/organizations/chess-club', { replace: true },
+      '/organizations/@chess-club', { replace: true },
     ));
   });
 

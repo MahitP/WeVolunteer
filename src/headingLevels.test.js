@@ -89,6 +89,28 @@ const STANDALONE = new Set([
 
   /* Public, signed-out pages. */
   'views/CertificateVerification.jsx',
+  /**
+   * The two public organization pages, and the view they share.
+   *
+   * ── Listed even though this scan cannot see their headings ──
+   *
+   * Neither contains a literal `<h1>`: the level arrives as a PROP —
+   * `OrganizationMasthead as="h1"` and `EmptyState headingLevel={1}` — so the
+   * regex below finds nothing and they pass without the allowlist. They are
+   * named here anyway, because "passes because the check cannot see it" is not
+   * the same as "is correct", and the next person to look should not have to
+   * work out which one this is.
+   *
+   * That is a real limit of this guard: a shell-rendered view could take a
+   * level-one heading through the same props and go unreported. The instrument
+   * that would catch it is `a11y/sweep.aria.spec.js`, which measures real
+   * heading order at walk time — and which has already caught exactly this
+   * class of thing twice on these routes (the invitation page's failure branch
+   * had no `h1` at all, and the organization page logged `h1 -> h3`).
+   */
+  'views/OrganizationPublic.jsx',
+  'views/OrganizationInvite.jsx',
+  'components/organizations/PublicOrganizationView.jsx',
 
   /* The crash experience replaces the whole tree, including the shell. */
   'views/ErrorExperience/ErrorExperience.jsx',

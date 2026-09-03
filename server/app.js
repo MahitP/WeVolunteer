@@ -1094,18 +1094,34 @@ app.use('/api/auth/check-email', lookupLimiter);
 
 app.use('/api/certificates/verify', verifyLimiter);
 /**
- * The other unauthenticated read of real data.
+ * The other unauthenticated reads of real data.
  *
  * Mounted here, ahead of the blanket `apiLimiter`, for the same reason
- * `/api/certificates/verify` is: it answers without a session, so nothing else
- * stands between it and being used as a free database probe. `shareTokenLimiter`
- * counts successes deliberately — see its own note for why, and for why its
- * message must never read as a verdict on the link.
+ * `/api/certificates/verify` is: they answer without a session, so nothing else
+ * stands between them and being used as a free database probe.
+ * `shareTokenLimiter` counts successes deliberately — see its own note for why,
+ * and for why its message must never read as a verdict on the link.
  *
- * The AUTHENTICATED routes that consume a token carry the same limiter inside
- * the router, where the account is known; this covers only the public one.
+ * ── The prefix covers BOTH public organization endpoints, on purpose ──
+ *
+ * This used to be `/api/public/organizations/invite`, which left
+ * `/api/public/organizations/:handle` — the canonical public page — behind
+ * `apiLimiter` alone. That is the wrong way round if either needs more
+ * protection: an invitation token is 32 random bytes and unguessable, while a
+ * handle is the club's NAME and guessable by design, so the handle route is the
+ * one an enumeration would actually target.
+ *
+ * One budget for both is right rather than convenient. The shape of legitimate
+ * traffic is identical — a club puts an address somewhere and a class of thirty
+ * opens it from one school connection — and the ceiling is what bounds a
+ * scraper. 120 per 15 minutes per device is roughly eight a minute: useless for
+ * walking a namespace, invisible to anybody reading a page.
+ *
+ * The AUTHENTICATED routes that consume a token carry a different limiter inside
+ * the router, keyed on the account, because a device-keyed one there would
+ * refuse the students at the back of that same class.
  */
-app.use('/api/public/organizations/invite', shareTokenLimiter);
+app.use('/api/public/organizations', shareTokenLimiter);
 app.use('/api', apiLimiter);
 
 app.use(webhookRoutes);

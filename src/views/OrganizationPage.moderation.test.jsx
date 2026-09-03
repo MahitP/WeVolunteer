@@ -85,6 +85,12 @@ beforeEach(() => {
   api.fetchOrganizationAppeals.mockResolvedValue({ appeals: [] });
   api.fetchOrganizationBans.mockResolvedValue({ bans: [] });
   api.fetchOrganizationJoinRequests.mockResolvedValue({ requests: [], pendingRequests: 0 });
+  /* The manage band also mounts the invitation panel, which fetches on mount.
+     Left unmocked, the auto-mock returns `undefined`, `.then` throws inside a
+     passive effect and the WHOLE page unmounts — which reads as "the control is
+     correctly absent" on half of these assertions. Vacuous-pass by crash. */
+  api.fetchOrganizationInvitations.mockResolvedValue({ invitations: [] });
+  api.searchDirectory.mockResolvedValue({ users: [], organizations: [] });
   api.joinOrganizationWithInvite.mockResolvedValue({});
   api.liftOrganizationBan.mockResolvedValue({});
 });

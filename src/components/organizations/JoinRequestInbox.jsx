@@ -28,10 +28,15 @@ import { formatDay } from '../../utils/helpers';
  * ── What a request discloses ──
  *
  * Exactly what the roster does: `profileSummary`, the same strict subset
- * directory search publishes. No grade, no school, no email address, and no
- * message — the request carries none, deliberately, because a free-text note
- * written by a minor and read by club managers is a disclosure this feature does
- * not need in order to work.
+ * directory search publishes. No grade, no school and no email address.
+ *
+ * A request may carry a short note the student chose to write, and it is shown
+ * here because deciding is what it is for. Rendered as TEXT in JSX, which React
+ * escapes — there is no `dangerouslySetInnerHTML` anywhere near this, and the
+ * server stores the note verbatim rather than "sanitising" it, which would
+ * mangle a child's `<3` while providing no protection escaping does not already
+ * give. It is read only by this club's managers: the queue is their route
+ * alone, and the note reaches no roster, no notification and no email.
  */
 export default function JoinRequestInbox({ orgKey, organizationName, policy, addToast, onDecided }) {
   const [state, setState] = useState({ loading: true, requests: [], error: '' });
@@ -121,6 +126,12 @@ export default function JoinRequestInbox({ orgKey, organizationName, policy, add
                       {request.username && <>@{request.username} · </>}
                       asked {formatDay(request.submittedAt)}
                     </span>
+                    {/* Inside the link, so the note travels with the person it
+                        belongs to on a narrow screen rather than wrapping into
+                        the actions. Text, never markup. */}
+                    {request.message && (
+                      <span className="org-request-note">{request.message}</span>
+                    )}
                   </span>
                 </Link>
 

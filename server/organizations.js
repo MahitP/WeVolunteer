@@ -26,8 +26,8 @@ import { isAvatarColor } from './avatarColors.js';
    costs no coupling, and the browser can import the same file for the settings
    form rather than holding a second copy of the words. */
 import {
-  JOIN_POLICIES, INVITE_POLICIES,
-  normaliseJoinPolicy, normaliseInvitePolicy,
+  JOIN_POLICIES, INVITE_POLICIES, VISIBILITIES, DEFAULT_VISIBILITY,
+  normaliseJoinPolicy, normaliseInvitePolicy, normaliseVisibility,
 } from './organizationPolicy.js';
 
 export const ORG_NAME_MAX = 120;
@@ -52,6 +52,7 @@ export {
 /* `export … from` re-exports without binding the name locally, and
    `validateOrganizationPayload` below calls this one. */
 import { normaliseOrgTags } from './organizationTags.js';
+import { validateHandle, normaliseHandle, HANDLE_MAX } from './organizationHandles.js';
 
 /**
  * A URL-safe identity derived from the name.
@@ -71,18 +72,60 @@ export function slugify(name) {
     .slice(0, 60);
 }
 
+/**
+ * The starting handle for a club whose organizer did not choose one.
+ *
+ * ── Why this now goes through validateHandle ──
+ *
+ * `slugify` answers "what is the URL-safe form of this name", which is not the
+ * same question as "is this a usable public handle". It happily returns `new`
+ * for a club called "New" — which used to be created with a permanently
+ * unreachable page, because the router matches the literal `/organizations/new`
+ * first — and `2024-team` for one called "2024 Team", and `hq` for "HQ".
+ *
+ * So the derived value is offered to `validateHandle` and repaired when it is
+ * refused, rather than trusted. `org-` is the prefix used for the repair
+ * because it is what a reader seeing `/organizations/@org-new` can make sense
+ * of; the numeric-suffix loop underneath is unchanged, and still exists so the
+ * second club anybody names "NHS" can be created at all.
+ */
 export async function uniqueSlug(db, name) {
-  const base = slugify(name) || 'organization';
+  const derived = slugify(name);
+  /* Repair before the collision loop, so a name that slugifies to a reserved or
+     malformed handle does not get a numeric suffix pinned to a base that was
+     never going to be accepted: "New" becomes `org-new`, then `org-new-2`. */
+  const base = validateHandle(derived).ok ? derived : `org-${derived || 'anization'}`.slice(0, HANDLE_MAX);
   let candidate = base;
   let n = 1;
   /* COLLATE NOCASE to match idx_organizations_slug, so the uniqueness check and
      the unique index agree about what a collision is. */
   const taken = await db.prepare('SELECT 1 FROM organizations WHERE slug = ? COLLATE nocase');
-  while (await taken.get(candidate)) {
+  while (await taken.get(candidate) || !validateHandle(candidate).ok) {
     n += 1;
-    candidate = `${base}-${n}`.slice(0, 64);
+    /* The suffix is trimmed off the BASE, not off the whole candidate, so a
+       long name cannot lose the digits that make it unique. */
+    const suffix = `-${n}`;
+    /* Trailing hyphens are stripped from the truncated base, because
+       `abc-` + `-2` is `abc--2`, which `validateHandle` refuses — and refusing
+       every candidate is how this loop would never end. */
+    const trimmed = base.slice(0, HANDLE_MAX - suffix.length).replace(/-+$/, '');
+    candidate = `${trimmed || 'organization'}${suffix}`;
   }
   return candidate;
+}
+
+/**
+ * Whether a handle is free, asked of the database rather than guessed.
+ *
+ * `excluding` is the organization doing the asking, so a manager re-saving the
+ * settings form without touching the handle is not told their own address is
+ * taken.
+ */
+export async function handleAvailable(db, handle, { excluding = null } = {}) {
+  const row = await db
+    .prepare('SELECT id FROM organizations WHERE slug = ? COLLATE nocase')
+    .get(normaliseHandle(handle));
+  return !row || row.id === excluding;
 }
 
 /**
@@ -162,6 +205,13 @@ export function validateOrganization(payload, { partial = false } = {}) {
       return { ok: false, field: 'joinPolicy', error: 'Choose one of the available join settings.' };
     }
     out.joinPolicy = payload.joinPolicy;
+  }
+
+  if (payload.visibility !== undefined) {
+    if (!VISIBILITIES.includes(payload.visibility)) {
+      return { ok: false, field: 'visibility', error: 'Choose whether this organization has a public page.' };
+    }
+    out.visibility = payload.visibility;
   }
 
   if (payload.invitePolicy !== undefined) {
@@ -394,9 +444,28 @@ export async function createOrganization(db, { name, description = '', tags = []
   const orgId = `org-${crypto.randomUUID()}`;
   await db.prepare(`
     INSERT INTO organizations
-      (id, name, slug, description, tags, created_by, created_by_name_snapshot, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-  `).run(orgId, name, await uniqueSlug(db, name), description, JSON.stringify(tags), creator.id, creator.name, now, now);
+      (id, name, slug, description, tags, created_by, created_by_name_snapshot, status,
+       visibility, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+  `).run(
+    orgId, name, await uniqueSlug(db, name), description, JSON.stringify(tags),
+    creator.id, creator.name,
+    /**
+     * `DEFAULT_VISIBILITY`, written explicitly rather than left to the column.
+     *
+     * The column's DEFAULT is `'unlisted'`, which is right for migration 063 —
+     * every club that already existed was created when the page required a
+     * session, and nobody running one agreed to publish it. It is wrong for a
+     * club created today, by somebody who is looking at the setting.
+     *
+     * The two answers are deliberately different, so the value is stated here
+     * rather than inherited. Leaving it to the DEFAULT made every new club
+     * unlisted while the product said otherwise: the settings form showed
+     * `public`, the constant said `public`, and the row said `unlisted`.
+     */
+    DEFAULT_VISIBILITY,
+    now, now,
+  );
 
   /* The creator is seeded as a manager rather than being implicit in
      `created_by`. One membership table answers "who may manage this", which
@@ -464,6 +533,17 @@ export function formatOrganization(row) {
      */
     joinPolicy: normaliseJoinPolicy(row.join_policy),
     invitePolicy: normaliseInvitePolicy(row.invite_policy),
+    /**
+     * Whether the club has a public page.
+     *
+     * Also published to every signed-in reader, and for a reason that is easy to
+     * get backwards: this is not a secret being leaked, it is a WARNING being
+     * given. A member about to post the club's address in a group chat needs to
+     * know whether the people they send it to will be able to open it. Hiding
+     * the setting from the members who share the link is how a club discovers
+     * its visibility by accident.
+     */
+    visibility: normaliseVisibility(row.visibility),
     /* Present only on the "mine" listing, which joins membership. Undefined
        elsewhere rather than null, so a caller can tell "not asked" from "not a
        manager". */
@@ -512,11 +592,14 @@ export function formatOrganization(row) {
 export function publicOrganization(row, { upcoming = [] } = {}) {
   return {
     kind: 'organization',
-    /* The slug travels so a signed-in reader can be sent to the real page, and
+    /* The handle travels so a signed-in reader can be sent to the real page, and
        so the address bar can say the club's name rather than a token. It is not
-       a capability: `/organizations/:key` requires a session and
-       `directory.read`, exactly as it did before this feature existed. */
+       a capability: the signed-in page requires a session and `directory.read`,
+       exactly as it did before this feature existed. */
     slug: row.slug,
+    /* The canonical address, built once on the server so no client has to know
+       that the `@` is punctuation rather than part of the stored handle. */
+    handle: `@${row.slug}`,
     name: row.name,
     description: row.description || '',
     tags: parseTags(row.tags),
@@ -535,6 +618,42 @@ export function publicOrganization(row, { upcoming = [] } = {}) {
       category: e.category ?? null,
     })),
   };
+}
+
+/**
+ * The organization at a handle, if it has a public page.
+ *
+ * ── One function, so "is this public" has one answer ──
+ *
+ * Three conditions, and getting any of them wrong publishes something: the
+ * handle has to match, the club has to be active, and its visibility has to be
+ * `public`. `normaliseVisibility` rather than a raw comparison, so a row that
+ * predates the column — NULL — reads as unlisted rather than as neither value
+ * and therefore not-not-public.
+ *
+ * `null` for all three failures, which is what lets the route answer one
+ * identical 404: handles are guessable by design, so distinguishing "not
+ * public" from "does not exist" would make the endpoint a directory of every
+ * club that chose not to be listed.
+ *
+ * The read lives here rather than in the route for the reason
+ * `db.accessSurface.test.js` ratchets — this module receives a handle and can
+ * be given a pooled client — and because the SELECT then sits beside the
+ * allowlist that decides what leaves it.
+ */
+export async function publicOrganizationByHandle(db, handle) {
+  const slug = normaliseHandle(handle);
+  if (!slug) return null;
+  const row = await db.prepare(`
+    SELECT o.*,
+           (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+           (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
+      FROM organizations o
+     WHERE o.slug = ? COLLATE nocase
+  `).get(slug);
+
+  if (!row || row.status !== 'active') return null;
+  return normaliseVisibility(row.visibility) === 'public' ? row : null;
 }
 
 /**

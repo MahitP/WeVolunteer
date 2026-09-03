@@ -48,11 +48,19 @@ describe('attacking the organization invitation link', () => {
       .run(joinPolicy, organizationId);
   };
 
+  /**
+   * Mints a link and remembers it, because a club may now hold several and
+   * every destructive route names one.
+   */
+  const links = {};
   const mintLink = async (key) => {
-    const res = await srv.call('POST', `/api/organizations/${key}/share-link`, {}, jordan);
+    const res = await srv.call('POST', `/api/organizations/${key}/share-links`, {}, jordan);
     expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
-    return String(res.body.path).split('/').pop();
+    links[key] = res.body.link;
+    return String(res.body.link.path).split('/').pop();
   };
+
+  const linkId = (key) => links[key]?.id ?? 'oshl-does-not-exist';
 
   const isMember = async (organizationId, userId) => Boolean(await db.prepare(
     'SELECT 1 FROM organization_members WHERE organization_id = ? AND user_id = ?'
@@ -117,12 +125,17 @@ describe('attacking the organization invitation link', () => {
      * has its own section at the bottom of this file.
      */
     it.each([
-      ['GET', 'share-link'],
-      ['POST', 'share-link'],
-      ['DELETE', 'share-link'],
+      ['GET', 'share-links'],
+      ['POST', 'share-links'],
+      ['DELETE', 'share-links/oshl-anything'],
+      ['PATCH', 'share-links/oshl-anything'],
       ['POST', 'join-requests'],
       ['GET', 'join-requests'],
       ['DELETE', 'join-requests/mine'],
+      ['GET', 'invitations'],
+      ['POST', 'invitations'],
+      ['DELETE', 'invitations/oinv-anything'],
+      ['DELETE', 'invitations/mine'],
     ])('is refused outright on %s …/%s', async (method, path) => {
       const res = await srv.call(method, `/api/organizations/${mineKey}/${path}`,
         method === 'GET' || method === 'DELETE' ? undefined : {});
@@ -170,7 +183,7 @@ describe('attacking the organization invitation link', () => {
   describe('a manager of a different organization', () => {
     it('cannot read our invitation link', async () => {
       const token = await mintLink(mineKey);
-      const res = await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, robin);
+      const res = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, robin);
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('not_allowed_to_invite');
       /* Not merely refused — the token is nowhere in the answer. */
@@ -178,17 +191,58 @@ describe('attacking the organization invitation link', () => {
       expect(JSON.stringify(res.body)).not.toMatch(/[0-9a-f]{64}/);
     });
 
-    it('cannot mint, rotate or switch off our invitation link', async () => {
+    it('cannot mint, rename, expire, rotate or switch off our invitation link', async () => {
       const token = await mintLink(mineKey);
+      const id = linkId(mineKey);
 
-      expect((await srv.call('POST', `/api/organizations/${mineKey}/share-link`, {}, robin)).status).toBe(403);
-      expect((await srv.call('DELETE', `/api/organizations/${mineKey}/share-link`, undefined, robin)).status).toBe(403);
+      expect((await srv.call('POST', `/api/organizations/${mineKey}/share-links`, {}, robin)).status).toBe(403);
+      expect((await srv.call('DELETE', `/api/organizations/${mineKey}/share-links/${id}`, undefined, robin)).status)
+        .toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { label: 'Theirs now' }, robin)).status).toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { rotate: true }, robin)).status).toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { expiresAt: '2020-01-01T00:00:00.000Z' }, robin)).status).toBe(403);
 
-      /* Ours is untouched: the same token still opens it. */
+      /* Ours is untouched: the same token still opens it, under the same name. */
       const still = await srv.call('GET', `/api/public/organizations/invite/${token}`);
       expect(still.status).toBe(200);
-      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, jordan)).body.rotations)
-        .toBe(0);
+      const ours = (await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, jordan)).body;
+      expect(ours.links).toHaveLength(1);
+      expect(ours.links[0].label).toBe('General');
+      expect(ours.links[0].state).toBe('live');
+    });
+
+    /**
+     * The cross-club id, which is the mistake a scoped route makes when it
+     * trusts the id and not the pair.
+     *
+     * Robin manages their OWN club, so `loadManagedOrganization` lets them
+     * through — the refusal has to come from the link lookup being scoped by
+     * organization AND id. A handler that looked a link up by id alone would let
+     * any organizer on the platform revoke any club's link.
+     */
+    it('cannot revoke our link by naming its id on their own club', async () => {
+      const token = await mintLink(mineKey);
+      const ourId = linkId(mineKey);
+
+      const res = await srv.call(
+        'DELETE', `/api/organizations/${theirsKey}/share-links/${ourId}`, undefined, robin,
+      );
+      expect(res.status).toBe(404);
+      expect((await srv.call('GET', `/api/public/organizations/invite/${token}`)).status).toBe(200);
+    });
+
+    it('cannot rotate our link by naming its id on their own club', async () => {
+      const token = await mintLink(mineKey);
+      const ourId = linkId(mineKey);
+
+      const res = await srv.call(
+        'PATCH', `/api/organizations/${theirsKey}/share-links/${ourId}`, { rotate: true }, robin,
+      );
+      expect(res.status).toBe(404);
+      expect((await srv.call('GET', `/api/public/organizations/invite/${token}`)).status).toBe(200);
     });
 
     it('cannot change who may join our organization', async () => {
@@ -257,7 +311,7 @@ describe('attacking the organization invitation link', () => {
 
     it('cannot read the link when the club says helpers only', async () => {
       const token = await mintLink(mineKey);
-      const res = await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student);
+      const res = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
       expect(res.status).toBe(403);
       expect(JSON.stringify(res.body)).not.toContain(token);
     });
@@ -273,23 +327,60 @@ describe('attacking the organization invitation link', () => {
       await mintLink(mineKey);
 
       await srv.call('PATCH', `/api/organizations/${mineKey}`, { invitePolicy: 'members' }, jordan);
-      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student)).status)
+      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student)).status)
         .toBe(200);
 
       await srv.call('PATCH', `/api/organizations/${mineKey}`, { invitePolicy: 'helpers' }, jordan);
-      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student)).status)
+      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student)).status)
         .toBe(403);
     });
 
-    it('cannot mint or rotate the link even when the club lets them share it', async () => {
+    it('cannot mint, rename, expire or rotate the link even when the club lets them share it', async () => {
       await mintLink(mineKey);
+      const id = linkId(mineKey);
       await srv.call('PATCH', `/api/organizations/${mineKey}`, { invitePolicy: 'members' }, jordan);
 
-      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student)).body.canCreate)
-        .toBe(false);
-      expect((await srv.call('POST', `/api/organizations/${mineKey}/share-link`, {}, student)).status).toBe(403);
-      expect((await srv.call('DELETE', `/api/organizations/${mineKey}/share-link`, undefined, student)).status)
+      /* The server says so on the payload, so the client need not derive it —
+         and then refuses every write regardless of what any client believes. */
+      const read = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
+      expect(read.body.canManage).toBe(false);
+      expect(read.body.canCreate).toBe(false);
+
+      expect((await srv.call('POST', `/api/organizations/${mineKey}/share-links`, {}, student)).status).toBe(403);
+      expect((await srv.call('DELETE', `/api/organizations/${mineKey}/share-links/${id}`, undefined, student)).status)
         .toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { label: 'Mine now' }, student)).status).toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { rotate: true }, student)).status).toBe(403);
+      expect((await srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`,
+        { expiresAt: '2020-01-01T00:00:00.000Z' }, student)).status).toBe(403);
+    });
+
+    /**
+     * A member who may share cannot read the club's operational record.
+     *
+     * The join count is aggregate and not sensitive in itself — nothing
+     * per-visitor is stored — but it is the club's own bookkeeping, and
+     * somebody who may hand an address out has not been given a reason to read
+     * how many people came through which link, or which links have lapsed.
+     */
+    it('is given the address and not the club’s bookkeeping', async () => {
+      await mintLink(mineKey);
+      const retired = (await srv.call('POST', `/api/organizations/${mineKey}/share-links`,
+        { label: 'Old QR code' }, jordan)).body.link;
+      await srv.call('DELETE', `/api/organizations/${mineKey}/share-links/${retired.id}`, undefined, jordan);
+      await srv.call('PATCH', `/api/organizations/${mineKey}`, { invitePolicy: 'members' }, jordan);
+
+      const res = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
+      expect(res.status).toBe(200);
+      expect(res.body.links).toHaveLength(1);
+      expect(res.body.links[0]).not.toHaveProperty('uses');
+      expect(res.body.links[0]).not.toHaveProperty('lastUsedAt');
+      expect(res.body.links[0]).not.toHaveProperty('revokedAt');
+      /* And not the revoked link's URL, which would be a dead credential they
+         could hand out. */
+      expect(JSON.stringify(res.body)).not.toContain(String(retired.path).split('/').pop());
     });
   });
 
@@ -304,12 +395,12 @@ describe('attacking the organization invitation link', () => {
     it('cannot read the link after being removed', async () => {
       await join(mineId, studentId, 'student_organizer');
       const token = await mintLink(mineKey);
-      expect((await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student)).body.path)
-        .toContain(token);
+      const before = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
+      expect(before.body.links[0].path).toContain(token);
 
       await srv.call('DELETE', `/api/organizations/${mineKey}/members/${studentId}`, undefined, jordan);
 
-      const after = await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student);
+      const after = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
       expect(after.status).toBe(403);
       expect(JSON.stringify(after.body)).not.toContain(token);
     });
@@ -320,7 +411,7 @@ describe('attacking the organization invitation link', () => {
       await srv.call('DELETE', `/api/organizations/${mineKey}/members/${studentId}`,
         { mode: 'ban', reason: 'Testing the ban' }, jordan);
 
-      const after = await srv.call('GET', `/api/organizations/${mineKey}/share-link`, undefined, student);
+      const after = await srv.call('GET', `/api/organizations/${mineKey}/share-links`, undefined, student);
       expect(after.status).toBe(403);
       expect(JSON.stringify(after.body)).not.toContain(token);
     });
@@ -435,21 +526,36 @@ describe('attacking the organization invitation link', () => {
     it('answers a join and a rotation racing each other without breaking either', async () => {
       await policy(mineId, 'invite');
       const token = await mintLink(mineKey);
+      const id = linkId(mineKey);
 
       const [joined, rotated] = await Promise.all([
         srv.call('POST', `/api/organizations/${mineKey}/membership`, { shareToken: token }, student),
-        srv.call('POST', `/api/organizations/${mineKey}/share-link`, {}, jordan),
+        srv.call('PATCH', `/api/organizations/${mineKey}/share-links/${id}`, { rotate: true }, jordan),
       ]);
 
       expect([200, 403]).toContain(joined.status);
       expect(rotated.status).toBe(200);
 
-      /* Exactly one link, and the membership agrees with the answer given. */
-      const links = await db.prepare(
-        'SELECT COUNT(*) AS n FROM organization_share_links WHERE organization_id = ?'
-      ).get(mineId);
-      expect(Number(links.n)).toBe(1);
+      /* Whichever order they landed in, the membership agrees with the answer
+         that was given — a join reported 200 with no membership row, or 403
+         with one, would mean the token was resolved somewhere other than the
+         moment of the act. */
       expect(await isMember(mineId, studentId)).toBe(joined.status === 200);
+
+      /* Exactly one LIVE link. The rotation leaves the old row behind as
+         history, which is why this counts by state rather than by row. */
+      const live = await db.prepare(`
+        SELECT COUNT(*) AS n FROM organization_share_links
+         WHERE organization_id = ? AND revoked_at IS NULL
+      `).get(mineId);
+      expect(Number(live.n)).toBe(1);
+
+      /* And the use count agrees with the outcome: counted inside the join
+         transaction, so a refused join must not have counted. */
+      const uses = await db.prepare(
+        'SELECT uses FROM organization_share_links WHERE id = ?'
+      ).get(id);
+      expect(Number(uses.uses)).toBe(joined.status === 200 ? 1 : 0);
     });
   });
 

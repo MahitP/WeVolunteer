@@ -1,20 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { Building2, CalendarDays, Lock, LogIn, UserPlus2 } from 'lucide-react';
-import OrganizationMasthead from '../components/organizations/OrganizationMasthead';
+import { Building2, Lock, LogIn, UserPlus2 } from 'lucide-react';
+import PublicOrganizationView, {
+  PublicOrganizationTopbar,
+} from '../components/organizations/PublicOrganizationView';
 import SignInToJoinDialog from '../components/organizations/SignInToJoinDialog';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
-import BrandMark from '../components/common/BrandMark';
 /* The page frame — the centred topbar, the single column, the footer — as
    distinct from the masthead, which brings its own. */
 import '../components/organizations/OrganizationExperience.css';
 import { api } from '../utils/api';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { APP_NAME } from '../config';
 import { useSession } from '../session/SessionProvider';
 import { rememberPendingInvite } from '../utils/pendingInvite';
 import { joinPolicySentence } from '../organizationPolicy';
-import { formatDay } from '../utils/helpers';
+import { organizationPath } from '../utils/organizationUrl';
 
 /**
  * What an invitation link opens.
@@ -50,6 +52,20 @@ export default function OrganizationInvite() {
      token that has not changed. */
   const [attempt, setAttempt] = useState(0);
 
+  /**
+   * The club's name in the tab.
+   *
+   * These pages render outside the shell, so `PAGE_META` — which is keyed by
+   * route — cannot name them, and every tab said just "WeVolunteer". That is
+   * worst precisely here: this is a page somebody was SENT, and it is the tab
+   * they leave open among a dozen while deciding whether to make an account.
+   *
+   * Falsy while loading and on the failure branches, which the hook reads as
+   * "nothing better to say than the route already does" and leaves the tab
+   * alone rather than flashing a name in and out.
+   */
+  useDocumentTitle(state.organization?.name);
+
   useEffect(() => {
     let cancelled = false;
     setState({ loading: true, organization: null, error: '' });
@@ -82,7 +98,7 @@ export default function OrganizationInvite() {
   useEffect(() => {
     if (isCheckingSession || !currentUser || !slug) return;
     rememberPendingInvite({ slug, token, name: state.organization?.name });
-    navigate(`/organizations/${encodeURIComponent(slug)}`, { replace: true });
+    navigate(organizationPath(slug), { replace: true });
   }, [isCheckingSession, currentUser, slug, token, navigate, state.organization?.name]);
 
   if (state.loading || isCheckingSession) {
@@ -108,7 +124,7 @@ export default function OrganizationInvite() {
     const invalid = state.error === 'invalid';
     return (
       <div className="invite-page">
-        <InviteTopbar />
+        <PublicOrganizationTopbar sub="Invitation" />
         <main className="invite-main">
           <EmptyState
             /**
@@ -163,12 +179,25 @@ export default function OrganizationInvite() {
         * has never seen this application. The mark is how they find out what
         * they are looking at before deciding whether to make an account.
         */}
-      <InviteTopbar />
+      <PublicOrganizationTopbar sub="Invitation" />
 
       <main className="invite-main stack-lg">
-        <OrganizationMasthead
+        {/**
+          * The club as a stranger sees it — shared with the public handle page.
+          *
+          * Both render the same allowlisted projection, and sharing the
+          * renderer is what keeps the ABSENT half honest: no member, no
+          * founder, no hours, and no event location. Two copies would have been
+          * two chances for one of them to grow a field.
+          *
+          * What is NOT shared is the action, because that is exactly where the
+          * two pages differ. A handle grants nothing; this link is what makes a
+          * Join press succeed at an invitation-only club, so the button is
+          * offered here in a state where the handle page shows none.
+          */}
+        <PublicOrganizationView
           organization={org}
-          as="h1"
+          headingLevel="h1"
           action={
             <button type="button" className="btn btn-primary btn-lg" onClick={() => setAsking(true)}>
               {affordance === 'request'
@@ -181,49 +210,6 @@ export default function OrganizationInvite() {
             organizationName: org.name,
           })}
         />
-
-        {/**
-          * What the club has coming up — titles and dates, and nothing else.
-          *
-          * The projection carries no location on purpose: an event's location is
-          * where named minors will physically be at a stated time, and a share
-          * link has no business publishing that outside the platform. This is the
-          * club advertising itself, which is what a title and a date are.
-          */}
-        <section className="card" aria-labelledby="invite-upcoming-heading">
-          <div className="card-head">
-            <h2 id="invite-upcoming-heading">Coming up</h2>
-          </div>
-          <div className="card-body">
-            {org.upcoming.length === 0 ? (
-              <EmptyState
-                icon={CalendarDays}
-                title="Nothing scheduled yet"
-                message={`${org.name} has not posted an opportunity yet. Join and you will be told when it does.`}
-              />
-            ) : (
-              <ul className="list">
-                {org.upcoming.map((event, i) => (
-                  <li key={`${event.title}-${i}`} className="list-row invite-upcoming-row">
-                    <span className="stack-xs">
-                      <span className="invite-upcoming-title">{event.title}</span>
-                      <span className="muted small">
-                        {event.startsAt ? formatDay(event.startsAt) : 'Date to be confirmed'}
-                        {event.category && <> · {event.category}</>}
-                      </span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-
-        <p className="muted small invite-foot">
-          <Building2 size={13} aria-hidden="true" />{' '}
-          {APP_NAME} is where schools and community groups organise volunteering and keep a
-          record of service hours. <Link to="/about">What is this?</Link>
-        </p>
       </main>
 
       {asking && (
@@ -234,32 +220,5 @@ export default function OrganizationInvite() {
         />
       )}
     </div>
-  );
-}
-
-/**
- * The same topbar the certificate verification page wears, for the same reason.
- *
- * Somebody arriving here has been sent a link by a person they know and has
- * never seen this application. The mark and the wordmark are how they find out
- * what they are looking at before deciding whether to make an account, and the
- * sub-label says which part of the product this is — exactly the shape
- * `CertificateVerification` uses for "Verification".
- *
- * The mark links home rather than being inert: unlike a certificate check, this
- * page is trying to interest somebody in the product, so the way out of it
- * should be the front door.
- */
-function InviteTopbar() {
-  return (
-    <header className="topbar invite-topbar">
-      <Link className="brand" to="/welcome">
-        <BrandMark />
-        <span className="brand-text">
-          <span className="brand-name">{APP_NAME}</span>
-          <span className="brand-sub">Invitation</span>
-        </span>
-      </Link>
-    </header>
   );
 }

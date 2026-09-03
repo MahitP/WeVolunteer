@@ -41,9 +41,15 @@ function usable(value) {
     && typeof value.slug === 'string'
     && value.slug.length > 0
     && value.slug.length < 128
-    /* The token is optional: somebody may have opened the link for a club that
-       lets anybody join, in which case they need no token to press Join. */
-    && (value.token === undefined || /^[0-9a-f]{64}$/.test(value.token)),
+    /* The token is optional: somebody may have arrived at a club's PUBLIC
+       address rather than through an invitation link, in which case they need
+       no token to press Join and the record exists only to bring them back to
+       the right club after signing up. `null` as well as `undefined`, because
+       the public page passes an explicit `token={null}` and a record stored
+       with one would otherwise read back as unusable — losing the redirect
+       for exactly the reader who came in by the friendlier route. */
+    && (value.token === undefined || value.token === null
+      || /^[0-9a-f]{64}$/.test(value.token)),
   );
 }
 

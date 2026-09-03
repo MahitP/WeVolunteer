@@ -1,13 +1,15 @@
-# Organizations: invitation links, membership policy, and the page
+# Organizations: public handles, invitation links, membership, and the page
 
-How a club is shared, who gets into it, and where each of those decisions is
-enforced. Written for whoever has to change this next.
+How a club is found, how it is shared, who gets into it, and where each of those
+decisions is enforced. Written for whoever has to change this next.
 
-Shipped 2026-09-03. Migration 062. The design that preceded it is in
+Shipped 2026-09-03 (migration 062) and extended 2026-09-04 (migration 063). The
+design that preceded the first half is in
 `docs/superpowers/specs/2026-09-03-organization-share-links-design.md`, including
-the ideas that were rejected and why.
+the ideas that were rejected and why; §13 below records what the second half
+refused.
 
-## 1. The four invariants
+## 1. The invariants
 
 Everything else follows from these, and none of them is obvious from the schema.
 
@@ -17,13 +19,25 @@ Everything else follows from these, and none of them is obvious from the schema.
 no capability, and it never makes anybody a member by itself. Membership is
 always an explicit act by a signed-in account.
 
+**A handle identifies; a link authorises.** The canonical address
+`/organizations/@robotics` is readable, printable and guessable *by design* — it
+is the club's name — and it carries no joining authority whatsoever. The
+invitation link is the credential. Confusing the two would make a club's front
+door a password anybody can read off a poster. §2 sets this out in both
+directions.
+
 **The token is resolved at the moment of the act, from the request body.** Never
 in a query string, never cached against a session, never turned into a grant that
 outlives the request. That is the only reason rotating or switching off a link
 takes effect on the next request rather than whenever a page happens to reload.
-It is also why the join route asks `tokenOpens(db, thisOrganization, token)`
+It is also why the join route asks `openingLinkId(db, thisOrganization, token)`
 rather than "did this token resolve to something": a Chess Club link must not
-open the Robotics Club.
+open the Robotics Club — and the same call is what says which link to count the
+use against.
+
+**An invitation has no credential at all.** It names a user, and only that user's
+session can accept it. §5 explains why that is stronger than the hashed-token
+design `admin_invitations` uses, and why invitation-by-email was refused.
 
 **`joinAffordance` is computed on the server, once.** Seven states, decided
 against the policy, the membership row, an active ban, the organization's status
@@ -41,7 +55,105 @@ rather than an argument, for the same reason `canManage` and `canHelpRun` are tw
 functions: the narrow answer keeps its own name, so a field added to the wide
 serializer cannot become public by somebody forgetting an argument.
 
-## 2. Membership policy
+## 2. The public handle
+
+A club's canonical address is `/organizations/@robotics`. It is the club's
+`slug` column with an `@` in front — the same arrangement `users.username` and
+`/users/@alice` already use, and for the same reason: one stored spelling, two
+written ones, and a unique index that can see they are the same.
+
+**The handle identifies. The invitation link authorises.** That separation is the
+whole of the design and it is worth stating in both directions:
+
+| | invitation link | public handle |
+|---|---|---|
+| what it is | a credential | an address |
+| guessable | no — 32 random bytes | **yes, by design** — it is the club's name |
+| works when unlisted | yes | no |
+| makes a Join succeed at an `invite` club | yes | **never** |
+| revocable | yes | no (it can be changed, which is not the same thing) |
+
+A handle that granted joining authority would be a password anybody can read off
+a poster. `joinAffordance` therefore never sees one: the public endpoint resolves
+a handle and returns a projection, and a Join arriving with nothing but a handle
+is judged by `join_policy` alone.
+
+### Renaming no longer moves the address
+
+It used to: a rename recomputed the slug, and the settings form promised as
+much. That was defensible while the slug was a private convenience and became
+wrong the moment it was the thing a club prints on a flyer. It was also already
+breaking three things:
+
+- Stored notification payloads bake `/organizations/@<slug>` into rows that
+  outlive the rename, so every historical notification for a renamed club
+  dead-linked.
+- `pendingInvite` keys a remembered invitation on the slug, so a rename between
+  opening a link and finishing signup silently dropped the token.
+- `?organization=<slug>` filters on the portfolio and certificate pages are the
+  kind of URL people bookmark.
+
+Freezing it fixes all three. The cost is that name and handle can diverge, which
+is why the handle became editable in the same change: an address you cannot
+change and did not choose is worse than one that moves.
+
+### Reserved segments, and a bug that had already shipped
+
+`/organizations/new` is a real page, and `slugify` happily returned `new` for a
+club called "New". Such a club was created with a permanently unreachable page —
+the router matched the literal first — and nothing reported it. `RESERVED_HANDLES`
+is **derived** from `CLIENT_ROUTE_PATTERNS` rather than typed out, so it cannot
+go stale the day somebody adds `/organizations/settings`, and `uniqueSlug`
+repairs a derived handle that would be refused (`New` → `org-new`) before the
+collision loop rather than after.
+
+The canonical `@` form makes the collision class impossible by construction
+anyway. The list is belt and braces, and it is what keeps a club created before
+this change reachable.
+
+## 3. Visibility, which is a second axis
+
+`join_policy` answers *who may become a member*. `visibility` answers *who may
+look*. Two enums, not one, because the useful combination is precisely the one a
+single enum cannot express: **findable, with a door** — a `public` club whose
+`join_policy` is `invite`, which is what a school club actually asks for.
+
+| | `public` | `unlisted` |
+|---|---|---|
+| `/organizations/@handle` with no session | the projection | 404 |
+| invitation links | work | work |
+| signed-in directory and search | listed | listed |
+| members and managers | no difference | no difference |
+
+Two values, not three. "Members only" would be a third that changes nothing a
+manager can observe: an unlisted club is already invisible to a stranger, and to
+a signed-in non-member it is exactly as visible as the directory already makes
+it.
+
+**An unlisted club and a club that does not exist answer identically** — same
+status, same body. Handles are guessable, so a distinguishable refusal would
+turn the endpoint into a directory of every club that chose not to be listed,
+including which schools have one.
+
+`normaliseVisibility` fails closed towards *not* publishing: only the exact
+string `'public'` opens a club, so a typo, a NULL from an unmigrated row, or a
+value from a future version can only ever publish less.
+
+### The asymmetry between the migration and creation
+
+Migration 063 backfills every existing club to `unlisted`. `createOrganization`
+writes `public` explicitly. That is deliberate and it is the privacy argument:
+
+- Every club that already existed was created when the page required a session.
+  Nobody running one agreed to publish it.
+- A club created today is created in a product that offers a public page, by
+  somebody looking at the setting.
+
+The column's `DEFAULT` is `'unlisted'`, so the value is stated at creation
+rather than inherited — leaving it to the default made every new club unlisted
+while the constant, the settings form and the API all said otherwise.
+
+## 4. Membership policy
 
 `organizations.join_policy` ∈ `open` | `invite` | `request`.
 `organizations.invite_policy` ∈ `helpers` | `members`.
@@ -77,7 +189,65 @@ reader normalises: an unrecognised join policy is read as `invite` and an
 unrecognised invite policy as `helpers`. Both fail closed, so a wrong value can
 only ever make the product stricter.
 
-## 3. Why the token is stored verbatim
+## 5. Direct invitations, and why they carry no credential
+
+`admin_invitations` is the in-repo precedent for inviting somebody: a random
+token, stored as a SHA-256 digest, mailed out, and redeemable only by a
+signed-in account whose **verified email address matches the one invited**. That
+last rule is the load-bearing one — the mail is not the authority, the address
+is, so a forwarded or intercepted invitation confers nothing.
+
+Organization invitations take that to its conclusion. If the authority is the
+identity of the person invited, a bearer token is not a second factor: it is a
+redundant credential that can leak, be logged, be shoulder-read, or sit in a
+mailbox after the invitation is revoked. So **there is no token**. An invitation
+names `invited_user_id`, and the only thing that can accept it is a request whose
+authenticated principal *is* that user. That is strictly stronger than the admin
+flow, and it needs no verified-email check to get there, because there is
+nothing to redeem.
+
+### Why not invite by email address
+
+Considered, and refused. Three arguments, in the order that decided it:
+
+1. **It would be an enumeration oracle over the platform's most private field.**
+   `profileSerializer.js` puts `email` in `PRIVILEGED_FIELDS`, and directory
+   search deliberately cannot match on it. A form that takes an address and
+   answers *anything* — "already a member", "sent", or a different latency — is
+   the first place on this platform where a semi-trusted actor could act on an
+   address they were never shown. `/api/auth/forgot-password` is written with one
+   frozen response on every path precisely to avoid this, and an invitation form
+   cannot be: an inviter has to be told whether their invitation went.
+2. **The actor is not comparable to an owner.** `admin.create` is owner-only and
+   step-up gated. A club's `invite_policy` may be `'members'` — any student in
+   the club. Copying a design justified by its caller being the most-trusted
+   account on the platform onto its least-trusted one is how the reasoning gets
+   lost.
+3. **The population is minors.** A club manager who can send mail from the
+   platform's SPF/DKIM-passing domain, with club branding, to an arbitrary
+   address, is a phishing capability. `server/email.escaping.test.js` exists
+   because that concern was found live once already.
+
+The recruiting case email would serve — getting somebody with no account into a
+club — is already served, better, by a share link: a URL a human chooses how to
+send, naming no address, with the platform never mailing a stranger on a club's
+behalf.
+
+### A decline is final for the inviter, not for the invitee
+
+`inviteUser` refuses when the person has already declined. The partial unique
+index stops a second *pending* invitation; without this rule a member could
+decline-invite-decline-invite indefinitely, which is harassment with a queue
+behind it. `canManage` does not bypass it either — bypassing is the vector.
+
+A declined person is not shut out: they can still join with a link, or send a
+request if the club takes them, and the refusal message says so. It is the tap on
+the shoulder that stops.
+
+Withdrawing is different. That is the club changing its own mind, so it costs the
+club nothing and the same person may be invited again.
+
+## 6. Why the token is stored verbatim
 
 Every other bearer value in this schema is hashed — `password_reset_tokens`,
 `admin_invitations`, `checkin_tokens` — and migration 048 renamed those columns
@@ -106,69 +276,143 @@ unreadable while still resolvable.
 **Do not "fix" this by hashing it.** The table it lives in is its own, so no
 existing query selects it, and `formatOrganization` cannot leak it by accident.
 
-## 4. Schema
+## 7. Schema
 
-Migration 062, additive on both engines. Two columns and two tables, no rebuild,
-so none of the ENGINEERING_GUIDE §8.3 guard set applies.
+Migration 062 was additive on both engines. Migration 063 is not: it **rebuilds**
+`organization_share_links`, because 062 made `organization_id` the primary key —
+which *was* the constraint "one link per club" — and SQLite cannot drop a primary
+key.
 
 ```
 organizations
-  join_policy    TEXT NOT NULL DEFAULT 'open'
-  invite_policy  TEXT NOT NULL DEFAULT 'helpers'
+  join_policy    TEXT NOT NULL DEFAULT 'open'       -- 062
+  invite_policy  TEXT NOT NULL DEFAULT 'helpers'    -- 062
+  visibility     TEXT NOT NULL DEFAULT 'unlisted'   -- 063, backfilled
 
-organization_share_links
-  organization_id  PK → organizations ON DELETE CASCADE
-  token            NOT NULL UNIQUE          -- supplies the lookup index
-  created_at, created_by → users ON DELETE SET NULL, rotations
+organization_share_links                            -- 063 rebuild
+  id               PK                               -- moved off organization_id
+  organization_id  → organizations ON DELETE CASCADE
+  token            NOT NULL UNIQUE                  -- supplies the lookup index
+  label            NOT NULL                         -- "General" for carried rows
+  created_at, created_by → users ON DELETE SET NULL
+  expires_at       NULL = never lapses (the default)
+  revoked_at       NULL = live; set rather than DELETEd
+  uses             NOT NULL DEFAULT 0
+  last_used_at     a DATE, not a timestamp
+
+  INDEX (organization_id, revoked_at)               -- the club's links
 
 organization_join_requests
   id               PK
   organization_id  → organizations ON DELETE CASCADE
   user_id          → users ON DELETE CASCADE
   status           CHECK IN ('pending','accepted','rejected','withdrawn')
+  message          NULL — the optional note (063)
   created_at, decided_at, decided_by → users ON DELETE SET NULL
 
   UNIQUE (organization_id, user_id) WHERE status = 'pending'   -- idx_..._live
   INDEX  (organization_id, status, created_at)                 -- the queue
   INDEX  (user_id, status)                                     -- the student's view
+
+organization_invitations                            -- 063
+  id               PK
+  organization_id  → organizations ON DELETE CASCADE
+  invited_user_id  NOT NULL → users ON DELETE CASCADE
+  invited_by       → users ON DELETE SET NULL
+  message          NULL — the optional note
+  status           CHECK IN ('pending','accepted','declined','revoked','expired')
+  created_at, expires_at, resolved_at
+
+  UNIQUE (organization_id, invited_user_id) WHERE status = 'pending'
+  INDEX  (organization_id), INDEX (invited_user_id)
 ```
 
-`organization_id` is the share link's **primary key**, so there is one live link
-per club: rotation is an `UPDATE` with no window in which the club has no link,
-and switching off is a `DELETE`. Nothing needs to tell two links apart.
+**There is no token column on `organization_invitations`, and no email column.**
+Both absences are the design, not an omission — see §7.
 
-`idx_org_join_requests_live` **is** the "no duplicate active requests" rule. It
-is partial so a declined student may ask again in March, and the whole history
-survives. `withdrawn` covers both "the student cancelled" and "they got in by
-another route, so nobody needs to decide it" — `decided_by` staying NULL is what
-says nobody did.
+### What the rebuild had to prove
 
-## 5. API
+ENGINEERING_GUIDE §8.3 requires the full guard set for a destructive rebuild of a
+table with children. `organization_share_links` has none, but the guards that
+matter here are the ones about *its own* rows, because a rebuild that silently
+dropped a club's live link would be indistinguishable from somebody having
+revoked it — no error, no log, a flyer that stopped working:
+
+- the column probe (`PRAGMA table_info`) makes the rebuild re-runnable;
+- an explicit column list, never `SELECT *`;
+- row counts before and after, with a throwing mismatch check;
+- `PRAGMA foreign_key_check` afterwards;
+- every carried row keeps its **token** — asserted value by value in
+  `migrations.organizationPublicIdentity.test.js`, because a changed token is a
+  broken link — and is labelled `General`, since `label` is NOT NULL.
+
+On PostgreSQL the same shape is a `DO $$ … $$` block that probes `pg_index` and
+`pg_constraint` to move the primary key, plus `ADD COLUMN IF NOT EXISTS`. Neither
+engine's half is a translation of the other; both are asserted, on a live
+PostgreSQL, in `migrations.postgres.test.js`.
+
+### `last_used_at` is a date
+
+Declared as one and stored as one. With a single use on a link — the common case
+for a club inviting a handful of people — a full timestamp is a per-student
+record of the hour a named child joined, readable by anybody who can read the
+club's links. "Used this week" is what a manager acts on.
+
+## 8. API
 
 | Route | Authorization |
 |---|---|
 | `GET /api/organizations/:key` | `directory.read` — roster now member/manager/moderator only |
 | `PATCH /api/organizations/:key` | `organization.manage.own` + `canManage`; mints a link when switching to `invite`; audited |
 | `POST /api/organizations/:key/membership` | `organization.join` + `joinAttemptLimiter`; accepts `{ shareToken? }` |
-| `GET /api/organizations/:key/share-link` | `organization.join` + `canInvite` (the club's `invite_policy`) |
-| `POST /api/organizations/:key/share-link` | `organization.manage.own` + `canManage`; audited |
-| `DELETE /api/organizations/:key/share-link` | `organization.manage.own` + `canManage`; audited |
+| `GET /api/organizations/:key/share-links` | `organization.join` + `canInvite`; a manager gets all of them, anybody else the one primary link |
+| `POST /api/organizations/:key/share-links` | `organization.manage.own` + `canManage`; audited |
+| `PATCH /api/organizations/:key/share-links/:linkId` | `organization.manage.own` + `canManage`; rename, expiry or `{rotate:true}` |
+| `DELETE /api/organizations/:key/share-links/:linkId` | `organization.manage.own` + `canManage`; audited |
 | `GET /api/public/organizations/invite/:token` | **none** — `shareTokenLimiter` |
-| `POST /api/organizations/:key/join-requests` | `organization.join` + `joinAttemptLimiter` |
+| `GET /api/public/organizations/:handle` | **none** — the canonical public page |
+| `POST /api/organizations/:key/join-requests` | `organization.join` + `joinAttemptLimiter`; accepts `{ message? }` |
 | `DELETE /api/organizations/:key/join-requests/mine` | `organization.join` |
 | `GET /api/organizations/:key/join-requests` | `organization.manage.own` + `canManage` |
 | `POST /api/organizations/:key/join-requests/:id/decision` | `organization.manage.own` + `canManage` |
+| `GET /api/organizations/:key/invitations` | `organization.manage.own` + `canManage` |
+| `POST /api/organizations/:key/invitations` | `organization.manage.own` + `canManage` + `joinAttemptLimiter`; `{ userId, message? }` |
+| `DELETE /api/organizations/:key/invitations/mine` | `organization.join` — the invitee declines |
+| `DELETE /api/organizations/:key/invitations/:invitationId` | `organization.manage.own` + `canManage` |
 
 Reviewing requests is **manager-only, not `canHelpRun`**. Admitting somebody is a
 standing decision about who is in the club, and the response is a list of named
 students a Student Organizer has no need for.
 
+**Reading a link is `invite_policy`; deciding what the links ARE is `canManage`.**
+A club that chose "any member may share" is saying its students may pass a URL
+on. It is not saying any member may regenerate it and stop every printed copy
+working, and nobody choosing the first thing is choosing the second.
+
+**Inviting a named person is `canManage` too**, and deliberately not
+`invite_policy`. Handing an address out has a human in the middle, aimed at
+somebody they are already talking to. Reaching into another person's
+notifications and naming them in the club's records is a decision about the
+roster.
+
+**There is no accept endpoint.** Accepting an invitation *is* joining, so the
+Accept press goes through `POST …/membership` — which already holds the
+capability check, the ban check, the affordance, the capacity and the
+transaction. A second route that also created memberships would be a second
+implementation of all of it, and the one that drifts is always the newer one.
+
 `GET` never mints. A GET that created a credential would put it in browser
 history and hand it to anything that speculatively prefetches — the argument
 `POST /api/applications/:id/checkin-code` already makes.
 
-`DELETE …/join-requests/mine` takes no identifier, so it cannot be pointed at
-somebody else's request. That is stronger than checking ownership.
+`DELETE …/join-requests/mine` and `DELETE …/invitations/mine` take no identifier,
+so neither can be pointed at somebody else's. That is stronger than checking
+ownership.
+
+Every link-scoped route matches on `(id, organization_id)` and never on `id`
+alone. A handler that trusted the id would let a manager of one club revoke
+another club's link — asserted directly in
+`organizations.shareLinkAdversarial.test.js`.
 
 ### Rate limits
 
@@ -184,11 +428,25 @@ those routes carry: `shareTokenLimiter` is address-keyed, and mounting it here
 would refuse the students at the back of that same class. Both are documented in
 `deploy/wevolunteer.env.example`.
 
-## 6. Privacy
+## 9. Privacy
 
-**Public, to a holder of a valid link, with no session:** name, slug, mark,
-colour, description, tags, member count, event count, `joinPolicy`, and up to
-three upcoming opportunities by title, date and category.
+Three audiences, decided explicitly.
+
+**Public — a holder of a valid link, or anybody at all if the club chose
+`visibility = 'public'` — with no session:** name, handle, slug, mark, colour,
+description, tags, member count, event count, `joinPolicy`, and up to three
+upcoming opportunities by title, date and category. That is the whole of
+`publicOrganization`, and it is an allowlist: the field list is asserted exactly
+in three test files, so a column added to `organizations` cannot reach an
+unauthenticated reader by being added to the table.
+
+**Signed-in, not a member:** the above, plus `invitePolicy`, `visibility`, the
+member *count*, the club's events, and the affordance. Not the roster.
+
+**Members:** the roster through `profileSummary`. **Managers:** additionally
+per-member hours within this club, the request queue with its notes, the
+outstanding invitations, the ban list, the appeal queue, and the links with
+their labels, states and join counts.
 
 **Never public:** any member's name, handle, avatar, rank or hours; the founder's
 name; the organization id; announcements and replies; **event locations**; bans;
@@ -203,9 +461,37 @@ advertising itself.
 holding `directory.read` — a named list of children in a club the reader has
 nothing to do with. Every row went through `profileSummary`, which is the wrong
 question: the *list* is the disclosure and no per-field allowlist can answer it.
-Non-members now get the count. And a request publishes `profileSummary` and
-nothing more — no grade, no school, no email, and no message, because the request
-deliberately carries none.
+Non-members now get the count.
+
+**The request note and the invitation note.** A request may carry up to 300
+characters the student chose to write, and an invitation up to 300 a manager
+wrote. Both are read only by this club's managers — the queue and the
+outstanding list are manager-only routes — and neither reaches a roster, a
+notification body or an email. Both are stored **verbatim** and rendered as text
+in JSX, which React escapes; there is no sanitiser, because stripping would
+mangle a child's `<3` while providing no protection escaping does not already
+give.
+
+Neither is a message. Written once, not editable, not repliable, and gone when
+the request or invitation is resolved. `message.send` is a capability with a
+Report button and a conversation behind it, and a club's front door is not the
+place to build a second one without either.
+
+**What a link records.** `uses` and `last_used_at`, incremented when somebody
+*joins* through it — not when somebody opens it. A view counter on an
+unauthenticated endpoint is a write on every anonymous request, and it is
+inflatable; a join is authenticated, deliberate and non-repeatable. Nothing
+per-visitor is stored: no row per use, no address, no referrer, no session. A
+count and a date, which cannot be turned back into who came from where. The join
+count is managers-only.
+
+**Who invited you is not disclosed to you.** The club invites, not the individual
+member who pressed the button. `viewer.invitation` carries the note and the
+expiry and no inviter, because naming them would make a decline an answer to a
+classmate rather than to a club — which is exactly the pressure a thirteen-year-old
+should not be under. A decline notifies the club not at all, for the mirror
+reason: a queue of "so-and-so said no" is how a club's managers end up
+discussing it with them.
 
 Notification bodies are minimal for the reason `FRIEND_SIGNED_UP` gives: they are
 copied into email, which leaves the building. "Priya Patel asked to join Chess
@@ -213,7 +499,7 @@ Club" and nothing else. A rejection carries no reason — the alternative is
 inviting a manager to type a judgement about a named minor into a message that
 gets emailed.
 
-## 7. Concurrency
+## 10. Concurrency
 
 | Situation | Settled by |
 |---|---|
@@ -223,6 +509,11 @@ gets emailed.
 | A link is rotated or revoked mid-join | The token is resolved inside the handler; there is no cached grant |
 | `open` → `invite` | The next tokenless join is refused; existing members are untouched and are never asked for a link |
 | `request` → `open` | Pending requests stay decidable; accepting somebody who has already joined is a no-op |
+| Two managers invite the same person at once | `ON CONFLICT (organization_id, invited_user_id) WHERE status = 'pending' DO NOTHING`; one 201, one 409 |
+| Accept and withdraw race | `UPDATE … WHERE status = 'pending'`; whichever lands first stands, the other reports `already_resolved` |
+| Two managers revoke the same link | `UPDATE … WHERE revoked_at IS NULL`; one `true`, one `false`, and the timestamp is the first one's |
+| A link is rotated while somebody joins through it | The membership and the answer agree, and the use is counted only if the join succeeded — both inside one transaction |
+| An invitation lapses between page load and Join | Refused: `invitationStands` computes expiry rather than waiting for a sweep |
 
 **One PostgreSQL trap, worth remembering.** `requestToJoin` originally let the
 insert throw and caught the unique violation. That is correct on SQLite and a trap
@@ -233,7 +524,7 @@ transaction that also notifies the managers. It failed **once** in a full
 needs two presses to genuinely overlap. Naming the conflict target avoids the
 exception on both engines with no savepoint.
 
-## 8. The page
+## 11. The page
 
 One information architecture, five readers. What changes is which sections have
 content and what the plate offers.
@@ -264,16 +555,53 @@ the masthead reading as the event page's four info pills with different labels.
 leaving moved into the actions menu, because it used to occupy the position a
 newcomer's Join occupies.
 
-`OrganizationInvite` renders the same masthead from the public projection, so
-somebody arriving with a link sees the club presented the way a member does. A
-signed-in reader is redirected to the real page with the token stashed.
+### Five states, one page
+
+| Reader | Plate offers | Sees |
+|---|---|---|
+| no account, `@handle`, public club | Join / Request, or nothing on an `invite` club | the public projection, standalone |
+| no account, bare path | "This page needs an account" | nothing about the club — no lookup is made |
+| signed in, not a member | Join / Request / "ask for the link" | the club, the count, the events |
+| invited | a banner above the plate: the note, the expiry, Accept and Decline | as above, plus the reason it is joinable |
+| member | "You are a member" | the roster, their own service record |
+| manager | the same, plus Share and Settings | the manage band: invitations, requests, bans, appeals |
+
+The bare-path asymmetry is the design. `/organizations/:key` is declared in
+**both** `APP_ROUTES` and `PUBLIC_ROUTES`, separated by session rather than by
+path — `shellWhenSignedIn` tells `isPublicPath` to stand down when there *is* a
+session, so a member opening their club's public address still gets the shell,
+their navigation and a Join their session can complete. Signed out, the `@` form
+opens the projection and the bare form says the page needs an account, without
+looking anything up. Looking the bare form up would quietly make every club's
+page public, including the ones that never chose to be, and would make the page
+an oracle for which clubs exist.
+
+`routeGating.guard.test.js` Guard 4 asserts that `shellWhenSignedIn` is actually
+honoured — that `isPublicPath` answers differently for the two sessions, and that
+App.jsx passes the session at all. Without it the flag would be a comment and the
+public view would take over every organization page for every member.
+
+`OrganizationInvite` and `OrganizationPublic` share `PublicOrganizationView`, so
+both render the same allowlisted projection. Sharing the renderer is what keeps
+the **absent** half honest: the allowlist is only as good as the least careful of
+its two renderers. What is not shared is the action, because that is exactly
+where they differ — a link is a credential and a handle is not.
+
+Both name the browser tab after the club through `useDocumentTitle`. They render
+outside the shell, so `PAGE_META` — keyed by route — cannot name them, and every
+tab said just "WeVolunteer". That is worst precisely here: this is a page somebody
+was *sent*, and it is the tab they leave open while deciding whether to make an
+account.
 
 ### The return-to, and why it is not one
 
 Pressing Join with no account opens a dialog and, on either choice, writes
 `{ slug, token }` to `sessionStorage` before navigating. After signing in,
-`handleLoginSuccess` reads it once and navigates to
-`` `/organizations/${encodeURIComponent(slug)}` ``.
+`handleLoginSuccess` reads it once and navigates to `organizationPath(slug)`.
+
+The token half is optional: somebody who arrived at a club's *public* address
+holds no invitation, so the record is the slug alone, and the Join that follows
+is judged by `join_policy` with nothing in hand.
 
 This is **not** a `returnTo`. A `returnTo` accepts a path and goes there, and
 keeping it safe means maintaining a validator for ever. What is stored here is a
@@ -283,19 +611,51 @@ open-redirect surface to get wrong. It is per-tab, spent once, and every access 
 wrapped, because `sessionStorage` throws rather than returning null in a private
 window.
 
-## 9. Rolling it back
+## 12. Rolling it back
 
-The migration is additive, so a code revert leaves a working database on both
-engines: two unread columns and two unread tables.
+**Migration 062 is additive; 063 is not.** A code revert to before 063 leaves a
+database whose `organization_share_links` has an `id` primary key where the old
+code expects `organization_id` — so reverting the code alone is not safe past
+063, and that is the one thing to know about this feature operationally.
 
-Operationally, three statements undo the feature's effects with no deploy:
+Reverting to *before 062* is safe from either point: the old code reads none of
+these columns or tables.
+
+Operationally, five statements undo the feature's effects with no deploy:
 
 ```sql
-DELETE FROM organization_share_links;                 -- every link stops resolving
+UPDATE organization_share_links SET revoked_at = datetime('now')  -- every link stops resolving
+  WHERE revoked_at IS NULL;
 UPDATE organizations SET join_policy = 'open';        -- every club joinable again
-UPDATE organization_join_requests SET status = 'withdrawn' WHERE status = 'pending';
+UPDATE organizations SET visibility  = 'unlisted';    -- no club has a public page
+UPDATE organization_join_requests   SET status = 'withdrawn' WHERE status = 'pending';
+UPDATE organization_invitations     SET status = 'revoked'   WHERE status = 'pending';
 ```
 
-Nobody loses a membership: `organization_members` is untouched by all three.
+Nobody loses a membership: `organization_members` is untouched by all five. The
+first is an `UPDATE` and not a `DELETE` on purpose — it is the same revocation a
+manager performs, so the club's own record of which links worked survives being
+switched off wholesale.
+
 There is deliberately no feature flag — it would be a fourth thing to wire
-through every new route, and these three statements are a better answer.
+through every new route, and these statements are a better answer.
+
+## 13. What was considered and refused
+
+Recorded so the next person does not have to re-derive it.
+
+| Idea | Why not |
+|---|---|
+| Invitation by email address | §5 — an enumeration oracle over `PRIVILEGED_FIELDS`, a less-trusted actor than the admin flow's, and a phishing capability aimed at minors |
+| A fourth join mode (`discoverable`) | §3 — visibility is orthogonal to admission, and folding them loses "findable, with a door" |
+| A third visibility value ("members only") | §3 — changes nothing a manager can observe |
+| A bearer token on an invitation | §5 — the identity *is* the authority, so a token is a redundant secret |
+| Per-use rows for link analytics | §9 — a per-student trail through a club's recruitment; a count and a date answer the manager's actual question |
+| Counting page views rather than joins | §9 — a write on every anonymous request, and inflatable |
+| Forcing an expiry on links | The flyer on the wall in September must work in May. Optional, never imposed, and warned about at creation |
+| A redirect table for old handles | Nothing needs one now that renaming does not move the address |
+| A notification when an invitation is withdrawn | A student's first news of a club should not be that it changed its mind |
+| A notification when an invitation is declined | A queue of "so-and-so said no" is how managers end up discussing it with them |
+| Telling the invitee who invited them | Makes a decline an answer to a classmate rather than to a club |
+| Sanitising the notes | Escaping already handles it; stripping mangles a child's `<3` |
+| A legal/privacy update | §9 — the public projection discloses nothing the notice's "Who can see your information" section contradicts, and it makes no exhaustiveness claim. Account-to-account invitations are already covered. **This stops being true the moment a public page publishes a member's name or an event's location** |

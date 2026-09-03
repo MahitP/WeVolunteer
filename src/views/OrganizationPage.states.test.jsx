@@ -75,7 +75,11 @@ beforeEach(() => {
   api.fetchOrganizationAppeals.mockResolvedValue({ appeals: [] });
   api.fetchOrganizationBans.mockResolvedValue({ bans: [] });
   api.fetchOrganizationJoinRequests.mockResolvedValue({ requests: [], pendingRequests: 0 });
-  api.fetchOrganizationShareLink.mockResolvedValue({ exists: false, canCreate: false });
+  api.fetchOrganizationShareLinks.mockResolvedValue({
+    links: [], canManage: false, canCreate: false, maxLinks: 10,
+  });
+  api.fetchOrganizationInvitations.mockResolvedValue({ invitations: [] });
+  api.searchDirectory.mockResolvedValue({ users: [], organizations: [] });
   api.joinOrganizationWithInvite.mockResolvedValue({});
   api.requestToJoinOrganization.mockResolvedValue({ created: true });
   api.withdrawOrganizationJoinRequest.mockResolvedValue({});
@@ -95,12 +99,56 @@ describe('the primary action', () => {
     await waitFor(() => expect(api.joinOrganizationWithInvite).toHaveBeenCalledWith('chess-club', undefined));
   });
 
+  /**
+   * Asking opens a composer rather than firing.
+   *
+   * The press used to send immediately. It now opens a dialog with an optional
+   * note, because a manager deciding about a request had only a name and an
+   * avatar to go on — which for a school club is frequently a choice between two
+   * students with the same first name.
+   */
   it('asks rather than joins on an organization that approves members', async () => {
     await show({ viewer: { affordance: 'request', joinPolicy: 'request' }, organization: { joinPolicy: 'request' } });
     expect(screen.queryByRole('button', { name: /^Join/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Request to join/ }));
-    await waitFor(() => expect(api.requestToJoinOrganization).toHaveBeenCalledWith('chess-club'));
+    /* The dialog, not the request. Nothing has been sent yet. */
+    await screen.findByRole('dialog', { name: /Request to join Chess Club/ });
+    expect(api.requestToJoinOrganization).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Send request/ }));
+    /* `undefined`, not an empty string: an empty note is stored as NULL, and a
+       club that turned request-to-join on must not have created a form a shy
+       thirteen-year-old cannot get past. */
+    await waitFor(() => expect(api.requestToJoinOrganization).toHaveBeenCalledWith('chess-club', undefined));
+  });
+
+  it('sends the note the student wrote', async () => {
+    await show({ viewer: { affordance: 'request', joinPolicy: 'request' }, organization: { joinPolicy: 'request' } });
+    fireEvent.click(screen.getByRole('button', { name: /Request to join/ }));
+    await screen.findByRole('dialog');
+
+    fireEvent.change(screen.getByLabelText(/Anything you want them to know/), {
+      target: { value: "  I'm in Ms Chen's class.  " },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Send request/ }));
+
+    /* Trimmed, because the surrounding whitespace is not part of what they
+       wrote and the server would trim it anyway. */
+    await waitFor(() => expect(api.requestToJoinOrganization)
+      .toHaveBeenCalledWith('chess-club', "I'm in Ms Chen's class."));
+  });
+
+  it('refuses to send a note past the limit, and says how far past', async () => {
+    await show({ viewer: { affordance: 'request', joinPolicy: 'request' }, organization: { joinPolicy: 'request' } });
+    fireEvent.click(screen.getByRole('button', { name: /Request to join/ }));
+    await screen.findByRole('dialog');
+
+    fireEvent.change(screen.getByLabelText(/Anything you want them to know/), {
+      target: { value: 'x'.repeat(312) },
+    });
+    expect(screen.getByText('12 characters too many.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Send request/ })).toBeDisabled();
   });
 
   it('shows a pending request as sent, and offers taking it back rather than sending another', async () => {
@@ -229,12 +277,15 @@ describe('sharing', () => {
     await show({
       viewer: {
         affordance: 'member', isMember: true, canInvite: true,
-        shareLink: { exists: true, createdAt: '2026-09-01T09:00:00.000Z', rotations: 0 },
+        shareLink: { exists: true, createdAt: '2026-09-01T09:00:00.000Z', label: 'General' },
       },
     });
-    api.fetchOrganizationShareLink.mockResolvedValue({
-      exists: true, path: `/organizations/invite/${'d'.repeat(64)}`,
-      createdAt: '2026-09-01T09:00:00.000Z', rotations: 0, canCreate: false,
+    api.fetchOrganizationShareLinks.mockResolvedValue({
+      links: [{
+        id: 'oshl-1', path: `/organizations/invite/${'d'.repeat(64)}`, label: 'General',
+        state: 'live', createdAt: '2026-09-01T09:00:00.000Z', expiresAt: null,
+      }],
+      canManage: false, canCreate: false, maxLinks: 10,
     });
 
     fireEvent.click(screen.getByRole('button', { name: /^Share$/ }));
@@ -256,8 +307,11 @@ describe('the management area', () => {
 
   it('offers a manager the settings screen without opening a menu', async () => {
     await show({ viewer: { affordance: 'member', isMember: true, memberRole: 'manager', canManage: true } });
+    /* The CANONICAL address. A rename no longer moves a club's handle, so the
+       handle is the address everywhere in the product — including the links
+       inside it. */
     expect(screen.getByRole('link', { name: /Settings/ }))
-      .toHaveAttribute('href', '/organizations/chess-club/edit');
+      .toHaveAttribute('href', '/organizations/@chess-club/edit');
   });
 });
 

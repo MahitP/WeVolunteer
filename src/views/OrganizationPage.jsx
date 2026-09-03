@@ -32,10 +32,10 @@
  * account holder gets to read.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Building2, Users, CalendarDays, UserRound, LogOut, Settings2, Clock, UserMinus,
-  FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2,
+  FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2, MailOpen, Check,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -50,14 +50,19 @@ import OrganizationMasthead from '../components/organizations/OrganizationMasthe
 import JoinAction from '../components/organizations/JoinAction';
 import ShareOrganizationDialog from '../components/organizations/ShareOrganizationDialog';
 import JoinRequestInbox from '../components/organizations/JoinRequestInbox';
+import InvitationManager from '../components/organizations/InvitationManager';
+import RequestToJoinDialog from '../components/organizations/RequestToJoinDialog';
 import '../components/organizations/OrganizationExperience.css';
 import { joinPolicySentence, JOIN_POLICY_COPY } from '../organizationPolicy';
 import { inviteTokenFor, clearPendingInvite } from '../utils/pendingInvite';
 import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
+import { organizationPath, organizationSubPath, organizationHandle } from '../utils/organizationUrl';
 
 export default function OrganizationPage({ addToast, currentUser }) {
   const { key } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -65,6 +70,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
   const [leaving, setLeaving] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -78,6 +84,28 @@ export default function OrganizationPage({ addToast, currentUser }) {
   }, [key]);
 
   useEffect(() => load(), [load]);
+
+  /**
+   * Move to the canonical address once the club is known.
+   *
+   * `/organizations/:key` still resolves an id and a bare handle, because
+   * notification rows, audit entries and links people saved were written before
+   * `@handle` existed and must keep working. But the address a reader ends up
+   * looking at — the one in the location bar, the one they copy, the one that
+   * works when they send it to somebody with no account — should be the
+   * canonical one.
+   *
+   * `replace`, so the non-canonical URL does not sit in the history behind
+   * them: pressing Back would otherwise land on the same page and redirect
+   * again, which is a trap rather than a navigation.
+   */
+  const canonical = data?.organization?.slug ? organizationPath(data.organization) : null;
+  useEffect(() => {
+    if (!canonical) return;
+    if (decodeURIComponent(location.pathname) !== decodeURIComponent(canonical)) {
+      navigate(canonical, { replace: true });
+    }
+  }, [canonical, location.pathname, navigate]);
 
   const [removing, setRemoving] = useState(null);
 
@@ -248,10 +276,37 @@ export default function OrganizationPage({ addToast, currentUser }) {
     }
   };
 
-  const requestToJoin = async () => {
+  /**
+   * Declining an invitation.
+   *
+   * No confirmation dialog. Declining removes nothing the reader had — they
+   * were not a member — and the club's door is still open: they can join with a
+   * link, or send a request if the club takes them. The toast says so, because
+   * "you cannot be invited again" is the one consequence that is not obvious.
+   */
+  const declineInvitation = async () => {
     setBusy(true);
     try {
-      const res = await api.requestToJoinOrganization(key);
+      await api.declineOrganizationInvitation(key);
+      addToast?.(
+        `You declined the invitation to ${data.organization.name}. `
+        + 'You can still join with an invitation link if you change your mind.',
+        'info',
+      );
+      load();
+    } catch (err) {
+      addToast?.(err.message, 'error');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestToJoin = async (message) => {
+    setBusy(true);
+    try {
+      const res = await api.requestToJoinOrganization(key, message);
+      setRequesting(false);
       addToast?.(
         res.created
           ? `Your request to join ${data.organization.name} was sent.`
@@ -335,6 +390,16 @@ export default function OrganizationPage({ addToast, currentUser }) {
    */
   const reported = viewer.affordance ?? (viewer.isMember ? 'member' : 'join');
   const affordance = reported === 'invite_required' && inviteToken ? 'join' : reported;
+  /**
+   * A direct invitation, which the server DOES decide.
+   *
+   * `viewer.invitation` is a row naming this reader, so unlike the share token
+   * there is nothing to keep out of a URL and nothing for the client to
+   * present — which is why `viewer.affordance` already reads `join` when one
+   * exists. This is only for the banner that explains WHY the club is suddenly
+   * joinable and offers the other answer.
+   */
+  const invitation = viewer.invitation ?? null;
 
   /**
    * The two secondary actions that are NOT buttons.
@@ -369,6 +434,60 @@ export default function OrganizationPage({ addToast, currentUser }) {
 
   return (
     <div className="page stack-lg">
+      {/**
+        * You have been invited.
+        *
+        * Above the plate, because it is the reason this page looks the way it
+        * does to this reader: an invitation-only club showing a Join button
+        * makes no sense until you know somebody asked you.
+        *
+        * The note is rendered as TEXT — `{invitation.message}` in JSX, which
+        * React escapes — and never as markup. Who sent it is deliberately
+        * absent: the club invites, not the individual member who pressed the
+        * button, and naming them would make declining an answer to a classmate
+        * rather than to a club.
+        *
+        * ── Why Accept appears twice on this page ──
+        *
+        * The plate also offers "Join <club>", because an invitation makes the
+        * affordance `join` and the plate renders the affordance. Considered and
+        * kept: giving the banner sole ownership would mean adding an `invited`
+        * affordance to the server's vocabulary for a cosmetic reason, and
+        * removing the plate's control would leave an invited reader's plate with
+        * no primary action at all.
+        *
+        * The redundancy is harmless in a way worth being explicit about — both
+        * controls do the same reversible thing, both are labelled
+        * unambiguously, and neither can do anything the other cannot. What the
+        * banner adds is the Decline, which has no other home, and the reason
+        * the club is suddenly joinable.
+        */}
+      {invitation && !viewer.isMember && (
+        <section className="org-invitation" aria-labelledby="org-invitation-heading">
+          <div className="org-invitation-body stack-sm">
+            <h2 id="org-invitation-heading" className="org-invitation-title">
+              <MailOpen size={17} aria-hidden="true" /> You have been invited to join {org.name}
+            </h2>
+            {invitation.message && (
+              <blockquote className="org-invitation-note">{invitation.message}</blockquote>
+            )}
+            <p className="muted small">
+              {invitation.expiresAt
+                ? <>This invitation is open until {formatDay(invitation.expiresAt)}.</>
+                : <>Accept whenever you are ready.</>}
+            </p>
+          </div>
+          <div className="row row-wrap org-invitation-actions">
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={join}>
+              <Check size={16} aria-hidden="true" /> Accept
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={declineInvitation}>
+              Decline
+            </button>
+          </div>
+        </section>
+      )}
+
       <OrganizationMasthead
         organization={org}
         charterLead={org.createdAt ? `Since ${new Date(org.createdAt).getFullYear()}` : null}
@@ -381,7 +500,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
               ban={viewer.ban}
               busy={busy}
               onJoin={join}
-              onRequest={requestToJoin}
+              onRequest={() => setRequesting(true)}
             />
 
             {/* Share sits beside the primary action rather than in the menu:
@@ -399,7 +518,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
                 also the one control on this row that a member never sees, which
                 is what makes the separation legible. */}
             {viewer.canManage && (
-              <Link className="btn btn-secondary" to={`/organizations/${org.slug}/edit`}>
+              <Link className="btn btn-secondary" to={organizationSubPath(org, 'edit')}>
                 <Settings2 size={16} aria-hidden="true" /> Settings
               </Link>
             )}
@@ -514,6 +633,14 @@ export default function OrganizationPage({ addToast, currentUser }) {
           </div>
 
           <div className="stack-lg">
+            {/* Invitations first: sending one is something a manager came here
+                to do, and the queue below is something they answer. */}
+            <InvitationManager
+              orgKey={key}
+              organizationName={org.name}
+              addToast={addToast}
+              onChanged={load}
+            />
             <JoinRequestInbox
               orgKey={key}
               organizationName={org.name}
@@ -535,6 +662,15 @@ export default function OrganizationPage({ addToast, currentUser }) {
           addToast={addToast}
           onClose={() => setSharing(false)}
           onChanged={load}
+        />
+      )}
+
+      {requesting && (
+        <RequestToJoinDialog
+          organization={org}
+          busy={busy}
+          onSubmit={message => requestToJoin(message)}
+          onClose={() => setRequesting(false)}
         />
       )}
 

@@ -63,6 +63,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicate active requests" rule. Every existing club defaults to **Anyone**, so
   nothing changes for anybody until a manager chooses otherwise.
 
+- **A club now has a readable public address, and it is deliberately not a way
+  in.** `/organizations/@robotics` — the club's handle with an `@`, the same
+  arrangement `/users/@alice` already uses. It is printable, guessable *by
+  design* (it is the club's name), and it carries **no joining authority
+  whatsoever**: a Join arriving with nothing but a handle is judged by the club's
+  join setting alone. The invitation link remains the credential. Confusing the
+  two would have made a club's front door a password anybody can read off a
+  poster.
+
+  A second setting decides who may open that page: **Anyone**, or **only
+  signed-in members of WeVolunteer**. It is a separate question from who may
+  *join*, and the two are kept separate because the useful combination is
+  precisely the one a single list cannot express — findable, with a door. An
+  unlisted club and a club that does not exist answer identically, because
+  handles are guessable and a distinguishable refusal would be a directory of
+  every club that chose not to be listed.
+
+  **Every club that already existed stays unlisted.** Nobody running one agreed
+  to publish it, so migration 063 backfills them and only clubs created from now
+  on are public by default. The setting lists what a public page actually shows
+  — name, description, logo, member *count*, and what is coming up — and what it
+  never shows: who is in it, and where an event is.
+
+- **Renaming a club no longer changes its web address.** It used to, and the
+  form said so. That was fine while the address was a private convenience and
+  wrong the moment it was the thing a club prints on a flyer — and it was already
+  breaking three things quietly: every historical notification for a renamed club
+  dead-linked, a rename between opening an invitation link and finishing signup
+  dropped the invitation, and bookmarked `?organization=` filters stopped
+  matching. The address is now edited on purpose or not at all, and there is a
+  field for it in the club's settings.
+
+  This also fixes a bug that had shipped: a club named "New" was created at
+  `/organizations/new`, which is the create form, so its page was permanently
+  unreachable and nothing reported it. Reserved segments are now derived from the
+  route table rather than typed out, so the list cannot go stale.
+
+- **A club can hold several named invitation links instead of one.** "General",
+  "Autumn open-day flyer", "Instagram bio", "Careers-fair booth" — each with its
+  own URL, its own life, and its own record of how many people joined through it.
+  With one link, retiring the flyer that had been on the corridor wall since
+  September also broke the Instagram bio; now revoking one leaves the rest alone.
+
+  **Expiry is optional and never imposed.** A link with no date keeps working
+  until somebody switches it off, which is what a printed flyer needs, and that
+  is the default. A manager who wants a link for one event booth can put a date
+  on it, and the form says what that will cost before they do. An expired or
+  revoked link refuses exactly the way a link that never existed does — it does
+  not quietly admit somebody a month later.
+
+  What a link records is a **count and a date**, incremented when somebody
+  *joins* through it. Not a view counter: that would be a write on every
+  anonymous request and inflatable by reloading. Nothing per-visitor is stored —
+  no row per use, no address, no referrer — so there is no per-student trail
+  through a club's recruitment, and the date is a date rather than a timestamp
+  because the hour a named child joined a club is a fact about that child's
+  evening.
+
+- **A manager can invite one named person, and there is no way to invite an
+  email address.** You search for somebody already on the platform, by name or
+  username, and they see it next time they open the club. The invitation carries
+  an optional note, lapses after a fortnight, and can be withdrawn.
+
+  **There is no token, anywhere.** An invitation names a user, and the only thing
+  that can accept it is a session belonging to that user — so it cannot be
+  forwarded, intercepted, or read off a screen and used. That is strictly
+  stronger than the hashed-token design administrator invitations use, and it
+  needs no verified-email check to get there because there is nothing to redeem.
+
+  Invitation by email address was considered and **refused**, for three reasons
+  in this order: it would be the platform's only write oracle over an address
+  field that directory search deliberately cannot even match on; the actor is a
+  club manager rather than a platform owner, so the administrator flow's design
+  cannot simply be copied down a trust level; and a club manager who can send
+  branded mail from the platform's domain to an arbitrary address is a phishing
+  capability aimed at a population of minors. Handing somebody an invitation
+  *link* already serves the recruiting case, with a human choosing how to send it.
+
+  Accepting an invitation goes through the ordinary Join, so the ban check, the
+  capability check and the transaction are the ones that already existed rather
+  than a second copy. Declining is the invited person's own answer and notifies
+  the club not at all — and it is final for the *inviter*: a member cannot ask
+  again after a no, which is what stops decline-invite-decline being a
+  harassment loop. The person who declined can still walk in through a link.
+
+- **A request to join can carry a line about why.** Optional, 300 characters,
+  shown only to the club's managers on the queue they already answer. A manager
+  deciding about a request previously had a name and an avatar to go on, which
+  for a school club is frequently a choice between two students with the same
+  first name. It is not a message: written once, not editable, not repliable, and
+  gone when the request is decided — a club's front door is not the place to
+  build a second messaging system without a Report button behind it.
+
 - **The organization page was rebuilt around the question it exists to answer.**
   It was five stacked cards in source order with a 22-pixel avatar, and the most
   destructive thing a member can do — Leave — sat in the position a newcomer's
@@ -221,6 +314,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry constant.
 
 ### Fixed
+
+- **Every radio button in the organization settings screen announced its label
+  and its whole explanation as one run-together word.** Each input was wrapped in
+  a `<label>` containing both the option's title and its sentence of consequence
+  with no whitespace between them, so the computed accessible name was literally
+  `AnyoneStudents can join this organization straight away.` A screen-reader user
+  heard that, per option, in every group. The title is now the name and the
+  sentence is the description, so the group is navigable by title — which is the
+  order a sighted reader takes them in anyway.
+
+- **A club named "New" was created with a permanently unreachable page.** Its
+  address derived to `/organizations/new`, which is the create form, and the
+  router matched the literal first. Same for "Invite". Nothing reported it: the
+  club existed, its page rendered something plausible, and the something was a
+  different screen. Reserved segments are now derived from the route table, and a
+  derived address that would collide is repaired before the collision loop rather
+  than after (`New` → `org-new`).
+
+- **The organization page's own links dropped the canonical address.** Eight call
+  sites built `/organizations/<slug>` by hand and one URL builder now does it, so
+  a link cannot silently omit the `@` — which does not break the page for a
+  signed-in reader and does refuse a signed-out one, making the omission
+  invisible exactly where it matters.
+
+- **Two public pages had no name in the browser tab.** The invitation page and
+  the new public page render outside the application shell, so the shell's
+  route-keyed titles could not name them and both tabs said only "WeVolunteer".
+  That is worst on precisely these pages: they are what somebody was *sent*, and
+  the tab they leave open while deciding whether to make an account.
 
 - **Twenty-eight legal-editor tests were failing on a calendar rollover, and
   only four of them mentioned a date.** Both editor suites hardcoded

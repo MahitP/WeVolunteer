@@ -1,5 +1,5 @@
 /**
- * The invitation link — an organization's shareable address.
+ * Invitation links — an organization's shareable addresses.
  *
  * ── What this is, and what it deliberately is not ──
  *
@@ -36,6 +36,44 @@
  * Never imported, for the reason `adminInvitations.js` gives: `db.js` opens its
  * file at module scope, so a module that reaches for it cannot be unit tested
  * without a database.
+ *
+ * ── Why a club has several links rather than one ──
+ *
+ * A club hands its address out in places that have nothing to do with each
+ * other: a printed flyer on a corridor wall, an Instagram bio, a QR code at an
+ * event booth, a message to one teacher. With a single link, the only way to
+ * retire the flyer that has been on the wall since September is to regenerate —
+ * which also breaks the Instagram bio and the teacher's message. Every link
+ * therefore has a LABEL and its own life, and revoking one leaves the rest
+ * alone.
+ *
+ * `MAX_LIVE_LINKS` bounds the set, because a club with forty live links has lost
+ * the property that makes revoking one of them meaningful.
+ *
+ * ── What is counted, and what deliberately is not ──
+ *
+ * A link records `uses` and `last_used_at`, incremented when somebody JOINS
+ * through it — not when somebody opens it. Two reasons, and the privacy one
+ * comes first:
+ *
+ *   - A view counter on an unauthenticated endpoint is a write on every
+ *     anonymous request, which is both a contention point and an invitation to
+ *     inflate. A join is an authenticated, deliberate, non-repeatable act.
+ *   - "How many people joined from the flyer" is the question a manager
+ *     actually has. "How many times was the page loaded" is a vanity metric,
+ *     and the brief asks for management rather than vanity.
+ *
+ * Nothing per-visitor is stored. There is no row per use, no address, no
+ * referrer, no session — a count and a date, which cannot be turned back into
+ * who came from where.
+ *
+ * ── Expiry is optional and never imposed ──
+ *
+ * `expires_at IS NULL` means the link does not lapse, and that is the default,
+ * because the flyer on the wall in September must still work in May. A manager
+ * who wants a link for one event booth can set a date; the interface warns
+ * before doing it, and an expired link refuses exactly the way a revoked one
+ * does rather than quietly admitting somebody a month later.
  */
 
 import crypto from 'node:crypto';
@@ -53,6 +91,79 @@ const newToken = () => crypto.randomBytes(32).toString('hex');
 const TOKEN_SHAPE = /^[0-9a-f]{64}$/;
 
 /**
+ * How many live links one club may hold.
+ *
+ * Not a resource limit — the rows are tiny. It is a usability limit: the reason
+ * to have several links is to be able to retire one of them knowingly, and a
+ * list of forty is a list nobody reads before pressing Revoke. Ten covers every
+ * real case the brief names (general, flyer, Instagram, event booth) four times
+ * over. Revoked links do not count against it; they are history.
+ *
+ * ── It is advisory, and that is the right trade ──
+ *
+ * The route counts before it inserts, and those are two statements: two managers
+ * creating a link at nine could both pass and leave eleven. There is no
+ * constraint that would fix it — "at most ten rows where revoked_at IS NULL" is
+ * not expressible as a unique index — so the alternative is a lock held across
+ * a write for a limit whose entire purpose is that a list stays readable. A club
+ * that briefly has eleven links is not a problem anybody experiences; a lock on
+ * this path would be.
+ */
+export const MAX_LIVE_LINKS = 10;
+
+/** How long a label may be. Long enough for "Autumn open-day flyer". */
+export const LABEL_MAX = 40;
+
+/** The label a link gets when nobody chose one — and the one migration 063 backfills. */
+export const DEFAULT_LABEL = 'General';
+
+/**
+ * Validates a label. `{ ok, error, field }`, like every other validator here.
+ *
+ * Trim and a length bound, which is the same treatment `validateOrganization`
+ * gives a name and a description — a label is shown to other managers, never to
+ * the public, and it reaches the page as text that React escapes.
+ */
+export function validateLabel(value, { fallback = DEFAULT_LABEL } = {}) {
+  const clean = String(value ?? '').trim();
+  if (!clean) return { ok: true, value: fallback };
+  if (clean.length > LABEL_MAX) {
+    return { ok: false, field: 'label', error: `A label can be at most ${LABEL_MAX} characters.` };
+  }
+  return { ok: true, value: clean };
+}
+
+/**
+ * The three states a link can be in, decided in ONE place.
+ *
+ * Every caller that needs to know whether a link works asks this, so "is it
+ * live" cannot be answered one way by the list endpoint and another way by the
+ * join handler. The order matters: a link that was revoked AND has since passed
+ * its expiry reads as revoked, because that is what the manager did to it.
+ */
+export function linkState(link, now = new Date()) {
+  if (!link) return 'missing';
+  if (link.revokedAt ?? link.revoked_at) return 'revoked';
+  const expiresAt = link.expiresAt ?? link.expires_at;
+  if (expiresAt && new Date(expiresAt).getTime() <= now.getTime()) return 'expired';
+  return 'live';
+}
+
+/** True when this link would admit somebody right now. */
+export const linkIsLive = (link, now = new Date()) => linkState(link, now) === 'live';
+
+/* The projection every read returns. One list, so a new column cannot reach a
+   response by being added to the table — the reason profileSerializer.js is an
+   allowlist. The token is included because reading the link back IS the
+   feature; who may read it is decided at the route by invite_policy. */
+const LINK_COLUMNS = `
+  id, organization_id AS "organizationId", token, label,
+  created_at AS "createdAt", created_by AS "createdBy",
+  expires_at AS "expiresAt", revoked_at AS "revokedAt",
+  uses, last_used_at AS "lastUsedAt"
+`;
+
+/**
  * The path a link points at.
  *
  * The origin is the client's business — whoever is copying the link is already
@@ -67,72 +178,183 @@ const TOKEN_SHAPE = /^[0-9a-f]{64}$/;
 export const shareLinkPath = (token) => `/organizations/invite/${token}`;
 
 /**
- * The organization's current link, or `null`.
+ * Every link a club holds, newest first, with the live ones ahead of the rest.
  *
- * Returns the token, because reading the link back is the point — see the module
- * header. The AUTHORIZATION for that read is the caller's problem and is decided
- * by `invite_policy` at the route, which is the only place that knows who is
- * asking.
+ * Revoked and expired links are INCLUDED. A manager needs to see that the
+ * autumn flyer link is the one that stopped working, and hiding it would make
+ * the join count and the last-used date — the only record that the flyer worked
+ * at all — disappear along with it.
  */
-export async function shareLinkFor(db, organizationId) {
+export async function shareLinksFor(db, organizationId) {
+  const rows = await db.prepare(`
+    SELECT ${LINK_COLUMNS}
+      FROM organization_share_links
+     WHERE organization_id = ?
+     ORDER BY created_at DESC, id DESC
+  `).all(organizationId);
+  return rows ?? [];
+}
+
+/** One link of this club's, or `null`. Scoped by organization on purpose. */
+export async function shareLinkById(db, organizationId, linkId) {
+  if (typeof linkId !== 'string' || !linkId) return null;
+  /* Both columns in the WHERE, always. A handler that looked a link up by id
+     alone and trusted the route parameter for the organization would let a
+     manager of one club revoke another club's link. */
   return (await db.prepare(`
-    SELECT organization_id AS "organizationId", token, created_at AS "createdAt",
-           created_by AS "createdBy", rotations
-      FROM organization_share_links WHERE organization_id = ?
-  `).get(organizationId)) ?? null;
+    SELECT ${LINK_COLUMNS}
+      FROM organization_share_links
+     WHERE id = ? AND organization_id = ?
+  `).get(linkId, organizationId)) ?? null;
 }
 
 /**
- * Mints the organization's first link, or replaces the one it has.
+ * The club's main link: the oldest one still live.
  *
- * ── One statement, so rotation has no gap ──
- *
- * `INSERT … ON CONFLICT DO UPDATE` rather than delete-then-insert. The
- * alternative leaves a window in which the club has no link at all, and a
- * concurrent `resolveShareToken` landing in that window would answer "no such
- * link" for a club that has one — a rotation that briefly looks like a
- * revocation.
- *
- * The previous token is overwritten, which IS the revocation of the old link:
- * there is never a state in which two links resolve to the same organization.
- *
- * ── What rotation does NOT do ──
- *
- * It does not touch `organization_members`. Everybody already in the club stays
- * in it — the link was the door, not the membership. The confirmation dialog in
- * the client says exactly that, because the manager's likely fear when pressing
- * Regenerate is that they are about to empty their own club.
- *
- * @returns {{ token: string, path: string, rotated: boolean }}
+ * OLDEST, not newest, because the oldest live link is the one most likely to be
+ * the one in circulation — printed, pinned, forwarded — and this is what the
+ * page offers a member who presses Share without wanting to think about which
+ * of four links to hand over. `null` when the club has none.
  */
-export async function issueShareLink(db, organizationId, { createdBy = null, now = new Date() } = {}) {
-  const existing = await shareLinkFor(db, organizationId);
+export async function primaryShareLink(db, organizationId, { now = new Date() } = {}) {
+  const links = await shareLinksFor(db, organizationId);
+  const live = links.filter(link => linkIsLive(link, now));
+  return live.length ? live[live.length - 1] : null;
+}
+
+/** How many live links a club holds, for the ceiling check. */
+export async function liveLinkCount(db, organizationId, { now = new Date() } = {}) {
+  const links = await shareLinksFor(db, organizationId);
+  return links.filter(link => linkIsLive(link, now)).length;
+}
+
+/**
+ * Mints a link.
+ *
+ * ── Why there is no upsert any more ──
+ *
+ * The single-link version was one `INSERT … ON CONFLICT DO UPDATE`, so that
+ * rotation had no window in which the club had no link. With several links that
+ * window does not exist: creating one does not touch the others, and rotation
+ * is expressed as `rotateShareLink` — revoke this one, mint its replacement,
+ * both inside the caller's transaction.
+ *
+ * @returns {{ id, token, path, label, expiresAt }}
+ */
+export async function createShareLink(db, organizationId, {
+  label = DEFAULT_LABEL, expiresAt = null, createdBy = null, now = new Date(),
+} = {}) {
   const token = newToken();
+  const id = `oshl-${crypto.randomBytes(9).toString('hex')}`;
 
   await db.prepare(`
     INSERT INTO organization_share_links
-      (organization_id, token, created_at, created_by, rotations)
-    VALUES (?, ?, ?, ?, 0)
-    ON CONFLICT(organization_id) DO UPDATE SET
-      token      = excluded.token,
-      created_at = excluded.created_at,
-      created_by = excluded.created_by,
-      /* Plus one against the STORED value, not against excluded.rotations:
-         excluded carries what this statement tried to insert, which is always
-         zero, so using it would reset the count on every rotation. (No
-         backticks in this comment - it lives inside a template literal.) */
-      rotations  = organization_share_links.rotations + 1
-  `).run(organizationId, token, now.toISOString(), createdBy);
+      (id, organization_id, token, label, created_at, created_by, expires_at, uses)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(id, organizationId, token, label, now.toISOString(), createdBy, expiresAt);
 
-  return { token, path: shareLinkPath(token), rotated: Boolean(existing) };
+  return { id, token, path: shareLinkPath(token), label, expiresAt };
 }
 
-/** Switches the link off. Returns whether there was one to switch off. */
-export async function revokeShareLink(db, organizationId) {
-  return (await db.prepare(
-    'DELETE FROM organization_share_links WHERE organization_id = ?'
-  ).run(organizationId)).changes > 0;
+/**
+ * Switches one link off, keeping its history.
+ *
+ * A soft revoke rather than a DELETE. The row records what the link was called
+ * and how many people joined through it, and that record is the reason a manager
+ * can tell "the flyer worked and I retired it" from "the flyer never worked".
+ *
+ * `WHERE revoked_at IS NULL` makes this idempotent AND makes the return value
+ * mean something: two managers pressing Revoke at the same moment produce one
+ * `true` and one `false`, and the timestamp is the first one's.
+ */
+export async function revokeShareLink(db, organizationId, linkId, { now = new Date() } = {}) {
+  const result = await db.prepare(`
+    UPDATE organization_share_links
+       SET revoked_at = ?
+     WHERE id = ? AND organization_id = ? AND revoked_at IS NULL
+  `).run(now.toISOString(), linkId, organizationId);
+  return result.changes > 0;
 }
+
+/**
+ * Replaces one link with a fresh one carrying the same label.
+ *
+ * This is what Regenerate means: the copies in circulation stop working, the
+ * label and the reason for the link survive, and — as the confirmation dialog
+ * says — nobody loses their membership, because the link was the door and not
+ * the roster.
+ *
+ * Both statements belong to the CALLER's transaction. Half of this applied is a
+ * club whose link is revoked with no replacement, which reads as a revocation
+ * nobody performed.
+ */
+export async function rotateShareLink(db, organizationId, linkId, { createdBy = null, now = new Date() } = {}) {
+  const existing = await shareLinkById(db, organizationId, linkId);
+  if (!existing) return null;
+  await revokeShareLink(db, organizationId, linkId, { now });
+  return createShareLink(db, organizationId, {
+    label: existing.label,
+    /* The replacement inherits the expiry deliberately: a link created for one
+       event booth should not become permanent by being regenerated. A manager
+       who wants it permanent clears the date, which is an explicit act. */
+    expiresAt: existing.expiresAt,
+    createdBy,
+    now,
+  });
+}
+
+/** Renames a link. Labels are management state; renaming changes no permission. */
+export async function renameShareLink(db, organizationId, linkId, label) {
+  const result = await db.prepare(`
+    UPDATE organization_share_links SET label = ? WHERE id = ? AND organization_id = ?
+  `).run(label, linkId, organizationId);
+  return result.changes > 0;
+}
+
+/**
+ * Sets or clears a link's expiry.
+ *
+ * `null` clears it, which is how a temporary link becomes permanent. Deliberately
+ * allowed: the alternative is a manager who set a date by mistake having to
+ * regenerate and re-print.
+ */
+export async function setShareLinkExpiry(db, organizationId, linkId, expiresAt) {
+  const result = await db.prepare(`
+    UPDATE organization_share_links SET expires_at = ? WHERE id = ? AND organization_id = ?
+  `).run(expiresAt, linkId, organizationId);
+  return result.changes > 0;
+}
+
+/**
+ * Records that somebody joined through this link.
+ *
+ * `uses = uses + 1` against the stored value, in one statement, so two people
+ * joining at the same instant cannot read-modify-write each other's count away.
+ * Called inside the join transaction: a counted use that did not produce a
+ * membership would be a lie, and a membership with an uncounted use loses the
+ * only number this feature reports.
+ */
+export async function recordShareLinkUse(db, organizationId, linkId, { now = new Date() } = {}) {
+  await db.prepare(`
+    UPDATE organization_share_links
+       SET uses = uses + 1, last_used_at = ?
+     WHERE id = ? AND organization_id = ?
+  `).run(dayOf(now), linkId, organizationId);
+}
+
+/**
+ * The DATE, deliberately, and not the timestamp.
+ *
+ * Migration 063 declares `last_used_at` as a date and argues why: "used this
+ * week" is what a manager acts on, and the hour somebody joined a club is a
+ * fact about that person's evening. With one use on a link — which is the
+ * common case for a club inviting a handful of people — a full timestamp is a
+ * per-student record of when a named child joined, reachable by anyone who can
+ * read the club's links.
+ *
+ * Truncating is what keeps the column the aggregate the schema says it is.
+ */
+const dayOf = (at) => at.toISOString().slice(0, 10);
 
 /**
  * The organization a token opens, or `null`.
@@ -153,18 +375,31 @@ export async function revokeShareLink(db, organizationId) {
  * only withdrawal a manager is offered, and a link that kept working through it
  * would make archiving a promise the product does not keep.
  */
-export async function resolveShareToken(db, token) {
+export async function resolveShareToken(db, token, { now = new Date() } = {}) {
   /* Shape-checked before the round trip, so a caller cannot make this hash and
      query a megabyte of request body. Nothing outside the shape can match a
      stored value anyway. */
   if (typeof token !== 'string' || !TOKEN_SHAPE.test(token)) return null;
 
-  return (await db.prepare(`
-    SELECT o.*
+  const row = await db.prepare(`
+    SELECT o.*, l.id AS "shareLinkId", l.revoked_at AS "shareLinkRevokedAt",
+           l.expires_at AS "shareLinkExpiresAt"
       FROM organization_share_links l
       JOIN organizations o ON o.id = l.organization_id
      WHERE l.token = ? AND o.status = 'active'
-  `).get(token)) ?? null;
+  `).get(token);
+  if (!row) return null;
+
+  /* Revocation and expiry are checked HERE rather than in the WHERE clause, so
+     that one function is the sole authority on what "live" means and the list
+     endpoint cannot disagree with the join handler about it. A revoked or lapsed
+     link is indistinguishable from one that never existed: same null, so the
+     endpoint above it answers the same 404 either way. */
+  const state = linkState(
+    { revokedAt: row.shareLinkRevokedAt, expiresAt: row.shareLinkExpiresAt },
+    now,
+  );
+  return state === 'live' ? row : null;
 }
 
 /**
@@ -174,8 +409,24 @@ export async function resolveShareToken(db, token) {
  * by accident. `resolveShareToken(...)` returning something truthy is not the
  * check — the check is that what came back is the organization in front of us.
  */
-export async function tokenOpens(db, organizationId, token) {
+export async function tokenOpens(db, organizationId, token, { now = new Date() } = {}) {
   if (!token) return false;
-  const org = await resolveShareToken(db, token);
+  const org = await resolveShareToken(db, token, { now });
   return Boolean(org && org.id === organizationId);
+}
+
+/**
+ * The id of the link that opens THIS organization, or `null`.
+ *
+ * The same question as `tokenOpens`, answered with the identity of the link so
+ * the join handler can count the use against it. Two functions rather than one
+ * returning a truthy id, because `if (await tokenOpens(...))` reads as a
+ * permission check and `const id = await openingLinkId(...)` reads as a lookup,
+ * and a permission check that returns an id invites `if (id)` on a caller that
+ * meant to ask about a different club.
+ */
+export async function openingLinkId(db, organizationId, token, { now = new Date() } = {}) {
+  if (!token) return null;
+  const org = await resolveShareToken(db, token, { now });
+  return org && org.id === organizationId ? org.shareLinkId : null;
 }

@@ -32,6 +32,7 @@ import {
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
 import { consumePendingRedirect } from './utils/pendingInvite';
+import { organizationPath } from './utils/organizationUrl';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
   X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
@@ -1190,7 +1191,7 @@ function AppShell({ toasts, addToast, removeToast }) {
   const handleLoginSuccess = () => {
     refreshAll();
     const invite = consumePendingRedirect();
-    navigate(invite ? `/organizations/${encodeURIComponent(invite.slug)}` : '/');
+    navigate(invite ? organizationPath(invite.slug) : '/');
   };
 
   const setViewingProfileState = (profile) => {
@@ -1325,7 +1326,10 @@ function AppShell({ toasts, addToast, removeToast }) {
      table, so adding a route to PUBLIC_ROUTES left it unreachable — it fell
      through to the signed-out catch-all and answered 404 while looking
      correctly declared. */
-  if (isPublicPath(currentPath)) {
+  /* `signedIn` matters: `/organizations/:key` is in both tables, and a reader
+     with a session must get the shell's organization page rather than the
+     standalone public one — see `shellWhenSignedIn` on that entry. */
+  if (isPublicPath(currentPath, { signedIn: Boolean(currentUser) })) {
     return (
       <React.Suspense fallback={<RouteFallback />}>
         <Routes>

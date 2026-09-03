@@ -235,16 +235,98 @@ describe('requests to join an organization', () => {
      * roster and directory search publish — no grade, no school, no email
      * address, and no free-text message, because a request carries none.
      */
-    it('discloses only what the roster already discloses', async () => {
+    it('discloses only what the roster already discloses, plus the note', async () => {
       await ask(student);
       const [row] = (await queue()).body.requests;
       expect(Object.keys(row).sort()).toEqual([
         'avatar', 'avatarColor', 'distinction', 'id', 'kind', 'location',
-        'name', 'profilePictureUrl', 'requestId', 'role', 'submittedAt', 'username',
+        'message', 'name', 'profilePictureUrl', 'requestId', 'role', 'submittedAt', 'username',
       ]);
+      /* Everything a profile withholds stays withheld. `message` is the one
+         field that is NOT from `profileSummary` — it is what the student chose
+         to write, for these managers to read. */
       const body = JSON.stringify((await queue()).body);
       expect(body).not.toContain('leo.chen@example.com');
-      expect(body).not.toMatch(/"grade"|"school"|"dateOfBirth"|"message"/);
+      expect(body).not.toMatch(/"grade"|"school"|"dateOfBirth"/);
+    });
+
+    /**
+     * The note reaches the people it was written for.
+     *
+     * A manager deciding about a request had only a name and an avatar to go
+     * on, which for a school club is frequently a choice between two students
+     * with the same first name.
+     */
+    it('carries the note the student wrote', async () => {
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: "  I'm in Ms Chen's class.  " }, student);
+      expect(res.status).toBe(201);
+      /* Trimmed on the way in, so the manager reads what was written and not
+         the whitespace around it. */
+      expect(res.body.message).toBe("I'm in Ms Chen's class.");
+
+      const [row] = (await queue()).body.requests;
+      expect(row.message).toBe("I'm in Ms Chen's class.");
+    });
+
+    it('stores no note as null rather than as an empty string', async () => {
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: '   ' }, student);
+      expect(res.status).toBe(201);
+      expect(res.body.message).toBeNull();
+      expect((await queue()).body.requests[0].message).toBeNull();
+    });
+
+    it('refuses a note past the limit rather than truncating it', async () => {
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: 'x'.repeat(301) }, student);
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('message');
+      /* And nothing was filed. A refused request that left a row would be a
+         request the student cannot see and cannot withdraw. */
+      expect((await queue()).body.requests).toHaveLength(0);
+    });
+
+    it('refuses a note that is not text', async () => {
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: { toString: 'not a string' } }, student);
+      expect(res.status).toBe(400);
+      expect(res.body.field).toBe('message');
+    });
+
+    /**
+     * Stored verbatim, escaped at the point of rendering.
+     *
+     * No sanitiser on the way in: the value is rendered as text by React, which
+     * escapes it, and stripping markup would mangle a child's `<3` while
+     * providing no protection escaping does not already provide. What this
+     * asserts is that the round trip does not silently rewrite what somebody
+     * typed — a "sanitised" note is a note the student did not write.
+     */
+    it('stores markup-looking text exactly as typed, without rewriting it', async () => {
+      const payload = '<script>alert(1)</script> & <3 "quotes"';
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: payload }, student);
+      expect(res.status).toBe(201);
+      expect(res.body.message).toBe(payload);
+      expect((await queue()).body.requests[0].message).toBe(payload);
+    });
+
+    it('shows the student their own note back', async () => {
+      await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: 'I help at the food bank on Saturdays.' }, student);
+      const p = await page(student);
+      expect(p.viewer.joinRequest).toBeTruthy();
+    });
+
+    it('keeps the note from a member who is not a manager', async () => {
+      await join(otherId, 'member');
+      await srv.call('POST', `/api/organizations/${orgKey}/join-requests`,
+        { message: 'a private note' }, student);
+      /* The queue is the only route that carries it, and a member is refused
+         there — so there is no path by which one student reads another's. */
+      expect((await queue(other)).status).toBe(403);
+      expect(JSON.stringify(await page(other))).not.toContain('a private note');
     });
 
     it('shows the count on the page so the badge and the list agree', async () => {

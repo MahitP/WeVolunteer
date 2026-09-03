@@ -392,24 +392,178 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     await expect(file('r4', 'u2')).resolves.toBeTruthy();
   });
 
-  it('gives the invitation-link table one row per organization and a unique token', async () => {
+  /**
+   * 063: the same table, after its primary key moved off `organization_id`.
+   *
+   * This assertion used to be the opposite — one row per organization, which
+   * WAS the constraint 062 shipped. 063 removes it deliberately, so this now
+   * proves the removal reached PostgreSQL: a `DO $$ … $$` block probing
+   * `pg_index` has to find the old constraint and drop it, and a block that
+   * silently matched nothing would leave PostgreSQL enforcing a rule SQLite no
+   * longer does — the exact kind of engine drift the parity tests exist for.
+   */
+  it('lets one organization hold several invitation links, each with a unique token', async () => {
     await runPostgresMigrations(db);
 
-    const mint = async (org, token) => await db.prepare(
-      'INSERT INTO organization_share_links (organization_id, token, created_at) VALUES (?, ?, ?)'
-    ).run(org, token, '2026-09-03');
+    const mint = async (id, org, token) => await db.prepare(
+      'INSERT INTO organization_share_links (id, organization_id, token, label, created_at, uses)'
+      + " VALUES (?, ?, ?, 'General', ?, 0)"
+    ).run(id, org, token, '2026-09-03');
 
-    await mint('org1', 'a'.repeat(64));
-    /* One live link per club: the primary key is what makes rotation an UPDATE
-       with no window in which the club has no link at all. */
-    await expect(mint('org1', 'b'.repeat(64))).rejects.toThrow();
+    await mint('l1', 'org1', 'a'.repeat(64));
+    /* Several links per club, which is what makes retiring the autumn flyer
+       possible without breaking the Instagram bio. */
+    await expect(mint('l2', 'org1', 'b'.repeat(64))).resolves.toBeTruthy();
 
     await db.prepare(
       "INSERT INTO organizations (id, name, slug, created_at, updated_at)"
       + " VALUES ('org2', 'Robotics', 'robotics', '2026-08-01', '2026-08-01')"
     ).run();
-    /* And no two clubs can share a token. */
-    await expect(mint('org2', 'a'.repeat(64))).rejects.toThrow();
+    /* And still no two links anywhere sharing a token — a token is resolved by
+       itself, so a duplicate would make "which club does this open" ambiguous. */
+    await expect(mint('l3', 'org2', 'a'.repeat(64))).rejects.toThrow();
+
+    /* The primary key really is `id` now, not `organization_id`. */
+    const pk = await db.prepare(
+      "SELECT a.attname FROM pg_index i"
+      + " JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)"
+      + " WHERE i.indrelid = 'organization_share_links'::regclass AND i.indisprimary"
+    ).all();
+    expect(pk.map(r => r.attname)).toEqual(['id']);
+
+    /* And the column 062 counted rotations in is gone, since a rotation is now
+       a new row rather than an increment. */
+    const rotations = await db.prepare(
+      "SELECT column_name FROM information_schema.columns"
+      + " WHERE table_schema = current_schema() AND table_name = 'organization_share_links'"
+      + "   AND column_name = 'rotations'"
+    ).get();
+    expect(rotations).toBeFalsy();
+  });
+
+  it('adds the link columns the multi-link model needs', async () => {
+    await runPostgresMigrations(db);
+
+    const cols = (await db.prepare(
+      "SELECT column_name FROM information_schema.columns"
+      + " WHERE table_schema = current_schema() AND table_name = 'organization_share_links'"
+      + " ORDER BY column_name"
+    ).all()).map(c => c.column_name);
+
+    expect(cols).toEqual([
+      'created_at', 'created_by', 'expires_at', 'id', 'label',
+      'last_used_at', 'organization_id', 'revoked_at', 'token', 'uses',
+    ]);
+  });
+
+  /**
+   * 063: visibility, and the direction it fails.
+   *
+   * The backfill is the privacy decision, and it is the one that would be
+   * quietest to get wrong: a DEFAULT of 'public' would publish every school
+   * club on the platform at boot, with no error and no notice to anybody.
+   * Asserted on the ROW rather than on the catalogue default, because a default
+   * that existing rows did not receive would look identical in the catalogue.
+   */
+  it('leaves every organization that predates the setting unlisted', async () => {
+    await runPostgresMigrations(db);
+
+    const col = await db.prepare(
+      "SELECT is_nullable, column_default FROM information_schema.columns"
+      + " WHERE table_schema = current_schema() AND table_name = 'organizations'"
+      + "   AND column_name = 'visibility'"
+    ).get();
+    expect(col?.is_nullable).toBe('NO');
+
+    const row = await db.prepare("SELECT visibility AS v FROM organizations WHERE id = 'org1'").get();
+    expect(row.v).toBe('unlisted');
+
+    const published = await db.prepare(
+      "SELECT COUNT(*)::int AS n FROM organizations WHERE visibility = 'public'"
+    ).get();
+    expect(Number(published.n)).toBe(0);
+  });
+
+  it('adds the nullable note to a join request', async () => {
+    await runPostgresMigrations(db);
+    const col = await db.prepare(
+      "SELECT is_nullable FROM information_schema.columns"
+      + " WHERE table_schema = current_schema()"
+      + "   AND table_name = 'organization_join_requests' AND column_name = 'message'"
+    ).get();
+    /* Nullable, so every request filed before the column existed stays valid
+       and its absence of a note is a fact rather than an empty string. */
+    expect(col?.is_nullable).toBe('YES');
+  });
+
+  /**
+   * 063: the invitations table, and the credential it deliberately has none of.
+   *
+   * An invitation names `invited_user_id`, and the only thing that can accept it
+   * is a session belonging to that user. Asserted as an ABSENCE, because that is
+   * the shape of the decision: a token column would be a redundant secret that
+   * can leak, be logged, or be read off a screen.
+   */
+  it('adds the invitations table with no token and no email column', async () => {
+    await runPostgresMigrations(db);
+
+    const cols = (await db.prepare(
+      "SELECT column_name FROM information_schema.columns"
+      + " WHERE table_schema = current_schema() AND table_name = 'organization_invitations'"
+      + " ORDER BY column_name"
+    ).all()).map(c => c.column_name);
+
+    expect(cols).toEqual([
+      'created_at', 'expires_at', 'id', 'invited_by', 'invited_user_id',
+      'message', 'organization_id', 'resolved_at', 'status',
+    ]);
+    expect(cols).not.toContain('token');
+    expect(cols).not.toContain('token_hash');
+    expect(cols).not.toContain('email');
+  });
+
+  it('holds one pending invitation per person per organization', async () => {
+    await runPostgresMigrations(db);
+
+    const live = await db.prepare(
+      "SELECT indexdef FROM pg_indexes"
+      + " WHERE schemaname = current_schema() AND indexname = 'idx_org_invitations_live'"
+    ).get();
+    expect(live?.indexdef).toBeTruthy();
+    expect(live.indexdef).toMatch(/UNIQUE/i);
+    /* The predicate, asserted rather than assumed: an index that lost its WHERE
+       would stop a club from ever re-inviting anybody after a withdrawal. */
+    expect(live.indexdef).toMatch(/WHERE \(status = 'pending'/);
+
+    const invite = async (id, user, status = 'pending') => await db.prepare(
+      'INSERT INTO organization_invitations'
+      + " (id, organization_id, invited_user_id, status, created_at)"
+      + " VALUES (?, 'org1', ?, ?, '2026-09-03')"
+    ).run(id, user, status);
+
+    await invite('i1', 'u2');
+    await expect(invite('i2', 'u2')).rejects.toThrow();
+    /* A different person is unaffected, and a resolved one does not block a
+       later invitation. */
+    await expect(invite('i3', 'u1')).resolves.toBeTruthy();
+    await db.prepare("UPDATE organization_invitations SET status = 'revoked' WHERE id = 'i1'").run();
+    await expect(invite('i4', 'u2')).resolves.toBeTruthy();
+  });
+
+  it('refuses an invitation status outside the vocabulary', async () => {
+    await runPostgresMigrations(db);
+
+    /* Through an awaited helper rather than `expect(db.prepare(…).run())`
+       directly. `fixtureDebt.js` reads an un-awaited `prepare()` chain as
+       PostgreSQL debt and cannot see that `expect(…).rejects` awaits it — and
+       the helper shape is what the rest of this file already uses. */
+    const insert = async () => await db.prepare(
+      'INSERT INTO organization_invitations'
+      + " (id, organization_id, invited_user_id, status, created_at)"
+      + " VALUES ('i9', 'org1', 'u2', 'maybe', '2026-09-03')"
+    ).run();
+
+    await expect(insert()).rejects.toThrow();
   });
 
   /** Nullable and unset, so every existing event stays correctable. */

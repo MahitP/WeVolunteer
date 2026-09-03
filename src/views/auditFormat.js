@@ -133,7 +133,11 @@ const ACTIONS = {
   ORGANIZATION_SHARE_LINK_CREATED: ['Organization invitation link created', TONES.NOTABLE],
   ORGANIZATION_SHARE_LINK_ROTATED: ['Organization invitation link regenerated', TONES.NOTABLE],
   ORGANIZATION_SHARE_LINK_REVOKED: ['Organization invitation link switched off', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_EXPIRY_SET: ['Organization invitation link expiry changed', TONES.NOTABLE],
   ORGANIZATION_MEMBERSHIP_POLICY_CHANGED: ['Organization membership settings changed', TONES.NOTABLE],
+  ORGANIZATION_HANDLE_CHANGED: ['Organization web address changed', TONES.NOTABLE],
+  ORGANIZATION_INVITATION_SENT: ['Organization invitation sent', TONES.ROUTINE],
+  ORGANIZATION_INVITATION_REVOKED: ['Organization invitation withdrawn', TONES.ROUTINE],
   /* Admitting somebody, or declining them. ROUTINE: it is the ordinary running
      of a club, it happens as often as students ask, and a trail in which every
      row is notable has no notable rows. */

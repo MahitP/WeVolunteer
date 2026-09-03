@@ -56,6 +56,67 @@ export const JOIN_POLICIES = Object.freeze(['open', 'invite', 'request']);
  */
 export const INVITE_POLICIES = Object.freeze(['helpers', 'members']);
 
+/**
+ * Whether the club's page opens to somebody with no account.
+ *
+ * ── Why this is a second axis and not a fourth join mode ──
+ *
+ * `join_policy` answers "who may become a member". This answers "who may LOOK".
+ * Folding them into one enum produces states nobody wants to name — an `open`
+ * club that cannot be found, an `unlisted` club anyone may join — and the useful
+ * combination is precisely the one a single enum cannot express: findable, with
+ * a door. That is a `public` club whose `join_policy` is `invite`, and it is what
+ * a school club actually asks for.
+ *
+ *   public    the canonical handle opens without a session, and the club appears
+ *             in public discovery.
+ *   unlisted  the handle needs a session. Members and managers see no
+ *             difference; a stranger sees nothing at all.
+ *
+ * Two values, not three. "Members only" would be a third that changes nothing a
+ * manager can observe: an unlisted club is already invisible to a stranger, and
+ * to a signed-in non-member it is exactly as visible as the directory already
+ * makes it.
+ */
+export const VISIBILITIES = Object.freeze(['public', 'unlisted']);
+
+/**
+ * How long the optional note on a request or an invitation may be.
+ *
+ * ── One bound with one name, and it lives here ──
+ *
+ * A student writing "why I want to join" and a manager writing "why we thought
+ * of you" are the same kind of value: one line, written once, read by the other
+ * party, never editable and never repliable. Two constants would be two numbers
+ * to keep in step for no reason anybody could state.
+ *
+ * It is declared in THIS module rather than beside either feature because both
+ * `organizationJoinRequests.js` and `organizationInvitations.js` import
+ * `node:crypto`, so neither can be pulled into the browser bundle — and the
+ * dialogs that draw the character counter need the number. This module imports
+ * nothing at all, which is exactly what makes it re-exportable to the client
+ * (see `src/organizationPolicy.js` and `serverModuleBoundary.test.js` for what
+ * happens when a re-exported server module is not that pure).
+ *
+ * Three hundred characters, because the bound is what stops a note from
+ * becoming something it must not become. `message.send` is a capability with a
+ * Report button and a conversation behind it, and a club's front door is not
+ * the place to build a second one without either.
+ */
+export const NOTE_MAX = 300;
+
+/**
+ * The default for a NEW organization, which is deliberately not the value
+ * migration 063 backfills onto existing ones.
+ *
+ * A club created today is created in a product that offers a public page, by
+ * somebody looking at the setting. Every club that already existed was created
+ * when the page required a session, and nobody running one agreed to publish it
+ * — so the migration takes the safe direction and creation takes the useful one.
+ * The asymmetry is the privacy argument, and it is stated in both places.
+ */
+export const DEFAULT_VISIBILITY = 'public';
+
 export const DEFAULT_JOIN_POLICY = 'open';
 export const DEFAULT_INVITE_POLICY = 'helpers';
 
@@ -79,6 +140,23 @@ export function normaliseJoinPolicy(value) {
 export function normaliseInvitePolicy(value) {
   return value === 'members' ? 'members' : 'helpers';
 }
+
+/**
+ * Fails closed towards NOT publishing.
+ *
+ * Only the exact string `'public'` opens a club to a stranger. Anything else —
+ * a typo, a NULL from a row that predates the column, a value from a future
+ * version — is read as `unlisted`, so a wrong value can only ever publish less.
+ * The opposite default would mean a bad row silently exposes a club that never
+ * chose to be exposed.
+ */
+export function normaliseVisibility(value) {
+  return value === 'public' ? 'public' : 'unlisted';
+}
+
+/** True when a stranger with no session may read this club's public projection. */
+export const isPubliclyVisible = (org) =>
+  normaliseVisibility(org?.visibility) === 'public' && org?.status === 'active';
 
 /**
  * Every state the primary control can be in.

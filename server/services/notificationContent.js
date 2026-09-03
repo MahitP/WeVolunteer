@@ -159,6 +159,16 @@ export const EVENT_CATEGORIES = {
    * about where they stand, not about an application queue.
    */
   ORGANIZATION_JOIN_REQUEST_RECEIVED: 'APPLICATION',
+  /**
+   * An invitation into a club.
+   *
+   * APPLICATION rather than ACCOUNT, alongside the join request it mirrors:
+   * both are "somebody is waiting for you to decide about a club", and a
+   * student who has turned Application notifications on has said that is what
+   * they want to hear about. ACCOUNT is for things that happened TO their
+   * account and cannot be declined.
+   */
+  ORGANIZATION_INVITATION_RECEIVED: 'APPLICATION',
 
   // EVENT
   /**
@@ -552,9 +562,20 @@ export function getInAppContent(event, payload) {
      * where the reader is authenticated and the disclosure is already governed.
      *
      * So: a name and a club. Not a grade, not a school, not an email address,
-     * and not a message — the request carries no free text at all, deliberately
-     * (migration 062). What a manager decides on is a person and a rank, and
-     * both are on the page the link opens.
+     * and not a message. A request may now carry a short note (migration 063),
+     * but the note is not repeated here: it was written for the club's managers
+     * to read on the page, and copying it into a notification would also copy
+     * it into an email, which leaves the platform. What this says is that
+     * somebody is waiting; the page says who and why.
+     */
+    /**
+     * Every organization deep link below is the canonical `@handle` form.
+     *
+     * A notification row persists its `link`, so these strings outlive the
+     * request that wrote them — which is exactly why the handle stopped moving
+     * when a club is renamed. Before that change, a rename silently dead-linked
+     * every historical notification a club had ever sent; now the address in a
+     * row from last term still resolves. See `organizationHandles.js`.
      */
     case 'ORGANIZATION_JOIN_REQUEST_RECEIVED': {
       const org = payload.organizationName || 'your organization';
@@ -565,9 +586,40 @@ export function getInAppContent(event, payload) {
         title: `Someone asked to join ${org}`,
         body: `${who} asked to join ${org}. It is waiting for a manager to accept or decline.`,
         link: payload.organizationSlug
-          ? `/organizations/${payload.organizationSlug}#requests`
+          ? `/organizations/@${payload.organizationSlug}#requests`
           : '/organizations',
         ctaText: 'Review the request',
+      };
+    }
+
+    /**
+     * You have been invited.
+     *
+     * ── What this does NOT say ──
+     *
+     * **Who invited you.** The club invites, not the individual member who
+     * pressed the button. Naming them would make declining an answer to a
+     * classmate rather than to a club, which is precisely the pressure a
+     * thirteen-year-old should not be under.
+     *
+     * **The note, if there is one.** A notification body is copied into an
+     * email, which leaves the platform; a note written to one person stays on
+     * the page they open. The body says there is one, so nobody misses it.
+     *
+     * The invitation lapses, so the body says so without printing a date — the
+     * page shows the date, and a body that hardcoded one would be wrong the
+     * moment the row was read a fortnight later.
+     */
+    case 'ORGANIZATION_INVITATION_RECEIVED': {
+      const org = payload.organizationName || 'an organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You have been invited to join ${org}`,
+        body: `${org} invited you to join. Open it to accept or decline — `
+          + 'the invitation does not last for ever.',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
       };
     }
 
@@ -580,7 +632,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager accepted your request to join ${org}. `
           + 'You will be told when it posts a new opportunity.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `Go to ${org}`,
       };
     }
@@ -624,7 +676,7 @@ export function getInAppContent(event, payload) {
         body:
           `${actor} removed you from ${org}.${why}`
           + '\n\nYou can still join this organization again.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `View ${org}`,
       };
     }
@@ -698,7 +750,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has looked at your appeal and lifted the ban. `
           + 'You can join again whenever you like.' + why,
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : undefined,
         ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
       };
     }
@@ -725,7 +777,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has lifted the ban. You can join again whenever `
           + 'you like.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `Go to ${org}`,
       };
     }

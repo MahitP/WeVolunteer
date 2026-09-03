@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import ShareOrganizationDialog from './ShareOrganizationDialog';
 import { api } from '../../utils/api';
 
@@ -18,27 +18,45 @@ import { api } from '../../utils/api';
  * webviews. A dialog whose only Copy control silently does nothing is worse than
  * one that shows the URL, because the reader cannot tell that it failed — so
  * both fallbacks are exercised rather than assumed.
+ *
+ * ── And the one thing this dialog now has to get right ──
+ *
+ * It presents two kinds of value that look identical and are not: a PUBLIC
+ * ADDRESS, which is readable, permanent and grants nothing, and INVITATION
+ * LINKS, which are credentials that can be revoked and that make a Join press
+ * succeed. Every assertion about the address section is really an assertion that
+ * the difference is on screen — because the difference is the security model.
  */
 
 vi.mock('../../utils/api');
 
 const TOKEN = 'a'.repeat(64);
-const ORG = { name: 'Chess Club', slug: 'chess-club' };
+const ORG = { name: 'Chess Club', slug: 'chess-club', visibility: 'unlisted' };
 
 const LINK = {
-  exists: true,
+  id: 'oshl-1',
   path: `/organizations/invite/${TOKEN}`,
+  label: 'General',
+  state: 'live',
   createdAt: '2026-09-01T09:00:00.000Z',
-  rotations: 0,
-  canCreate: true,
+  expiresAt: null,
+  revokedAt: null,
+  uses: 0,
+  lastUsedAt: null,
 };
 
-const show = async (link = LINK, props = {}) => {
-  api.fetchOrganizationShareLink.mockResolvedValue(link);
+/**
+ * `payload` is the whole endpoint answer, because who sees what is decided
+ * there: a manager gets every link with its stats, and a member who may only
+ * share gets one link with none. Passing the shape rather than a link is what
+ * lets one helper drive both readers.
+ */
+const show = async (payload = { links: [LINK], canManage: true, canCreate: true }, props = {}) => {
+  api.fetchOrganizationShareLinks.mockResolvedValue({ maxLinks: 10, ...payload });
   const utils = render(
     <ShareOrganizationDialog
       orgKey="chess-club"
-      organization={ORG}
+      organization={props.organization ?? ORG}
       policy="invite"
       onClose={vi.fn()}
       addToast={props.addToast ?? vi.fn()}
@@ -46,9 +64,14 @@ const show = async (link = LINK, props = {}) => {
       {...props}
     />,
   );
-  await waitFor(() => expect(api.fetchOrganizationShareLink).toHaveBeenCalledWith('chess-club'));
+  await waitFor(() => expect(api.fetchOrganizationShareLinks).toHaveBeenCalledWith('chess-club'));
   return utils;
 };
+
+/** A manager's view of one live link. */
+const MANAGED = { links: [LINK], canManage: true, canCreate: true };
+/** Somebody who may pass the link on and not decide what it is. */
+const SHARER = { links: [LINK], canManage: false, canCreate: false };
 
 let clipboard;
 let share;
@@ -59,8 +82,10 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
   share = undefined;
   Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
-  api.createOrganizationShareLink.mockResolvedValue({ exists: true, path: LINK.path, rotated: true });
-  api.revokeOrganizationShareLink.mockResolvedValue({ exists: false, revoked: true });
+  api.createOrganizationShareLink.mockResolvedValue({ link: LINK });
+  api.rotateOrganizationShareLink.mockResolvedValue({ link: LINK, rotated: true });
+  api.revokeOrganizationShareLink.mockResolvedValue({ link: { ...LINK, state: 'revoked' }, revoked: true });
+  api.updateOrganizationShareLink.mockResolvedValue({ link: LINK });
 });
 
 afterEach(() => {
@@ -71,26 +96,104 @@ afterEach(() => {
 describe('the link itself', () => {
   it('is shown as an absolute URL in a field somebody can select', async () => {
     await show();
-    const field = await screen.findByLabelText('Invitation link');
+    /* Labelled by its own name, which is how a manager tells four links apart. */
+    const field = await screen.findByLabelText('General');
     expect(field).toHaveAttribute('readonly');
     expect(field.value).toMatch(new RegExp(`^https?://[^/]+/organizations/invite/${TOKEN}$`));
   });
 
-  it('says when it was made, and how often it has been replaced', async () => {
-    await show({ ...LINK, rotations: 3 });
-    expect(await screen.findByText(/regenerated 3 times/)).toBeInTheDocument();
+  it('says when it was made and how many people joined through it', async () => {
+    await show({ ...MANAGED, links: [{ ...LINK, uses: 12 }] });
+    expect(await screen.findByText(/12 people joined/)).toBeInTheDocument();
   });
 
-  it('says "1 time" in the singular', async () => {
-    await show({ ...LINK, rotations: 1 });
-    expect(await screen.findByText(/regenerated 1 time$/)).toBeInTheDocument();
+  it('counts one person in the singular', async () => {
+    await show({ ...MANAGED, links: [{ ...LINK, uses: 1 }] });
+    expect(await screen.findByText(/1 person joined/)).toBeInTheDocument();
+  });
+
+  /**
+   * The join count is a manager's number, not a sharer's.
+   *
+   * It is aggregate and not sensitive in itself — no visitor, no address, no
+   * referrer is stored anywhere — but it is the club's operational record, and
+   * somebody who may hand an address out has not been given a reason to read
+   * it.
+   */
+  it('keeps the join count from somebody who may only share', async () => {
+    await show(SHARER);
+    await screen.findByLabelText('General');
+    expect(screen.queryByText(/joined/)).not.toBeInTheDocument();
+  });
+
+  it('says when a link will stop working, where one will', async () => {
+    await show({ ...MANAGED, links: [{ ...LINK, expiresAt: '2026-12-01T23:59:59.000Z' }] });
+    expect(await screen.findByText(/stops working/)).toBeInTheDocument();
+  });
+
+  /**
+   * Several links, each its own plate.
+   *
+   * The reason this feature exists: retiring the flyer that has been on the
+   * corridor wall since September must not break the Instagram bio.
+   */
+  it('shows every working link with its own name and URL', async () => {
+    const flyer = { ...LINK, id: 'oshl-2', label: 'Autumn flyer', path: `/organizations/invite/${'b'.repeat(64)}` };
+    await show({ ...MANAGED, links: [LINK, flyer] });
+
+    expect(await screen.findByLabelText('General')).toBeInTheDocument();
+    const second = screen.getByLabelText('Autumn flyer');
+    expect(second.value).toContain('b'.repeat(64));
+    expect(second.value).not.toContain(TOKEN);
+  });
+});
+
+/**
+ * The public address, and why it is a separate thing on screen.
+ *
+ * A handle is an ADDRESS: readable, printable, permanent, and it grants nothing.
+ * An invitation link is a CREDENTIAL. Presenting them together and labelled is
+ * the only way a manager can be expected to tell them apart, and telling them
+ * apart is the whole security model.
+ */
+describe('the public address', () => {
+  const PUBLIC_ORG = { ...ORG, visibility: 'public' };
+
+  it('is offered for a club that has a public page', async () => {
+    await show(MANAGED, { organization: PUBLIC_ORG });
+    const field = await screen.findByLabelText('Public address');
+    expect(field.value).toMatch(/\/organizations\/@chess-club$/);
+  });
+
+  it('says plainly that it does not let anybody join', async () => {
+    await show(MANAGED, { organization: PUBLIC_ORG });
+    expect(await screen.findByText(/does not let anybody join/)).toBeInTheDocument();
+  });
+
+  /**
+   * Absent, not shown with a warning.
+   *
+   * An address that answers "not found" to everybody outside the club is not an
+   * address, and offering one would have managers printing a URL that does not
+   * work.
+   */
+  it('is absent for an unlisted club', async () => {
+    await show(MANAGED);
+    await screen.findByLabelText('General');
+    expect(screen.queryByLabelText('Public address')).not.toBeInTheDocument();
+  });
+
+  it('is not the invitation link', async () => {
+    await show(MANAGED, { organization: PUBLIC_ORG });
+    const address = await screen.findByLabelText('Public address');
+    expect(address.value).not.toContain(TOKEN);
   });
 });
 
 describe('copying', () => {
   it('puts the URL on the clipboard and says so', async () => {
     const addToast = vi.fn();
-    await show(LINK, { addToast });
+    await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Copy link/ }));
 
     await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(
@@ -109,7 +212,7 @@ describe('copying', () => {
   it('shows the URL instead when there is no clipboard', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
     const addToast = vi.fn();
-    await show(LINK, { addToast });
+    await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Copy link/ }));
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(
@@ -120,7 +223,7 @@ describe('copying', () => {
   it('shows the URL instead when the clipboard write is refused', async () => {
     clipboard.writeText.mockRejectedValue(new Error('permission denied'));
     const addToast = vi.fn();
-    await show(LINK, { addToast });
+    await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Copy link/ }));
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(
@@ -155,7 +258,7 @@ describe('the share sheet', () => {
     Object.defineProperty(navigator, 'share', { value: share, configurable: true });
     const addToast = vi.fn();
 
-    await show(LINK, { addToast });
+    await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Share…/ }));
     await waitFor(() => expect(share).toHaveBeenCalled());
     /* A cancelled share is not a failure. */
@@ -165,16 +268,60 @@ describe('the share sheet', () => {
 
 describe('a club with no link yet', () => {
   it('offers a manager the way to make one', async () => {
-    await show({ exists: false, canCreate: true });
+    await show({ links: [], canManage: true, canCreate: true });
     expect(await screen.findByText('No invitation link yet')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Create invitation link/ }));
-    await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith('chess-club'));
+
+    fireEvent.click(screen.getByRole('button', { name: /New link/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Create link/ }));
+
+    /* An unnamed link gets the server's default label, so `label` is
+       `undefined` rather than an empty string — and no expiry, because a link
+       that lapses must be something somebody chose. */
+    await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith(
+      'chess-club', { label: undefined, expiresAt: null },
+    ));
+  });
+
+  it('sends the name a manager typed', async () => {
+    await show({ links: [], canManage: true, canCreate: true });
+    fireEvent.click(await screen.findByRole('button', { name: /New link/ }));
+    fireEvent.change(screen.getByLabelText(/What is this link for/), {
+      target: { value: 'Autumn flyer' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create link/ }));
+
+    await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith(
+      'chess-club', { label: 'Autumn flyer', expiresAt: null },
+    ));
+  });
+
+  /**
+   * The warning before a link that lapses.
+   *
+   * An expiry is the one thing in this dialog that breaks LATER, when nobody is
+   * looking at it: the flyer works in September and quietly stops in October.
+   * The default is no expiry, and choosing one says what it costs.
+   */
+  it('warns before making a link that expires, and defaults to one that does not', async () => {
+    await show({ links: [], canManage: true, canCreate: true });
+    fireEvent.click(await screen.findByRole('button', { name: /New link/ }));
+
+    expect(screen.getByText(/keeps working until you switch it off/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Stop working after/), { target: { value: '2026-12-01' } });
+    expect(screen.getByText(/stop letting anybody in after that date/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Create link/ }));
+    await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith(
+      'chess-club',
+      { label: undefined, expiresAt: expect.stringContaining('2026-12-01') },
+    ));
   });
 
   it('tells a member who may share but not create whose job it is', async () => {
-    await show({ exists: false, canCreate: false });
+    await show({ links: [], canManage: false, canCreate: false });
     expect(await screen.findByText(/Ask a manager of this organization to create one/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Create invitation link/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /New link/ })).not.toBeInTheDocument();
   });
 });
 
@@ -191,38 +338,132 @@ describe('replacing and switching off', () => {
     await show();
     fireEvent.click(await screen.findByRole('button', { name: /^Regenerate$/ }));
 
-    expect(await screen.findByText(/Every copy of the current link stops working/)).toBeInTheDocument();
+    expect(await screen.findByText(/Every copy of this link stops working/)).toBeInTheDocument();
+    /* And that the club's OTHER links carry on — the reason a club has several. */
+    expect(screen.getByText(/Your other links are not affected/)).toBeInTheDocument();
     expect(screen.getByText(/Nobody loses their membership/)).toBeInTheDocument();
-    expect(api.createOrganizationShareLink).not.toHaveBeenCalled();
+    expect(api.rotateOrganizationShareLink).not.toHaveBeenCalled();
 
     /* The confirmation's own verb, which is deliberately not the same word as
        the control that opened it. */
     fireEvent.click(screen.getByRole('button', { name: /^Regenerate link$/ }));
-    await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith('chess-club'));
+    await waitFor(() => expect(api.rotateOrganizationShareLink)
+      .toHaveBeenCalledWith('chess-club', 'oshl-1'));
   });
 
-  it('confirms switching off, and names the consequence for an invite-only club', async () => {
-    await show();
-    fireEvent.click(await screen.findByRole('button', { name: /Turn off link/ }));
+  it('names the link in the confirmation, so a manager sees which one', async () => {
+    const flyer = { ...LINK, id: 'oshl-2', label: 'Autumn flyer' };
+    await show({ ...MANAGED, links: [LINK, flyer] });
 
-    expect(await screen.findByText(/no invitation link until a manager/)).toBeInTheDocument();
+    const plate = (await screen.findByLabelText('Autumn flyer')).closest('.org-share-plate');
+    fireEvent.click(within(plate).getByRole('button', { name: /^Regenerate$/ }));
+
+    expect(await screen.findByText(/Regenerate “Autumn flyer”\?/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Regenerate link$/ }));
+    await waitFor(() => expect(api.rotateOrganizationShareLink)
+      .toHaveBeenCalledWith('chess-club', 'oshl-2'));
+  });
+
+  it('confirms switching off, and names the consequence for a club with one link', async () => {
+    await show();
+    fireEvent.click(await screen.findByRole('button', { name: /Switch off/ }));
+
+    expect(await screen.findByText(/This is the only one that works/)).toBeInTheDocument();
     expect(screen.getByText(/Nobody loses their membership/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /^Turn it off$/ }));
-    await waitFor(() => expect(api.revokeOrganizationShareLink).toHaveBeenCalledWith('chess-club'));
+    fireEvent.click(screen.getByRole('button', { name: /^Switch it off$/ }));
+    await waitFor(() => expect(api.revokeOrganizationShareLink)
+      .toHaveBeenCalledWith('chess-club', 'oshl-1'));
+  });
+
+  /**
+   * With more than one link the "nobody can join" warning is not true, and
+   * must not be said.
+   */
+  it('does not warn about locking the club out when other links work', async () => {
+    const flyer = { ...LINK, id: 'oshl-2', label: 'Autumn flyer' };
+    await show({ ...MANAGED, links: [LINK, flyer] });
+
+    const plate = (await screen.findByLabelText('General')).closest('.org-share-plate');
+    fireEvent.click(within(plate).getByRole('button', { name: /Switch off/ }));
+
+    expect(await screen.findByText(/Your other links carry on/)).toBeInTheDocument();
+    expect(screen.queryByText(/This is the only one that works/)).not.toBeInTheDocument();
+  });
+
+  it('renames a link without touching the link itself', async () => {
+    await show();
+    fireEvent.click(await screen.findByRole('button', { name: /Rename “General”/ }));
+    fireEvent.change(screen.getByLabelText('Rename this link'), { target: { value: 'Instagram' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+
+    await waitFor(() => expect(api.updateOrganizationShareLink)
+      .toHaveBeenCalledWith('chess-club', 'oshl-1', { label: 'Instagram' }));
+    /* A rename is not a rotation. The URL people already have keeps working. */
+    expect(api.rotateOrganizationShareLink).not.toHaveBeenCalled();
+  });
+
+  it('clears an expiry, so a temporary link can become permanent', async () => {
+    await show({ ...MANAGED, links: [{ ...LINK, expiresAt: '2026-12-01T23:59:59.000Z' }] });
+    fireEvent.click(await screen.findByRole('button', { name: /Change expiry/ }));
+    fireEvent.change(screen.getByLabelText('Stop working after'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+
+    await waitFor(() => expect(api.updateOrganizationShareLink)
+      .toHaveBeenCalledWith('chess-club', 'oshl-1', { expiresAt: null }));
+  });
+
+  /**
+   * The links that stopped working stay visible.
+   *
+   * A manager needs to see that the autumn flyer is the one that lapsed — and
+   * the join count beside it is the only record that the flyer worked at all.
+   */
+  it('keeps revoked and expired links visible to a manager, with their counts', async () => {
+    await show({
+      ...MANAGED,
+      links: [
+        LINK,
+        { ...LINK, id: 'oshl-2', label: 'Autumn flyer', state: 'expired', uses: 9 },
+        { ...LINK, id: 'oshl-3', label: 'Old QR code', state: 'revoked', uses: 4 },
+      ],
+    });
+
+    fireEvent.click(await screen.findByText(/2 links no longer working/));
+    expect(screen.getByText('Autumn flyer')).toBeInTheDocument();
+    expect(screen.getByText(/Expired · 9 people joined/)).toBeInTheDocument();
+    expect(screen.getByText(/Switched off · 4 people joined/)).toBeInTheDocument();
+  });
+
+  it('does not offer the URL of a dead link for copying', async () => {
+    await show({
+      ...MANAGED,
+      links: [{ ...LINK, state: 'revoked' }],
+    });
+    await screen.findByText(/1 link no longer working/);
+    expect(screen.queryByLabelText('General')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Copy link/ })).not.toBeInTheDocument();
+  });
+
+  it('refuses to offer another link once the club is at its ceiling', async () => {
+    await show({ ...MANAGED, canCreate: false });
+    expect(await screen.findByRole('button', { name: /New link/ })).toBeDisabled();
+    expect(screen.getByText(/Switch one off to make another/)).toBeInTheDocument();
   });
 
   it('does not offer either to somebody who may only share', async () => {
-    await show({ ...LINK, canCreate: false });
+    await show(SHARER);
     await screen.findByRole('button', { name: /Copy link/ });
     expect(screen.queryByRole('button', { name: /^Regenerate$/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Turn off link/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Switch off/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Rename/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /expiry/ })).not.toBeInTheDocument();
   });
 
   it('surfaces a refusal rather than pretending it worked', async () => {
-    api.createOrganizationShareLink.mockRejectedValue(new Error('You do not manage this organization.'));
+    api.rotateOrganizationShareLink.mockRejectedValue(new Error('You do not manage this organization.'));
     const addToast = vi.fn();
-    await show(LINK, { addToast });
+    await show(MANAGED, { addToast });
 
     fireEvent.click(await screen.findByRole('button', { name: /^Regenerate$/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Regenerate link$/ }));
@@ -240,17 +481,17 @@ describe('replacing and switching off', () => {
  */
 describe('what the dialog says the link does', () => {
   it('tells an invitation-only club that the link is what admits people', async () => {
-    await show(LINK, { policy: 'invite' });
-    expect(await screen.findByText(/only people who have it can join/)).toBeInTheDocument();
+    await show(MANAGED, { policy: 'invite' });
+    expect(await screen.findByText(/only people who have one can join/)).toBeInTheDocument();
   });
 
   it('tells an open club that the link is an address and not a password', async () => {
-    await show(LINK, { policy: 'open' });
-    expect(await screen.findByText(/not a password/)).toBeInTheDocument();
+    await show(MANAGED, { policy: 'open' });
+    expect(await screen.findByText(/not passwords/)).toBeInTheDocument();
   });
 
   it('tells a request-to-join club that a manager still decides', async () => {
-    await show(LINK, { policy: 'request' });
+    await show(MANAGED, { policy: 'request' });
     expect(await screen.findByText(/still accepts or declines every one/)).toBeInTheDocument();
   });
 });
@@ -263,7 +504,7 @@ describe('dialog behaviour', () => {
   });
 
   it('reports a failed load rather than an empty dialog', async () => {
-    api.fetchOrganizationShareLink.mockRejectedValue(new Error('the server is down'));
+    api.fetchOrganizationShareLinks.mockRejectedValue(new Error('the server is down'));
     render(
       <ShareOrganizationDialog
         orgKey="chess-club" organization={ORG} policy="invite"

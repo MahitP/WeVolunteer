@@ -17,7 +17,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { AlertCircle, Building2, Archive, ImagePlus } from 'lucide-react';
 import MembershipPolicyFields from '../components/organizations/MembershipPolicyFields';
 import '../components/organizations/OrganizationExperience.css';
-import { DEFAULT_JOIN_POLICY, DEFAULT_INVITE_POLICY } from '../organizationPolicy';
+import { DEFAULT_JOIN_POLICY, DEFAULT_INVITE_POLICY, DEFAULT_VISIBILITY } from '../organizationPolicy';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -25,6 +25,7 @@ import ConfirmDialog from '../components/common/ConfirmDialog';
 import TagInput from '../components/common/TagInput';
 import { normaliseOrgTag, MAX_ORG_TAGS, MAX_ORG_TAG_LENGTH } from '../organizationTags.js';
 import EmojiAvatarPicker from '../components/common/EmojiAvatarPicker';
+import { organizationPath } from '../utils/organizationUrl';
 
 /**
  * A stored tag label, as the chip `TagInput` expects.
@@ -58,8 +59,18 @@ export default function OrganizationForm({ addToast }) {
     /* The same defaults migration 062 gives a new row, so a club created through
        this form and one created by the API agree about who may join it. */
     joinPolicy: DEFAULT_JOIN_POLICY, invitePolicy: DEFAULT_INVITE_POLICY,
+    visibility: DEFAULT_VISIBILITY,
+    /* Empty until a club is loaded. A NEW organization has no handle to edit —
+       the server derives the first one from the name — so the field appears
+       only when editing. */
+    handle: '',
   });
   const [imageUrl, setImageUrl] = useState(null);
+  /* The handle as it was loaded, kept beside the form rather than in it: the
+     save needs to know whether the field MOVED, and a value that lives in
+     `form` would be overwritten by the edit it is supposed to be compared
+     against. */
+  const [loadedHandle, setLoadedHandle] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
   const [loadError, setLoadError] = useState('');
@@ -76,6 +87,7 @@ export default function OrganizationForm({ addToast }) {
            rather than re-deriving it here means one answer to the question. */
         if (!res.viewer.canManage) { setLoadError('forbidden'); return; }
         setImageUrl(res.organization.imageUrl ?? null);
+        setLoadedHandle(res.organization.slug ?? '');
         setForm({
           name: res.organization.name,
           description: res.organization.description,
@@ -84,6 +96,8 @@ export default function OrganizationForm({ addToast }) {
           allowReplies: res.organization.allowReplies !== false,
           joinPolicy: res.organization.joinPolicy ?? DEFAULT_JOIN_POLICY,
           invitePolicy: res.organization.invitePolicy ?? DEFAULT_INVITE_POLICY,
+          visibility: res.organization.visibility ?? DEFAULT_VISIBILITY,
+          handle: res.organization.slug ?? '',
           /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
              Mapping in here and back out on submit keeps the shared editor
              usable without teaching it a second storage format. */
@@ -133,12 +147,18 @@ export default function OrganizationForm({ addToast }) {
         name: form.name.trim(), description: form.description, tags,
         avatar: form.avatar, avatarColor: form.avatarColor, allowReplies: form.allowReplies,
         joinPolicy: form.joinPolicy, invitePolicy: form.invitePolicy,
+        visibility: form.visibility,
+        /* Only when editing, and only when it actually moved. Sending the
+           unchanged handle on every save would make every save a candidate for
+           the collision refusal, and would write an ORGANIZATION_HANDLE_CHANGED
+           audit row for a manager who only fixed a typo in the description. */
+        ...(editing && form.handle && form.handle !== loadedHandle ? { handle: form.handle } : {}),
       };
       const res = editing
         ? await api.updateOrganization(key, body)
         : await api.createOrganization(body);
       addToast?.(editing ? 'Organization updated.' : `${res.organization.name} created.`, 'success');
-      navigate(`/organizations/${res.organization.slug}`);
+      navigate(organizationPath(res.organization));
     } catch (err) {
       addToast?.(err.message, 'error');
       if (err.data?.field) setErrors({ [err.data.field]: err.message });
@@ -208,19 +228,17 @@ export default function OrganizationForm({ addToast }) {
             {editing && (
               <span className="field-hint">
                 {/**
-                  * Two different links, and a manager needs to know which one a
-                  * rename touches.
+                  * What a rename does NOT touch, which is now everything.
                   *
-                  * The web address carries the slug, which is derived from the
-                  * name and does change — that half was already here. The
-                  * invitation link is a random token in its own table and is
-                  * untouched by a rename, which is the reassurance that matters
-                  * once a club has put one on a flyer. Left unsaid, a manager who
-                  * read the old sentence would reasonably conclude that renaming
-                  * their club breaks every invitation they have handed out.
+                  * This used to say the opposite, and truthfully: a rename
+                  * recomputed the handle and the old address stopped working.
+                  * That changed when the handle became something a club prints
+                  * on a flyer — see `organizationHandles.js`. Both reassurances
+                  * belong here because a manager renaming a club is exactly the
+                  * person wondering which of their links is about to break.
                   */}
-                Renaming changes this organization&rsquo;s web address, so the old address stops
-                working. Any invitation link you have shared keeps working.
+                Renaming does not change this organization&rsquo;s web address or its invitation
+                links. You can change the address below.
               </span>
             )}
           </div>
@@ -366,9 +384,54 @@ export default function OrganizationForm({ addToast }) {
             <MembershipPolicyFields
               joinPolicy={form.joinPolicy}
               invitePolicy={form.invitePolicy}
+              visibility={form.visibility}
               disabled={submitting}
               onChange={set}
             />
+
+            {/**
+              * The web address, editable and only when editing.
+              *
+              * A new organization has none to edit — the server derives the
+              * first one from the name, so there is nothing to show before it
+              * exists, and asking somebody to invent a URL in the middle of
+              * creating a club is a form field nobody fills in well.
+              *
+              * The `@` is rendered as a prefix OUTSIDE the input, so the value
+              * in the field is exactly what is stored and the punctuation is
+              * not something a manager has to remember to type. The same shape
+              * a username field uses, and for the same reason.
+              */}
+            {editing && (
+              <div className="field">
+                <label className="label" htmlFor="org-handle">Web address</label>
+                <div className="org-handle-input">
+                  <span className="org-handle-prefix" aria-hidden="true">
+                    /organizations/@
+                  </span>
+                  <input
+                    id="org-handle"
+                    className="input"
+                    value={form.handle}
+                    maxLength={40}
+                    disabled={submitting}
+                    aria-invalid={!!errors.handle}
+                    aria-describedby={errors.handle ? 'org-handle-err' : 'org-handle-hint'}
+                    onChange={e => set('handle', e.target.value.toLowerCase().replace(/^@+/, ''))}
+                  />
+                </div>
+                {errors.handle && (
+                  <span className="field-error" id="org-handle-err">
+                    <AlertCircle size={12} aria-hidden="true" />{errors.handle}
+                  </span>
+                )}
+                <span className="field-hint" id="org-handle-hint">
+                  Lowercase letters, numbers and hyphens.{' '}
+                  <strong>Changing this stops the old address working</strong> — anywhere you have
+                  printed or posted it. Invitation links are not affected.
+                </span>
+              </div>
+            )}
 
           <div className="field">
             {/**
@@ -397,7 +460,7 @@ export default function OrganizationForm({ addToast }) {
         </div>
 
         <div className="card-foot row-between">
-          <Link className="btn btn-ghost" to={editing ? `/organizations/${key}` : '/directory'}>Cancel</Link>
+          <Link className="btn btn-ghost" to={editing ? organizationPath(key) : '/directory'}>Cancel</Link>
           <div className="row org-actions">
             {editing && (
               <button type="button" className="btn btn-danger" disabled={submitting}

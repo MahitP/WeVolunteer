@@ -932,13 +932,70 @@ export const api = {
     }),
 
   // ── Organization invitation links ──────────────
-  fetchOrganizationShareLink: async (key) =>
-    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`),
-  /** Mints the first link, or replaces the one there is. Managers only. */
-  createOrganizationShareLink: async (key) =>
-    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`, { method: 'POST', body: '{}' }),
-  revokeOrganizationShareLink: async (key) =>
-    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`, { method: 'DELETE' }),
+  /**
+   * The club's links.
+   *
+   * A manager gets all of them with their labels, states and join counts;
+   * anybody else who may share gets the one primary link and nothing else. Both
+   * shapes come back as `{ links: [...] }`, so the caller does not branch on
+   * which reader it is — `canManage` on the same payload says that.
+   */
+  fetchOrganizationShareLinks: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-links`),
+  /** Mints a link. Managers only. */
+  createOrganizationShareLink: async (key, { label, expiresAt } = {}) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-links`, {
+      method: 'POST',
+      body: JSON.stringify({ label, expiresAt }),
+    }),
+  /** Renames a link, or moves its expiry. */
+  updateOrganizationShareLink: async (key, linkId, changes) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-links/${encodeURIComponent(linkId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
+    }),
+  /**
+   * Replaces a link, keeping its label. Every copy of the old one stops working.
+   *
+   * A separate function rather than a flag on `updateOrganizationShareLink`,
+   * because the server refuses a request that both renames and regenerates —
+   * one that did both would leave a manager unsure which name the new link
+   * carries.
+   */
+  rotateOrganizationShareLink: async (key, linkId) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-links/${encodeURIComponent(linkId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ rotate: true }),
+    }),
+  revokeOrganizationShareLink: async (key, linkId) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-links/${encodeURIComponent(linkId)}`, {
+      method: 'DELETE',
+    }),
+
+  // ── Direct invitations ─────────────────────────
+  fetchOrganizationInvitations: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/invitations`),
+  /** Invites one named person. A user id, never an email address. */
+  inviteToOrganization: async (key, userId, message) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/invitations`, {
+      method: 'POST',
+      body: JSON.stringify(message ? { userId, message } : { userId }),
+    }),
+  revokeOrganizationInvitation: async (key, invitationId) =>
+    apiFetch(
+      `/api/organizations/${encodeURIComponent(key)}/invitations/${encodeURIComponent(invitationId)}`,
+      { method: 'DELETE' },
+    ),
+  /**
+   * Declines the invitation addressed to me.
+   *
+   * There is no matching accept: accepting an invitation IS joining, so the
+   * Accept press goes through `joinOrganization` and the invitation is what
+   * makes it succeed. A second endpoint that also created memberships would be
+   * a second copy of the join rules.
+   */
+  declineOrganizationInvitation: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/invitations/mine`, { method: 'DELETE' }),
 
   /**
    * The public projection an invitation link opens. UNAUTHENTICATED.
@@ -951,9 +1008,26 @@ export const api = {
   fetchOrganizationInvite: async (token) =>
     apiFetch(`/api/public/organizations/invite/${encodeURIComponent(token)}`),
 
+  /**
+   * A club at its canonical public address. UNAUTHENTICATED.
+   *
+   * Takes the BARE handle — the `@` is punctuation the URL carries, and the
+   * caller strips it, the same way `PublicProfile` does for `/users/@name`.
+   *
+   * Answers one 404 for a club that does not exist, one that is archived and
+   * one that chose not to be public. Handles are guessable by design, so a
+   * distinguishable refusal would make this a directory of the clubs that opted
+   * out.
+   */
+  fetchPublicOrganization: async (handle) =>
+    apiFetch(`/api/public/organizations/${encodeURIComponent(handle)}`),
+
   // ── Requests to join ───────────────────────────
-  requestToJoinOrganization: async (key) =>
-    apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests`, { method: 'POST', body: '{}' }),
+  requestToJoinOrganization: async (key, message) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests`, {
+      method: 'POST',
+      body: JSON.stringify(message ? { message } : {}),
+    }),
   withdrawOrganizationJoinRequest: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests/mine`, { method: 'DELETE' }),
   fetchOrganizationJoinRequests: async (key) =>

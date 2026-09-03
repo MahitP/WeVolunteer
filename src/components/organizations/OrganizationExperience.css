@@ -726,3 +726,329 @@
     justify-content: center;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The invitation somebody has been offered
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The banner above the plate, for a reader who has been invited.
+ *
+ * ── Why it is above the plate and not inside it ──
+ *
+ * It is the reason the page looks the way it does to this reader: an
+ * invitation-only club showing a Join button makes no sense until you know
+ * somebody asked you. Inside the plate it would have competed with the club's
+ * own name for the first thing read; above it, it is a sentence that arrives
+ * first and then gets out of the way.
+ *
+ * The accent border is the club's own colour, which is what ties the notice to
+ * the club rather than to the platform — the same device the manage band uses.
+ */
+.org-invitation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--org-accent, var(--neutral-100));
+  border-radius: var(--r-md);
+}
+
+.org-invitation-body {
+  /* `min-width: 0` so a long note wraps instead of pushing the actions off the
+     right edge — the same reason both organization columns carry it. */
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+
+.org-invitation-title {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/**
+ * The note the club wrote.
+ *
+ * A `blockquote`, because it is somebody else's words inside this page and the
+ * element that says so is the right one. Indented off a rule rather than boxed:
+ * a second surface here would make a one-line note look like a document.
+ */
+.org-invitation-note {
+  margin: 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--rule);
+  color: var(--ink-2);
+  font-style: italic;
+  /* Long words in a note somebody typed — a URL, a class code — must not widen
+     the banner past the page. */
+  overflow-wrap: anywhere;
+}
+
+.org-invitation-actions {
+  flex: 0 0 auto;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The note on a request, and the invite composer
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The line a student wrote with their request.
+ *
+ * Clamped to three lines. A manager reading a queue needs to see who is waiting
+ * at a glance, and a 300-character note per row would push the fourth request
+ * below the fold — but truncating to one line loses the sentence that makes the
+ * decision. Three is the compromise, and the full text is never more than a
+ * hover away in the accessibility tree because the element is not `hidden`.
+ */
+.org-request-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.org-invite-composer {
+  padding: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+/* The magnifier sits inside the field's box, so the icon reads as part of the
+   search rather than as a button beside it. */
+.org-invite-search {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  padding-left: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+}
+
+.org-invite-search .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  /* The focus ring belongs to the wrapper, so an inner one would draw a second
+     rectangle inside the first. */
+  box-shadow: none;
+}
+
+.org-invite-search:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+
+.org-invite-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+
+/**
+ * One person in the result list.
+ *
+ * The whole row is the label, so the tap target is the row and not the 16px
+ * radio — the house rule is 44px and a radio alone is nowhere near it.
+ */
+.org-invite-result {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  min-height: 44px;
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.org-invite-result:last-child { border-bottom: none; }
+.org-invite-result:hover { background: var(--surface-2); }
+.org-invite-result:has(input:checked) { background: var(--brand-tint); }
+.org-invite-result:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Share dialog: several links, and the public address
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The public address plate.
+ *
+ * Marked out from the invitation links by its border rather than by a heading,
+ * because the distinction it carries — an address that grants nothing against a
+ * credential that does — is exactly the thing a manager must not skim past. A
+ * dashed edge reads as "this one is different" without shouting.
+ */
+.org-share-address {
+  border-style: dashed;
+}
+
+.org-share-labelrow {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.org-share-label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.org-share-rename {
+  align-items: center;
+  gap: var(--s2);
+}
+
+.org-share-rename .input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.org-share-expiry {
+  flex: 1 1 100%;
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+
+.org-share-new {
+  padding: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+/**
+ * The links that no longer work, collapsed.
+ *
+ * A `details` element, so the closed state costs one line and the open state is
+ * the browser's own disclosure — keyboard-operable and announced without any
+ * JavaScript. The history matters and does not matter enough to be the first
+ * thing in the dialog.
+ */
+.org-share-retired > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.org-share-retired > summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.org-share-retired-row {
+  /* Dimmer than a live link, but not so dim it fails contrast — `--ink-soft` is
+     the token that is still readable, and the state is carried by the words
+     ("Switched off", "Expired") rather than by the colour alone. */
+  color: var(--ink-2);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The handle field
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `/organizations/@` as a prefix outside the input.
+ *
+ * So the value in the field is exactly what is stored, and the punctuation is
+ * not something a manager has to remember to type. `aria-hidden` on the prefix
+ * because the label already says "Web address" — read out, the prefix would be
+ * a URL fragment between the label and the field.
+ */
+.org-handle-input {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.org-handle-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s2) 0 var(--s3);
+  background: var(--surface-2);
+  border-right: 1px solid var(--rule);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.org-handle-input .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-family: var(--font-mono);
+}
+
+.org-handle-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+
+@media (max-width: 480px) {
+  /**
+   * The prefix wraps above the field on a narrow screen.
+   *
+   * `/organizations/@` is fifteen mono characters; beside an input on a 375px
+   * screen it leaves about nine characters of room to type in. Stacking gives
+   * the field the full width and keeps the prefix as the label-like thing it
+   * reads as.
+   */
+  .org-handle-input {
+    flex-direction: column;
+  }
+
+  .org-handle-prefix {
+    border-right: none;
+    border-bottom: 1px solid var(--rule);
+    padding: var(--s1) var(--s3);
+  }
+}
+
+/**
+ * The extra line on a policy option, under the consequence.
+ *
+ * Used by the public-visibility option to list what a public page actually
+ * discloses. Smaller and softer than the consequence, because it is detail
+ * somebody reads once when deciding rather than every time they scan the group.
+ */
+.org-policy-note {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+}

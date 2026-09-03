@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES } from './index.jsx';
+import { APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, isPublicPath } from './index.jsx';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APP_JSX = readFileSync(path.join(SRC, 'App.jsx'), 'utf8');
@@ -141,10 +141,30 @@ describe('route gating cannot become decorative', () => {
   /**
    * Guard 3 — a gated path may not also be reachable as a public one.
    *
-   * `routes.test.jsx` already forbids duplicate paths across the concatenated
-   * table, which covers the exact-match case. This covers the one it cannot see:
-   * a public route whose pattern *matches* a gated path, which would shadow the
-   * gate without ever being a duplicate of it.
+   * `routes.test.jsx` already forbids duplicate paths WITHIN a table, which
+   * covers the exact-match case. This covers the one it cannot see: a public
+   * route whose pattern *matches* a gated path, which would shadow the gate
+   * without ever being a duplicate of it.
+   *
+   * ── Why `shellWhenSignedIn` is exempt, and why that is not a hole ──
+   *
+   * `/organizations/:key` is declared in both tables on purpose: signed out it
+   * is a club's public address, signed in it is the club's page. App.jsx passes
+   * the session to `isPublicPath`, and a `shellWhenSignedIn` entry answers
+   * false whenever there IS one — so for every reader the gate could apply to,
+   * the gated route wins.
+   *
+   * For a reader with no session the public pattern does match a gated path
+   * (`/organizations/new`), and that shadows nothing that was reachable: a
+   * gated route is by definition unreachable without a session, and App.jsx
+   * would otherwise answer the signed-out catch-all. What they get instead is
+   * the public view's "this page needs an account", which is the same answer
+   * said better.
+   *
+   * The exemption is deliberately narrow — the flag, not the path — so a future
+   * public route cannot inherit it by being declared nearby, and a
+   * `shellWhenSignedIn` entry is still required to carry no gate of its own
+   * (Guard 1).
    */
   it('no public route pattern shadows a gated route path', () => {
     const toRegex = pattern => new RegExp(
@@ -153,6 +173,7 @@ describe('route gating cannot become decorative', () => {
 
     const shadowed = [];
     for (const pub of PUBLIC_ROUTES) {
+      if (pub.shellWhenSignedIn) continue;
       const re = toRegex(pub.path);
       for (const app of APP_ROUTES) {
         if (app.path !== pub.path && re.test(app.path)) {
@@ -162,5 +183,34 @@ describe('route gating cannot become decorative', () => {
     }
 
     expect(shadowed, 'a public route pattern would render before the gated one').toEqual([]);
+  });
+
+  /**
+   * Guard 4 — `shellWhenSignedIn` must actually be honoured.
+   *
+   * The exemption in Guard 3 rests entirely on `isPublicPath` standing down for
+   * a reader with a session. If that behaviour were ever removed — or if
+   * App.jsx stopped passing the session — the flag would become a comment and
+   * the public view would take over every organization page for every member.
+   * So the behaviour is asserted rather than assumed, and App.jsx is checked
+   * for the call that supplies it.
+   */
+  it('a shellWhenSignedIn route is public only while there is no session', () => {
+    const flagged = PUBLIC_ROUTES.filter(r => r.shellWhenSignedIn);
+    expect(flagged.length, 'this guard is pointless with no flagged routes').toBeGreaterThan(0);
+
+    for (const route of flagged) {
+      /* A concrete path from the pattern — the parameter filled with something
+         that could not be a literal segment in the table. Named `concrete`
+         because `path` in this file is the node module. */
+      const concrete = route.path.replace(/:[^/]+/g, 'zz-fixture');
+      expect(isPublicPath(concrete, { signedIn: false }), `${route.path} signed out`).toBe(true);
+      expect(isPublicPath(concrete, { signedIn: true }), `${route.path} signed in`).toBe(false);
+    }
+
+    expect(
+      APP_JSX,
+      'App.jsx must pass the session to isPublicPath, or shellWhenSignedIn is decorative',
+    ).toMatch(/isPublicPath\(\s*currentPath\s*,\s*\{\s*signedIn:/);
   });
 });
