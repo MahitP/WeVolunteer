@@ -369,6 +369,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absence reads as the club ignoring them. Coerced at the single place that
   writes the row, with a guard over the whole notification registry.
 
+- **The accessibility sweep was reporting a not-found panel as coverage of the
+  public certificate verification page.** `/verify/:code` took its parameter
+  from a literal in the harness's fixture table, `WEV-8DLE-CNMH`. That code had
+  never resolved and never could: `generateCode` builds certificate codes from
+  `crypto.randomBytes`, so every reseed mints different ones — two runs during
+  this fix produced `WEV-JPFW-8C2S` and `WEV-9B6A-JQVK`. React Router serves the
+  shell for any path, so the route answered HTTP 200, landed on exactly the
+  requested path, and rendered "Invalid Certificate" — which five sweeps then
+  measured and filed under the real route's name. Every accessibility number
+  ever reported for the verification page was a number about its error state,
+  and nothing in the output said so. Parameters that cannot be written down are
+  now resolved from the running application at walk time
+  (`a11y/harness/fixtures.mjs` asks `/api/certificates` for a code that exists),
+  and the run's log names the code it measured. The panel itself is marked
+  `data-error-kind="404"` as a backstop, so a seed that stops issuing
+  certificates makes the sweep report the route as unmeasured rather than
+  quietly audit the wrong page again — and the fixture table now fails its guard
+  if anybody types a code-shaped literal back into it.
 - **A lower version number could compare as higher, permanently.** The version
   comparator was `(major - major) || (minor - minor) || (patch - patch)` over
   components produced by `Number()` with no bound on length. Both halves were
