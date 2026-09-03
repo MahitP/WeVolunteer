@@ -4,15 +4,6 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { startTestServer, enrolTwoFactor } from './testServer.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
-import { daysAhead } from './testing/dates.js';
-
-/**
- * Effective dates are COMPUTED. A literal one is valid for two days and
- * refused for ever after — `server/testing/dates.js` has the full account of
- * what that cost, and `legalStore.test.js` fails the build on a relapse.
- */
-const TODAY = daysAhead(0);
-
 
 /**
  * The Legal Center editor, attacked rather than exercised.
@@ -31,6 +22,21 @@ const TODAY = daysAhead(0);
  * pass every functional test in the suite while making version comparison
  * meaningless. An audit finds that once; a test keeps finding it.
  */
+
+/**
+ * Every date these fixtures publish under is today's.
+ *
+ * Rule 2 — a version cannot take effect before it is published — is checked
+ * against the wall clock, so a literal date here stops being a fixture and
+ * becomes a bomb on a timer: once the clock walks past it every publish in the
+ * file is refused, and the refusals arrive wearing the wrong labels. Rule 3
+ * allows equality, and everything below publishes to one slug, so a single
+ * shared "today" satisfies the floor for all of them.
+ *
+ * The malformed dates further down stay literal on purpose — they are testing
+ * the parser's shape rules, which the calendar has no say in.
+ */
+const today = () => new Date().toISOString().slice(0, 10);
 
 /* ─── The launch scenario: enforcement ON, with revisions present ─────────── */
 
@@ -81,7 +87,7 @@ describe('hash enforcement and the revision layer, together', () => {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nA revision published before the switch.\n',
-      effectiveAt: TODAY,
+      effectiveAt: today(),
       userId: null,
     });
 
@@ -104,7 +110,7 @@ describe('hash enforcement and the revision layer, together', () => {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nServed under enforcement.\n',
-      effectiveAt: TODAY,
+      effectiveAt: today(),
       userId: null,
     });
 
@@ -141,7 +147,7 @@ describe('hash enforcement and the revision layer, together', () => {
       slug: 'cookie-and-tracking-notice',
       version: '1.1.0',
       body: '# Cookie Notice\n\nStill here without the file.\n',
-      effectiveAt: TODAY,
+      effectiveAt: today(),
       userId: null,
     });
 
@@ -168,7 +174,7 @@ describe('hash enforcement and the revision layer, together', () => {
         slug: 'cookie-and-tracking-notice',
         version,
         body: `# Cookie Notice\n\n${text}\n`,
-        effectiveAt: TODAY,
+        effectiveAt: today(),
         userId: null,
       });
     }
@@ -315,7 +321,7 @@ describe('attacking the editor over HTTP', () => {
     for (const [label, version] of REJECTED) {
       it(`refuses ${label}: ${JSON.stringify(version)}`, async () => {
         const res = await publish(
-          { body: `# H\n\nAttempt ${label}.\n`, version, effectiveAt: TODAY },
+          { body: `# H\n\nAttempt ${label}.\n`, version, effectiveAt: today() },
           await grantFor(version)
         );
         expect(res.status).toBe(400);
@@ -331,7 +337,7 @@ describe('attacking the editor over HTTP', () => {
     it('refuses non-string versions without a 500', async () => {
       for (const version of [null, 123, true, {}, ['1.0.0'], 1.0]) {
         const res = await publish(
-          { body: '# H\n\nTyped wrongly.\n', version, effectiveAt: TODAY },
+          { body: '# H\n\nTyped wrongly.\n', version, effectiveAt: today() },
           await grantFor('')
         );
         expect([400, 403], `version ${JSON.stringify(version)}`).toContain(res.status);
@@ -341,7 +347,7 @@ describe('attacking the editor over HTTP', () => {
 
     it('refuses a missing version field entirely', async () => {
       const res = await publish(
-        { body: '# H\n\nNo version at all.\n', effectiveAt: TODAY },
+        { body: '# H\n\nNo version at all.\n', effectiveAt: today() },
         await grantFor('')
       );
       expect(res.status).not.toBe(500);
@@ -357,7 +363,7 @@ describe('attacking the editor over HTTP', () => {
      */
     it('accepts a version with surrounding whitespace and stores it trimmed', async () => {
       const res = await publish(
-        { body: '# H\n\nPadded version.\n', version: '  1.5.0  ', effectiveAt: TODAY },
+        { body: '# H\n\nPadded version.\n', version: '  1.5.0  ', effectiveAt: today() },
         await grantFor('  1.5.0  ')
       );
       expect(res.status).toBe(200);
@@ -375,7 +381,7 @@ describe('attacking the editor over HTTP', () => {
     it('refuses a numeric component too large to compare exactly', async () => {
       const huge = '999999999999999999999.0.0';
       const res = await publish(
-        { body: '# H\n\nHuge version.\n', version: huge, effectiveAt: TODAY },
+        { body: '# H\n\nHuge version.\n', version: huge, effectiveAt: today() },
         await grantFor(huge)
       );
       expect(res.status).toBe(400);
@@ -426,7 +432,7 @@ describe('attacking the editor over HTTP', () => {
     ]) {
       it(`refuses a link using ${label}`, async () => {
         const res = await publish(
-          { body: `# H\n\n[click](${href})\n`, version: '4.0.0', effectiveAt: TODAY },
+          { body: `# H\n\n[click](${href})\n`, version: '4.0.0', effectiveAt: today() },
           await grantFor('4.0.0')
         );
         expect(res.status).toBe(400);
@@ -449,7 +455,7 @@ describe('attacking the editor over HTTP', () => {
       const hostile = '# H\n\n<script>alert(1)</script> and '
         + '<img src=x onerror=alert(1)> and <iframe src=evil>\n';
       const res = await publish(
-        { body: hostile, version: '5.0.0', effectiveAt: TODAY },
+        { body: hostile, version: '5.0.0', effectiveAt: today() },
         await grantFor('5.0.0')
       );
       expect(res.status).toBe(200);
@@ -471,7 +477,7 @@ describe('attacking the editor over HTTP', () => {
 
     it('refuses a link to a document that does not exist', async () => {
       const res = await publish(
-        { body: '# H\n\n[x](/legal/no-such-policy)\n', version: '6.0.0', effectiveAt: TODAY },
+        { body: '# H\n\n[x](/legal/no-such-policy)\n', version: '6.0.0', effectiveAt: today() },
         await grantFor('6.0.0')
       );
       expect(res.status).toBe(400);
@@ -488,7 +494,7 @@ describe('attacking the editor over HTTP', () => {
     ]) {
       it(`finds an unsafe link nested in a ${label}`, async () => {
         const res = await publish(
-          { body, version: '7.0.0', effectiveAt: TODAY },
+          { body, version: '7.0.0', effectiveAt: today() },
           await grantFor('7.0.0')
         );
         expect(res.status).toBe(400);
@@ -509,7 +515,7 @@ describe('attacking the editor over HTTP', () => {
       const challengeId = await grantFor('8.0.0');
 
       const refused = await publish(
-        { body: '# H\n\n[x](javascript:alert(1))\n', version: '8.0.0', effectiveAt: TODAY },
+        { body: '# H\n\n[x](javascript:alert(1))\n', version: '8.0.0', effectiveAt: today() },
         challengeId
       );
       expect(refused.status).toBe(400);
@@ -517,7 +523,7 @@ describe('attacking the editor over HTTP', () => {
       /* The SAME challenge now publishes valid content. If the refusal had spent
          it, this would be a 409. */
       const accepted = await publish(
-        { body: '# H\n\nFixed the link.\n', version: '8.0.0', effectiveAt: TODAY },
+        { body: '# H\n\nFixed the link.\n', version: '8.0.0', effectiveAt: today() },
         challengeId
       );
       expect(accepted.status).toBe(200);
@@ -529,7 +535,7 @@ describe('attacking the editor over HTTP', () => {
       ).get()).n;
 
       await publish(
-        { body: '# H\n\nRefused.\n', version: 'nope', effectiveAt: TODAY },
+        { body: '# H\n\nRefused.\n', version: 'nope', effectiveAt: today() },
         await grantFor('nope')
       );
 
@@ -541,7 +547,7 @@ describe('attacking the editor over HTTP', () => {
 
     it('leaks no filesystem path in an error message', async () => {
       const res = await publish(
-        { body: '# H\n\nRefused.\n', version: 'nope', effectiveAt: TODAY },
+        { body: '# H\n\nRefused.\n', version: 'nope', effectiveAt: today() },
         await grantFor('nope')
       );
       expect(JSON.stringify(res.body)).not.toMatch(/\/Users\/|\/home\/|docs\/legal/);
@@ -562,8 +568,8 @@ describe('attacking the editor over HTTP', () => {
   it('lets only one of two concurrent publishes at the same version succeed', async () => {
     const [a, b] = await Promise.all([grantFor('9.0.0'), grantFor('9.0.0')]);
     const results = await Promise.all([
-      publish({ body: '# H\n\nRacer A.\n', version: '9.0.0', effectiveAt: TODAY }, a),
-      publish({ body: '# H\n\nRacer B.\n', version: '9.0.0', effectiveAt: TODAY }, b),
+      publish({ body: '# H\n\nRacer A.\n', version: '9.0.0', effectiveAt: today() }, a),
+      publish({ body: '# H\n\nRacer B.\n', version: '9.0.0', effectiveAt: today() }, b),
     ]);
 
     const codes = results.map(r => r.status).sort();
@@ -622,7 +628,7 @@ describe('attacking the editor over HTTP', () => {
     });
     const published = await srv.call(
       'POST', '/api/admin/legal/documents/terms-of-service/revisions',
-      { body: '# Terms\n\nRevised before this signup.\n', version: '1.4.0', effectiveAt: TODAY },
+      { body: '# Terms\n\nRevised before this signup.\n', version: '1.4.0', effectiveAt: today() },
       owner, { [REAUTH_CHALLENGE_HEADER]: termsGrant }
     );
     expect(published.status).toBe(200);

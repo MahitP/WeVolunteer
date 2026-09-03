@@ -477,6 +477,14 @@ describe('parseEffectiveAt', () => {
  * long enough to be reviewed, merged, and forgotten. This file owns the date
  * rules, so it owns the guard.
  *
+ * It earned its place immediately, twice. It found the same bug with a longer
+ * fuse in `legalUpgradeBoot.test.js` — `2027-01-01` and `2027-02-01`, which pass
+ * today and become past dates in four months — and it holds against the version
+ * of the two editor suites that was fixed in parallel on `main`, which uses its
+ * own local helpers rather than `server/testing/dates.js`. That is the point of
+ * asserting the property instead of the mechanism: two independent fixes, one
+ * guarantee, and neither has to know about the other.
+ *
  * THIS file is exempt: it pins `now` explicitly (`NOW` above), which is the
  * other correct way to test a date rule and is why its own literals are safe.
  * The registry in `legalDocuments.js` is not a test and is not scanned — its

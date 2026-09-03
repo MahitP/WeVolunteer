@@ -26,10 +26,19 @@
  *
  * ── Why a module and not a line in each file ──
  *
- * Three copies of a one-liner is how the fourth caller writes a literal instead.
+ * Copies of a one-liner are how the next caller writes a literal instead.
  * `server/testing/` is where this project already keeps test infrastructure that
  * more than one suite needs (`fixtureDebt.js`), and the guard in
  * `legalStore.test.js` fails the build on any test that goes back to a literal.
+ *
+ * ── Who actually imports this, and who does not ──
+ *
+ * `legalUpgradeBoot.test.js` does. The two editor suites do NOT: they were fixed
+ * in parallel on `main` (`d6d7259`) with equivalent local helpers, and that
+ * version was taken at the merge rather than replaced — the guard asserts the
+ * PROPERTY, not the mechanism, and both spellings satisfy it. Rewriting two
+ * green files to route through this module would be churn for symmetry's sake.
+ * A new caller should import this rather than write a third helper.
  *
  * Imports nothing, so any suite can take it without paying for a database or a
  * server.

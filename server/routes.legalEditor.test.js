@@ -2,15 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer, enrolTwoFactor } from './testServer.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { RUNNING_ON_POSTGRES } from './testEngine.js';
-import { daysAhead } from './testing/dates.js';
-
-/**
- * Effective dates are COMPUTED. A literal one is valid for two days and
- * refused for ever after — `server/testing/dates.js` has the full account of
- * what that cost, and `legalStore.test.js` fails the build on a relapse.
- */
-const TODAY = daysAhead(0);
-
 
 /**
  * The owner-only Legal Center editor.
@@ -39,6 +30,24 @@ describe('the Legal Center editor', () => {
 
   const OWNER_PASSWORD = 'Password123';
 
+  /**
+   * Effective dates, relative to the day the suite runs.
+   *
+   * Rule 2 — a version cannot take effect before it is published — is checked
+   * against the wall clock, so a fixture written as a literal date is a bomb on
+   * a timer: it passes until the clock walks past it, and then EVERY publish in
+   * the file is refused. The knock-on failures name the wrong thing entirely
+   * (`expected [ '1.2.0' ] to include '1.1.0'`, a duplicate insert that no
+   * longer collides because the row it would collide with was never written),
+   * which is a slow way to rediscover that the dates went stale.
+   *
+   * The offsets below preserve the ORDER the literals had, because rule 3 makes
+   * one publication's date the floor for every later publication of the SAME
+   * document. Same-slug dates only ever move forward.
+   */
+  const daysFromToday = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const today = () => daysFromToday(0);
+
   /* Distinct documents per concern, so one test publishing a revision cannot
      move the version another test is asserting against. None of these is a
      signup document, so nothing here disturbs the consent fixtures. */
@@ -48,8 +57,8 @@ describe('the Legal Center editor', () => {
   const PUBLIC_READ = 'volunteer-record-policy';
   /* For the effective-date rules. Its own slug, because rule 3 — effective dates
      only move forward — means one test's date becomes the floor for every later
-     publication of the same document. `EDITABLE` is walked up the `daysAhead`
-     ladder by the cases above, which is exactly that effect. Not a signup or
+     publication of the same document. `EDITABLE` is already dated two days
+     ahead by the fixtures above, which is exactly that effect. Not a signup or
      organizer document, so publishing it disturbs no consent fixture. */
   const DATED = 'youth-safety-guidelines';
 
@@ -116,7 +125,7 @@ describe('the Legal Center editor', () => {
     it('refuses an unauthenticated caller on every endpoint', async () => {
       const list = await srv.call('GET', listUrl);
       const read = await srv.call('GET', docUrl(EDITABLE));
-      const write = await srv.call('POST', publishUrl(EDITABLE), { body: body('x'), version: '9.9.9', effectiveAt: TODAY });
+      const write = await srv.call('POST', publishUrl(EDITABLE), { body: body('x'), version: '9.9.9', effectiveAt: today() });
 
       expect(list.status).toBe(401);
       expect(read.status).toBe(401);
@@ -137,7 +146,7 @@ describe('the Legal Center editor', () => {
       expect((await srv.call('GET', listUrl, undefined, admin)).status).toBe(403);
       expect((await srv.call('GET', docUrl(EDITABLE), undefined, admin)).status).toBe(403);
       expect((await publish(EDITABLE, {
-        body: body('smuggled'), version: '9.9.9', effectiveAt: TODAY,
+        body: body('smuggled'), version: '9.9.9', effectiveAt: today(),
       }, admin)).status).toBe(403);
     });
 
@@ -178,7 +187,7 @@ describe('the Legal Center editor', () => {
   describe('step-up verification', () => {
     it('refuses a session alone, however legitimate the owner', async () => {
       const res = await publish(EDITABLE, {
-        body: body('no grant'), version: '1.0.1', effectiveAt: TODAY,
+        body: body('no grant'), version: '1.0.1', effectiveAt: today(),
       });
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('reauth_required');
@@ -186,7 +195,7 @@ describe('the Legal Center editor', () => {
 
     it('publishes nothing when the verification is missing', async () => {
       const before = await srv.call('GET', `/api/legal/documents/${EDITABLE}`);
-      await publish(EDITABLE, { body: body('no grant'), version: '1.0.1', effectiveAt: TODAY });
+      await publish(EDITABLE, { body: body('no grant'), version: '1.0.1', effectiveAt: today() });
       const after = await srv.call('GET', `/api/legal/documents/${EDITABLE}`);
       expect(after.body.version).toBe(before.body.version);
       expect(after.body.markdown).toBe(before.body.markdown);
@@ -200,7 +209,7 @@ describe('the Legal Center editor', () => {
     it('refuses a grant taken out for a different document', async () => {
       const challengeId = await grantFor(REJECTED, '1.0.1');
       const res = await publish(EDITABLE, {
-        body: body('wrong document'), version: '1.0.1', effectiveAt: TODAY,
+        body: body('wrong document'), version: '1.0.1', effectiveAt: today(),
       }, owner, challengeId);
       /* 409, not 403: the caller IS verified, and the grant they hold simply is
          not for this request. `refuseReauth` maps that to "not completed yet",
@@ -213,7 +222,7 @@ describe('the Legal Center editor', () => {
     it('refuses a grant taken out for a different version', async () => {
       const challengeId = await grantFor(EDITABLE, '1.0.1');
       const res = await publish(EDITABLE, {
-        body: body('version mismatch'), version: '2.0.0', effectiveAt: TODAY,
+        body: body('version mismatch'), version: '2.0.0', effectiveAt: today(),
       }, owner, challengeId);
       expect(res.status).toBe(409);
       expect((await srv.call('GET', `/api/legal/documents/${EDITABLE}`)).body.markdown)
@@ -228,7 +237,7 @@ describe('the Legal Center editor', () => {
       const res = await publishVerified(EDITABLE, {
         body: body('The cookie notice, corrected.'),
         version: '1.1.0',
-        effectiveAt: TODAY,
+        effectiveAt: today(),
       });
       expect(res.status).toBe(200);
       expect(res.body.version).toBe('1.1.0');
@@ -244,7 +253,7 @@ describe('the Legal Center editor', () => {
       await publishVerified(PUBLIC_READ, {
         body: body('Records are kept for as long as the school requires.'),
         version: '1.2.0',
-        effectiveAt: daysAhead(1),
+        effectiveAt: today(),
       });
 
       const res = await srv.call('GET', `/api/legal/documents/${PUBLIC_READ}`);
@@ -274,7 +283,7 @@ describe('the Legal Center editor', () => {
 
     it('keeps every previous version', async () => {
       await publishVerified(EDITABLE, {
-        body: body('Corrected again.'), version: '1.2.0', effectiveAt: daysAhead(2),
+        body: body('Corrected again.'), version: '1.2.0', effectiveAt: daysFromToday(2),
       });
 
       const res = await srv.call('GET', docUrl(EDITABLE), undefined, owner);
@@ -311,13 +320,13 @@ describe('the Legal Center editor', () => {
     /* Each case takes out its own grant, so a refusal cannot be mistaken for a
        missing verification — and so a refused save is shown NOT to cost one. */
     const attempt = (version) => publishVerified(REJECTED, {
-      body: body(`attempting ${version}`), version, effectiveAt: daysAhead(3),
+      body: body(`attempting ${version}`), version, effectiveAt: today(),
     });
 
     it('refuses a malformed version', async () => {
       for (const bad of ['1', 'v1.0.0', '1.0', '1.0.0.1', 'one', '', '1.01.0']) {
         const res = await publish(REJECTED, {
-          body: body('x'), version: bad, effectiveAt: daysAhead(3),
+          body: body('x'), version: bad, effectiveAt: today(),
         }, owner, await grantFor(REJECTED, bad));
         expect(res.status, `version ${JSON.stringify(bad)}`).toBe(400);
         expect(res.body.field).toBe('version');
@@ -361,7 +370,7 @@ describe('the Legal Center editor', () => {
     it('refuses text identical to what is already published', async () => {
       const current = await srv.call('GET', docUrl(VERSIONED), undefined, owner);
       const res = await publishVerified(VERSIONED, {
-        body: current.body.body, version: '5.0.0', effectiveAt: daysAhead(4),
+        body: current.body.body, version: '5.0.0', effectiveAt: today(),
       });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/identical/);
@@ -383,7 +392,7 @@ describe('the Legal Center editor', () => {
       const res = await publishVerified(VERSIONED, {
         body: '# Heading\n\n[click here](javascript:alert(document.cookie))\n',
         version: '4.0.0',
-        effectiveAt: daysAhead(5),
+        effectiveAt: today(),
       });
       expect(res.status).toBe(400);
       expect(res.body.field).toBe('body');
@@ -401,7 +410,7 @@ describe('the Legal Center editor', () => {
 
     it('refuses an empty document', async () => {
       const res = await publishVerified(VERSIONED, {
-        body: '   ', version: '4.0.0', effectiveAt: daysAhead(5),
+        body: '   ', version: '4.0.0', effectiveAt: today(),
       });
       expect(res.status).toBe(400);
     });
@@ -490,8 +499,8 @@ describe('the Legal Center editor', () => {
       await expect(async () => db.prepare(`
         INSERT INTO legal_document_revisions
           (slug, version, body, content_hash, effective_at, created_at, created_by)
-        VALUES (?, '1.1.0', 'x', 'h', ?, ?, NULL)
-      `).run(EDITABLE, TODAY, `${TODAY}T00:00:00Z`)).rejects.toThrow();
+        VALUES (?, '1.1.0', 'x', 'h', '${today()}', '${today()}T00:00:00Z', NULL)
+      `).run(EDITABLE)).rejects.toThrow();
     });
   });
   /**
@@ -506,7 +515,7 @@ describe('the Legal Center editor', () => {
    */
   describe('the effective date does not gate publication', () => {
     it('serves a future-dated revision immediately', async () => {
-      const future = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
+      const future = daysFromToday(60);
       const marker = `Dated ahead ${Date.now()}.`;
 
       /* A slug nothing else in this file publishes to. Rule 3 — effective dates
@@ -539,7 +548,7 @@ describe('the Legal Center editor', () => {
       const res = await publishVerified(DATED, {
         version: '4.0.1',
         body: `# Youth safety guidelines\n\nAnother revision ${Date.now()}.\n`,
-        effectiveAt: new Date().toISOString().slice(0, 10),
+        effectiveAt: today(),
       });
       expect(res.status).toBe(200);
 
@@ -562,7 +571,7 @@ describe('the Legal Center editor', () => {
        that an owner whose local calendar is a day behind the server's is not
        refused the date their own picker offered them. See `parseEffectiveAt`. */
     it('refuses a date genuinely in the past', async () => {
-      const wellPast = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+      const wellPast = daysFromToday(-3);
       const res = await publishVerified(DATED, {
         version: '5.0.0', body: body('past'), effectiveAt: wellPast,
       });
@@ -572,7 +581,7 @@ describe('the Legal Center editor', () => {
     });
 
     it('refuses a date more than a year ahead', async () => {
-      const far = new Date(Date.now() + 400 * 86400000).toISOString().slice(0, 10);
+      const far = daysFromToday(400);
       const res = await publishVerified(DATED, {
         version: '5.0.1', body: body('far'), effectiveAt: far,
       });
@@ -585,7 +594,7 @@ describe('the Legal Center editor', () => {
        break, so it is asserted rather than assumed. */
     it('accepts today', async () => {
       const res = await publishVerified(DATED, {
-        version: '5.1.0', body: body('today'), effectiveAt: new Date().toISOString().slice(0, 10),
+        version: '5.1.0', body: body('today'), effectiveAt: today(),
       });
       expect(res.status).toBe(200);
     });
@@ -599,14 +608,14 @@ describe('the Legal Center editor', () => {
      * or after the pending date, and the printed timeline stays readable.
      */
     it('refuses a date earlier than a pending future-dated revision', async () => {
-      const ahead = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
+      const ahead = daysFromToday(45);
       expect((await publishVerified(DATED, {
         version: '6.0.0', body: body('scheduled'), effectiveAt: ahead,
       })).status).toBe(200);
 
       const res = await publishVerified(DATED, {
         version: '6.0.1', body: body('same day correction'),
-        effectiveAt: new Date().toISOString().slice(0, 10),
+        effectiveAt: today(),
       });
       expect(res.status).toBe(400);
       expect(res.body.field).toBe('effectiveAt');
