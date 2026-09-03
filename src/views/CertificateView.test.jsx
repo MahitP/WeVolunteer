@@ -131,6 +131,51 @@ describe('when it cannot be opened', () => {
     renderViewer();
     expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument();
   });
+
+  /**
+   * The empty state is the only thing under the shell's `h1`, so an `h3` — the
+   * `EmptyState` default, right for the twenty-eight callers that sit inside a
+   * section — announces a level that is not there to anybody skimming by
+   * heading. Reported by the accessibility sweep as `h1 "Certificate" -> h3`.
+   */
+  it('does not skip a heading level on the way to the empty state', async () => {
+    vi.spyOn(api, 'fetchCertificate').mockRejectedValue(new ApiError('nope', { status: 404 }));
+    renderViewer();
+
+    const title = await screen.findByText(/No certificate matches that code/i);
+    expect(title.tagName).toBe('H2');
+  });
+
+  /**
+   * Why a view that is not an `ErrorExperience` carries its attribute.
+   *
+   * The a11y sweep uses `data-error-kind` to tell "I measured this route's page"
+   * from "I measured an error panel standing in for it". Certificate codes are
+   * random, so the harness's typed fixture never resolves and this route renders
+   * the not-found panel on every run — which, unmarked, was measured and
+   * reported as coverage of the certificate page.
+   *
+   * Asserted here because the attribute has no visible effect: nothing in the
+   * product would fail if somebody removed it, and the sweep would quietly go
+   * back to over-reporting.
+   */
+  it('marks the not-found panel so the a11y sweep does not count it as the page', async () => {
+    vi.spyOn(api, 'fetchCertificate').mockRejectedValue(new ApiError('nope', { status: 404 }));
+    const { container } = renderViewer();
+
+    await screen.findByText(/No certificate matches that code/i);
+    expect(container.querySelector('[data-error-kind="404"]')).not.toBeNull();
+  });
+
+  /* A server fault is not a 404, and marking it as one would make the sweep
+     drop a route for the wrong reason. */
+  it('does not mark a server fault as a missing page', async () => {
+    vi.spyOn(api, 'fetchCertificate').mockRejectedValue(new ApiError('boom', { status: 500 }));
+    const { container } = renderViewer();
+
+    await screen.findByText(/could not be loaded/i);
+    expect(container.querySelector('[data-error-kind="404"]')).toBeNull();
+  });
 });
 
 describe('downloading', () => {

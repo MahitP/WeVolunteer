@@ -113,10 +113,36 @@ export default function CertificateView({ currentUser, addToast }) {
 
   if (error) {
     return (
-      <div className="page stack-lg">
+      /**
+       * `data-error-kind` on a page that is not an `ErrorExperience`.
+       *
+       * The a11y sweep reads this attribute to answer "did I measure the page
+       * this route names, or an error panel standing in for it?" — a question
+       * HTTP status cannot answer, because React Router serves the shell for any
+       * path and a missing fixture still lands on 200.
+       *
+       * Certificate codes are `crypto.randomBytes` (see `generateCode`), so the
+       * harness's typed `code` fixture cannot resolve on a freshly seeded
+       * database and this route renders the not-found panel every run. Without
+       * the marker the sweep measured that panel and reported it under
+       * `/certificates/:code`, which is the failure mode `walk.mjs` calls "worse
+       * than skipping a route, because it produces numbers that look like
+       * coverage".
+       *
+       * So the marker is here to make the sweep report this route as UNMEASURED
+       * rather than to claim a page it never saw. It narrows what the suite
+       * asserts, on purpose. The real page was audited with axe directly — see
+       * docs/operations/owner-center.md — and the durable fix is to resolve the
+       * fixture from the seed at run time rather than type it.
+       */
+      <div className="page stack-lg" data-error-kind={error === 'not_found' ? '404' : 'unknown'}>
         <BackLink />
         <EmptyState
           icon={FileText}
+          /* The only thing on the page, so it sits directly under the shell's
+             `h1` — `headingLevel` exists for exactly this, and the default `3`
+             would announce a level that is not there. See EmptyState. */
+          headingLevel={2}
           title={error === 'not_found' ? 'No certificate matches that code' : 'That certificate could not be loaded'}
           message={error === 'not_found'
             ? 'Certificates can only be opened by the volunteer who earned them. Check the code, or open one from your list.'

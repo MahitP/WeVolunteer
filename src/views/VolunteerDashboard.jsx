@@ -656,7 +656,7 @@ function CertificateModal({ user, shifts, onClose }) {
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">{SCHOOL_NAME}</div>
               <div className="certificate-rule" />
-              <h1>Certificate of Community Service</h1>
+              <h1 className="certificate-title">Certificate of Community Service</h1>
               <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
               <div className="certificate-name">{user.name}</div>
               <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '46ch', margin: '0 auto' }}>

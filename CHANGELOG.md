@@ -286,6 +286,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A fleet where every monitor is paused read "Operational".** With zero
+  monitors the uptime card already said "No monitors" — the false-green fixed
+  last round — but *one paused monitor* took the other branch and reported
+  "Operational · 0 up": a green tick for a fleet in which nothing is being
+  checked. The two states are the same fact wearing different hats. It now reads
+  **"All paused — 1 monitor, none currently checking"**, muted rather than red,
+  because a monitor parked until a site goes live is a deliberate state and not
+  a fault. Found the moment the real account had exactly one monitor and it was
+  paused ahead of launch. A partially paused fleet now also says so
+  ("3 up, 1 paused") instead of quietly counting only the active ones.
+
+- **The certificate page had two `h1` elements, and no check could see it.**
+  The shell supplies every route's `h1`; `CertificateDocument` rendered a second.
+  `a11y/sweep.aria.spec.js` asserts exactly one per route and would have failed —
+  except it never reached this page. Certificate codes are `crypto.randomBytes`,
+  so the sweep's typed `:code` fixture resolves to nothing, and what it measured
+  and filed under `/certificates/:code` was the not-found panel. Three changes,
+  because one would only have hidden the next:
+
+  The document's heading is now an `h2` by default and takes `headingLevel` from
+  its caller, the way `EmptyState` already did. `headingLevels.test.js` no longer
+  exempts it — the exemption's stated reason, that print hides the shell so
+  demoting "would leave the printed document with no heading at all", was not
+  what demoting does; it leaves an `h2`. The type scale had to stop hanging off
+  the tag for that to be true, so `.certificate h1` became `.certificate-title`
+  in both its rules.
+
+  `CertificateView`'s not-found panel now carries `data-error-kind`, which is the
+  signal `walk.mjs` reads to tell a measured page from an error panel standing in
+  for one. The sweep reports the route as unmeasured rather than claiming a page
+  it never saw — narrowing what the suite asserts, on purpose.
+
+  And `a11y/workflows/certificate.spec.js` closes the gap rather than only
+  labelling it: it asks the API for a code that exists, then runs axe, the
+  one-`h1` rule and a no-skipped-levels check against the real document. Reported
+  as a gap it would have been; this measures it.
+
+- **The certificate's empty state skipped from `h1` to `h3`.** It is the only
+  thing under the page heading, so `EmptyState`'s default level — right for the
+  twenty-eight callers that sit inside a section — announced a level that was not
+  there. Found by the sweep's own heading report, which had been printing it
+  next to the identical `/organizations/:key` case.
+
+- **A documentation claim that was not true.** An operations note asserted that
+  Better Stack **telemetry** had been restored and live-verified. It had not —
+  or the change did not survive: `BETTERSTACK_SOURCE_TOKEN` and
+  `BETTERSTACK_INGESTING_HOST` are absent from `.env`, and
+  `bin/betterstack-live-check.mjs` refuses up front rather than sending. The
+  note is corrected to record telemetry as **not configured**, which is the
+  honest state and a labelled one: the sink reports `not_configured`, logging
+  falls back to stdout, and nothing in the application depends on it. Worth a
+  changelog line rather than a quiet edit, because a runbook that overstates
+  which credentials are in place is the kind of error that is only discovered
+  during an incident. `.env` and the live check are the only authorities on
+  this; a note claiming otherwise is worth nothing next to either.
+
 - **A lower version number could compare as higher, permanently.** The version
   comparator was `(major - major) || (minor - minor) || (patch - patch)` over
   components produced by `Number()` with no bound on length. Both halves were

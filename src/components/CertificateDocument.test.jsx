@@ -112,3 +112,49 @@ describe('what prints', () => {
     expect(within(document_).queryByRole('button')).toBeNull();
   });
 });
+
+describe('the document heading', () => {
+  /**
+   * The shell supplies the page's `h1`, so a second one here gave
+   * `/certificates/:code` two — contradicting the one-per-route rule
+   * `a11y/sweep.aria.spec.js` enforces, on a route that rule could not reach.
+   */
+  it('is an h2 by default, so the page keeps exactly one h1', () => {
+    const { container } = render(
+      <CertificateDocument certificate={certificate()} volunteer={volunteer} />
+    );
+
+    const heading = screen.getByText('Certificate of Community Service');
+    expect(heading.tagName).toBe('H2');
+    expect(container.querySelector('h1')).toBeNull();
+  });
+
+  /* A caller that supplies no `h1` of its own can ask for one. */
+  it('takes the level from its caller', () => {
+    render(
+      <CertificateDocument certificate={certificate()} volunteer={volunteer} headingLevel={1} />
+    );
+    expect(screen.getByText('Certificate of Community Service').tagName).toBe('H1');
+  });
+
+  /**
+   * The type scale moved from `.certificate h1` to `.certificate-title` so the
+   * tag could vary without the title silently shrinking to a browser default.
+   * Asserted because nothing visible fails if the class is dropped in jsdom —
+   * it would only show up as a smaller heading on a real screen.
+   */
+  it('carries the class its type scale hangs off', () => {
+    render(<CertificateDocument certificate={certificate()} volunteer={volunteer} />);
+    expect(screen.getByText('Certificate of Community Service'))
+      .toHaveClass('certificate-title');
+  });
+
+  /* A level HTML cannot render would be an unknown tag: visible on screen and
+     absent from the outline. Same rule as EmptyState — fall back, never clamp. */
+  it('falls back rather than rendering a heading that does not exist', () => {
+    render(
+      <CertificateDocument certificate={certificate()} volunteer={volunteer} headingLevel={9} />
+    );
+    expect(screen.getByText('Certificate of Community Service').tagName).toBe('H2');
+  });
+});

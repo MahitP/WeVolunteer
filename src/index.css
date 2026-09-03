@@ -3344,7 +3344,10 @@ a.list-row:hover { text-decoration: none; }
 .certificate-canvas { background: var(--surface-2); }
 
 .certificate-rule { border-top: 2px solid var(--cert-accent); width: 44px; margin: var(--s5) auto; }
-.certificate h1 {
+/* Class, not tag. The document's heading level depends on what supplies the
+   page's `h1` — the shell does, here — so the tag is a prop and the type scale
+   must not move with it. See CertificateDocument.jsx. */
+.certificate-title {
   font-family: var(--font-doc);
   font-weight: 400;
   font-size: 2rem;
@@ -3941,7 +3944,7 @@ a.list-row:hover { text-decoration: none; }
   .certificate-actions > * { flex: 1; justify-content: center; }
   /* The document's own type steps down with the paper, so a 27-character event
      title does not need a horizontal scroll to read. */
-  .certificate h1 { font-size: 1.5rem; }
+  .certificate-title { font-size: 1.5rem; }
   .certificate-name { font-size: 1.375rem; }
   .certificate-event { font-size: 1.125rem; }
   .certificate-hours { font-size: 2rem; }

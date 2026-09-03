@@ -283,14 +283,15 @@ seen to work" are different claims, and this table is the difference.
 |---|---|---|
 | **Upstash** | present | **Yes**, 2026-09-02. `fetchRedis()` reached the real database: reachable, breaker closed, ~420 ms round trip. |
 | **Pinecone** | present | **Yes**, 2026-09-02. `fetchVectorSearch()` read the real index (`wevolunteer-discover-v1`, namespace `development`, 6 records). |
-| **Better Stack** | `BETTERSTACK_UPTIME_API_TOKEN` set | **Yes**, 2026-09-03. Monitors and both incident queries answered 200 on the free plan. The account currently has **no monitors** and one open incident, which is Better Stack's own onboarding sample (`google.com` / "Sample incident"). |
+| **Better Stack Uptime** | `BETTERSTACK_UPTIME_API_TOKEN` set | **Yes**, 2026-09-03. Eight distinct operations exercised — see §10. One monitor for `https://wevolunteers.org` (paused until launch, §9); zero open incidents. |
+| **Better Stack telemetry** | **not configured** | **No, and correctly so.** `BETTERSTACK_SOURCE_TOKEN` and `BETTERSTACK_INGESTING_HOST` are absent from `.env` [verified 2026-09-03], so the sink reports `not_configured`, logging falls back to stdout, and the Owner Center's telemetry row says so rather than claiming to be sending. Independent of the Uptime token above: the uptime card works without telemetry and telemetry works without it. See `docs/operations/betterstack.md`. |
 | **Amplitude** | read pair set | **Yes**, 2026-09-03. `/api/2/users` and `/api/2/events/segmentation` answered 200 with real figures (2 active users in 30 days, 8 home-page events). |
 
-All four integrations are now configured and live-verified. The remaining
-**source** telemetry credentials (`BETTERSTACK_SOURCE_TOKEN` /
-`BETTERSTACK_INGESTING_HOST`) are still unset, so logs and traces stay local —
-that is a separate pipeline from the Uptime API above and is documented in
-[`betterstack.md`](betterstack.md).
+Three of the four are configured and live-verified. The fourth — Better Stack's
+**telemetry** pipeline, a separate credential pair from the Uptime API above —
+is off because `BETTERSTACK_SOURCE_TOKEN` and `BETTERSTACK_INGESTING_HOST` are
+unset, so logs and traces stay local. That is a labelled state rather than a
+fault, and switching it on is documented in [`betterstack.md`](betterstack.md).
 
 The frontend's rendering of live data was verified separately by driving the
 page with payloads in the exact shape the server produces: monitors with a
@@ -298,7 +299,75 @@ down entry, an open incident, user counts with week-on-week trends, the
 sparkline, and the feature-usage bars. Failure and stale rendering was verified
 the same way — see §5.
 
-## 9. When a vendor changes something
+## 9. The production monitor, and the one launch step it needs
+
+**A monitor exists for `https://wevolunteers.org`** — Better Stack id `4890899`,
+name "WeVolunteer production", created through the Uptime API on 2026-09-03.
+
+| Setting | Value | Why |
+|---|---|---|
+| type | `status` | A plain HTTP availability check. No keyword, no Playwright — both cost more and neither is needed to answer "is it up". |
+| check frequency | 180s | Three minutes. The API's floor is 30s; this is deliberately unaggressive for a pilot and stays clear of any fast-check tier. |
+| request timeout | 30s | Must be ≤ the check frequency, which it is by a wide margin. |
+| verify SSL | on | It is an HTTPS endpoint; a monitor that ignores certificate validity would miss the most likely quiet failure. |
+| alerting | email only | `sms`, `call` and `push` are explicitly off — they need on-call setup and are the channels that cost money. |
+
+### It is PAUSED, and unpausing it is a launch step
+
+`wevolunteers.org` currently publishes **MX records only — no A or AAAA record**,
+so the web host does not resolve at all. Verified independently with `dig`/`curl`
+as well as by the monitor, which opened a "DNS lookup failure" incident within
+seconds of being created.
+
+An active monitor against a site that does not exist yet emails an alert on every
+check and sits permanently red. That is not monitoring, it is training the reader
+to ignore Better Stack — the exact failure this whole page is written against. So
+the monitor is configured, correct, and parked.
+
+**At launch, unpause it.** Either the Better Stack dashboard's toggle, or:
+
+```
+PATCH https://uptime.betterstack.com/api/v2/monitors/4890899   {"paused": false}
+```
+
+Until then the Owner Center reports "All paused — 1 monitor, none currently
+checking", which is the honest state.
+
+## 10. Free-tier verification
+
+Every claim below was exercised against this account on 2026-09-03 with the
+`BETTERSTACK_UPTIME_API_TOKEN` in `.env`, on the plan that account is actually on.
+
+| Operation | Endpoint | Result |
+|---|---|---|
+| List monitors | `GET /api/v2/monitors` | 200 [proven] |
+| Create monitor | `POST /api/v2/monitors` | 201 [proven] |
+| Get monitor | `GET /api/v2/monitors/:id` | 200 [proven] |
+| Pause monitor | `PATCH /api/v2/monitors/:id` | 200 [proven] |
+| List incidents | `GET /api/v3/incidents` | 200 [proven] |
+| Get incident | `GET /api/v3/incidents/:id` | 200 [proven] |
+| Resolve incident | `POST /api/v3/incidents/:id/resolve` | 200 [proven] |
+| Read telemetry sources | `GET /api/v1/sources` (telemetry host) | 200 [proven] |
+
+**What that does and does not prove.** It proves these operations are available to
+this account, at no cost, today. It does **not** prove Better Stack publishes a
+policy guaranteeing them on the free tier — the pricing page lists 10 monitors and
+1 status page and says nothing about API access per tier, so there is no document
+to cite. The evidence here is behavioural, and it is recorded as such.
+
+**Nothing paid was introduced.** One monitor against an allowance of ten; a
+three-minute interval; no status page, no on-call schedule, no SLA reporting, no
+paid alert channel. The application itself calls only the three read endpoints —
+create, pause and resolve were one-off operator actions run from a script, not
+capabilities added to WeVolunteer. See §8.
+
+**The token is a GLOBAL Better Stack token**, not a team-scoped Uptime one: it
+reached `telemetry.betterstack.com/api/v1/sources` as well [proven, 2026-09-03].
+That is why `BETTERSTACK_API_TOKEN` can stay unset. It also means the token is
+broader than the Owner Center needs — worth narrowing to a team-scoped Uptime
+token if it is ever shared.
+
+## 11. When a vendor changes something
 
 The endpoint shapes, auth schemes and plan positions above were read on
 **2026-09-02**. If a card starts reading *Unexpected answer* after a vendor

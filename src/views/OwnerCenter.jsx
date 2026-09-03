@@ -545,6 +545,18 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
          */
         ? (monitors.monitors.length === 0
           ? { tone: 'muted', state: 'No monitors', detail: 'Nothing is being checked from outside' }
+          /**
+           * Every monitor paused is the same fact as no monitors, wearing a
+           * different hat: nothing is being checked. It read "Operational ·
+           * 0 up", which is the false green above in a second shape — found
+           * the moment the real account had exactly one monitor and it was
+           * paused ahead of launch.
+           *
+           * Muted, not red, for the same reason: a monitor parked until a site
+           * goes live is a deliberate state, not a fault.
+           */
+          : monitors.paused === monitors.monitors.length
+          ? { tone: 'muted', state: 'All paused', detail: `${monitors.paused} monitor${monitors.paused === 1 ? '' : 's'}, none currently checking` }
           : monitors.down > 0
           ? { tone: 'danger', state: 'Monitor down', detail: `${monitors.down} of ${monitors.monitors.length} down` }
           /* A stale reading is reported as stale rather than as operational:
@@ -554,7 +566,7 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
           : monitors.stale
             /* Server clock to server clock — see `StaleNotice`. */
             ? { tone: 'warn', state: 'Last known good', detail: `${monitors.up} up, as of ${relative(monitors.fetchedAt, serverNow(monitoring.generatedAt))}` }
-            : { tone: 'ok', state: 'Operational', detail: `${monitors.up} up` })
+            : { tone: 'ok', state: 'Operational', detail: `${monitors.up} up${monitors.paused ? `, ${monitors.paused} paused` : ''}` })
         : monitors.state === 'not_configured'
           ? { tone: 'muted', state: 'Not configured' }
           : { tone: 'warn', state: 'Unavailable' }),

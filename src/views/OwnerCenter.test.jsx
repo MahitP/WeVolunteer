@@ -262,6 +262,51 @@ describe('the systems grid', () => {
     expect(screen.queryByText(/systems need attention/i)).toBeNull();
   });
 
+  /**
+   * The exact state the real account is in before launch: one monitor, paused.
+   *
+   * It read "Operational · 0 up" — the same unearned green as zero monitors,
+   * wearing a different hat. Nothing is being checked either way.
+   */
+  it('does not call an all-paused monitor fleet operational', async () => {
+    stubApi({
+      m: monitoring({
+        monitors: {
+          state: 'ok', up: 0, down: 0, paused: 1,
+          monitors: [{ id: '1', name: 'WeVolunteer production', url: 'https://wevolunteers.org', status: 'paused', paused: true }],
+        },
+      }),
+    });
+    renderOwner();
+    await screen.findByText(/Systems/);
+
+    const row = systemRow('Uptime monitoring');
+    expect(within(row).getByText('All paused')).toBeInTheDocument();
+    expect(within(row).queryByText('Operational')).toBeNull();
+    /* Deliberate, not broken. */
+    expect(screen.queryByText(/systems need attention/i)).toBeNull();
+  });
+
+  it('says how many are paused when only some are', async () => {
+    stubApi({
+      m: monitoring({
+        monitors: {
+          state: 'ok', up: 2, down: 0, paused: 1,
+          monitors: [
+            { id: '1', name: 'API', url: 'https://a.test', status: 'up', paused: false },
+            { id: '2', name: 'Web', url: 'https://b.test', status: 'up', paused: false },
+            { id: '3', name: 'Old', url: 'https://c.test', status: 'up', paused: true },
+          ],
+        },
+      }),
+    });
+    renderOwner();
+    await screen.findByText(/Systems/);
+    /* Operational is right — two are genuinely being checked — but a reader
+       should not have to open the card to learn a third is not. */
+    expect(within(systemRow('Uptime monitoring')).getByText(/2 up, 1 paused/)).toBeInTheDocument();
+  });
+
   it('separates a degraded Redis from a healthy one', async () => {
     stubApi({
       i: infrastructure({

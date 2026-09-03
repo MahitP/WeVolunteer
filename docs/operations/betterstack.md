@@ -21,6 +21,30 @@
 > granted tools mutates anything. Re-run the audit after any Better Stack
 > change.
 
+> **Telemetry is NOT configured on this machine, and nothing is broken by
+> that.** Both `BETTERSTACK_SOURCE_TOKEN` and `BETTERSTACK_INGESTING_HOST` are
+> absent from `.env` [verified 2026-09-03 by name, without reading any value],
+> so `resolveTelemetryConfig` reports `not_configured`, every telemetry call is
+> a no-op, and the application logs to stdout exactly as it always has. Better
+> Stack is never required to serve a request.
+>
+> The distinction the code draws here is the useful part: `not_configured` is a
+> different state from `bad_host` and from `disabled_by_operator`, so "off" is
+> diagnosable rather than ambiguous. `bin/betterstack-live-check.mjs` refuses
+> up front with `BETTERSTACK_SOURCE_TOKEN is empty` rather than attempting a
+> send and reporting a confusing transport error.
+>
+> **To switch it on**, add the two lines from `.env.example` to `.env` with the
+> values from Better Stack -> Telemetry -> Sources -> your source, then restart
+> the server and re-run `bin/betterstack-live-check.mjs`. Nothing in the
+> application changes shape when they appear; the sink enables itself at boot.
+>
+> A caution recorded because it cost time on 2026-09-03: an *earlier* note in
+> this file claimed telemetry had been restored and live-verified. It had not —
+> or the change did not survive. `.env` is the only authority on this, and
+> `bin/betterstack-live-check.mjs` is the only proof; a note asserting a
+> credential is present is worth nothing next to either.
+>
 > **A third reader arrived with the Owner Center.** `/owner` calls Better
 > Stack's **Uptime** API for monitor and incident status, using a FOURTH
 > credential (`BETTERSTACK_UPTIME_API_TOKEN`) that is not interchangeable with

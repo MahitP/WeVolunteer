@@ -37,8 +37,40 @@ import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
  * silently wrong is worse than one that says it is incomplete, so each missing
  * value says so.
  */
-export default function CertificateDocument({ certificate, volunteer }) {
+export default function CertificateDocument({ certificate, volunteer, headingLevel = 2 }) {
   if (!certificate) return null;
+
+  /**
+   * ── Why this is an `h2` by default and not the `h1` it used to be ──
+   *
+   * The document renders inside the app shell, and the shell already supplies
+   * the page's `h1` (`topbar-title`, App.jsx). A second `h1` here gave
+   * `/certificates/:code` two of them, which contradicts the one-per-route rule
+   * `a11y/sweep.aria.spec.js` enforces at runtime. That contradiction went
+   * unnoticed only because the sweep never reached this page: certificate codes
+   * are random, so its typed fixture resolves to nothing and it measured the
+   * not-found panel instead. See `a11y/workflows/certificate.spec.js`.
+   *
+   * `headingLevels.test.js` used to exempt this file, on the reasoning that
+   * print hides the shell so demoting the heading "would leave the printed
+   * document with no heading at all". That is not what demoting does — it
+   * leaves an `h2`: still a heading, still the largest thing on the paper. The
+   * exemption is therefore removed rather than kept.
+   *
+   * The type scale had to be uncoupled from the tag for that to be true. It was
+   * `.certificate h1 { font-size: 2rem }` (and `1.5rem` in the narrow
+   * breakpoint), so demoting the tag alone would have silently shrunk the
+   * document's title to the browser's default `h2`. Both selectors are now
+   * `.certificate-title`, which is what the tag being a prop requires.
+   *
+   * A prop rather than a constant for the same reason `EmptyState` takes one:
+   * if this document is ever rendered somewhere the shell does not supply an
+   * `h1` — a standalone print view, a public verification page — that caller
+   * can say so instead of this file guessing.
+   */
+  const asked = Number(headingLevel);
+  const level = Number.isInteger(asked) && asked >= 1 && asked <= 6 ? asked : 2;
+  const Heading = `h${level}`;
 
   const name = volunteer?.name || certificate.volunteer?.name || 'Name unavailable';
   const grade = volunteer?.grade ?? certificate.volunteer?.grade ?? null;
@@ -54,7 +86,7 @@ export default function CertificateDocument({ certificate, volunteer }) {
       <div className="certificate-body">
         <div className="certificate-org">WeVolunteer Network</div>
         <div className="certificate-rule" />
-        <h1>Certificate of Community Service</h1>
+        <Heading className="certificate-title">Certificate of Community Service</Heading>
 
         <p className="certificate-lede">This certifies that</p>
         <div className="certificate-name">{name}</div>
