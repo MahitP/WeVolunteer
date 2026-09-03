@@ -222,6 +222,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Twenty-eight legal-editor tests were failing on a calendar rollover, and
+  only four of them mentioned a date.** Both editor suites hardcoded
+  `effectiveAt: '2026-09-01'` — thirty times between them — and
+  `parseEffectiveAt` floors an effective date at yesterday-in-UTC, so every one
+  of them turned into an HTTP 400 on 2026-09-03 and stayed that way. The count
+  was not the expensive part: `validatePublication` checks the date *before* the
+  body sanitizer and before the step-up grant, so the date refusal preempted
+  what each case was actually about — thirteen link-injection tests reported
+  `expected 'effectiveAt' to be 'body'`, two grant tests reported
+  `expected 400 to be 409`, and a unique-constraint test reported a constraint
+  not firing against a row whose publish had been refused. Dates are now
+  computed from today (`server/testing/dates.js`), a guard in
+  `legalStore.test.js` fails the build on a relapse, and it immediately found the
+  same bug with a longer fuse in `legalUpgradeBoot.test.js` (`2027-01-01`, which
+  passes today and expires in four months).
+
 - **A student who appealed an organization ban and was turned down was never
   told.** `_insertInApp` bound `link` straight into the INSERT, and four content
   cases omit it deliberately — `ORGANIZATION_BAN_APPEAL_STANDS`'s own note says a

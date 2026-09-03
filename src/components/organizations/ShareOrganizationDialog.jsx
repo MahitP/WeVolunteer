@@ -209,15 +209,26 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
         {link?.canCreate && (
           <div className="modal-foot org-share-foot">
             {link.exists ? (
+              /**
+                * Regenerate first, Turn off second — in the DOM, on both
+                * breakpoints.
+                *
+                * The order used to be the other way round, which read correctly
+                * on a wide screen (`space-between` put them at opposite ends)
+                * and badly on a narrow one: the modal footer stacks below 640px,
+                * so `space-between` collapses and the DESTRUCTIVE control ended
+                * up directly beneath the Copy button — the nearest thing to a
+                * thumb reaching for the action this dialog exists for. Measured
+                * at 375px before this change.
+                *
+                * One order rather than a `column-reverse` on mobile, because
+                * reversing visually while leaving the DOM alone puts tab order
+                * and reading order in disagreement, which is a worse problem
+                * than the one it solves. On a wide screen this now reads
+                * Regenerate · Turn off, and Turn off is the quiet ghost of the
+                * two either way.
+                */
               <>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={busy}
-                  onClick={() => setConfirming('revoke')}
-                >
-                  <Ban size={15} aria-hidden="true" /> Turn off link
-                </button>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -226,6 +237,14 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
                 >
                   {busy ? <Loader2 size={15} className="spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
                   Regenerate
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={busy}
+                  onClick={() => setConfirming('revoke')}
+                >
+                  <Ban size={15} aria-hidden="true" /> Turn off link
                 </button>
               </>
             ) : (

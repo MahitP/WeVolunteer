@@ -900,6 +900,27 @@ time { font-variant-numeric: tabular-nums; }
   flex-direction: column;
 }
 
+/**
+ * How tall the sticky topbar is, for anything that has to clear it.
+ *
+ * MEASURED, not derived — and it has to be. The height is this rule's padding
+ * plus whatever the tallest child's line box comes to, so there is no expression
+ * that yields it. 65px in the browser at the time of writing (16 + 33 + 16).
+ *
+ * Declared because the alternative is a magic number in every component that
+ * sticks below the bar, and the organization page's rail was the second one. If
+ * the padding or the controls change, re-measure with
+ * `document.querySelector('header.topbar').getBoundingClientRect().height` and
+ * change this one value.
+ *
+ * Deliberately does NOT drive `.topbar` itself: giving the bar a fixed height
+ * would make this token authoritative over a layout that is currently free to
+ * grow with its content, which is a larger change than the one thing it is for.
+ */
+:root {
+  --topbar-h: 65px;
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -8111,6 +8132,22 @@ input:disabled + .premium-slider {
    * assumption the emblem rests on true for every club.
    */
   --org-accent: var(--neutral-100);
+
+  /**
+   * What may be drawn ON that ground.
+   *
+   * A component token rather than the primitive reached for directly, because
+   * the name is the argument: this ink does not follow the theme, and a reader
+   * seeing `var(--neutral-900)` inside a component rule has no way to tell a
+   * decision from somebody who did not know `--ink` existed.
+   *
+   * It resolves to the same fixed dark primitive in both themes, which is the
+   * point — the eight accent values are pale in dark mode too, so a
+   * theme-following ink would be near-white on near-white every night. Measured
+   * at about 1.1:1 before this existed, and at roughly 13:1 on every one of the
+   * eight after.
+   */
+  --org-accent-ink: var(--neutral-900);
 }
 
 /* The "keeping up to date" callout in the Legal Center. Bordered rather than
