@@ -124,8 +124,29 @@ console.log(`database: ${target.database}\n`);
   let decoded = null;
   try { decoded = decodeURIComponent(literal); } catch { /* malformed escape */ }
 
+  /**
+   * The placeholder check, which exists because it caught a real afternoon.
+   *
+   * Every connection string anybody hands you — Supabase's own Connect panel,
+   * this repository's `.env.example`, a message from a colleague — carries the
+   * password as a placeholder: `[YOUR-PASSWORD]`, `<NEW-PASSWORD>`,
+   * `your-password-here`. Pasted whole and left unsubstituted, it reaches the
+   * server as a password, is rejected as a password, and is reported as
+   * `password authentication failed` — which is true, unhelpful, and sends
+   * somebody to reset a password that was never the problem.
+   *
+   * It is a 0 ms check standing in front of a round trip and an hour.
+   */
+  const PLACEHOLDER = /^[<[{(].*[>\]})]$/.test(literal)
+    || /^(your|new|db|the)[-_]?password$/i.test(literal)
+    || /password[-_]?here$/i.test(literal);
+
   if (!literal) {
     record('password survives URI decoding', null, 'no password in the URL');
+  } else if (PLACEHOLDER) {
+    record('password is a real password', false,
+      'this is the PLACEHOLDER from a connection-string template, pasted unsubstituted — '
+      + 'replace it with the actual database password');
   } else if (decoded === null) {
     record('password survives URI decoding', false,
       'it contains a "%" that is not a valid escape, so the URL cannot be decoded at all');
