@@ -2,6 +2,15 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer, enrolTwoFactor } from './testServer.js';
 import { REAUTH_CHALLENGE_HEADER } from './sensitiveActions.js';
 import { RUNNING_ON_POSTGRES } from './testEngine.js';
+import { daysAhead } from './testing/dates.js';
+
+/**
+ * Effective dates are COMPUTED. A literal one is valid for two days and
+ * refused for ever after — `server/testing/dates.js` has the full account of
+ * what that cost, and `legalStore.test.js` fails the build on a relapse.
+ */
+const TODAY = daysAhead(0);
+
 
 /**
  * The owner-only Legal Center editor.
@@ -39,9 +48,9 @@ describe('the Legal Center editor', () => {
   const PUBLIC_READ = 'volunteer-record-policy';
   /* For the effective-date rules. Its own slug, because rule 3 — effective dates
      only move forward — means one test's date becomes the floor for every later
-     publication of the same document. `EDITABLE` is already dated 2026-09-03 by
-     the fixtures above, which is exactly that effect. Not a signup or organizer
-     document, so publishing it disturbs no consent fixture. */
+     publication of the same document. `EDITABLE` is walked up the `daysAhead`
+     ladder by the cases above, which is exactly that effect. Not a signup or
+     organizer document, so publishing it disturbs no consent fixture. */
   const DATED = 'youth-safety-guidelines';
 
   const listUrl = '/api/admin/legal/documents';
@@ -107,7 +116,7 @@ describe('the Legal Center editor', () => {
     it('refuses an unauthenticated caller on every endpoint', async () => {
       const list = await srv.call('GET', listUrl);
       const read = await srv.call('GET', docUrl(EDITABLE));
-      const write = await srv.call('POST', publishUrl(EDITABLE), { body: body('x'), version: '9.9.9', effectiveAt: '2026-09-01' });
+      const write = await srv.call('POST', publishUrl(EDITABLE), { body: body('x'), version: '9.9.9', effectiveAt: TODAY });
 
       expect(list.status).toBe(401);
       expect(read.status).toBe(401);
@@ -128,7 +137,7 @@ describe('the Legal Center editor', () => {
       expect((await srv.call('GET', listUrl, undefined, admin)).status).toBe(403);
       expect((await srv.call('GET', docUrl(EDITABLE), undefined, admin)).status).toBe(403);
       expect((await publish(EDITABLE, {
-        body: body('smuggled'), version: '9.9.9', effectiveAt: '2026-09-01',
+        body: body('smuggled'), version: '9.9.9', effectiveAt: TODAY,
       }, admin)).status).toBe(403);
     });
 
@@ -169,7 +178,7 @@ describe('the Legal Center editor', () => {
   describe('step-up verification', () => {
     it('refuses a session alone, however legitimate the owner', async () => {
       const res = await publish(EDITABLE, {
-        body: body('no grant'), version: '1.0.1', effectiveAt: '2026-09-01',
+        body: body('no grant'), version: '1.0.1', effectiveAt: TODAY,
       });
       expect(res.status).toBe(403);
       expect(res.body.code).toBe('reauth_required');
@@ -177,7 +186,7 @@ describe('the Legal Center editor', () => {
 
     it('publishes nothing when the verification is missing', async () => {
       const before = await srv.call('GET', `/api/legal/documents/${EDITABLE}`);
-      await publish(EDITABLE, { body: body('no grant'), version: '1.0.1', effectiveAt: '2026-09-01' });
+      await publish(EDITABLE, { body: body('no grant'), version: '1.0.1', effectiveAt: TODAY });
       const after = await srv.call('GET', `/api/legal/documents/${EDITABLE}`);
       expect(after.body.version).toBe(before.body.version);
       expect(after.body.markdown).toBe(before.body.markdown);
@@ -191,7 +200,7 @@ describe('the Legal Center editor', () => {
     it('refuses a grant taken out for a different document', async () => {
       const challengeId = await grantFor(REJECTED, '1.0.1');
       const res = await publish(EDITABLE, {
-        body: body('wrong document'), version: '1.0.1', effectiveAt: '2026-09-01',
+        body: body('wrong document'), version: '1.0.1', effectiveAt: TODAY,
       }, owner, challengeId);
       /* 409, not 403: the caller IS verified, and the grant they hold simply is
          not for this request. `refuseReauth` maps that to "not completed yet",
@@ -204,7 +213,7 @@ describe('the Legal Center editor', () => {
     it('refuses a grant taken out for a different version', async () => {
       const challengeId = await grantFor(EDITABLE, '1.0.1');
       const res = await publish(EDITABLE, {
-        body: body('version mismatch'), version: '2.0.0', effectiveAt: '2026-09-01',
+        body: body('version mismatch'), version: '2.0.0', effectiveAt: TODAY,
       }, owner, challengeId);
       expect(res.status).toBe(409);
       expect((await srv.call('GET', `/api/legal/documents/${EDITABLE}`)).body.markdown)
@@ -219,7 +228,7 @@ describe('the Legal Center editor', () => {
       const res = await publishVerified(EDITABLE, {
         body: body('The cookie notice, corrected.'),
         version: '1.1.0',
-        effectiveAt: '2026-09-01',
+        effectiveAt: TODAY,
       });
       expect(res.status).toBe(200);
       expect(res.body.version).toBe('1.1.0');
@@ -235,7 +244,7 @@ describe('the Legal Center editor', () => {
       await publishVerified(PUBLIC_READ, {
         body: body('Records are kept for as long as the school requires.'),
         version: '1.2.0',
-        effectiveAt: '2026-09-02',
+        effectiveAt: daysAhead(1),
       });
 
       const res = await srv.call('GET', `/api/legal/documents/${PUBLIC_READ}`);
@@ -265,7 +274,7 @@ describe('the Legal Center editor', () => {
 
     it('keeps every previous version', async () => {
       await publishVerified(EDITABLE, {
-        body: body('Corrected again.'), version: '1.2.0', effectiveAt: '2026-09-03',
+        body: body('Corrected again.'), version: '1.2.0', effectiveAt: daysAhead(2),
       });
 
       const res = await srv.call('GET', docUrl(EDITABLE), undefined, owner);
@@ -302,13 +311,13 @@ describe('the Legal Center editor', () => {
     /* Each case takes out its own grant, so a refusal cannot be mistaken for a
        missing verification — and so a refused save is shown NOT to cost one. */
     const attempt = (version) => publishVerified(REJECTED, {
-      body: body(`attempting ${version}`), version, effectiveAt: '2026-09-04',
+      body: body(`attempting ${version}`), version, effectiveAt: daysAhead(3),
     });
 
     it('refuses a malformed version', async () => {
       for (const bad of ['1', 'v1.0.0', '1.0', '1.0.0.1', 'one', '', '1.01.0']) {
         const res = await publish(REJECTED, {
-          body: body('x'), version: bad, effectiveAt: '2026-09-04',
+          body: body('x'), version: bad, effectiveAt: daysAhead(3),
         }, owner, await grantFor(REJECTED, bad));
         expect(res.status, `version ${JSON.stringify(bad)}`).toBe(400);
         expect(res.body.field).toBe('version');
@@ -352,7 +361,7 @@ describe('the Legal Center editor', () => {
     it('refuses text identical to what is already published', async () => {
       const current = await srv.call('GET', docUrl(VERSIONED), undefined, owner);
       const res = await publishVerified(VERSIONED, {
-        body: current.body.body, version: '5.0.0', effectiveAt: '2026-09-05',
+        body: current.body.body, version: '5.0.0', effectiveAt: daysAhead(4),
       });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/identical/);
@@ -374,7 +383,7 @@ describe('the Legal Center editor', () => {
       const res = await publishVerified(VERSIONED, {
         body: '# Heading\n\n[click here](javascript:alert(document.cookie))\n',
         version: '4.0.0',
-        effectiveAt: '2026-09-06',
+        effectiveAt: daysAhead(5),
       });
       expect(res.status).toBe(400);
       expect(res.body.field).toBe('body');
@@ -392,7 +401,7 @@ describe('the Legal Center editor', () => {
 
     it('refuses an empty document', async () => {
       const res = await publishVerified(VERSIONED, {
-        body: '   ', version: '4.0.0', effectiveAt: '2026-09-06',
+        body: '   ', version: '4.0.0', effectiveAt: daysAhead(5),
       });
       expect(res.status).toBe(400);
     });
@@ -481,8 +490,8 @@ describe('the Legal Center editor', () => {
       await expect(async () => db.prepare(`
         INSERT INTO legal_document_revisions
           (slug, version, body, content_hash, effective_at, created_at, created_by)
-        VALUES (?, '1.1.0', 'x', 'h', '2026-09-01', '2026-09-01T00:00:00Z', NULL)
-      `).run(EDITABLE)).rejects.toThrow();
+        VALUES (?, '1.1.0', 'x', 'h', ?, ?, NULL)
+      `).run(EDITABLE, TODAY, `${TODAY}T00:00:00Z`)).rejects.toThrow();
     });
   });
   /**
