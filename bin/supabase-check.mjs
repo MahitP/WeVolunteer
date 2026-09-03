@@ -36,7 +36,9 @@
  *   SUPABASE_CHECK_URL='postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres' \
  *     node bin/supabase-check.mjs
  *
- *   --write-probe   also exercise transactions, concurrency and pooling
+ *   --write-probe   also exercise transactions, concurrency and pooling.
+ *                   Requires --i-know-this-is-disposable as well, and still
+ *                   refuses a database with any user rows in it.
  *   --json PATH     write the findings as JSON
  *
  * Never prints the URL, the password, or any part of either.
@@ -46,7 +48,23 @@ import net from 'node:net';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { promises as dns } from 'node:dns';
 
-const WRITE_PROBE = process.argv.includes('--write-probe');
+/**
+ * The write probe needs TWO flags, and the second one is a sentence.
+ *
+ * `--write-probe` alone reads as "run the thorough version", which is exactly
+ * the mood somebody is in when they point this at the database they actually
+ * care about. It creates a table. So it also needs
+ * `--i-know-this-is-disposable`, which nobody types by reflex, and even then it
+ * refuses a database holding user rows.
+ *
+ * The counted guards are: the second flag, the user-row check further down,
+ * and — for a managed host, where "disposable" is least likely to be true — a
+ * third, below.
+ */
+const WRITE_PROBE = process.argv.includes('--write-probe')
+  && process.argv.includes('--i-know-this-is-disposable');
+const WRITE_PROBE_ASKED = process.argv.includes('--write-probe');
+const MANAGED_WRITE_OK = process.argv.includes('--yes-write-to-this-managed-database');
 const jsonAt = process.argv.indexOf('--json');
 const JSON_OUT = jsonAt === -1 ? null : process.argv[jsonAt + 1];
 
@@ -77,8 +95,47 @@ function describeTarget() {
 }
 
 const target = describeTarget();
+const MANAGED_HOST = /\.supabase\.(co|com)$/.test(target.host);
 console.log(`host:     ${target.host}:${target.port}  (${target.kind})`);
 console.log(`database: ${target.database}\n`);
+
+/* ── 0. The credential as written, versus the credential that will be sent ── */
+
+/**
+ * A password in a URI is percent-DECODED before it is sent.
+ *
+ * So a password containing a literal `%` arrives at the server as something
+ * else — `pa%73s` is sent as `pass` — and a password containing `%zz` makes the
+ * whole string fail to decode. The connection then fails with
+ * `password authentication failed`, which sends everybody to check the password
+ * they typed, which is correct, which is why this is so hard to find.
+ *
+ * Observed live: a 29-character password written into `.env` reached the server
+ * as 27 characters, because it contained `%40`.
+ *
+ * A literal `%` must be written `%25`. The same applies to `@`, `#`, `/`, `:`
+ * and `?`, though only `%` silently changes the VALUE — the others change where
+ * the parser thinks the password ends, which fails more loudly.
+ */
+{
+  const after = URL_.slice(URL_.indexOf('://') + 3);
+  const at = after.lastIndexOf('@');
+  const literal = at === -1 ? '' : after.slice(after.indexOf(':') + 1, at);
+  let decoded = null;
+  try { decoded = decodeURIComponent(literal); } catch { /* malformed escape */ }
+
+  if (!literal) {
+    record('password survives URI decoding', null, 'no password in the URL');
+  } else if (decoded === null) {
+    record('password survives URI decoding', false,
+      'it contains a "%" that is not a valid escape, so the URL cannot be decoded at all');
+  } else if (decoded !== literal) {
+    record('password survives URI decoding', false,
+      `written as ${literal.length} chars, SENT as ${decoded.length} — a literal "%" must be "%25"`);
+  } else {
+    record('password survives URI decoding', true, 'what is written is what is sent');
+  }
+}
 
 /* ── 1. Address family ────────────────────────────────────────────────────── */
 
@@ -277,7 +334,17 @@ record('query round trip', true,
 
 /* ── 7. The write probe, only when asked and only when safe ──────────────── */
 
-if (WRITE_PROBE) {
+if (WRITE_PROBE_ASKED && !WRITE_PROBE) {
+  record('write probe', null,
+    'REFUSED: --write-probe also needs --i-know-this-is-disposable');
+} else if (WRITE_PROBE && MANAGED_HOST && !MANAGED_WRITE_OK) {
+  /* A managed host is somebody's real project far more often than it is a
+     scratch one, and the cost of being wrong is asymmetric. Both flags plus a
+     third, so that reaching a live Supabase database with a CREATE TABLE takes
+     three deliberate acts rather than two. */
+  record('write probe', null,
+    'REFUSED: this is a managed Supabase host — add --yes-write-to-this-managed-database');
+} else if (WRITE_PROBE) {
   /**
    * Two statements, not one CASE.
    *
