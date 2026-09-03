@@ -145,6 +145,20 @@ export const EVENT_CATEGORIES = {
   NEW_APPLICATION: 'APPLICATION',
   SPOT_RELEASED: 'APPLICATION',
   VOLUNTEER_RELEASED_SPOT: 'APPLICATION',
+  /**
+   * A student asking to join a club, filed under APPLICATION rather than
+   * ACCOUNT.
+   *
+   * It is the same shape as `NEW_APPLICATION`: somebody applied to a thing you
+   * run, and it is sitting in a queue waiting for you to decide it. A manager
+   * who has turned Applications on and Account off has said "tell me about
+   * things awaiting my decision", and this is one.
+   *
+   * The two OUTCOMES go the other way, under ACCOUNT, beside
+   * `ORGANIZATION_MEMBERSHIP_REMOVED` — from the student's side they are news
+   * about where they stand, not about an application queue.
+   */
+  ORGANIZATION_JOIN_REQUEST_RECEIVED: 'APPLICATION',
 
   // EVENT
   /**
@@ -231,6 +245,8 @@ export const EVENT_CATEGORIES = {
   LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
   /* Membership of a club is a relationship with the platform, not an event. */
   ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_ACCEPTED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_REJECTED: 'ACCOUNT',
   ORGANIZATION_BANNED: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
@@ -521,6 +537,79 @@ export function getInAppContent(event, payload) {
           + 'you can close your account at any time.',
         link: `/legal/${payload.slug}`,
         ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    /**
+     * Somebody wants in, and a manager has to answer.
+     *
+     * ── Why the body names one person and nothing else ──
+     *
+     * This is dispatched to every manager, which means it is also enqueued as
+     * email, which means it leaves the building. `FRIEND_SIGNED_UP` makes the
+     * same argument and lands the same way: the recipient is being told that
+     * something needs their attention, and the detail lives behind the link,
+     * where the reader is authenticated and the disclosure is already governed.
+     *
+     * So: a name and a club. Not a grade, not a school, not an email address,
+     * and not a message — the request carries no free text at all, deliberately
+     * (migration 062). What a manager decides on is a person and a rank, and
+     * both are on the page the link opens.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_RECEIVED': {
+      const org = payload.organizationName || 'your organization';
+      const who = payload.actorName || 'Somebody';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `Someone asked to join ${org}`,
+        body: `${who} asked to join ${org}. It is waiting for a manager to accept or decline.`,
+        link: payload.organizationSlug
+          ? `/organizations/${payload.organizationSlug}#requests`
+          : '/organizations',
+        ctaText: 'Review the request',
+      };
+    }
+
+    case 'ORGANIZATION_JOIN_REQUEST_ACCEPTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You are now a member of ${org}`,
+        body:
+          `A manager accepted your request to join ${org}. `
+          + 'You will be told when it posts a new opportunity.',
+        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
+      };
+    }
+
+    /**
+     * Declined — and carrying no reason, on purpose.
+     *
+     * The alternative is a free-text field in which a club manager writes a
+     * judgement about a named minor, which is then copied into an email that
+     * leaves the platform. A ban carries a reason because a ban is an
+     * enforcement decision with an appeal heard against it; declining a request
+     * is neither, and it is reversible by simply asking again.
+     *
+     * It says the door is not locked for that reason: without that sentence the
+     * message reads as permanent, which it is not — the partial unique index is
+     * scoped to `pending`, so a declined student may ask again.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_REJECTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `${org} did not accept your request`,
+        body:
+          `Your request to join ${org} was not accepted. `
+          + 'Nothing about your account, your hours or any other organization changes, '
+          + 'and you can ask again later.',
+        /* No CTA. The decision is made, and a button back to a club that has
+           just said no is not something to press. */
       };
     }
 

@@ -23,8 +23,19 @@ import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
 import {
   validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
-  formatOrganization, uniqueSlug,
+  memberRoleOf, formatOrganization, publicOrganizationSnapshot, canInvite, uniqueSlug,
 } from '../organizations.js';
+import { joinAffordance, affordanceAdmits } from '../organizationPolicy.js';
+import {
+  issueShareLink, revokeShareLink, shareLinkFor, resolveShareToken, tokenOpens,
+  shareLinkPath,
+} from '../organizationShareLinks.js';
+import {
+  requestToJoin, withdrawRequest, retireRequestOnJoin, pendingRequestFor,
+  pendingRequests, pendingRequestCount, decideRequest, requestSubject,
+  REQUEST_DECISIONS,
+} from '../organizationJoinRequests.js';
+import { shareTokenLimiter, joinAttemptLimiter } from '../organizationLimiters.js';
 import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { profileSummary } from '../profileSerializer.js';
 import {
@@ -135,15 +146,44 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     return res.status(404).json({ error: 'No such organization.', code: 'not_found' });
   }
 
-  const members = await db.prepare(`
-    SELECT u.id, u.username, u.name, u.avatar, u.profile_picture_url, u.role, u.location,
+  const membership = await db.prepare(
+    'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
+  ).get(row.id, req.principal.userId);
+
+  /**
+   * The roster goes to the club, not to the platform.
+   *
+   * ── What this changed, and why it had to ──
+   *
+   * This query used to run for every reader holding `directory.read`, which is
+   * every signed-in account except `partner`. So any account could open any
+   * organization and read up to a hundred of its members: on this platform, a
+   * named list of children belonging to a club the reader has nothing to do
+   * with. Each row went through `profileSummary`, so no field leaked that a
+   * profile would have withheld — but the LIST is itself the disclosure, and no
+   * per-field allowlist can answer that.
+   *
+   * Members, managers and moderators see it. Everybody else gets
+   * `organization.memberCount`, which is already on the payload, names nobody,
+   * and is what actually answers "is this club real and how big is it" for
+   * somebody deciding whether to join.
+   *
+   * A manager who is not a member cannot occur (managing IS a membership row),
+   * but `mayManage` is included because `organization.moderate` bypasses
+   * membership and an administrator reviewing a club needs to see who is in it.
+   */
+  const mayReadRoster = Boolean(membership) || mayManage;
+
+  const members = mayReadRoster ? await db.prepare(`
+    SELECT u.id, u.username, u.name, u.avatar, u.avatar_color, u.profile_picture_url,
+           u.role, u.location,
            m.member_role AS "memberRole", m.joined_at AS "joinedAt"
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'
     ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE nocase
     LIMIT 100
-  `).all(row.id);
+  `).all(row.id) : [];
 
   /**
    * Upcoming first, then recent past. Cancelled events are excluded: an
@@ -159,10 +199,6 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     ORDER BY "startsAt" DESC
     LIMIT 50
   `).all(row.id);
-
-  const membership = await db.prepare(
-    'SELECT member_role FROM organization_members WHERE organization_id = ? AND user_id = ?'
-  ).get(row.id, req.principal.userId);
 
   /**
    * Hours, scoped to this organization.
@@ -192,8 +228,55 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
   const viewerHours = await organizationHoursForUser(db, row.id, req.principal.userId);
   const memberHours = mayManage ? await organizationHoursByUser(db, row.id) : null;
 
+  const organization = formatOrganization(row);
+  const ban = await viewerBanState(row.id, req.principal.userId);
+  const joinRequest = await pendingRequestFor(db, row.id, req.principal.userId);
+
+  /**
+   * What the primary control should say — decided HERE, not in the browser.
+   *
+   * There are seven states and which one is right depends on the policy, the
+   * membership row, an active ban, the organization's status and the capability.
+   * A client computing that would be holding a second implementation of the
+   * membership policy, and the direction it drifts is the one this codebase
+   * already names as the failure: the UI offers a button the API rejects.
+   *
+   * `hasInvite` is FALSE here on purpose. The token is not accepted as a query
+   * parameter — a GET carrying it would put a live link into browser history,
+   * server logs and anything that prefetches — so a reader holding one is told
+   * `invite_required` and the client, which knows it is holding a token for this
+   * club, renders Join and sends the token with the press. The server is still
+   * the authority: a stale token gets a 403 there and the page reloads into the
+   * honest state.
+   */
+  const affordance = joinAffordance({
+    joinPolicy: organization.joinPolicy,
+    status: row.status,
+    isMember: Boolean(membership),
+    isBanned: Boolean(ban),
+    hasPendingRequest: Boolean(joinRequest),
+    canJoinAtAll: can(req.principal, 'organization.join'),
+    hasInvite: false,
+  });
+
+  const mayInvite = canInvite({
+    invitePolicy: organization.invitePolicy,
+    memberRole: membership?.member_role ?? null,
+    hasModerate: can(req.principal, 'organization.moderate'),
+  });
+
+  /**
+   * Whether a link EXISTS, never the link itself.
+   *
+   * The token is handed out by `GET …/share-link` alone, which is one route with
+   * one authorization rule. Putting it on the page payload would mean every
+   * organization page load carried a credential, to every reader the roster
+   * gate lets through, for a control most of them will never open.
+   */
+  const link = mayInvite ? await shareLinkFor(db, row.id) : null;
+
   res.json({
-    organization: formatOrganization(row),
+    organization,
     members: members.map(m => ({
       ...profileSummary(m),
       memberRole: m.memberRole,
@@ -225,6 +308,27 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
         && await canHelpRun(db, row.id, req.principal.userId, {
           hasModerate: can(req.principal, 'organization.moderate'),
         }),
+      /* The one canonical description of what this reader may do about
+         membership. `policy` travels with it so the page can explain the state
+         ("this club admits by invitation") without re-deriving which of the
+         three modes produced it. */
+      affordance: affordance.action,
+      joinPolicy: affordance.policy,
+      /* Present only while a request is live, so `viewer.joinRequest` is a fact
+         and not a nullable field the page has to interpret. */
+      ...(joinRequest ? { joinRequest: { submittedAt: joinRequest.createdAt } } : {}),
+      /* May this person pass the link on — the club's `invite_policy` turned
+         into a yes or a no by `canInvite`, never re-derived from `memberRole`
+         in the browser. Creating and rotating the link is `canManage`, which is
+         already on this payload. */
+      canInvite: mayInvite,
+      shareLink: mayInvite
+        ? { exists: Boolean(link), createdAt: link?.createdAt ?? null, rotations: link?.rotations ?? 0 }
+        : null,
+      /* The badge on the Requests card. A count rather than the queue: the
+         queue is its own authenticated route, and a manager who is not looking
+         at it should not be paying for it on every page load. */
+      pendingRequests: mayManage ? await pendingRequestCount(db, row.id) : null,
       hours: viewerHours.hours,
       events: viewerHours.events,
       history: await organizationHistoryForUser(db, row.id, req.principal.userId),
@@ -249,7 +353,7 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
        * conversation to go around the process rather than through it. Managers
        * see it in the moderation list; the subject does not.
        */
-      ban: await viewerBanState(row.id, req.principal.userId),
+      ban,
     },
     totals: mayManage ? await organizationHoursTotal(db, row.id) : null,
   });
@@ -317,6 +421,12 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
   if (check.value.allowReplies !== undefined) {
     updates.push('allow_replies = ?'); values.push(check.value.allowReplies ? 1 : 0);
   }
+  if (check.value.joinPolicy !== undefined) {
+    updates.push('join_policy = ?'); values.push(check.value.joinPolicy);
+  }
+  if (check.value.invitePolicy !== undefined) {
+    updates.push('invite_policy = ?'); values.push(check.value.invitePolicy);
+  }
   if (req.body?.status !== undefined) {
     if (!['active', 'archived'].includes(req.body.status)) {
       return res.status(400).json({ error: 'Status must be active or archived.', field: 'status' });
@@ -327,13 +437,91 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
 
   updates.push('updated_at = ?'); values.push(new Date().toISOString());
   values.push(row.id);
-  await db.prepare(`UPDATE organizations SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+  /**
+   * The edit, the link it may require, and the record of both — one transaction.
+   *
+   * ── Why switching to `invite` mints a link here ──
+   *
+   * A club whose policy is `invite` and which has no link is a club nobody can
+   * join, including by the route the setting exists to enable. Leaving that to a
+   * second, separate press means the manager's most likely path through the
+   * settings screen produces a broken club and no error — the setting saved, and
+   * the consequence arrives later, to somebody else.
+   *
+   * So the link is created in the same transaction as the setting that needs it.
+   * A club that already has one keeps it: this mints, it never rotates, because
+   * changing the setting must not silently invalidate a link already on a flyer.
+   *
+   * ── Why the change is audited ──
+   *
+   * Who may join a club, and who may hand out its address, are exactly the
+   * questions somebody asks six months later when a student turns up in a club
+   * they should not be in. `recordAudit` never catches, so a failed audit rolls
+   * the whole edit back — the same argument the promotion route makes.
+   */
+  const policyChanged = check.value.joinPolicy !== undefined
+    && check.value.joinPolicy !== row.join_policy;
+  const inviteChanged = check.value.invitePolicy !== undefined
+    && check.value.invitePolicy !== row.invite_policy;
+
+  try {
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare(`UPDATE organizations SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+
+      if (check.value.joinPolicy === 'invite' && !await shareLinkFor(tx, row.id)) {
+        await issueShareLink(tx, row.id, { createdBy: req.principal.userId });
+        await recordAudit(tx, {
+          adminId: req.principal.userId,
+          action: 'ORGANIZATION_SHARE_LINK_CREATED',
+          details: `Created the invitation link for ${row.name} (${row.slug}) `
+            + 'when switching it to invitation-only.',
+        });
+      }
+
+      if (policyChanged || inviteChanged) {
+        const parts = [];
+        if (policyChanged) parts.push(`who can join: ${row.join_policy ?? 'open'} to ${check.value.joinPolicy}`);
+        if (inviteChanged) parts.push(`who can share the link: ${row.invite_policy ?? 'helpers'} to ${check.value.invitePolicy}`);
+        await recordAudit(tx, {
+          adminId: req.principal.userId,
+          action: 'ORGANIZATION_MEMBERSHIP_POLICY_CHANGED',
+          details: `${row.name} (${row.slug}) — ${parts.join('; ')}.`,
+        });
+      }
+    });
+  } catch (err) {
+    console.error('Organization update failed:', err);
+    return res.status(500).json({ error: 'Could not save those changes.' });
+  }
 
   res.json({ organization: formatOrganization(await db.prepare(`${ORG_SELECT} WHERE o.id = ?`).get(row.id)) });
 });
 
-/** Join. Idempotent — tapping Join twice is not an error worth an error page. */
-router.post('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'), async (req, res) => {
+/**
+ * Join. Idempotent — tapping Join twice is not an error worth an error page.
+ *
+ * ── Where the membership policy is enforced ──
+ *
+ * Here, and only here. `join_policy` is rendered by the page and validated by
+ * the settings form, but this is the boundary: a client that skips the page and
+ * posts directly meets exactly the same three refusals. `joinAffordance` is the
+ * single function that decides which, so the button the page drew and the answer
+ * this route gives are the same computation with the same inputs.
+ *
+ * ── The token is presented HERE, in the body ──
+ *
+ * Not carried in a session, not cached against the page load, and not accepted
+ * in the query string. Resolving it inside this handler is what makes rotation
+ * and revocation instant — there is no window in which a page opened under an
+ * old link still holds permission — and it is why a GET never sees it.
+ *
+ * `tokenOpens` asks whether the token opens THIS organization, not merely
+ * whether it resolves to something. A Chess Club link must not admit anybody to
+ * the Robotics Club.
+ */
+router.post('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'),
+  joinAttemptLimiter, shareTokenLimiter, async (req, res) => {
   const row = await loadOrganization(req, res);
   if (!row) return;
   if (row.status !== 'active') {
@@ -360,11 +548,52 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
     });
   }
 
-  await db.prepare(`
-    INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
-    VALUES (?, ?, 'member', ?)
-    ON CONFLICT(organization_id, user_id) DO NOTHING
-  `).run(row.id, req.principal.userId, new Date().toISOString());
+  /* Already in? Say so and stop, before the policy gets a chance to refuse
+     somebody who is standing inside the club. A club switched to `invite` after
+     they joined must not answer their second press with "you need a link". */
+  const already = await db.prepare(
+    'SELECT 1 AS ok FROM organization_members WHERE organization_id = ? AND user_id = ?'
+  ).get(row.id, req.principal.userId);
+
+  if (!already) {
+    const token = typeof req.body?.shareToken === 'string' ? req.body.shareToken : null;
+    const affordance = joinAffordance({
+      joinPolicy: row.join_policy,
+      status: row.status,
+      isMember: false,
+      isBanned: false,          /* refused above, with its own message */
+      hasPendingRequest: false, /* a pending request does not block a link join */
+      canJoinAtAll: true,       /* `requireCap` has already said so */
+      hasInvite: await tokenOpens(db, row.id, token),
+    });
+
+    if (!affordanceAdmits(affordance.action)) {
+      if (affordance.action === 'request') {
+        return res.status(409).json({
+          error: 'This organization approves members. Send a request to join and a manager will look at it.',
+          code: 'request_required',
+        });
+      }
+      return res.status(403).json({
+        error: 'This organization admits members by invitation. Ask somebody in it for the invitation link.',
+        code: 'invite_required',
+      });
+    }
+  }
+
+  await runInTransaction(db, async (tx) => {
+    await tx.prepare(`
+      INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+      VALUES (?, ?, 'member', ?)
+      ON CONFLICT(organization_id, user_id) DO NOTHING
+    `).run(row.id, req.principal.userId, new Date().toISOString());
+
+    /* A request that has been overtaken by events stops waiting for a decision
+       nobody now needs to make. `withdrawn` rather than `accepted`, because no
+       manager decided it — see `retireRequestOnJoin`. In the same transaction as
+       the membership row, so the two cannot disagree. */
+    await retireRequestOnJoin(tx, row.id, req.principal.userId);
+  });
 
   res.json({ isMember: true, memberCount: await countMembers(row.id) });
 });
@@ -1494,5 +1723,476 @@ router.post('/api/organizations/:key/bans/:userId/lift', authenticateToken, requ
 
   res.json({ userId: req.params.userId, banned: false, liftedAt: now });
 });
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The invitation link
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The managers of an organization, for the notification fan-out.
+ *
+ * One query returning ids, the shape `memberIds` already uses and for the same
+ * reason: a request that notified a club of three hundred one query at a time
+ * would be three hundred round trips inside the request that filed it. Deleted
+ * accounts are excluded here rather than by the notification worker, so the
+ * fan-out does not enqueue mail for somebody who is gone.
+ */
+async function managerIds(handle, organizationId, { excluding = [] } = {}) {
+  const rows = await handle.prepare(`
+    SELECT m.user_id FROM organization_members m
+    JOIN users u ON u.id = m.user_id
+    WHERE m.organization_id = ? AND m.member_role = 'manager'
+      AND u.account_status = 'active'
+  `).all(organizationId);
+  const skip = new Set(excluding);
+  return rows.map(r => r.user_id).filter(id => !skip.has(id));
+}
+
+/**
+ * GET the organization's invitation link.
+ *
+ * ── Who may read it, and why that is a setting rather than a rank ──
+ *
+ * `canInvite` turns the club's own `invite_policy` into a yes or a no. That is
+ * the whole of "who can invite": there is no separate per-person invitation and
+ * no address book, because the requirement is "hand somebody a link" and one
+ * link with a policy on who may pass it on satisfies it without creating a
+ * second delivery surface that names students.
+ *
+ * ── The refusal is a 403 and not a 404 ──
+ *
+ * Unlike the token endpoint below, the caller has already proved they can see
+ * this organization (`directory.read` got them the page). Hiding the existence
+ * of a link from a member who may not share it would tell them nothing useful
+ * and would make the share control look broken rather than restricted.
+ */
+router.get('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
+  if (!row) return;
+
+  const memberRole = await memberRoleOf(db, row.id, req.principal.userId);
+  const hasModerate = can(req.principal, 'organization.moderate');
+  if (!canInvite({ invitePolicy: row.invite_policy, memberRole, hasModerate })) {
+    return res.status(403).json({
+      error: 'Only people who help run this organization can share its invitation link.',
+      code: 'not_allowed_to_invite',
+    });
+  }
+
+  const link = await shareLinkFor(db, row.id);
+  if (!link) {
+    /* 200 with `exists: false`, not a 404. "There is no link yet" is a normal
+       state of a club that has never made one, and the dialog's job in that
+       state is to offer a manager the Create control — which a 404 would turn
+       into an error screen. */
+    return res.json({ exists: false, canCreate: hasModerate || memberRole === 'manager' });
+  }
+
+  res.json({
+    exists: true,
+    path: shareLinkPath(link.token),
+    createdAt: link.createdAt,
+    rotations: link.rotations,
+    canCreate: hasModerate || memberRole === 'manager',
+  });
+});
+
+/**
+ * POST — mint the link, or replace the one there is. Managers only.
+ *
+ * ── Why POST and not a lazily-minting GET ──
+ *
+ * A GET that created a credential would put it in browser history and hand it
+ * to anything that speculatively prefetches links — the argument
+ * `POST /api/applications/:id/checkin-code` already makes for the same shape.
+ * It also means "look at our link" and "replace our link" cannot be confused,
+ * which matters because the second one breaks every copy already handed out.
+ *
+ * ── Why creating is `canManage` while sharing is `invite_policy` ──
+ *
+ * Passing an address on is routine. Deciding what the club's front door IS —
+ * and, on a regeneration, deciding that every copy in circulation stops working
+ * — is not. `canHelpRun` exists for the club's routine work and its own header
+ * argues against widening the dangerous question by an option, so this asks the
+ * narrow one.
+ */
+router.post('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+  if (row.status !== 'active') {
+    return res.status(409).json({
+      error: 'Unarchive this organization before making an invitation link for it.',
+      code: 'archived',
+    });
+  }
+
+  let issued;
+  try {
+    issued = await runInTransaction(db, async (tx) => {
+      const link = await issueShareLink(tx, row.id, { createdBy: req.principal.userId });
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: link.rotated ? 'ORGANIZATION_SHARE_LINK_ROTATED' : 'ORGANIZATION_SHARE_LINK_CREATED',
+        /* No token in the audit trail. The trail is read by administrators who
+           are not in this club, and a credential written into it would be a
+           credential in a table with a different retention rule and a different
+           audience. What matters six months later is that somebody replaced the
+           link and when — not what it said. */
+        details: link.rotated
+          ? `Regenerated the invitation link for ${row.name} (${row.slug}). The previous link no longer works; members were unaffected.`
+          : `Created the invitation link for ${row.name} (${row.slug}).`,
+      });
+      return link;
+    });
+  } catch (err) {
+    console.error('Could not issue an organization invitation link:', err);
+    return res.status(500).json({ error: 'Could not make an invitation link.' });
+  }
+
+  const link = await shareLinkFor(db, row.id);
+  res.status(issued.rotated ? 200 : 201).json({
+    exists: true,
+    path: issued.path,
+    rotated: issued.rotated,
+    createdAt: link?.createdAt ?? null,
+    rotations: link?.rotations ?? 0,
+    canCreate: true,
+  });
+});
+
+/**
+ * DELETE — switch the link off.
+ *
+ * Not step-up gated and deliberately cheaper than creating one, on the rule the
+ * invitation routes already state: revocation only ever REMOVES reach, and
+ * putting friction in front of the safe action makes it harder than the
+ * dangerous one.
+ *
+ * A club whose policy is `invite` and whose link has just been switched off can
+ * be joined by nobody, which is a legitimate thing to want (an intake window
+ * that has closed) and is why this does not also change the policy. The client
+ * says so plainly in the confirmation.
+ */
+router.delete('/api/organizations/:key/share-link', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const removed = await runInTransaction(db, async (tx) => {
+    const gone = await revokeShareLink(tx, row.id);
+    if (gone) {
+      await recordAudit(tx, {
+        adminId: req.principal.userId,
+        action: 'ORGANIZATION_SHARE_LINK_REVOKED',
+        details: `Switched off the invitation link for ${row.name} (${row.slug}). Members were unaffected.`,
+      });
+    }
+    return gone;
+  });
+
+  res.json({ exists: false, revoked: removed, canCreate: true });
+});
+
+/**
+ * GET the public projection an invitation link opens. UNAUTHENTICATED.
+ *
+ * ── The one endpoint on this platform that answers with no session ──
+ *
+ * That is the point: somebody handed a link has no account, and asking them to
+ * make one before they can see what they are joining is how a share link stops
+ * being worth sharing. So this is modelled on `GET /api/certificates/verify/:code`
+ * — the only other unauthenticated read of real data — and it copies both of
+ * that route's disciplines.
+ *
+ * **It discloses only what the club itself advertises.** `publicOrganization` is
+ * an allowlist, and its header sets out field by field what is absent and why:
+ * no member, no founder, no event location, no announcement, no hours, no id.
+ *
+ * **Every failure answers identically.** No such token, a revoked one, one whose
+ * organization has been archived — all 404 with the same body. A distinguishable
+ * refusal would turn this into a probe for live links, and the shape of the
+ * refusal is the only thing an attacker gets to measure.
+ *
+ * Rate limiting is mounted in app.js ahead of the router, keyed on the device,
+ * counting successes — see `shareTokenLimiter` for why successes count and why
+ * the message must never read as a verdict on the link.
+ */
+router.get('/api/public/organizations/invite/:token', async (req, res) => {
+  const gone = () => res.status(404).json({
+    error: 'That invitation link does not work. It may have been replaced or switched off. '
+      + 'Ask whoever shared it for the current one.',
+    code: 'invalid_link',
+  });
+
+  try {
+    const org = await resolveShareToken(db, req.params.token);
+    if (!org) return gone();
+
+    /* The reads AND the allowlist live together in `organizations.js` — see
+       `publicOrganizationSnapshot` for why, and for what it refuses to select. */
+    res.json({ organization: await publicOrganizationSnapshot(db, org) });
+  } catch (err) {
+    console.error('Invitation link lookup failed:', err);
+    /* The same body as a miss. A 500 here would tell a caller that the token
+       matched something and the failure came afterwards, which is more than a
+       uniform refusal is willing to say. */
+    return gone();
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Requests to join
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * POST — ask to join.
+ *
+ * ── Only for a club that actually approves members ──
+ *
+ * A request filed against an `open` club is refused with the affordance that
+ * club really offers, rather than accepted and left in a queue nobody looks at.
+ * Against an `invite` club it is refused too: the club has said the way in is
+ * its link, and letting a stranger file a request instead would be a second door
+ * the setting was chosen to close.
+ *
+ * ── Duplicates are settled by the database ──
+ *
+ * `requestToJoin` leans on the partial unique index and reports the existing
+ * request as the same success as a new one. Two simultaneous presses therefore
+ * produce one row, not two — and the second press is not an error, because
+ * pressing a button twice never is.
+ */
+router.post('/api/organizations/:key/join-requests', authenticateToken, requireCap('organization.join'),
+  joinAttemptLimiter, async (req, res) => {
+    const row = await loadOrganization(req, res);
+    if (!row) return;
+    if (row.status !== 'active') {
+      return res.status(409).json({ error: 'That organization is no longer accepting members.', code: 'archived' });
+    }
+
+    const ban = await db.prepare(`
+      SELECT reason FROM organization_bans
+      WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+    `).get(row.id, req.principal.userId);
+    /* Enforced here as well as on the join route, and for the same reason it is
+       enforced there: a ban that only stopped one of the two ways in would be a
+       ban a client could route around. */
+    if (ban) {
+      return res.status(403).json({
+        error: 'You cannot ask to rejoin this organization while this ban is active.',
+        code: 'banned',
+        reason: ban.reason,
+      });
+    }
+
+    const membership = await memberRoleOf(db, row.id, req.principal.userId);
+    if (membership) return res.status(409).json({ error: 'You are already a member.', code: 'already_member' });
+
+    const affordance = joinAffordance({
+      joinPolicy: row.join_policy,
+      status: row.status,
+      canJoinAtAll: true,
+    });
+    if (affordance.action !== 'request') {
+      return res.status(409).json({
+        error: affordance.action === 'join'
+          ? 'This organization lets you join straight away.'
+          : 'This organization admits members by invitation, not by request.',
+        code: 'not_by_request',
+        affordance: affordance.action,
+      });
+    }
+
+    let request;
+    try {
+      request = await runInTransaction(db, async (tx) => {
+        const filed = await requestToJoin(tx, row.id, req.principal.userId);
+        if (!filed.created) return filed;
+
+        const requester = await tx.prepare('SELECT name FROM users WHERE id = ?').get(req.principal.userId);
+        for (const managerId of await managerIds(tx, row.id, { excluding: [req.principal.userId] })) {
+          await notificationService.dispatch('ORGANIZATION_JOIN_REQUEST_RECEIVED', {
+            organizationName: row.name,
+            organizationSlug: row.slug,
+            actorName: requester?.name ?? 'Somebody',
+          }, managerId, `org-join-request:${filed.id}`);
+        }
+        return filed;
+      });
+    } catch (err) {
+      console.error('Could not file a request to join:', err);
+      return res.status(500).json({ error: 'Could not send that request.' });
+    }
+
+    res.status(request.created ? 201 : 200).json({
+      pending: true,
+      submittedAt: request.createdAt,
+      created: request.created,
+    });
+  });
+
+/**
+ * DELETE — take your own request back.
+ *
+ * `/mine` rather than an id, so there is nothing to get wrong: the route cannot
+ * be pointed at somebody else's request, because it never accepts an identifier.
+ * That is a stronger guarantee than checking ownership, and it is the same
+ * reason `DELETE …/membership` takes no user id.
+ */
+router.delete('/api/organizations/:key/join-requests/mine', authenticateToken, requireCap('organization.join'), async (req, res) => {
+  const row = await loadOrganization(req, res);
+  if (!row) return;
+  const withdrawn = await withdrawRequest(db, row.id, req.principal.userId);
+  res.json({ pending: false, withdrawn });
+});
+
+/**
+ * GET the queue. Managers only.
+ *
+ * ── Why not `canHelpRun` ──
+ *
+ * Two reasons, and the second is the one that decides it. Admitting somebody is
+ * a standing decision about who is in the club, which is the class of question
+ * `canManage` guards — and this response is a list of named students who have
+ * asked for something, which is a disclosure a Student Organizer has no need
+ * for. `canHelpRun`'s own header argues against widening the dangerous question
+ * by an option; this asks the narrow one.
+ *
+ * Every row goes through `profileSummary`, the same strict subset the roster and
+ * directory search use, so a queue cannot become the route by which a manager
+ * reads a field a profile would have withheld.
+ */
+router.get('/api/organizations/:key/join-requests', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const rows = await pendingRequests(db, row.id);
+  res.json({
+    requests: rows.map(r => ({
+      /* `requestId` and not `id`, because `profileSummary` publishes `id` and it
+         means the USER — the same shape the roster uses, so one row component
+         serves both and links to the same profile. Naming the request `id` here
+         made the spread below overwrite it, which is not a clash a reader
+         notices and cost the decision route its identifier. */
+      requestId: r.id,
+      submittedAt: r.createdAt,
+      /* Handed over as it came out of the database, because `profileSummary`
+         reads the column names — it is the same strict subset the roster and
+         directory search publish, so a queue cannot disclose a field a profile
+         would have withheld. */
+      ...profileSummary({ ...r, id: r.userId }),
+    })),
+    /* So the client's badge and its list cannot disagree after a decision. */
+    pendingRequests: rows.length,
+  });
+});
+
+/**
+ * POST a decision. Managers only.
+ *
+ * ── One transaction, and a conditional update inside it ──
+ *
+ * Accepting is four writes that must all happen or none: the request's status,
+ * the membership row, the recomputation of the new member's helper capabilities,
+ * and the audit row. `recordAudit` never catches, so a failed audit rolls the
+ * admission back — there is no state in which somebody joined a club and the
+ * record did not happen.
+ *
+ * `decideRequest` writes `… WHERE id = ? AND organization_id = ? AND status =
+ * 'pending'`, which is what makes two managers pressing Accept at the same
+ * moment produce one membership and one honest 409 rather than two writes racing
+ * over one row. The membership insert is `ON CONFLICT DO NOTHING`, so even the
+ * loser's write would be harmless if it got that far.
+ *
+ * ── Why `organization_id` is in that WHERE clause ──
+ *
+ * Request ids are random UUIDs, so this is not a guessing defence. It is what
+ * stops a manager of one club deciding another club's request by pasting an id
+ * into a route scoped to theirs — the cross-organization case the brief asks
+ * about, closed in the statement rather than in a preceding check.
+ */
+router.post('/api/organizations/:key/join-requests/:requestId/decision', authenticateToken,
+  requireCap('organization.manage.own'), async (req, res) => {
+    const row = await loadManagedOrganization(req, res);
+    if (!row) return;
+
+    const decision = req.body?.decision;
+    if (!REQUEST_DECISIONS.includes(decision)) {
+      return res.status(400).json({
+        error: `The decision must be ${REQUEST_DECISIONS.join(' or ')}.`,
+        field: 'decision',
+      });
+    }
+
+    const subject = await requestSubject(db, row.id, req.params.requestId);
+    /* 404 before the update, so "no such request in this club" is answered once
+       and the update below only ever handles the race. */
+    if (!subject) return res.status(404).json({ error: 'No such request.', code: 'not_found' });
+
+    let outcome;
+    try {
+      outcome = await runInTransaction(db, async (tx) => {
+        const result = await decideRequest(tx, {
+          organizationId: row.id,
+          requestId: req.params.requestId,
+          decision,
+          deciderId: req.principal.userId,
+        });
+        if (result !== 'decided') return result;
+
+        if (decision === 'accept') {
+          await tx.prepare(`
+            INSERT INTO organization_members (organization_id, user_id, member_role, joined_at)
+            VALUES (?, ?, 'member', ?)
+            ON CONFLICT(organization_id, user_id) DO NOTHING
+          `).run(row.id, subject.userId, new Date().toISOString());
+          /* Recomputed for the same reason leaving recomputes it: the answer is
+             derived from the membership table rather than remembered, so it
+             cannot drift from the thing it describes. Joining as an ordinary
+             member grants nothing, and calling it anyway is what makes the rule
+             one sentence instead of four call sites. */
+          await syncOrganizerCapabilities(tx, subject.userId, req.principal.userId);
+        }
+
+        await recordAudit(tx, {
+          adminId: req.principal.userId,
+          action: decision === 'accept' ? 'ORGANIZATION_REQUEST_ACCEPTED' : 'ORGANIZATION_REQUEST_REJECTED',
+          targetUserId: subject.userId,
+          details: `${decision === 'accept' ? 'Accepted' : 'Declined'} a request to join ${row.name} (${row.slug}).`,
+        });
+
+        await notificationService.dispatch(
+          decision === 'accept'
+            ? 'ORGANIZATION_JOIN_REQUEST_ACCEPTED'
+            : 'ORGANIZATION_JOIN_REQUEST_REJECTED',
+          { organizationName: row.name, organizationSlug: row.slug },
+          subject.userId,
+          `org-join-request-decision:${req.params.requestId}`,
+        );
+
+        return result;
+      });
+    } catch (err) {
+      console.error('Could not decide a request to join:', err);
+      return res.status(500).json({ error: 'Could not save that decision.' });
+    }
+
+    if (outcome === 'already_decided') {
+      return res.status(409).json({
+        error: 'Somebody has already answered that request.',
+        code: 'already_decided',
+      });
+    }
+    if (outcome !== 'decided') {
+      return res.status(404).json({ error: 'No such request.', code: 'not_found' });
+    }
+
+    res.json({
+      decision,
+      memberCount: await countMembers(row.id),
+      pendingRequests: await pendingRequestCount(db, row.id),
+    });
+  });
+
 
 export default router;

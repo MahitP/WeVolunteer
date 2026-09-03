@@ -121,6 +121,24 @@ const ACTIONS = {
      to see classmates' details and write on their service records. */
   ORGANIZATION_RANK_CHANGED: ['Organization rank changed', TONES.NOTABLE],
   ORGANIZATION_ROSTER_EXPORTED: ['Organization roster exported', TONES.NOTABLE],
+  /**
+   * The invitation link, and the setting that decides who needs one.
+   *
+   * NOTABLE rather than ROUTINE. Regenerating is the act that stops every copy
+   * of a link already handed out from working, and changing who may join is the
+   * question somebody asks six months later when a student turns up in a club
+   * they should not be in. Neither is grave — nobody's standing changes — but a
+   * reader scanning the trail should see them.
+   */
+  ORGANIZATION_SHARE_LINK_CREATED: ['Organization invitation link created', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_ROTATED: ['Organization invitation link regenerated', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_REVOKED: ['Organization invitation link switched off', TONES.NOTABLE],
+  ORGANIZATION_MEMBERSHIP_POLICY_CHANGED: ['Organization membership settings changed', TONES.NOTABLE],
+  /* Admitting somebody, or declining them. ROUTINE: it is the ordinary running
+     of a club, it happens as often as students ask, and a trail in which every
+     row is notable has no notable rows. */
+  ORGANIZATION_REQUEST_ACCEPTED: ['Request to join accepted', TONES.ROUTINE],
+  ORGANIZATION_REQUEST_REJECTED: ['Request to join declined', TONES.ROUTINE],
   /* The one action that makes a student's service record unchangeable. NOTABLE
      rather than routine: it is irreversible, and the trail is the only place
      that records who did it. */

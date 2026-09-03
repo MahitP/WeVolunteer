@@ -175,6 +175,13 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/organizations/new',
   '/organizations/:key/edit',
   '/organizations/:key',
+  /* The invitation link. Allowed under the rule this whole file rests on: the
+     STORED value is the matched pattern, so the token cannot survive matching —
+     exactly the case `/verify/:code` and `/appeal/:token` already make for a
+     live bearer value. The path shape says only that somebody opened an
+     invitation, which names neither the club nor the reader. And a crash HERE is
+     one that costs a signup: it is read by people who have no account yet. */
+  '/organizations/invite/:token',
   '/hours/external',
   /* The same answer as `/hours`, twice over. A crash report from either carries
      the path and nothing else — no certificate, no organization, no dates, and

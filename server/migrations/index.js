@@ -70,6 +70,7 @@ import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
+import organizationMembershipPolicy from './062_organization_membership_policy.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -405,7 +406,16 @@ export const MIGRATIONS = [
    * and order-independent beyond that.
    */
   leaderboardCandidates,
-  resyncUnacceptedLegalHashesAgain
+  resyncUnacceptedLegalHashesAgain,
+  /**
+   * 062 — how somebody joins an organization, and the link that lets them.
+   *
+   * Two defaulted columns on `organizations` plus two new tables with foreign
+   * keys to it and to `users`, so it must run after both exist and after 001,
+   * which rebuilds `users`. Nothing else depends on its order, and it is
+   * additive on both engines.
+   */
+  organizationMembershipPolicy
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

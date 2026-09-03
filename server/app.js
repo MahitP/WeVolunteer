@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { createRedisLimitStore } from './redis/limitStore.js';
+import { shareTokenLimiter } from './organizationLimiters.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { readFileSync } from 'fs';
@@ -1092,6 +1093,19 @@ app.use('/api/auth/check-username', lookupLimiter);
 app.use('/api/auth/check-email', lookupLimiter);
 
 app.use('/api/certificates/verify', verifyLimiter);
+/**
+ * The other unauthenticated read of real data.
+ *
+ * Mounted here, ahead of the blanket `apiLimiter`, for the same reason
+ * `/api/certificates/verify` is: it answers without a session, so nothing else
+ * stands between it and being used as a free database probe. `shareTokenLimiter`
+ * counts successes deliberately — see its own note for why, and for why its
+ * message must never read as a verdict on the link.
+ *
+ * The AUTHENTICATED routes that consume a token carry the same limiter inside
+ * the router, where the account is known; this covers only the public one.
+ */
+app.use('/api/public/organizations/invite', shareTokenLimiter);
 app.use('/api', apiLimiter);
 
 app.use(webhookRoutes);

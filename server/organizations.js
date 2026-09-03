@@ -22,6 +22,13 @@
 
 import crypto from 'node:crypto';
 import { isAvatarColor } from './avatarColors.js';
+/* Vocabulary only, and that module imports nothing at all — so reading it here
+   costs no coupling, and the browser can import the same file for the settings
+   form rather than holding a second copy of the words. */
+import {
+  JOIN_POLICIES, INVITE_POLICIES,
+  normaliseJoinPolicy, normaliseInvitePolicy,
+} from './organizationPolicy.js';
 
 export const ORG_NAME_MAX = 120;
 export const ORG_DESCRIPTION_MAX = 2000;
@@ -137,6 +144,31 @@ export function validateOrganization(payload, { partial = false } = {}) {
       return { ok: false, field: 'allowReplies', error: 'That setting must be on or off.' };
     }
     out.allowReplies = payload.allowReplies;
+  }
+
+  /**
+   * Who may join, and who may hand out the link.
+   *
+   * Validated against `organizationPolicy.js` rather than a literal here,
+   * because migration 062 deliberately carries no CHECK constraint — SQLite
+   * cannot add one without rebuilding this table — so this IS the constraint.
+   * A value outside the vocabulary is refused rather than normalised, because
+   * a manager who typed something unexpected should be told, not silently given
+   * a different setting from the one they chose. The readers normalise; the
+   * writer refuses.
+   */
+  if (payload.joinPolicy !== undefined) {
+    if (!JOIN_POLICIES.includes(payload.joinPolicy)) {
+      return { ok: false, field: 'joinPolicy', error: 'Choose one of the available join settings.' };
+    }
+    out.joinPolicy = payload.joinPolicy;
+  }
+
+  if (payload.invitePolicy !== undefined) {
+    if (!INVITE_POLICIES.includes(payload.invitePolicy)) {
+      return { ok: false, field: 'invitePolicy', error: 'Choose who may share the invitation link.' };
+    }
+    out.invitePolicy = payload.invitePolicy;
   }
 
   if (payload.avatar !== undefined) {
@@ -417,6 +449,21 @@ export function formatOrganization(row) {
     imageUrl: row.image_url || null,
     allowReplies: row.allow_replies !== 0,
     avatarColor: row.avatar_color || null,
+    /**
+     * The membership settings, normalised on the way out.
+     *
+     * Published to every reader, not only to managers, because the page has to
+     * be able to say "this club admits by invitation" to somebody who is not in
+     * it — that is the whole of §17: discovering a club and being allowed into
+     * it are different questions, and one that hid its policy would leave a
+     * student pressing a button that cannot work.
+     *
+     * `invitePolicy` is not a secret either: it says which ranks may pass the
+     * link on, which is a fact about how the club is run and is visible from its
+     * roster anyway.
+     */
+    joinPolicy: normaliseJoinPolicy(row.join_policy),
+    invitePolicy: normaliseInvitePolicy(row.invite_policy),
     /* Present only on the "mine" listing, which joins membership. Undefined
        elsewhere rather than null, so a caller can tell "not asked" from "not a
        manager". */
@@ -426,6 +473,154 @@ export function formatOrganization(row) {
     status: row.status,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * What a stranger holding an invitation link may see.
+ *
+ * ── An allowlist, and a separate function, on purpose ──
+ *
+ * `formatOrganization` serves signed-in readers and grows over time; every field
+ * added to it is a field a member may see, which is the right default for that
+ * function and the wrong one here. If this were `formatOrganization` with a flag,
+ * the next field added would become public by default and nobody would notice
+ * until it was.
+ *
+ * So this names, one by one, what is published to somebody with no account. Two
+ * functions rather than a flag, for the same reason `canManage` and `canHelpRun`
+ * are two functions: the narrow answer keeps its own name, so a route cannot get
+ * the wide one by forgetting an argument.
+ *
+ * ── What is deliberately absent, and why ──
+ *
+ *   • **Every member.** No names, no handles, no avatars, no ranks, no count of
+ *     managers. The roster is a list of children, and a link forwarded once into
+ *     a group chat must not publish it. The member COUNT stays: "forty members"
+ *     names nobody and is what tells a parent the club is real.
+ *   • **The founder's name.** A person, published to an unauthenticated reader,
+ *     for no reason the page needs.
+ *   • **Event locations.** An upcoming event's title and date advertise the club;
+ *     its location is where named minors will physically be at a stated time, and
+ *     that is not something a share link should publish outside the platform.
+ *   • **The organization id.** The slug is enough for the signed-in redirect, and
+ *     an id would be a second handle on the record for no gain.
+ *   • **Announcements, hours, bans, appeals, join requests, and the token.**
+ *
+ * @param {object} row an `organizations` row, with `memberCount`/`eventCount`
+ * @param {Array}  upcoming already-narrowed event rows: title, startsAt, category
+ */
+export function publicOrganization(row, { upcoming = [] } = {}) {
+  return {
+    kind: 'organization',
+    /* The slug travels so a signed-in reader can be sent to the real page, and
+       so the address bar can say the club's name rather than a token. It is not
+       a capability: `/organizations/:key` requires a session and
+       `directory.read`, exactly as it did before this feature existed. */
+    slug: row.slug,
+    name: row.name,
+    description: row.description || '',
+    tags: parseTags(row.tags),
+    avatar: row.avatar || null,
+    imageUrl: row.image_url || null,
+    avatarColor: row.avatar_color || null,
+    memberCount: row.memberCount ?? 0,
+    eventCount: row.eventCount ?? 0,
+    joinPolicy: normaliseJoinPolicy(row.join_policy),
+    /* So the invitation page can say what pressing Join will actually do —
+       "join straight away" against "ask a manager" — before somebody makes an
+       account for it. */
+    upcoming: upcoming.map(e => ({
+      title: e.title,
+      startsAt: e.startsAt ?? null,
+      category: e.category ?? null,
+    })),
+  };
+}
+
+/**
+ * Reads what `publicOrganization` needs, and returns the projection.
+ *
+ * ── Why the queries live here and not in the route ──
+ *
+ * Two reasons, and both matter. The first is the one
+ * `db.accessSurface.test.js` ratchets: this module RECEIVES a handle, so these
+ * two statements can be given a pooled client during the PostgreSQL port, while
+ * the same statements written in the route file reach for the imported global
+ * and cannot.
+ *
+ * The second is that the projection and the reads that feed it are one decision.
+ * `publicOrganization` promises that no event location and no member reaches an
+ * unauthenticated reader; a route free to write its own query is free to select
+ * `e.location` and hand it in. Keeping the SELECT beside the allowlist means the
+ * promise is checkable in one place.
+ *
+ * @param {object} db     a database handle
+ * @param {object} org    an `organizations` row
+ */
+export async function publicOrganizationSnapshot(db, org, { upcomingLimit = 3, now = Date.now() } = {}) {
+  /* Both counts in one statement rather than two round trips, the shape
+     `ORG_SELECT` uses — and only these two, because they are the only aggregate
+     the projection publishes. */
+  const counts = await db.prepare(`
+    SELECT (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = ?) AS "memberCount",
+           (SELECT COUNT(*) FROM events e WHERE e.organization_id = ?) AS "eventCount"
+  `).get(org.id, org.id);
+
+  /**
+   * A few upcoming opportunities, by title and date.
+   *
+   * Enough to show the club is active — an invitation page with nothing on it
+   * reads as an empty club rather than a new one — and deliberately NOT the
+   * location. An event's location is where named minors will physically be at a
+   * stated time, and a share link has no business publishing that outside the
+   * platform. Cancelled events are excluded for the reason the signed-in page
+   * gives: an event that is not happening is not something to advertise.
+   *
+   * Filtered in SQL on the derived start, then bounded in JavaScript, because
+   * the start is a correlated MIN over `slots` and an event with no slot yet has
+   * none at all — a WHERE against it would silently drop the ordering the
+   * LIMIT depends on.
+   */
+  const rows = await db.prepare(`
+    SELECT e.title, e.category,
+           (SELECT MIN(s.start_datetime) FROM slots s WHERE s.event_id = e.id) AS "startsAt"
+    FROM events e
+    WHERE e.organization_id = ? AND e.status <> 'cancelled'
+    ORDER BY "startsAt" ASC
+    LIMIT 40
+  `).all(org.id);
+
+  const upcoming = rows
+    .filter(e => e.startsAt && Date.parse(e.startsAt) >= now)
+    .slice(0, upcomingLimit);
+
+  return publicOrganization({ ...org, ...counts }, { upcoming });
+}
+
+/**
+ * May this principal hand out the organization's invitation link?
+ *
+ * ── Why this is not `canManage` and not `canHelpRun` ──
+ *
+ * It is whichever of those two the ORGANIZATION has chosen, which is a question
+ * neither of them can answer on its own. `invite_policy` is the club's setting;
+ * this is the one place it is turned into a yes or a no, so a second route
+ * cannot answer it differently.
+ *
+ * Takes the ranks as parameters rather than re-reading them, because both
+ * callers have already loaded the membership row for other reasons and a second
+ * lookup on every organization page load is a query nobody needs.
+ *
+ * Sharing only. Creating, rotating and switching the link off is always
+ * `canManage` — those are decisions about the club's front door rather than
+ * about passing its address on, and the route asks `canManage` for them
+ * directly.
+ */
+export function canInvite({ invitePolicy, memberRole, hasModerate = false }) {
+  if (hasModerate) return true;
+  if (!memberRole) return false;
+  if (normaliseInvitePolicy(invitePolicy) === 'members') return true;
+  return memberRole === 'manager' || memberRole === 'student_organizer';
 }
 
 /**

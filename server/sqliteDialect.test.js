@@ -217,7 +217,13 @@ const CONSTRUCTS = [
      SQLite half of suspending FK enforcement (`PRAGMA foreign_keys = OFF/ON`)
      beside its PostgreSQL equivalent. Both branches live together on purpose —
      that is what the dialect module is for. */
-  { name: 'PRAGMA',          pattern: /\bPRAGMA\s+\w/gi,                    runtime: 6, boot: 91,
+  /* Boot 91 → 92 on 2026-09-03 for `062_organization_membership_policy.js`: one
+     `PRAGMA table_info(organizations)`, the column probe that makes its two
+     `ADD COLUMN`s re-runnable. Additive, boot-path only, and it never runs
+     against PostgreSQL — that half is `ADD COLUMN IF NOT EXISTS`, which is why
+     the runtime count did not move. `045_event_audience.js` contributed the same
+     shape for the same reason. */
+  { name: 'PRAGMA',          pattern: /\bPRAGMA\s+\w/gi,                    runtime: 6, boot: 92,
     postgres: 'session settings and information_schema; PRAGMA does not exist' },
   /**
    * Case-sensitive, and the case carries the meaning.
@@ -632,12 +638,22 @@ describe('SQLite-only SQL still in the codebase', () => {
    * somebody thought to look for, so every addition to the list is expected to
    * raise the total once, and never again.
    */
-  it('holds the total at 141 — 9 runtime, 132 boot', () => {
+  /**
+   * Raised from 141 (9 runtime, 132 boot) to 142 (9 runtime, 133 boot) on
+   * 2026-09-03, for `062_organization_membership_policy.js`.
+   *
+   * One site, in the boot path: the `PRAGMA table_info(organizations)` that lets
+   * the migration's two `ADD COLUMN`s be re-run safely. The runtime count is
+   * unchanged, which is the number that gates the PostgreSQL port — and this
+   * migration's PostgreSQL half is `ALTER TABLE … ADD COLUMN IF NOT EXISTS`,
+   * carrying no SQLite-only construct at all.
+   */
+  it('holds the total at 142 — 9 runtime, 133 boot', () => {
     const runtime = CONSTRUCTS.reduce((n, c) => n + tallyOf(rel => !isBoot(rel), c), 0);
     const boot = CONSTRUCTS.reduce((n, c) => n + tallyOf(isBoot, c), 0);
 
     expect(runtime, 'runtime SQLite-only SQL grew').toBeLessThanOrEqual(9);
-    expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(132);
+    expect(boot, 'boot-path SQLite-only SQL grew').toBeLessThanOrEqual(133);
   });
 });
 
