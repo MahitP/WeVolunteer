@@ -175,7 +175,37 @@ export default function CertificateVerification() {
           )}
 
           {status === 'invalid' && (
-            <div style={{ textAlign: 'center' }}>
+            /**
+             * `data-error-kind` on a page that is not an `ErrorExperience`.
+             *
+             * The accessibility sweep reads this attribute to answer the one
+             * question an HTTP status cannot: "did I measure the page this route
+             * names, or a panel standing in for it?" React Router serves the
+             * shell for any path, so `/verify/<anything>` answers 200 and lands
+             * on exactly the requested path whether or not the code is real.
+             *
+             * That mattered because a certificate code cannot be written down.
+             * `generateCode` in server/certificates.js draws it from
+             * `crypto.randomBytes`, so the harness's typed fixture was different
+             * from every seeded code and this branch is what `/verify/:code`
+             * rendered on every run — measured, and reported as coverage of the
+             * public verification page. `a11y/harness/walk.mjs` calls that
+             * "worse than skipping a route, because it produces numbers that
+             * look like coverage".
+             *
+             * `a11y/harness/fixtures.mjs` now resolves a real code from
+             * `/api/certificates` at walk time, so the sweep measures the
+             * verified page. This marker is the backstop for the day that lookup
+             * finds nothing — a seed without an attended event, say — so the
+             * sweep says "unmeasured" instead of quietly auditing this panel
+             * again. Same reasoning, and the same attribute, as `CertificateView`.
+             *
+             * Only THIS state carries it. "Too many checks" and "Verification
+             * unavailable" are explicitly not verdicts on the certificate, and
+             * marking them 404 would claim the code did not resolve when the
+             * truth is that it was never looked up.
+             */
+            <div style={{ textAlign: 'center' }} data-error-kind="404">
               <div style={{ color: 'var(--danger)', marginBottom: 'var(--s4)' }}>
                 <ShieldAlert size={48} />
               </div>

@@ -1,4 +1,5 @@
-import { ROUTES, SIGNED_OUT_ROUTES } from './routes.mjs';
+import { ROUTES, SIGNED_OUT_ROUTES, concreteFor } from './routes.mjs';
+import { resolveFixtures } from './fixtures.mjs';
 import { fetchRoles } from './roles.mjs';
 import { signInAs } from './signIn.mjs';
 
@@ -48,6 +49,12 @@ export async function forEachRoute(
   const redirected = [];
   /* Answered 200 on the right path, but showed an error instead of the page. */
   const unmeasured = [];
+  /* The same thing, for the routes `SWEEP_CANNOT_MEASURE` says cannot be
+     reached by this sweep's kind of visitor. Kept apart so the specs can go on
+     asserting that `unmeasured` is empty — an expected gap and a surprise are
+     different facts, and merging them would either hide the surprise or turn the
+     expected gap into a permanent red. */
+  const expectedUnmeasured = [];
   const visited = [];
 
   /**
@@ -60,6 +67,23 @@ export async function forEachRoute(
     ? [{ role: { key: 'signed-out' }, storageState: undefined, routes: SIGNED_OUT_ROUTES }]
     : await signedInPasses({ browser, request, baseURL }, roles);
 
+  /**
+   * Parameters the typed table cannot supply, asked of the running app.
+   *
+   * `routes.mjs` precomputes `route.concrete` from literals, which is all a
+   * seeded id or handle needs. A certificate code is `crypto.randomBytes` and
+   * differs every reseed, so it can only be learned here — see `fixtures.mjs`.
+   * Resolved ONCE for the whole walk (and memoised beyond it), then merged per
+   * route below, so a route's URL is never built from a value that was true
+   * when somebody typed it and false ever since.
+   *
+   * Done for the signed-out pass too. There is no session in that pass, but the
+   * lookup opens its own, and `/verify/:code` is a PUBLIC route: the code is
+   * what a reader is handed on paper, and the signed-out visit is the one that
+   * matches how the link is really opened.
+   */
+  const live = await resolveFixtures({ browser, request, baseURL });
+
   for (const pass of passes) {
     const ctx = await browser.newContext({
       baseURL,
@@ -69,17 +93,21 @@ export async function forEachRoute(
     const page = await ctx.newPage();
 
     for (const route of pass.routes) {
+      /* The typed path, with anything `fixtures.mjs` resolved layered over it.
+         Everything below reports against THIS rather than `route.concrete`, so
+         a failure names the URL that was actually visited. */
+      const target = concreteFor(route.path, live);
       let res;
       try {
-        res = await page.goto(route.concrete, { waitUntil: 'domcontentloaded' });
+        res = await page.goto(target, { waitUntil: 'domcontentloaded' });
       } catch (err) {
         unreachable.push(
-          `${route.concrete} (${pass.role.key}) -> navigation threw: ${err.message.split('\n')[0]}`
+          `${target} (${pass.role.key}) -> navigation threw: ${err.message.split('\n')[0]}`
         );
         continue;
       }
       if (res && res.status() >= 400) {
-        unreachable.push(`${route.concrete} (${pass.role.key}) -> HTTP ${res.status()}`);
+        unreachable.push(`${target} (${pass.role.key}) -> HTTP ${res.status()}`);
         continue;
       }
 
@@ -156,8 +184,8 @@ export async function forEachRoute(
       }
 
       const landed = new URL(page.url()).pathname;
-      if (landed !== route.concrete) {
-        redirected.push(`${route.concrete} (${pass.role.key}) -> ${landed}`);
+      if (landed !== target) {
+        redirected.push(`${target} (${pass.role.key}) -> ${landed}`);
         continue;
       }
 
@@ -187,6 +215,12 @@ export async function forEachRoute(
        *
        * A 404 means the path or its fixture did not resolve to anything, so
        * whatever was measured is not the page the route names.
+       *
+       * `fixtures.mjs` has since removed the commonest cause: a parameter whose
+       * value cannot be written down — a certificate code is `crypto.randomBytes`
+       * and differs every reseed — is now resolved from the running app instead
+       * of typed, so `/verify/:code` is measured against a code that exists. This
+       * check is what remains honest when even that finds nothing.
        */
       /* `page.evaluate`, NOT `locator.getAttribute`. A locator action auto-waits
          for the element to appear, and on a route that renders correctly this
@@ -198,10 +232,20 @@ export async function forEachRoute(
         () => document.querySelector('[data-error-kind]')?.getAttribute('data-error-kind') ?? null
       ).catch(() => null);
       if (errorKind === '404' && !route.path.startsWith('/errors')) {
-        unmeasured.push(
-          `${route.concrete} (${pass.role.key}) -> rendered a 404, so its path or `
-          + 'fixture does not resolve and the page under this route was never measured'
-        );
+        if (route.sweepCannotMeasure) {
+          /* Prefixed with the DECLARED path, not just the concrete one, so the
+             stale-exemption guard in sweep.aria.spec.js can match these against
+             `SWEEP_CANNOT_MEASURE`'s keys exactly rather than by guessing at a
+             shared prefix. */
+          expectedUnmeasured.push(
+            `${route.path} — ${target} (${pass.role.key}) -> ${route.sweepCannotMeasure}`
+          );
+        } else {
+          unmeasured.push(
+            `${target} (${pass.role.key}) -> rendered a 404, so its path or `
+            + 'fixture does not resolve and the page under this route was never measured'
+          );
+        }
         continue;
       }
 
@@ -211,7 +255,7 @@ export async function forEachRoute(
     await ctx.close();
   }
 
-  return { unreachable, redirected, unmeasured, visited };
+  return { unreachable, redirected, unmeasured, expectedUnmeasured, visited };
 }
 
 async function signedInPasses({ browser, request, baseURL }, roles) {

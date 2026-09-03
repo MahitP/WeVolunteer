@@ -315,8 +315,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   `CertificateView`'s not-found panel now carries `data-error-kind`, which is the
   signal `walk.mjs` reads to tell a measured page from an error panel standing in
-  for one. The sweep reports the route as unmeasured rather than claiming a page
-  it never saw — narrowing what the suite asserts, on purpose.
+  for one — so a route whose fixture does not resolve is reported as unmeasured
+  rather than claimed as a page the sweep never saw. That is now the backstop
+  rather than the outcome: the live fixture described in the next entry resolves
+  a real code for `:code`, so the sweep reaches this document too.
 
   And `a11y/workflows/certificate.spec.js` closes the gap rather than only
   labelling it: it asks the API for a code that exists, then runs axe, the
@@ -342,6 +344,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   during an incident. `.env` and the live check are the only authorities on
   this; a note claiming otherwise is worth nothing next to either.
 
+- **The accessibility sweep was reporting a not-found panel as coverage of the
+  public certificate verification page.** `/verify/:code` took its parameter
+  from a literal in the harness's fixture table, `WEV-8DLE-CNMH`. That code had
+  never resolved and never could: `generateCode` builds certificate codes from
+  `crypto.randomBytes`, so every reseed mints different ones — two runs during
+  this fix produced `WEV-JPFW-8C2S` and `WEV-9B6A-JQVK`. React Router serves the
+  shell for any path, so the route answered HTTP 200, landed on exactly the
+  requested path, and rendered "Invalid Certificate" — which five sweeps then
+  measured and filed under the real route's name. Every accessibility number
+  ever reported for the verification page was a number about its error state,
+  and nothing in the output said so. Parameters that cannot be written down are
+  now resolved from the running application at walk time
+  (`a11y/harness/fixtures.mjs` asks `/api/certificates` for a code that exists),
+  and the run's log names the code it measured. The panel itself is marked
+  `data-error-kind="404"` as a backstop, so a seed that stops issuing
+  certificates makes the sweep report the route as unmeasured rather than
+  quietly audit the wrong page again — and the fixture table now fails its guard
+  if anybody types a code-shaped literal back into it.
+
+  `/certificates/:code` is the one route a live code does **not** rescue, and the
+  reason is ownership rather than fixtures: `getCertificateForOwner` reads by
+  `user_id`, the seeded certificate belongs to `user-student-2`, and the sweep
+  signs in as the first account of each role — `user-student-1`. The 404 it gets
+  is the product correctly refusing it, so no fixture can ever make that route
+  measurable by the role sweep. `routes.mjs` records it in
+  `SWEEP_CANNOT_MEASURE` with that reason, `walk.mjs` reports it as an expected
+  gap instead of a surprise, and `sweep.aria.spec.js` fails if the exemption ever
+  stops being earned — so an exemption cannot outlive the fact behind it. The
+  page itself is measured by `a11y/workflows/certificate.spec.js`, which signs in
+  as the holder and now shares the harness's one lookup rather than carrying a
+  second copy of it.
 - **A lower version number could compare as higher, permanently.** The version
   comparator was `(major - major) || (minor - minor) || (patch - patch)` over
   components produced by `Number()` with no bound on length. Both halves were

@@ -121,19 +121,20 @@ export default function CertificateView({ currentUser, addToast }) {
        * HTTP status cannot answer, because React Router serves the shell for any
        * path and a missing fixture still lands on 200.
        *
-       * Certificate codes are `crypto.randomBytes` (see `generateCode`), so the
-       * harness's typed `code` fixture cannot resolve on a freshly seeded
-       * database and this route renders the not-found panel every run. Without
-       * the marker the sweep measured that panel and reported it under
-       * `/certificates/:code`, which is the failure mode `walk.mjs` calls "worse
-       * than skipping a route, because it produces numbers that look like
-       * coverage".
+       * The harness resolves a real, current code now — `a11y/harness/fixtures.mjs`
+       * asks `/api/certificates`, because codes are `crypto.randomBytes` (see
+       * `generateCode`) and no literal survives a reseed. That fixed
+       * `/verify/:code`, which is public. It does NOT make this route
+       * measurable, and the reason is ownership rather than fixtures:
+       * `getCertificateForOwner` reads by `user_id`, the seeded certificate
+       * belongs to `user-student-2`, and the sweep signs in as `user-student-1`.
+       * The 404 it sees here is the product correctly refusing it.
        *
-       * So the marker is here to make the sweep report this route as UNMEASURED
-       * rather than to claim a page it never saw. It narrows what the suite
-       * asserts, on purpose. The real page was audited with axe directly — see
-       * docs/operations/owner-center.md — and the durable fix is to resolve the
-       * fixture from the seed at run time rather than type it.
+       * So the marker makes the sweep report this route as unmeasured rather
+       * than claim a page it never saw — `routes.mjs`'s `SWEEP_CANNOT_MEASURE`
+       * records that as an expected gap, with a guard that fails if it ever
+       * stops being true. The page itself is audited by
+       * `a11y/workflows/certificate.spec.js`, which signs in as the holder.
        */
       <div className="page stack-lg" data-error-kind={error === 'not_found' ? '404' : 'unknown'}>
         <BackLink />

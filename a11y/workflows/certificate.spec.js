@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { signInAs } from '../harness/signIn.mjs';
+import { resolveCertificate } from '../harness/fixtures.mjs';
 import { scan } from '../harness/axe.mjs';
 
 /**
@@ -7,23 +7,23 @@ import { scan } from '../harness/axe.mjs';
  *
  * ── The gap this closes ──
  *
- * `/certificates/:code` is parameterised, and `routes.mjs` supplies parameters
- * from a table of literals. That works for `/users/:handle` and `/events/:id`,
- * whose seeded values are stable strings somebody can write down. It cannot work
- * here: `generateCode` in `server/certificates.js` builds the code from
- * `crypto.randomBytes`, so every reseed produces a different one — two
- * consecutive scratch databases gave `WEV-3CVD-ZJS6` and `WEV-5U93-8FP9`.
+ * `/certificates/:code` is the one route the sweep cannot reach, and the reason
+ * is worth stating exactly, because the obvious one is wrong.
  *
- * So the typed fixture never resolves, the route renders its not-found panel on
- * every single run, and before `CertificateView` carried `data-error-kind` the
- * sweep measured that panel and filed the result under `/certificates/:code`.
- * Which is the failure `walk.mjs` warns about in its own words: worse than
- * skipping a route, because it produces numbers that look like coverage.
+ * It is NOT that the code cannot be resolved. `a11y/harness/fixtures.mjs` asks
+ * `/api/certificates` for a code that exists and the sweep measures
+ * `/verify/:code` against that very code on every run. The obstacle is
+ * OWNERSHIP: `getCertificateForOwner` scopes every read to `user_id`, so this
+ * page opens only for the student who earned the certificate. The sweep signs in
+ * as the first account of each role — `user-student-1` for students — and the
+ * seed's only attended event belongs to `user-student-2`. The sweep is therefore
+ * authenticated as somebody the product is right to refuse, and the 404 it gets
+ * is the product working.
  *
- * Marking the panel fixed the dishonesty — the sweep now reports the route as
- * unmeasured — but reporting a gap is not closing one. This closes it, by
- * asking the API for a code that exists instead of hoping one was written down
- * correctly.
+ * `routes.mjs` records that in `SWEEP_CANNOT_MEASURE`, so the run reports it as
+ * an expected gap rather than a surprise. But recording a gap is not closing
+ * one. This closes it, by signing in as the student who actually holds the
+ * certificate.
  *
  * ── Why the whole page and not a component test ──
  *
@@ -38,62 +38,32 @@ test('axe finds no violations on a real certificate', async ({ browser, request,
   test.setTimeout(120000);
 
   /**
-   * Every demo student, not `fetchRoles`.
+   * One lookup, shared with the sweep.
    *
-   * `fetchRoles` keeps one account per distinct ROLE, which is right for a sweep
-   * measuring shells and reachable route sets — auditing five students adds no
-   * coverage there. It is wrong here: it collapses the three seeded students to
-   * the first, and a certificate is a property of the ACCOUNT, not the role.
-   * The seed gives one to `user-student-2`, so the deduped list returns the one
-   * student who has none and the spec fails on an empty list having proved
-   * nothing. Which account holds it is a seed detail this file should not know,
-   * so it asks each in turn instead of naming one.
+   * This file used to carry its own copy: fetch the demo accounts, filter to
+   * students, sign each in, ask `/api/certificates`, stop at the first that
+   * answers. `fixtures.mjs` now does exactly that for the route sweep, and two
+   * copies of a search this fiddly are one edit away from disagreeing — with the
+   * disagreement showing up as an accessibility finding rather than as the
+   * harness bug it would be. It hands back the session as well as the code,
+   * which is what this spec needs and the sweep does not.
+   *
+   * The subtlety the copy existed to capture is preserved inside it: `fetchRoles`
+   * deduplicates to one account per ROLE, and a certificate is a property of the
+   * ACCOUNT, so the deduplicated list returns the student who holds nothing.
    */
-  const accountsRes = await request.get(`${baseURL}/api/auth/demo-accounts`);
-  expect(accountsRes.ok(), 'GET /api/auth/demo-accounts').toBeTruthy();
-  const payload = await accountsRes.json();
-  const accounts = (Array.isArray(payload) ? payload : payload?.accounts ?? [])
-    /* Certificates belong to the volunteer who earned them —
-       `getCertificateForOwner` scopes every read to `user_id`, and no other role
-       can open one (`routes.certificateViewer.test.js`). */
-    .filter(a => /student/i.test(a.role));
-  expect(accounts.length, 'the demo seed must contain a student').toBeGreaterThan(0);
+  const certificate = await resolveCertificate({ browser, request, baseURL });
+  expect(
+    certificate,
+    'no seeded student holds a certificate, so there was nothing to measure. '
+    + 'A certificate needs an attended, past event in the demo seed.'
+  ).toBeTruthy();
+  const { code, statePath } = certificate;
 
-  let ctx = null;
-  let page = null;
-  let code = null;
-  const tried = [];
+  const ctx = await browser.newContext({ baseURL, storageState: statePath });
+  const page = await ctx.newPage();
 
   try {
-    for (const account of accounts) {
-      const statePath = await signInAs(
-        browser,
-        { key: account.id, email: account.email, role: account.role },
-        baseURL
-      );
-      const candidate = await browser.newContext({ baseURL, storageState: statePath });
-      const candidatePage = await candidate.newPage();
-
-      /* The reader's own list, which is also the only place a code can be
-         learned from — no endpoint hands out somebody else's. */
-      const list = await candidatePage.request.get('/api/certificates');
-      expect(list.ok(), `GET /api/certificates as ${account.id}`).toBeTruthy();
-      const body = await list.json();
-      const rows = Array.isArray(body) ? body : (body?.certificates ?? []);
-      const found = rows.find(r => r?.code)?.code;
-
-      tried.push(`${account.id}: ${rows.length} certificate(s)`);
-      if (found) { ctx = candidate; page = candidatePage; code = found; break; }
-      await candidate.close();
-    }
-
-    expect(
-      code,
-      'no seeded student holds a certificate, so there was nothing to measure. '
-      + `Tried — ${tried.join('; ')}. A certificate needs an attended, verified, `
-      + 'past event in the demo seed.'
-    ).toBeTruthy();
-
     await page.goto(`/certificates/${code}`);
     await page.getByText('Certificate of Community Service').waitFor({ timeout: 60000 });
 
@@ -137,6 +107,6 @@ test('axe finds no violations on a real certificate', async ({ browser, request,
     const violations = await scan(page);
     expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
   } finally {
-    if (ctx) await ctx.close();
+    await ctx.close();
   }
 });
