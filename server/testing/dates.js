@@ -56,12 +56,12 @@ const DAY = 86400000;
  * of intermittent failure this module exists to end.
  *
  * `daysAhead(0)` is today, the earliest date a publish accepts without relying
- * on the validator's one day of slack. Ascending values preserve the ordering
+ * on the validator's one day of slack — and it is the whole interface. A `today()`
+ * wrapper was here and had no callers: `main`'s version of the editor suites
+ * defines its own, so the only importer writes `daysAhead(120)` and `daysAhead(150)`.
+ * One export nobody has to choose between. Ascending values preserve the ordering
  * that rule 3 — effective dates only move forward — makes load-bearing when
  * several revisions of one document are published in sequence.
  */
 export const daysAhead = (n = 0) =>
   new Date(Date.now() + n * DAY).toISOString().slice(0, 10);
-
-/** Today, in UTC. The common case, named. */
-export const today = () => daysAhead(0);
