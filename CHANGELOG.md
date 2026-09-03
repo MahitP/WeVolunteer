@@ -333,8 +333,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set their own handle to a victim's id shadowed that club on every id-addressed
   path: the notification and audit links deliberately kept working landed the
   victim's own members on the attacker's page, and on an open club their Join
-  press put them on a stranger's roster. The lookup now asks two unambiguous
-  questions, and an id-shaped handle is refused outright.
+  press put them on a stranger's roster.
+
+  A handle equal to any club's id is now refused by asking the database — a
+  UUID pattern covers every id the product mints and none of the short readable
+  ones a seeded database uses, which is the shape that found the gap — and a
+  club is looked up by id *before* handle, so a name somebody typed can never
+  override an identifier the system assigned.
 
 - **Accepting a request to join was the one admission path with no ban check.**
   Joining and requesting both re-read the ban at the moment of the act; the

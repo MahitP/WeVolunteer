@@ -123,9 +123,27 @@ export async function uniqueSlug(db, name) {
  * taken.
  */
 export async function handleAvailable(db, handle, { excluding = null } = {}) {
-  const row = await db
-    .prepare('SELECT id FROM organizations WHERE slug = ? COLLATE nocase')
-    .get(normaliseHandle(handle));
+  const clean = normaliseHandle(handle);
+  if (!clean) return false;
+
+  /**
+   * Both namespaces, in one statement.
+   *
+   * A handle that equals some club's ID is the collision that let an organizer
+   * shadow another club: they read the victim's id off the directory payload,
+   * claimed it as their handle, and every id-addressed link to the victim
+   * resolved to them instead. `validateHandle` refuses a UUID-shaped value,
+   * which covers every id `createOrganization` mints — but not the short
+   * readable ids in the demo seed and any database seeded the same way, which
+   * is how this was found.
+   *
+   * Asking the database is the check that cannot be out of date: it refuses
+   * exactly the strings that would collide, with no pattern to keep in step
+   * with however ids are minted next.
+   */
+  const row = await db.prepare(`
+    SELECT id FROM organizations WHERE slug = ? COLLATE nocase OR id = ?
+  `).get(clean, clean);
   return !row || row.id === excluding;
 }
 
@@ -674,13 +692,22 @@ const WITH_COUNTS = `
  * deliberately keeps working would land the victim's own members on the
  * attacker's page.
  *
- * `validateHandle` now refuses an id-shaped handle, which stops the collision
- * being created. Asking two unambiguous questions is what makes it not matter
- * if one exists anyway — an id always resolves to the row whose id it is.
+ * ── The ID is asked FIRST, and that order is the fix ──
  *
- * Handle first, because that is the canonical address and the common case. The
- * id branch stays because notification payloads and audit rows written before
- * handles existed name organizations by id and must keep resolving.
+ * Handle-first was tried and is wrong: it hands the attacker exactly what they
+ * wanted, because their chosen handle wins over the victim's assigned id.
+ * Verified against a running server before this was written — with handle-first,
+ * `/api/organizations/org-robotics` resolved to the club that had claimed that
+ * string as its handle rather than to the club whose id it is.
+ *
+ * Ids are assigned by the system; handles are chosen by people. A value that
+ * somebody typed must never override an identifier the system minted, so the
+ * id namespace is consulted first. If a handle does collide with some club's
+ * id, the club that loses its address is the one that chose the colliding name
+ * — which is the right way round for the harm to fall.
+ *
+ * `handleAvailable` refuses such a handle outright, so the collision should not
+ * exist; this order is what makes it harmless if one ever does.
  *
  * Lives here rather than in the route for the reason `db.accessSurface.test.js`
  * ratchets: this module receives a handle, so these statements can be given a
@@ -688,14 +715,17 @@ const WITH_COUNTS = `
  */
 export async function organizationByKey(db, key) {
   const raw = String(key ?? '');
+
+  /* The id branch is not only for legacy links — it is the precedence rule.
+     Notification payloads and audit rows written before handles existed do also
+     name organizations by id, and must keep resolving. */
+  const byId = raw ? await db.prepare(`${WITH_COUNTS} WHERE o.id = ?`).get(raw) : null;
+  if (byId) return byId;
+
   const handle = normaliseHandle(raw);
-
-  const byHandle = handle
+  return (handle
     ? await db.prepare(`${WITH_COUNTS} WHERE o.slug = ? COLLATE nocase`).get(handle)
-    : null;
-  if (byHandle) return byHandle;
-
-  return (await db.prepare(`${WITH_COUNTS} WHERE o.id = ?`).get(raw)) ?? null;
+    : null) ?? null;
 }
 
 /**

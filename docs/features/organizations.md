@@ -125,15 +125,33 @@ path: the notification and audit links this feature deliberately keeps working
 would land the victim's own members on the attacker's page, and on an `open`
 club their Join press would put them on a stranger's roster.
 
-Two locks now, and the order matters:
+Two locks now, and the second one was got wrong once before it was got right:
 
-1. **`loadOrganization` asks two unambiguous questions** — handle first, then id
-   — so an id always resolves to the row whose id it is, whatever anybody's
-   handle says. This is the fix that makes a collision harmless.
-2. **`validateHandle` refuses an id-shaped handle**, matched on a UUID anywhere
-   in the value rather than on the `org-` prefix, so it covers every id shape
-   this schema uses instead of the one that was found. This is the fix that
-   stops a collision existing.
+1. **A handle equal to any organization's id is refused**, by asking the
+   database rather than by matching a pattern. `validateHandle` also refuses a
+   UUID-shaped value without a round trip, which covers every id
+   `createOrganization` mints — but *not* the short readable ids the demo seed
+   uses (`org-robotics`), and that is the shape that found the gap. A pattern
+   has to be kept in step with however ids are minted next; the database check
+   does not.
+2. **`organizationByKey` asks the ID namespace FIRST.** Handle-first was tried
+   and hands the attacker exactly what they wanted, because their chosen handle
+   wins over the victim's assigned id — verified against a running server, where
+   `/api/organizations/org-robotics` resolved to the club that had claimed that
+   string rather than to the club whose id it is. Ids are assigned by the
+   system; handles are chosen by people, and a value somebody typed must never
+   override an identifier the system minted.
+
+The two namespaces are only ever ambiguous on the **bare** path.
+`/organizations/@<x>` is resolved as a handle and never as an id, because the
+`@` is what says which namespace is being addressed. So a club that chose a
+colliding name loses its bare address and keeps its canonical one — which is
+the right way round for the harm to fall.
+
+`organizations.handleCollision.test.js` asserts both locks, and asserts the
+resolution order against a collision written **straight into the column**,
+bypassing every validator: that is the property that has to hold even if a
+handle gets in by some route the validators do not cover.
 
 ### What the public route accepts is wider than what a manager may choose
 
@@ -634,14 +652,31 @@ One information architecture, five readers. What changes is which sections have
 content and what the plate offers.
 
 ```
+the invitation   why this club is suddenly joinable    (only if you were invited)
 the plate        who this club is, and the one thing you can do about it
 opportunities    what you could sign up for            ┐ left column
 the noticeboard  what the club has said                │
 members          who is in it                          ┘
 your service     what you personally have done for it  ┐ right rail
 about            who started it, and how it admits     ┘
-manage           the controls, in a visibly separate band
+manage           invitations, requests, bans, appeals  (managers, separate band)
 ```
+
+The invitation banner sits **above** the plate, because it is the reason the
+page looks the way it does to that reader: an invitation-only club showing a
+Join button makes no sense until you know somebody asked you. It carries the
+note, the date it lapses, Accept, Decline — and the sentence saying what
+declining costs, which is that the club cannot ask again. That was in the toast
+afterwards, beside a ghost button a thirteen-year-old can mis-tap.
+
+Accept appears twice on that reader's page: once in the banner and once as the
+plate's primary action, because an invitation makes the affordance `join` and
+the plate renders the affordance. Considered and kept — giving the banner sole
+ownership would mean adding an `invited` affordance to the server's vocabulary
+for a cosmetic reason, and removing the plate's control would leave an invited
+reader with no primary action. Both do the same reversible thing and both are
+labelled unambiguously; what the banner adds is the Decline, which has no other
+home.
 
 The plate carries the club's mark on a ground of its **own colour** —
 `avatar_color` has existed since migration 043 and tinted a 22-pixel circle. It
