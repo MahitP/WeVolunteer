@@ -15,6 +15,12 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * /users/id/:id, /users/:handle, /users/:handle/badges,
  * /users/:handle/certificates, /users/:handle/hours, /organizations/:key,
  * /organizations/:key/edit, /verify/:code, /legal/:slug, /appeal/:token.
+ *
+ * A value that CANNOT be written down belongs in `fixtures.mjs`, which asks the
+ * running application at walk time and whose answer `walk.mjs` merges over this
+ * table. Every name still needs an entry here — the guard requires one, and a
+ * placeholder that names its own absence is how the two unresolvable ones are
+ * already recorded.
  */
 export const FIXTURES = {
   /* Real values from the demo seed, read out of the database rather than
@@ -28,7 +34,19 @@ export const FIXTURES = {
   id: 'user-diana',
   eventId: 'event-softball',
   handle: 'dsorensen',
-  code: 'WEV-8DLE-CNMH',
+  /* NOT a code, on purpose, and it must never be replaced by one that looks
+     like a code. `generateCode` in server/certificates.js builds a certificate
+     code from `crypto.randomBytes`, so it is different in every scratch
+     database and no literal can survive a reseed — two consecutive ones gave
+     `WEV-3CVD-ZJS6` and `WEV-5U93-8FP9`. The literal that used to sit here,
+     `WEV-8DLE-CNMH`, had therefore never resolved: `/verify/WEV-8DLE-CNMH`
+     answered 200, landed on exactly that path and rendered "Invalid
+     Certificate", which the sweep measured and reported as coverage of the
+     public verification page. `fixtures.mjs` resolves the real one from
+     `/api/certificates` at walk time; this placeholder is what stands if that
+     lookup finds nothing, and it renders a panel `walk.mjs` can recognise, so
+     the route is reported unmeasured rather than silently audited. */
+  code: 'no-live-certificate-code',
   slug: 'terms-of-service',
   /* No fixture is possible for these two with the demo seed: `organizations` is
      empty, and an appeal token is minted per decision and cannot be invented.
@@ -37,6 +55,29 @@ export const FIXTURES = {
   key: 'no-seeded-organization',
   token: 'no-seeded-appeal-token'
 };
+
+/**
+ * A route path with its parameters filled in.
+ *
+ * Pure, and takes the values as an argument, so the same substitution serves
+ * two callers that must not share a dependency: `ROUTES` below builds its
+ * `concrete` from the typed table alone — no server, no database, which is what
+ * lets `routes.test.js` import this module — while `walk.mjs` calls it again
+ * with whatever `fixtures.mjs` resolved from the running application layered on
+ * top. One implementation, so the URL the guard checks and the URL the sweep
+ * visits cannot drift apart.
+ *
+ * A null or empty override is ignored rather than substituted, so a lookup that
+ * found nothing falls back to the typed placeholder instead of navigating to
+ * `/verify/null`.
+ */
+export function concreteFor(routePath, overrides = {}) {
+  return routePath.replace(/:([A-Za-z]+)/g, (whole, name) => {
+    const live = overrides[name];
+    if (live) return String(live);
+    return name in FIXTURES ? FIXTURES[name] : whole;
+  });
+}
 
 const SRC = fs.readFileSync(path.join(ROOT, 'src/routes/index.jsx'), 'utf8');
 
@@ -88,10 +129,7 @@ export const ROUTES = [...SRC.matchAll(/\{\s*path:\s*'([^']+)'/g)]
   .filter(p => !p.includes('*'))
   .map(routePath => {
     const parameterised = routePath.includes(':');
-    const concrete = routePath.replace(
-      /:([A-Za-z]+)/g,
-      (whole, name) => (name in FIXTURES ? FIXTURES[name] : whole)
-    );
+    const concrete = concreteFor(routePath);
     const group = GROUP.get(routePath) || 'APP_ROUTES';
     return {
       path: routePath,
