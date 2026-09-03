@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROUTES, FIXTURES } from './routes.mjs';
+import { ROUTES, FIXTURES, concreteFor } from './routes.mjs';
 
 /**
  * The inventory is derived, and this proves it stayed derived.
@@ -51,6 +51,46 @@ describe('the accessibility route inventory', () => {
     }
     const missing = [...names].filter(n => !(n in FIXTURES));
     expect(missing, `parameters with no fixture: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  /**
+   * The one fixture that must never be a literal.
+   *
+   * `generateCode` in server/certificates.js draws a certificate code from
+   * `crypto.randomBytes`, so any code written down here is wrong the moment the
+   * database is reseeded — and wrong INVISIBLY, because React Router answers 200
+   * on `/verify/<anything>` and the sweep measured the resulting "Invalid
+   * Certificate" panel as though it were the verification page. `WEV-8DLE-CNMH`
+   * sat here doing exactly that.
+   *
+   * The real value comes from `a11y/harness/fixtures.mjs`, which asks
+   * `/api/certificates` at walk time. This asserts that nobody has quietly put a
+   * code-shaped literal back, which is the change that would silently switch the
+   * live lookup off again.
+   */
+  it('does not pin a certificate code, which cannot survive a reseed', () => {
+    expect(
+      FIXTURES.code,
+      'certificate codes are crypto.randomBytes — resolve one in fixtures.mjs, '
+      + `do not type one here (found ${FIXTURES.code})`
+    ).not.toMatch(/^WEV-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+  });
+
+  /**
+   * The substitution the sweep actually uses.
+   *
+   * `walk.mjs` does not visit `route.concrete`; it calls `concreteFor` again
+   * with whatever was resolved live. If the two disagreed, the guard above would
+   * be checking a URL nobody visits.
+   */
+  it('lets a live value override the typed one, and ignores an absent one', () => {
+    expect(concreteFor('/verify/:code', { code: 'WEV-3CVD-ZJS6' }))
+      .toBe('/verify/WEV-3CVD-ZJS6');
+    expect(concreteFor('/verify/:code', {})).toBe(`/verify/${FIXTURES.code}`);
+    expect(concreteFor('/verify/:code', { code: null })).toBe(`/verify/${FIXTURES.code}`);
+    /* An override for one parameter must not disturb the others. */
+    expect(concreteFor('/users/:handle/hours', { code: 'x' }))
+      .toBe(`/users/${FIXTURES.handle}/hours`);
   });
 
   it('excludes catch-all routes, which are not pages', () => {
