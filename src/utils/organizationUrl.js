@@ -26,9 +26,3 @@ export function organizationPath(organization) {
 /** A sub-page of an organization — `edit`, and whatever comes next. */
 export const organizationSubPath = (organization, segment) =>
   `${organizationPath(organization)}/${segment}`;
-
-/** How a handle is WRITTEN, wherever one is shown to a reader. */
-export const organizationHandle = (organization) => {
-  const slug = typeof organization === 'string' ? organization : organization?.slug;
-  return slug ? `@${String(slug).replace(/^@+/, '')}` : '';
-};

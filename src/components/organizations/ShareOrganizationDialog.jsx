@@ -7,7 +7,7 @@ import ConfirmDialog from '../common/ConfirmDialog';
 import { api } from '../../utils/api';
 import { publicUrl } from '../../config';
 import { formatDay } from '../../utils/helpers';
-import { organizationHandle } from '../../utils/organizationUrl';
+import { organizationPath } from '../../utils/organizationUrl';
 
 /**
  * Sharing a club: its public address, and its invitation links.
@@ -159,8 +159,11 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
     }
   };
 
-  const handle = organizationHandle(organization);
-  const publicAddress = handle ? publicUrl(`/organizations/${handle}`) : '';
+  /* Through `organizationPath`, not `/organizations/${handle}` by hand. It is
+     the one builder that adds the sigil AND encodes the segment — and this
+     value is copied to a clipboard and pasted into a browser, which is the
+     worst place for a URL that is nearly right. */
+  const publicAddress = organization?.slug ? publicUrl(organizationPath(organization)) : '';
 
   return (
     <>

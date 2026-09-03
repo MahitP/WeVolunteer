@@ -57,7 +57,7 @@ import { joinPolicySentence, JOIN_POLICY_COPY } from '../organizationPolicy';
 import { inviteTokenFor, clearPendingInvite } from '../utils/pendingInvite';
 import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
-import { organizationPath, organizationSubPath, organizationHandle } from '../utils/organizationUrl';
+import { organizationPath, organizationSubPath } from '../utils/organizationUrl';
 
 export default function OrganizationPage({ addToast, currentUser }) {
   const { key } = useParams();

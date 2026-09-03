@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { organizationPath, organizationSubPath, organizationHandle } from './organizationUrl';
+import { organizationPath, organizationSubPath } from './organizationUrl';
 
 /**
  * Where an organization lives, built in one place.
@@ -57,22 +57,5 @@ describe('the canonical path', () => {
 describe('sub-pages', () => {
   it('hangs a segment off the canonical path', () => {
     expect(organizationSubPath({ slug: 'robotics' }, 'edit')).toBe('/organizations/@robotics/edit');
-  });
-});
-
-describe('writing a handle for a reader', () => {
-  it('prefixes the sigil', () => {
-    expect(organizationHandle({ slug: 'robotics' })).toBe('@robotics');
-    expect(organizationHandle('robotics')).toBe('@robotics');
-  });
-
-  it('does not double it', () => {
-    expect(organizationHandle('@robotics')).toBe('@robotics');
-  });
-
-  it('is empty rather than a lone sigil when there is no handle', () => {
-    for (const nothing of [undefined, null, '', { slug: null }]) {
-      expect(organizationHandle(nothing)).toBe('');
-    }
   });
 });
