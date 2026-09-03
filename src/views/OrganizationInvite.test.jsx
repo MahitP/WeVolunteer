@@ -99,7 +99,8 @@ describe('a visitor with no account', () => {
   it('says a club that approves members will approve them', async () => {
     await show({ ...ORG, joinPolicy: 'request' });
     expect(screen.getByRole('button', { name: /Request to join/ })).toBeInTheDocument();
-    expect(screen.getByText('A manager reads every request and decides.')).toBeInTheDocument();
+    expect(screen.getByText('A manager of Chess Club will see your request and decide.'))
+      .toBeInTheDocument();
   });
 
   it('explains that joining needs an account, rather than failing', async () => {

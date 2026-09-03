@@ -248,9 +248,14 @@ describe('inviting somebody to an organization', () => {
       expect(res.body.code).toBe('archived');
     });
 
-    it('refuses to invite yourself', async () => {
+    it('refuses to invite yourself, and says why', async () => {
       const res = await invite({ userId: managerId });
       expect(res.status).toBe(400);
+      expect(res.body.code).toBe('self');
+      /* Not "You are already in this organization" — a manager who mis-clicked
+         their own row was told something about their own membership while
+         trying to invite somebody else. */
+      expect(res.body.error).toBe('You cannot invite yourself.');
     });
 
     it('writes an audit row that names the club and the person, and never the note', async () => {
@@ -418,6 +423,128 @@ describe('inviting somebody to an organization', () => {
       await join(bystanderId, 'member');
       expect((await page(bystander)).viewer.invitation).toBeUndefined();
       expect((await page(helper)).viewer.invitation).toBeUndefined();
+    });
+  });
+
+  /**
+   * An invitation admits on a club that would otherwise make you ask.
+   *
+   * This is the case the feature was inert for: the invitee was told to send a
+   * request, their Accept press was answered `request_required`, and the
+   * invitation sat pending against the club's outstanding list until it lapsed.
+   */
+  describe('on a club that approves its members', () => {
+    it('lets an invited person in without asking as well', async () => {
+      await policy('request');
+      await invite({ userId: inviteeId });
+
+      const viewer = (await page(invitee)).viewer;
+      expect(viewer.affordance).toBe('join');
+      expect(viewer.invitation).toBeTruthy();
+
+      const joined = await acceptByJoining();
+      expect(joined.status, JSON.stringify(joined.body)).toBe(200);
+      expect(await isMember(inviteeId)).toBe(true);
+    });
+
+    /**
+     * And a LINK still does not, which is the other half.
+     *
+     * A share link is an address somebody passed on and says nothing about who
+     * holds it. A request-to-join club's whole point is that a human approves
+     * each member, so a link that bypassed the approval would make the setting
+     * decorative.
+     */
+    it('still refuses somebody holding only a link', async () => {
+      await policy('request');
+      const link = (await srv.call('POST', `/api/organizations/${orgKey}/share-links`, {}, manager))
+        .body.link;
+      const token = String(link.path).split('/').pop();
+
+      const res = await srv.call('POST', `/api/organizations/${orgKey}/membership`,
+        { shareToken: token }, invitee);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('request_required');
+      expect(await isMember(inviteeId)).toBe(false);
+    });
+
+    it('retires the invitation when a manager accepts their request instead', async () => {
+      await policy('request');
+      await invite({ userId: inviteeId });
+      /* They asked as well — which the affordance no longer offers them, but a
+         request filed before the invitation arrived is a real state. */
+      await srv.call('POST', `/api/organizations/${orgKey}/join-requests`, {}, invitee);
+      const requestId = (await srv.call('GET', `/api/organizations/${orgKey}/join-requests`,
+        undefined, manager)).body.requests[0].requestId;
+
+      const decided = await srv.call(
+        'POST', `/api/organizations/${orgKey}/join-requests/${requestId}/decision`,
+        { decision: 'accept' }, manager,
+      );
+      expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+
+      /* The invitation stops being outstanding, exactly as it would if they had
+         joined through the ordinary route. Left pending it would count against
+         the club's list for ever and block re-invitation for a fortnight. */
+      const row = await db.prepare(
+        'SELECT status FROM organization_invitations WHERE organization_id = ?'
+      ).get(orgId);
+      expect(row.status).toBe('accepted');
+      expect((await listInvitations()).body.invitations).toHaveLength(0);
+    });
+
+    /**
+     * And accepting a request re-checks the ban, which it did not.
+     *
+     * Joining and requesting both re-read it at the moment of the act; the
+     * manager's Accept did not, and banning does not retire a pending request.
+     */
+    it('refuses to accept a request from somebody since banned', async () => {
+      await policy('request');
+      await srv.call('POST', `/api/organizations/${orgKey}/join-requests`, {}, invitee);
+      const requestId = (await srv.call('GET', `/api/organizations/${orgKey}/join-requests`,
+        undefined, manager)).body.requests[0].requestId;
+
+      await db.prepare(`
+        INSERT INTO organization_bans (id, organization_id, user_id, reason, banned_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(`ban-${Math.random().toString(36).slice(2)}`, orgId, inviteeId,
+        'Banned while the request was waiting', managerId, new Date().toISOString());
+
+      const decided = await srv.call(
+        'POST', `/api/organizations/${orgKey}/join-requests/${requestId}/decision`,
+        { decision: 'accept' }, manager,
+      );
+      expect(decided.status).toBe(409);
+      expect(decided.body.code).toBe('banned');
+      expect(await isMember(inviteeId)).toBe(false);
+
+      /* And the request is still PENDING, so a manager who lifts the ban can
+         still accept it — rather than a row marked accepted with no membership
+         behind it, which is what checking after the status write would have
+         committed. */
+      const row = await db.prepare(
+        'SELECT status FROM organization_join_requests WHERE id = ?'
+      ).get(requestId);
+      expect(row.status).toBe('pending');
+    });
+
+    it('still lets a manager decline a banned person’s request', async () => {
+      await policy('request');
+      await srv.call('POST', `/api/organizations/${orgKey}/join-requests`, {}, invitee);
+      const requestId = (await srv.call('GET', `/api/organizations/${orgKey}/join-requests`,
+        undefined, manager)).body.requests[0].requestId;
+      await db.prepare(`
+        INSERT INTO organization_bans (id, organization_id, user_id, reason, banned_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(`ban-${Math.random().toString(36).slice(2)}`, orgId, inviteeId,
+        'Banned while the request was waiting', managerId, new Date().toISOString());
+
+      const declined = await srv.call(
+        'POST', `/api/organizations/${orgKey}/join-requests/${requestId}/decision`,
+        { decision: 'reject' }, manager,
+      );
+      expect(declined.status, JSON.stringify(declined.body)).toBe(200);
     });
   });
 

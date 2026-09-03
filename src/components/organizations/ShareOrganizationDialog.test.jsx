@@ -156,8 +156,9 @@ describe('the link itself', () => {
  * the only way a manager can be expected to tell them apart, and telling them
  * apart is the whole security model.
  */
+const PUBLIC_ORG = { ...ORG, visibility: 'public' };
+
 describe('the public address', () => {
-  const PUBLIC_ORG = { ...ORG, visibility: 'public' };
 
   it('is offered for a club that has a public page', async () => {
     await show(MANAGED, { organization: PUBLIC_ORG });
@@ -183,6 +184,34 @@ describe('the public address', () => {
     expect(screen.queryByLabelText('Public address')).not.toBeInTheDocument();
   });
 
+  /**
+   * But a manager is told the option exists.
+   *
+   * Migration 063 backfills every club that predates the setting to
+   * `unlisted`, so on the day this shipped every existing manager opened Share,
+   * saw only invitation links, and had no signal that a public page was a thing
+   * they could have.
+   */
+  it('tells an unlisted club’s manager where to turn one on', async () => {
+    await show(MANAGED);
+    expect(await screen.findByText(/no public address/)).toBeInTheDocument();
+    expect(screen.getByText(/Who can see this organization’s page/)).toBeInTheDocument();
+  });
+
+  /* Not to a member who may share, because they cannot change the setting and
+     the sentence would be an instruction they cannot follow. */
+  it('does not say it to somebody who cannot change it', async () => {
+    await show(SHARER);
+    await screen.findByLabelText('General');
+    expect(screen.queryByText(/no public address/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing about it once the club is public', async () => {
+    await show(MANAGED, { organization: PUBLIC_ORG });
+    await screen.findByLabelText('Public address');
+    expect(screen.queryByText(/no public address/)).not.toBeInTheDocument();
+  });
+
   it('is not the invitation link', async () => {
     await show(MANAGED, { organization: PUBLIC_ORG });
     const address = await screen.findByLabelText('Public address');
@@ -205,30 +234,55 @@ describe('copying', () => {
   /**
    * No clipboard API at all — plain HTTP, or an embedded webview.
    *
-   * The reader gets the URL in a toast, and the field is still there to select
-   * by hand. Deliberately `info` and not `error`: nothing has gone wrong for
-   * them, and the value they wanted is on screen.
+   * The reader is pointed at the field, which is still there and still selects
+   * its whole value on focus. Deliberately `info` and not `error`: nothing has
+   * gone wrong for them, and the value they wanted is on screen.
+   *
+   * It used to pass the URL itself, on the reasoning that `info` shows it long
+   * enough to select. It does not — `addToast` dismisses after five seconds,
+   * and the 64-character token has no break opportunity, so the toast also
+   * rendered wider than a phone viewport allows.
    */
-  it('shows the URL instead when there is no clipboard', async () => {
+  it('points at the field when there is no clipboard', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
     const addToast = vi.fn();
     await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Copy link/ }));
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(
-      expect.stringContaining(`/organizations/invite/${TOKEN}`), 'info',
+      expect.stringContaining('Select the link in the box'), 'info',
     ));
+    /* And never the URL itself, which is what made the toast unusable. */
+    expect(addToast).not.toHaveBeenCalledWith(expect.stringContaining(TOKEN), expect.anything());
+    /* The field is the fallback, so it has to still be there, still hold the
+       URL, and still be selectable. */
+    const field = screen.getByLabelText('Invitation link: General');
+    expect(field.value).toContain(`/organizations/invite/${TOKEN}`);
+    expect(field).toHaveAttribute('readonly');
   });
 
-  it('shows the URL instead when the clipboard write is refused', async () => {
+  it('points at the field when the clipboard write is refused', async () => {
     clipboard.writeText.mockRejectedValue(new Error('permission denied'));
     const addToast = vi.fn();
     await show(MANAGED, { addToast });
     fireEvent.click(await screen.findByRole('button', { name: /Copy link/ }));
 
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(
-      expect.stringContaining(`/organizations/invite/${TOKEN}`), 'info',
+      expect.stringContaining('Select the link in the box'), 'info',
     ));
+  });
+
+  /**
+   * The field says what kind of value it holds.
+   *
+   * With the visible label alone, a screen-reader user heard "Public address,
+   * edit text" and then "Autumn flyer, edit text" — and the distinction this
+   * dialog exists to draw was carried entirely by a dashed border.
+   */
+  it('names the invitation field as an invitation link', async () => {
+    await show(MANAGED);
+    const field = await screen.findByLabelText('Invitation link: General');
+    expect(field.value).toContain(`/organizations/invite/${TOKEN}`);
   });
 });
 
@@ -445,10 +499,24 @@ describe('replacing and switching off', () => {
     expect(screen.queryByRole('button', { name: /Copy link/ })).not.toBeInTheDocument();
   });
 
+  /**
+   * At the ceiling the control is reachable and refuses, rather than being
+   * removed from the tab order with its reason attached to nothing.
+   */
   it('refuses to offer another link once the club is at its ceiling', async () => {
     await show({ ...MANAGED, canCreate: false });
-    expect(await screen.findByRole('button', { name: /New link/ })).toBeDisabled();
-    expect(screen.getByText(/Switch one off to make another/)).toBeInTheDocument();
+    const button = await screen.findByRole('button', { name: /New link/ });
+
+    expect(button).toHaveAttribute('aria-disabled', 'true');
+    /* Reachable: `disabled` would have taken it out of the tab order and left
+       the explanation associated with nothing. */
+    expect(button).not.toBeDisabled();
+    const reason = screen.getByText(/Switch one off to make another/);
+    expect(button).toHaveAttribute('aria-describedby', reason.id);
+
+    /* And pressing it does nothing, so the state is still enforced. */
+    fireEvent.click(button);
+    expect(screen.queryByLabelText(/What is this link for/)).not.toBeInTheDocument();
   });
 
   it('does not offer either to somebody who may only share', async () => {
@@ -485,9 +553,47 @@ describe('what the dialog says the link does', () => {
     expect(await screen.findByText(/only people who have one can join/)).toBeInTheDocument();
   });
 
-  it('tells an open club that the link is an address and not a password', async () => {
+  /**
+   * And it says the thing that is true of all three, which is the one that
+   * used to be missing.
+   *
+   * The `open` sentence read "They are addresses to hand out — not passwords."
+   * Nothing rotates a link when `join_policy` tightens — deliberately, because
+   * a link on a printed flyer has to keep working — so a manager who followed
+   * that advice, posted the link publicly, and later switched to Invitation
+   * only had a live credential on a public feed and had never been told.
+   */
+  it.each(['open', 'invite', 'request'])(
+    'tells a %s club to treat the links as private, whatever the policy',
+    async (policy) => {
+      await show(MANAGED, { policy });
+      expect(await screen.findByText(/treat them as private/)).toBeInTheDocument();
+    },
+  );
+
+  /**
+   * And says it in the singular to somebody who can only see one link.
+   *
+   * A member with share rights is given the club's primary link and nothing
+   * else, so a sentence about "these links" described a list they cannot see.
+   */
+  it.each(['open', 'invite', 'request'])(
+    'says it in the singular to a sharer on a %s club',
+    async (policy) => {
+      await show(SHARER, { policy });
+      expect(await screen.findByText(/treat it as private/)).toBeInTheDocument();
+      expect(screen.queryByText(/treat them as private/)).not.toBeInTheDocument();
+    },
+  );
+
+  it('points an open club at the public address for anything public', async () => {
     await show(MANAGED, { policy: 'open' });
-    expect(await screen.findByText(/not passwords/)).toBeInTheDocument();
+    expect(await screen.findByText(/for a poster, use the public address/)).toBeInTheDocument();
+  });
+
+  it('warns that the links survive a change of policy', async () => {
+    await show(MANAGED, { policy: 'open' });
+    expect(await screen.findByText(/keep working if you change who can join/)).toBeInTheDocument();
   });
 
   it('tells a request-to-join club that a manager still decides', async () => {
@@ -501,6 +607,25 @@ describe('dialog behaviour', () => {
     await show();
     const dialog = await screen.findByRole('dialog', { name: /Share Chess Club/ });
     expect(dialog).toHaveAttribute('aria-modal', 'true');
+  });
+
+  /**
+   * The security sentence is in the dialog's accessible DESCRIPTION.
+   *
+   * `WHAT_THE_LINK_DOES` is the sentence that tells a manager whether these
+   * links are credentials. It used to be a bare paragraph a screen-reader user
+   * had to arrow to: the dialog announced "Share Chess Club, dialog" and the
+   * one distinction it exists to draw was not in the announcement.
+   */
+  it('announces what the links are, not just the club name', async () => {
+    await show(MANAGED, { policy: 'invite' });
+    const dialog = await screen.findByRole('dialog');
+    const describedBy = dialog.getAttribute('aria-describedby');
+
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy);
+    expect(description).toBeTruthy();
+    expect(description.textContent).toMatch(/only people who have one can join/);
   });
 
   it('reports a failed load rather than an empty dialog', async () => {

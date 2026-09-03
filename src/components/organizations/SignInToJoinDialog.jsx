@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { LogIn, UserPlus } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
 import { rememberPendingInvite } from '../../utils/pendingInvite';
+import { APP_NAME } from '../../config';
 
 /**
  * What a visitor with no account is told when they press Join.
@@ -28,9 +29,20 @@ import { rememberPendingInvite } from '../../utils/pendingInvite';
  * nothing else: the person still signs in, and lands on the dashboard rather
  * than on the club. That is the right way round for a storage failure.
  */
-export default function SignInToJoinDialog({ organization, token, onClose }) {
+export default function SignInToJoinDialog({ organization, token, affordance = 'join', onClose }) {
   const navigate = useNavigate();
   const name = organization?.name ?? 'this organization';
+  /**
+   * Asking to join is not joining, and the dialog has to say the same thing the
+   * button did.
+   *
+   * A `request`-policy club offers "Request to join" with "a manager will see
+   * your request and decide" underneath, and this dialog then said "Join Chess
+   * Club" and "Joining an organization needs an account" — telling the reader
+   * they were joining a club they were in fact asking to join. Both pages that
+   * open this now pass the affordance they rendered.
+   */
+  const asking = affordance === 'request';
 
   const go = (to) => {
     rememberPendingInvite({ slug: organization?.slug, token, name: organization?.name });
@@ -38,10 +50,14 @@ export default function SignInToJoinDialog({ organization, token, onClose }) {
   };
 
   return (
-    <Modal onClose={onClose} label={`Sign in to join ${name}`}>
+    <Modal onClose={onClose} label={asking ? `Sign in to ask to join ${name}` : `Sign in to join ${name}`}>
       <ModalHead
-        title={`Join ${name}`}
-        description="Joining an organization needs a WeVolunteer account. It takes a minute, and it is what lets an organizer credit your hours."
+        title={asking ? `Request to join ${name}` : `Join ${name}`}
+        description={asking
+          ? `Asking to join an organization needs a ${APP_NAME} account. It takes a minute, and `
+            + 'it is what lets a manager see who is asking.'
+          : `Joining an organization needs a ${APP_NAME} account. It takes a minute, and it is `
+            + 'what lets an organizer credit your hours.'}
         onClose={onClose}
       />
 

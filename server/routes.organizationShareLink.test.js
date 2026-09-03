@@ -315,6 +315,29 @@ describe('the organization invitation link', () => {
     });
 
     /**
+     * And refuses a LAPSED one, which used to mint a replacement born expired.
+     *
+     * The replacement inherits the expiry deliberately — a link made for one
+     * event booth must not become permanent by being regenerated — so rotating
+     * an expired link produced a "fresh" link that was already dead. It read as
+     * a regeneration that silently did nothing, which is the worst answer for a
+     * control that promises the old copies stop working and here is the new one.
+     */
+    it('refuses to regenerate a link that has expired, and says which', async () => {
+      const created = (await makeLink()).body.link;
+      await db.prepare('UPDATE organization_share_links SET expires_at = ? WHERE id = ?')
+        .run('2020-01-01T00:00:00.000Z', created.id);
+
+      const res = await editLink(created.id, { rotate: true });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('expired');
+      expect(res.body.error).toMatch(/has expired/);
+
+      /* And nothing was minted: no second row, dead or alive. */
+      expect((await readLinks(manager)).body.links).toHaveLength(1);
+    });
+
+    /**
      * The property a manager is most likely to be afraid of, and the one the
      * confirmation dialog promises: the link was the door, not the membership.
      */

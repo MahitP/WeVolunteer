@@ -17,6 +17,12 @@
  * second implementation of the policy, which is the whole thing this file is
  * arranged to prevent.
  */
+/* The platform's name, so the visibility copy does not hardcode it. This is
+   the CLIENT half of the policy module, so a client import is safe here —
+   `server/organizationPolicy.js` still imports nothing at all, which is what
+   makes it re-exportable to the browser at all. */
+import { APP_NAME } from './config';
+
 export {
   JOIN_POLICIES,
   INVITE_POLICIES,
@@ -55,9 +61,20 @@ export const JOIN_POLICY_COPY = Object.freeze({
   invite: {
     label: 'Invitation only',
     consequence: 'Students need this organization’s invitation link to join.',
+    /**
+     * Two second-order facts, and the second one is a safety warning.
+     *
+     * A manager switching TO this setting is the person who needs to hear that
+     * links they handed out while the club was open are now the way in —
+     * nothing rotates them on a policy change (a link on a printed flyer has to
+     * keep working), so a link that was posted publicly under "anybody may
+     * join" becomes a credential the moment this is chosen.
+     */
     note: 'Signed-in students can still find you in search and are told they need a link, '
-      + 'rather than being unable to find you at all. Whether you have a page somebody '
-      + 'without an account can open is the separate setting below.',
+      + 'rather than being unable to find you at all. Any invitation link you have already '
+      + 'shared becomes a way in — check where you have posted them, and regenerate any you '
+      + 'put somewhere public. Whether you have a page somebody without an account can open '
+      + 'is the separate setting below.',
   },
   request: {
     label: 'Request to join',
@@ -81,12 +98,24 @@ export const VISIBILITY_COPY = Object.freeze({
     label: 'Anyone can see this page',
     consequence: 'This organization has a web address that works without an account, so you '
       + 'can put it on a poster or in a bio.',
-    note: 'It shows your name, description, logo, how many members you have and what you have '
-      + 'coming up — never who is in it, and never where an event is.',
+    /**
+     * The disclosure list, and it has to be COMPLETE.
+     *
+     * "never … never" makes this read as an inventory, which is exactly how a
+     * safety statement about children is read. It is asserted field-for-field
+     * against `publicOrganization`'s allowlist in
+     * `src/organizationPolicy.copy.test.js`, because a list that drifts from
+     * the projection is worse than no list: a manager who read it would have
+     * been told something untrue about what they published.
+     */
+    note: 'It shows your name, description, logo, tags, how many members you have, how many '
+      + 'opportunities you have run, and what is coming up — never who is in it, and never '
+      + 'where an event is.',
   },
   unlisted: {
-    label: 'Only signed-in members of WeVolunteer',
-    consequence: 'Somebody without an account sees nothing at all. Your invitation links still '
+    label: `Only people signed in to ${APP_NAME}`,
+    consequence: `Somebody without an account sees nothing at all. Anybody with a ${APP_NAME} `
+      + 'account can still find this organization in search, and your invitation links still '
       + 'work for anybody you send them to.',
   },
 });
@@ -119,7 +148,12 @@ export function joinPolicySentence(affordance, { policy, organizationName } = {}
         ? 'You have an invitation, so you can join now.'
         : `Anyone can join ${club}.`;
     case 'request':
-      return 'A manager reads every request and decides.';
+      /* "will see … and decide", not "reads every request and decides". There
+         is no expiry, no reminder and no escalation on a request, so the
+         stronger wording is a guarantee of a reply that the product cannot
+         keep — and the audience reads it as one. `pending` below already got
+         this right; these two are aligned to it. */
+      return `A manager of ${club} will see your request and decide.`;
     case 'pending':
       return 'A manager will look at your request. You can take it back at any time.';
     case 'invite_required':

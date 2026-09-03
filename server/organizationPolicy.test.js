@@ -220,3 +220,66 @@ describe('who may hand out the invitation link', () => {
     expect(canInvite({ invitePolicy: 'everyone', memberRole: 'manager' })).toBe(true);
   });
 });
+
+/**
+ * An invitation admits, whatever the policy says.
+ *
+ * The `hasInvite` test used to live only in the `invite` branch, which made the
+ * invitation feature inert on a `request` club: the invitee was told to send a
+ * request, their Accept press was answered `request_required`, and the
+ * invitation sat pending until it lapsed while counting against the club's
+ * outstanding list.
+ */
+describe('holding a direct invitation', () => {
+  const invited = (joinPolicy) => joinAffordance({ joinPolicy, isInvited: true });
+
+  it('admits on an invitation-only club', () => {
+    expect(invited('invite').action).toBe('join');
+  });
+
+  it('admits on a club that would otherwise make you ask', () => {
+    /* The club invited them by name — it has already made the decision a
+       request exists to ask for. */
+    expect(invited('request').action).toBe('join');
+  });
+
+  /**
+   * And a LINK does not, which is the half widening `hasInvite` broke.
+   *
+   * A share link is an address somebody passed on; it says nothing about who is
+   * holding it. A `request` club's whole point is that a human approves each
+   * member, so a link that bypassed the approval would make the setting
+   * decorative.
+   */
+  it('is not the same as holding a link', () => {
+    expect(joinAffordance({ joinPolicy: 'request', hasInvite: true }).action).toBe('request');
+    expect(joinAffordance({ joinPolicy: 'invite', hasInvite: true }).action).toBe('join');
+    expect(joinAffordance({ joinPolicy: 'invite' }).action).toBe('invite_required');
+  });
+
+  it('changes nothing on an open club', () => {
+    expect(invited('open').action).toBe('join');
+    expect(joinAffordance({ joinPolicy: 'open' }).action).toBe('join');
+  });
+
+  it('still reports the policy it applied, so the page can explain itself', () => {
+    expect(invited('request')).toEqual({ action: 'join', policy: 'request' });
+  });
+
+  /** And it does not override any of the four states that come first. */
+  it('does not override membership, a ban, an archived club, or a pending request', () => {
+    expect(joinAffordance({ joinPolicy: 'request', isInvited: true, isMember: true }).action)
+      .toBe('member');
+    expect(joinAffordance({ joinPolicy: 'request', isInvited: true, isBanned: true }).action)
+      .toBe('banned');
+    expect(joinAffordance({ joinPolicy: 'request', isInvited: true, status: 'archived' }).action)
+      .toBe('unavailable');
+    expect(joinAffordance({ joinPolicy: 'request', isInvited: true, canJoinAtAll: false }).action)
+      .toBe('unavailable');
+    /* A pending request wins, because "you already asked" answers the question
+       and withdrawing is offered there. The invitation is still on the payload,
+       so nothing is lost. */
+    expect(joinAffordance({ joinPolicy: 'request', isInvited: true, hasPendingRequest: true }).action)
+      .toBe('pending');
+  });
+});

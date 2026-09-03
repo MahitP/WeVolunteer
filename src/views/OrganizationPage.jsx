@@ -472,9 +472,28 @@ export default function OrganizationPage({ addToast, currentUser }) {
               <blockquote className="org-invitation-note">{invitation.message}</blockquote>
             )}
             <p className="muted small">
-              {invitation.expiresAt
-                ? <>This invitation is open until {formatDay(invitation.expiresAt)}.</>
-                : <>Accept whenever you are ready.</>}
+              {/* Always a date: `inviteUser` sets a fortnight's TTL on every
+                  invitation, so the "no expiry" branch that used to be here was
+                  unreachable — and a false promise one nullable column away
+                  from being shown. */}
+              This invitation is open until {formatDay(invitation.expiresAt)}.
+            </p>
+            {/**
+              * What declining costs, BEFORE the press.
+              *
+              * A decline is final for the club: `inviteUser` refuses for ever
+              * afterwards, so this organization can never invite this person
+              * again. That was only said in the toast — after the fact — beside
+              * a ghost button a thirteen-year-old can mis-tap next to Accept.
+              *
+              * A sentence rather than a confirmation dialog: the act is not
+              * destructive to anything the reader has, and the door is still
+              * open to them by link or by request. What they need is to know
+              * that the asking stops.
+              */}
+            <p className="muted small">
+              If you decline, {org.name} cannot invite you again — you would need one of its
+              invitation links to join later.
             </p>
           </div>
           <div className="row row-wrap org-invitation-actions">

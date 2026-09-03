@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Building2, Lock, LogIn, UserPlus2 } from 'lucide-react';
+import { Building2, Lock, LogIn, UserPlus2, WifiOff, Clock } from 'lucide-react';
 import PublicOrganizationView, {
   PublicOrganizationTopbar,
 } from '../components/organizations/PublicOrganizationView';
@@ -87,8 +87,10 @@ export default function OrganizationPublic() {
           organization: null,
           /* A 404 is "there is no public club at that address" — which covers a
              club that is unlisted, archived or absent, all of which the server
-             answers identically. Anything else is the connection. */
+             answers identically. Anything else is the connection or the rate
+             limit, and `status` is what tells those two apart. */
           error: err.status === 404 ? 'missing' : err.message,
+          status: err.status ?? 0,
         });
       });
     return () => { cancelled = true; };
@@ -107,9 +109,26 @@ export default function OrganizationPublic() {
             headingLevel={1}
             icon={Lock}
             title="This page needs an account"
+            /* Not "open the link you were sent instead" — they DID open the
+               link they were sent. What they need is the shape of the address
+               that works, so they can ask for the right thing. */
             message={`Organizations on ${APP_NAME} are shown to signed-in members at this address. `
-              + 'If somebody sent you a public link or an invitation link, open that instead.'}
-            action={<Link className="btn btn-primary" to="/login">Log in</Link>}
+              + 'A club can also have a public address, which looks like /organizations/@name — '
+              + 'ask whoever shared this for that, or for an invitation link.'}
+            /**
+              * Both doors, and signing up is the primary one.
+              *
+              * This is the page whose whole reason for existing is turning a
+              * stranger into an account, and it offered only Log in — which is
+              * the wrong door for somebody who has never been here.
+              * `SignInToJoinDialog` already gets this ordering right.
+              */
+            action={(
+              <span className="row row-wrap">
+                <Link className="btn btn-primary" to="/signup">Create an account</Link>
+                <Link className="btn btn-secondary" to="/login">Log in</Link>
+              </span>
+            )}
           />
         </main>
       </div>
@@ -119,7 +138,19 @@ export default function OrganizationPublic() {
   if (state.loading) {
     return (
       <div className="invite-page">
-        <LoadingSkeleton heights={[180, 120]} className="stack-lg" />
+        {/**
+          * The topbar and the centred column, which this branch used to omit.
+          *
+          * `.invite-main` is what applies `max-width: 45rem; margin: 0 auto`,
+          * so without it a stranger on a wide screen saw full-width skeletons
+          * with no branding, then the brand bar appeared and the content
+          * collapsed to a centred column — two layout shifts on the one page
+          * whose job is a first impression.
+          */}
+        <PublicOrganizationTopbar sub="Organizations" />
+        <main className="invite-main stack-lg" role="status" aria-label="Loading this organization">
+          <LoadingSkeleton heights={[180, 120]} />
+        </main>
       </div>
     );
   }
@@ -132,6 +163,16 @@ export default function OrganizationPublic() {
    */
   if (state.error) {
     const missing = state.error === 'missing';
+    /**
+      * A rate limit is its own answer, and it must not offer a retry.
+      *
+      * `/api/public/organizations/*` is bounded per device — a handle is
+      * guessable, so the ceiling is what stops an enumeration. The realistic
+      * way to meet it is legitimate: one school, one address, a class opening
+      * the club link off an assembly slide. Offering Try again there re-fires
+      * immediately and re-429s, which teaches the reader the page is broken.
+      */
+    const throttled = state.status === 429;
     return (
       <div className="invite-page">
         <PublicOrganizationTopbar sub="Organizations" />
@@ -143,17 +184,28 @@ export default function OrganizationPublic() {
                page had no level-one heading at all until the a11y sweep
                measured it. */
             headingLevel={1}
-            icon={missing ? Building2 : Lock}
-            title={missing ? 'We could not find that organization' : 'Could not open this page'}
+            /* A padlock says "you are not allowed in", which is true of neither
+               of the other two branches. `missing` is a club that is not there;
+               anything else is the connection or the ceiling. The invitation
+               page uses the same mapping, so the two pages that share a
+               renderer no longer give one failure two different icons. */
+            icon={missing ? Building2 : (throttled ? Clock : WifiOff)}
+            title={missing
+              ? 'We could not find that organization'
+              : (throttled ? 'Too many tries just now' : 'Could not reach the server')}
             message={missing
               ? 'There may be no organization at that address, or it may not have a public page. '
                 + 'Check the address, or ask whoever shared it for an invitation link.'
               : state.error}
             action={missing
               ? <Link className="btn btn-secondary" to="/welcome">Go to {APP_NAME}</Link>
-              : <button type="button" className="btn btn-secondary" onClick={() => setAttempt(a => a + 1)}>
-                Try again
-              </button>}
+              : (throttled
+                ? <Link className="btn btn-secondary" to="/welcome">Go to {APP_NAME}</Link>
+                : (
+                  <button type="button" className="btn btn-secondary" onClick={() => setAttempt(a => a + 1)}>
+                    Try again
+                  </button>
+                ))}
           />
         </main>
       </div>
@@ -204,6 +256,9 @@ export default function OrganizationPublic() {
              club so signing up lands back here, and the Join press that follows
              is judged by `join_policy` with no invitation in hand. */
           token={null}
+          /* So a request-policy club does not offer "Request to join" and then
+             open a dialog headed "Join Chess Club". */
+          affordance={affordance}
           onClose={() => setAsking(false)}
         />
       )}

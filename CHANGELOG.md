@@ -315,6 +315,146 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A creator could choose "Only people signed in" and get a club open to the
+  internet.** `POST /api/organizations` validated `visibility`, `joinPolicy` and
+  `invitePolicy` onto its payload and then called `createOrganization` without
+  them, so every new club took the column defaults. The visibility half was a
+  privacy failure reachable on the first try by an organizer doing exactly the
+  right thing: they ticked the private option, saved, and got a club whose page
+  a stranger could read — with the Share dialog then advertising the public
+  address to every member. The other half was quieter and just as wrong: a club
+  created "Invitation only" was joinable by anybody.
+
+- **A manager could take another club's web address and shadow it.** An
+  organization id is `org-` plus a UUID — exactly 40 characters, starts with a
+  letter, lowercase alphanumerics and single hyphens — which satisfied every
+  rule a handle had to satisfy, and the module's own comment claimed it could
+  not. Because a club was looked up with `slug = ? OR id = ?`, an organizer who
+  set their own handle to a victim's id shadowed that club on every id-addressed
+  path: the notification and audit links deliberately kept working landed the
+  victim's own members on the attacker's page, and on an open club their Join
+  press put them on a stranger's roster. The lookup now asks two unambiguous
+  questions, and an id-shaped handle is refused outright.
+
+- **Accepting a request to join was the one admission path with no ban check.**
+  Joining and requesting both re-read the ban at the moment of the act; the
+  manager's Accept did not, and banning does not retire a pending request — so a
+  queue could hold a row for somebody since banned, with nothing marking them,
+  and accepting re-admitted them with the ban still live. The check now runs
+  before the status is written, so a refusal leaves the request answerable
+  rather than committing an acceptance with no membership behind it.
+
+- **An invitation to a request-to-join club could never be accepted.** The
+  affordance returned "send a request" before it consulted whether the reader
+  held an invitation, so the invitee was told to queue up, their Accept press
+  was refused, and the invitation sat pending against the club's list until it
+  lapsed. A direct invitation now admits whatever the join setting says — which
+  is what an invitation means: the club has already made, about that person, the
+  decision a request exists to ask for.
+
+  A share **link** deliberately still does not. It is an address somebody passed
+  on and says nothing about who is holding it, so on a club that approves its
+  members it must not bypass the approval — the two are now separate inputs, and
+  both directions are asserted, because the first attempt at this fix widened
+  the link's authority by accident.
+
+- **Accepting a request left a pending invitation to the same person pending for
+  ever.** It counted against the club's outstanding list, blocked re-invitation
+  for a fortnight, was offered back to the new member on their own page, and
+  would have walked them into an invitation-only club again if they ever left.
+
+- **A club whose web address predates the address rules could not serve its
+  public page.** `slugify` could produce `hq`, `2024-team` or sixty characters,
+  and migration 063 does not rewrite existing addresses — rewriting them would
+  break links those clubs have already handed out. The public route was gating
+  on the stricter rules that govern what a manager may *choose*, so such a club
+  could turn its page on, watch the Share dialog offer the address with a Copy
+  button, and have every visitor answered "not found".
+
+- **Regenerating an expired link minted a replacement that was born expired.**
+  The replacement inherits the expiry on purpose — a link made for one event
+  booth must not become permanent by being regenerated — so the control silently
+  did nothing, which is the worst possible answer for one that promises the old
+  copies stop working and here is the new one.
+
+- **The share dialog told managers that invitation links are "not passwords".**
+  True of what the link does today and false of what it is: nothing rotates a
+  club's links when the join setting tightens, deliberately, because a link on a
+  printed flyer has to keep working. So a manager who followed that advice,
+  posted the link publicly, and later switched to Invitation only had a live
+  credential on a public feed and had never been told. Every policy's wording
+  now says the part that does not change, and the Invitation-only setting warns
+  that links already shared become a way in.
+
+- **The disclosure list for a public page was two fields out of date and read as
+  complete.** "It shows your name, description, logo … never who is in it, and
+  never where an event is" omitted the club's tags and its opportunity count.
+  That sentence is what a manager is entitled to rely on before publishing a
+  page about children, so it is now asserted field-for-field against the
+  projection: a field added to one and not the other fails the build.
+
+- **Two person rows had a 300-character paragraph as their accessible name.** The
+  note a student wrote with a request, and the note a manager wrote with an
+  invitation, were rendered *inside* the link to that person — so a screen
+  reader read the name, the handle, the date and the whole note as the name of a
+  navigation control, and clicking the note navigated away. It is the same
+  run-together-name defect this release fixed for the settings radios, in a
+  worse place.
+
+- **Every settings option's second-order note was announced to nobody.** With an
+  explicit `aria-describedby`, the browser discards every other text node in the
+  label — and the note was a sibling of the element named there, not inside it.
+  The two sentences that went unread were the warning that invitation-only clubs
+  remain findable, and the list of what a public page publishes about a club full
+  of children.
+
+- **A club's own note could not be read past its third line.** The queue clamps
+  a note to three lines to stay scannable, and there was no way to see the rest —
+  on the one piece of text a manager is being asked to decide on. It now expands
+  on hover and on keyboard focus.
+
+- **The invite search reported a failed lookup as "nobody matched that".** The
+  error was swallowed and the previous results were left in place, so a manager
+  on a flaky school network was told the student they were looking for does not
+  exist. Its two status messages were also created and destroyed with their own
+  text, which is precisely how a live region announces nothing at all.
+
+- **Both expiry pickers offered dates the server refuses** — yesterday, and the
+  year 2099 — with the refusal arriving as an error toast after a round trip.
+  For "Add an expiry" specifically, a mis-typed year was a link that died the
+  moment it was created.
+
+- **The share dialog's error state had no way out, and demoted the manager
+  reading it.** A failed load offered no retry — the only escape was to close
+  and reopen the dialog, with nothing saying that would help — and it reset the
+  manager's own permissions to false, so the footer holding the one useful
+  control disappeared along with the reason.
+
+- **The clipboard fallback put a URL into a toast that dismisses after five
+  seconds** and, being 64 unbroken characters, rendered wider than a phone
+  viewport allows. It now points at the field two lines above, which is
+  focusable and selects its whole value.
+
+- **A public page's failure states wore the wrong icon and the wrong offer.** A
+  padlock said "you are not allowed in" on a network error; a rate limit — which
+  a class opening one link from one school address will meet legitimately —
+  offered a Try again that re-fires and fails again; and both public pages
+  dropped their header and their centred column while loading, so a stranger's
+  first impression was two layout shifts.
+
+- **"Request to join" opened a dialog headed "Join".** A student asking to join
+  a club that approves its members was told they were joining it.
+
+- **A signed-out reader handed the bare address was told to open a different
+  link** — the one they had just opened — and offered only Log in, on the one
+  page whose entire purpose is turning a stranger into an account.
+
+- **A manager who mis-clicked their own row in the invite search** was told "You
+  are already in this organization" while trying to invite somebody else.
+
+- **The handle field named two of the four rules it enforces**, so "ab" and
+  "3d-printing" were typed happily and refused on save.
+
 - **Every radio button in the organization settings screen announced its label
   and its whole explanation as one run-together word.** Each input was wrapped in
   a `<label>` containing both the option's title and its sentence of consequence

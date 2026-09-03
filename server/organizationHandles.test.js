@@ -132,6 +132,59 @@ describe('validating a handle', () => {
     }
   });
 
+  /**
+   * The shape that used to slip through, and the exploit it enabled.
+   *
+   * An organization id is `org-` plus a `crypto.randomUUID()` — exactly 40
+   * characters, starts with a letter, lowercase alphanumerics separated by
+   * single hyphens. It satisfied every other rule here, and this module's own
+   * comment claimed it could not.
+   *
+   * With `loadOrganization` resolving a key against `slug` OR `id`, a manager
+   * of any club could read another club's id off the directory payload, claim
+   * it as their own handle, and shadow the victim on every id-addressed path —
+   * so the victim's members following a legacy notification link landed on the
+   * attacker's page, and on an `open` club their Join press put them on a
+   * stranger's roster.
+   */
+  it('refuses a handle that could be an internal id', () => {
+    for (const id of [
+      'org-4a30e1d4-0191-4694-81e2-d715926a5817',
+      'usr-fb962375-7a54-4847-bbfe-da2fbb8036d5',
+      'x-9645e89c-386e-41a3-9ced-7652c30b5bef',
+    ]) {
+      const result = validateHandle(id);
+      expect(result.ok, id).toBe(false);
+      /* Not "reserved" — nobody wanted this word. */
+      expect(result.error).toMatch(/not available/);
+    }
+  });
+
+  /* A bare UUID is refused one rule earlier, because it starts with a digit.
+     Asserted separately so the two refusals are not conflated: this one would
+     still be refused if `ID_SHAPED` were deleted, and the three above would
+     not. */
+  it('refuses a bare UUID for its shape', () => {
+    const result = validateHandle('9645e89c-386e-41a3-9ced-7652c30b5bef');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/starting with a letter/);
+  });
+
+  /**
+   * Written for a UUID rather than for the `org-` prefix, so it covers every id
+   * shape this schema uses instead of only the one that was found.
+   */
+  it('refuses an id shape it has never seen', () => {
+    expect(validateHandle('team-4a30e1d4-0191-4694-81e2-d715926a5817').ok).toBe(false);
+  });
+
+  /** And does not refuse a club whose name happens to contain hex and digits. */
+  it('still accepts an ordinary handle that looks technical', () => {
+    for (const good of ['robotics-2027', 'team-1a2b3c', 'cafe-babe', 'chess-club-2027']) {
+      expect(validateHandle(good).ok, good).toBe(true);
+    }
+  });
+
   it('refuses a non-string without throwing', () => {
     for (const bad of [undefined, null, 42, {}, [], true]) {
       expect(validateHandle(bad).ok).toBe(false);

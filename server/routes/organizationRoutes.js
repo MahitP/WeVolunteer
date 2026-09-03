@@ -25,7 +25,7 @@ import { recordAudit } from '../auditLog.js';
 import {
   validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
   memberRoleOf, formatOrganization, publicOrganizationSnapshot, canInvite, uniqueSlug,
-  handleAvailable, publicOrganizationByHandle,
+  handleAvailable, publicOrganizationByHandle, organizationByKey,
 } from '../organizations.js';
 import { joinAffordance, affordanceAdmits, normaliseVisibility } from '../organizationPolicy.js';
 import {
@@ -90,8 +90,10 @@ const ORG_SELECT = `
  * before handles existed name organizations by id and must keep resolving.
  */
 async function loadOrganization(req, res) {
-  const key = normaliseHandle(req.params.key) || String(req.params.key ?? '');
-  const row = await db.prepare(`${ORG_SELECT} WHERE (o.slug = ? COLLATE nocase OR o.id = ?)`).get(key, req.params.key);
+  /* `organizationByKey` carries the argument for why this is two lookups and
+     not one `slug = ? OR id = ?`, and it lives in `organizations.js` because
+     that module receives a handle — see `db.accessSurface.test.js`. */
+  const row = await organizationByKey(db, req.params.key);
   if (!row) {
     res.status(404).json({ error: 'No such organization.', code: 'not_found' });
     return null;
@@ -286,11 +288,11 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     isBanned: Boolean(ban),
     hasPendingRequest: Boolean(joinRequest),
     canJoinAtAll: can(req.principal, 'organization.join'),
-    /* A direct invitation counts as holding the club's authority to join, the
-       same way a share token does — and it is TRUE here where the token is
-       false, because there is nothing to keep out of the URL: the invitation is
-       a row naming this user, resolved from the session. */
-    hasInvite: Boolean(invitation),
+    /* `isInvited`, not `hasInvite` — a direct invitation, which admits whatever
+       the setting says. It is TRUE here where the token is false, because there
+       is nothing to keep out of a URL: the invitation is a row naming this
+       user, resolved from the session. */
+    isInvited: Boolean(invitation),
   });
 
   const mayInvite = canInvite({
@@ -427,6 +429,13 @@ router.post('/api/organizations', authenticateToken, requireCap('organization.cr
         description: check.value.description ?? '',
         tags: check.value.tags ?? [],
         creator,
+        /* All three settings the form offers, PASSED ON. They were validated
+           onto `check.value` and then dropped, so a creator who chose "Only
+           people signed in" got a club open to the internet and one who chose
+           "Invitation only" got a club anybody could walk into. */
+        ...(check.value.visibility !== undefined ? { visibility: check.value.visibility } : {}),
+        ...(check.value.joinPolicy !== undefined ? { joinPolicy: check.value.joinPolicy } : {}),
+        ...(check.value.invitePolicy !== undefined ? { invitePolicy: check.value.invitePolicy } : {}),
       });
     });
   } catch (err) {
@@ -720,11 +729,14 @@ router.post('/api/organizations/:key/membership', authenticateToken, requireCap(
       isBanned: false,          /* refused above, with its own message */
       hasPendingRequest: false, /* a pending request does not block a link join */
       canJoinAtAll: true,       /* `requireCap` has already said so */
-      /* Either authority admits: a live link for this club, or an invitation
-         addressed to this person. Both are re-checked HERE, at the moment of
-         the act, rather than trusted from the page load — which is what makes
-         revoking a link or withdrawing an invitation take effect instantly. */
-      hasInvite: Boolean(linkId) || Boolean(invitation),
+      /* The two authorities, kept apart. A link is an address and admits only
+         where the club says a link is the way in; a direct invitation names
+         this person and admits whatever the setting says. Both are re-checked
+         HERE, at the moment of the act, rather than trusted from the page load
+         — which is what makes revoking a link or withdrawing an invitation take
+         effect instantly. See `joinAffordance`. */
+      hasInvite: Boolean(linkId),
+      isInvited: Boolean(invitation),
     });
 
     if (!affordanceAdmits(affordance.action)) {
@@ -2146,10 +2158,27 @@ router.patch('/api/organizations/:key/share-links/:linkId', authenticateToken, r
   }
 
   if (rotate) {
-    if (linkState(existing) === 'revoked') {
+    /**
+     * A dead link cannot be regenerated, and "dead" includes lapsed.
+     *
+     * `rotateShareLink` inherits the old link's expiry on purpose — a link made
+     * for one event booth must not become permanent by being regenerated — so
+     * rotating an EXPIRED link minted a replacement that was born expired. It
+     * read as a regeneration that silently did nothing, which is the worst
+     * possible answer for a control whose whole promise is "the old copies stop
+     * working and here is the new one".
+     *
+     * Both dead states are refused with their own reason, because "switched off"
+     * and "expired" are different things a manager did (or did not do) and the
+     * next step is the same either way: make a new link.
+     */
+    const state = linkState(existing);
+    if (state !== 'live') {
       return res.status(409).json({
-        error: 'That link is switched off. Make a new one instead.',
-        code: 'revoked',
+        error: state === 'revoked'
+          ? 'That link is switched off. Make a new one instead.'
+          : 'That link has expired. Make a new one instead.',
+        code: state,
       });
     }
     const replacement = await runInTransaction(db, async (tx) => {
@@ -2321,10 +2350,29 @@ router.get('/api/public/organizations/:handle', async (req, res) => {
   });
 
   try {
+    /**
+     * NOT shape-checked with `validateHandle`, deliberately.
+     *
+     * `validateHandle` governs what a manager may CHOOSE. It is stricter than
+     * what already exists in the column: `slugify` predates it and could return
+     * `hq` (under the 3-character floor), `2024-team` (digit-initial) or 60
+     * characters (over the 40 ceiling), and migration 063 does not rewrite
+     * existing slugs — rewriting them would break the links those clubs have
+     * already handed out, which is the whole reason renaming stopped moving the
+     * address.
+     *
+     * Gating the public route on it meant such a club could set
+     * `visibility = 'public'`, watch the Share dialog offer it a public address
+     * with a Copy button, and have every visitor — including one holding a
+     * printed poster — answered 404. Fail-closed, so nothing leaked; the
+     * product simply lied to the manager about whether their page was public.
+     *
+     * `publicOrganizationByHandle` can only ever return a row that exists, so
+     * it is the honest authority here. All this needs is a length ceiling, to
+     * refuse a megabyte of path without a round trip.
+     */
     const handle = normaliseHandle(req.params.handle);
-    /* Shape-checked before the round trip. `validateHandle` also refuses the
-       reserved segments, which cannot name a club anyway. */
-    if (!validateHandle(handle).ok) return gone();
+    if (!handle || handle.length > 200) return gone();
 
     /* One function decides "is there a public club at this handle" — see
        `publicOrganizationByHandle` for the three conditions and why all three
@@ -2423,8 +2471,11 @@ router.post('/api/organizations/:key/invitations', authenticateToken, requireCap
     const target = await invitableUser(db, userId);
     if (!target) return res.status(404).json({ error: 'We could not find that person.', code: 'no_such_user' });
 
+    /* Says what happened, not something about their own membership. A manager
+       who mis-clicked their own row in the search results was told "You are
+       already in this organization" while trying to invite somebody else. */
     if (target.id === req.principal.userId) {
-      return res.status(400).json({ error: 'You are already in this organization.', code: 'already_member' });
+      return res.status(400).json({ error: 'You cannot invite yourself.', code: 'self' });
     }
     if (await memberRoleOf(db, row.id, target.id)) {
       return res.status(409).json({
@@ -2793,6 +2844,37 @@ router.post('/api/organizations/:key/join-requests/:requestId/decision', authent
     let outcome;
     try {
       outcome = await runInTransaction(db, async (tx) => {
+        /**
+         * The ban, re-checked HERE — the third admission path, and the one that
+         * was missing it.
+         *
+         * `POST …/membership` and `POST …/join-requests` both re-read the ban at
+         * the moment of the act, and this file's own comment claims the ban is
+         * enforced on the join path because that is the boundary. Accepting a
+         * request is a second way onto the roster, so the boundary has to be
+         * here too. Banning does not retire a pending request, so the queue can
+         * hold a row for somebody who has since been banned, with nothing
+         * marking them.
+         *
+         * ── Before `decideRequest`, not after ──
+         *
+         * `decideRequest` writes the status. Checking the ban after it and
+         * returning early would commit a request marked `accepted` with no
+         * membership row behind it — a worse state than the bug being fixed,
+         * and one no later read could tell from a real acceptance.
+         *
+         * Refusing leaves the request PENDING, which is what the response tells
+         * the manager: lift the ban and accept, or decline. Deciding it for them
+         * in either direction would be the wrong call to make on their behalf.
+         */
+        if (decision === 'accept') {
+          const banned = await tx.prepare(`
+            SELECT 1 AS ok FROM organization_bans
+             WHERE organization_id = ? AND user_id = ? AND lifted_at IS NULL
+          `).get(row.id, subject.userId);
+          if (banned) return 'banned';
+        }
+
         const result = await decideRequest(tx, {
           organizationId: row.id,
           requestId: req.params.requestId,
@@ -2807,6 +2889,15 @@ router.post('/api/organizations/:key/join-requests/:requestId/decision', authent
             VALUES (?, ?, 'member', ?)
             ON CONFLICT(organization_id, user_id) DO NOTHING
           `).run(row.id, subject.userId, new Date().toISOString());
+
+          /* An invitation this person was also holding stops being outstanding,
+             exactly as it would if they had joined through the ordinary route.
+             Left pending, it would count against the club's list for ever, be
+             offered back to them on their own page, block re-invitation for a
+             fortnight, and walk them back into an `invite`-only club if they
+             ever left. */
+          await acceptInvitationOnJoin(tx, row.id, subject.userId);
+
           /* Recomputed for the same reason leaving recomputes it: the answer is
              derived from the membership table rather than remembered, so it
              cannot drift from the thing it describes. Joining as an ordinary
@@ -2842,6 +2933,16 @@ router.post('/api/organizations/:key/join-requests/:requestId/decision', authent
       return res.status(409).json({
         error: 'Somebody has already answered that request.',
         code: 'already_decided',
+      });
+    }
+    /* The request was answerable and the person is banned. The row stays
+       pending, so a manager who lifts the ban can still accept it — which is
+       better than deciding it for them in either direction. */
+    if (outcome === 'banned') {
+      return res.status(409).json({
+        error: 'That person is banned from this organization. Lift the ban first, '
+          + 'or decline the request.',
+        code: 'banned',
       });
     }
     if (outcome !== 'decided') {

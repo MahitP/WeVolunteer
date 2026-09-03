@@ -142,10 +142,17 @@ function PolicyOption({ group, value, copy, checked, disabled, onChange }) {
         value={value}
         checked={checked}
         disabled={disabled}
-        /* The title alone is the name; the sentence is the description. See the
-           component header for the run-together name this replaced. */
+        /* The title alone is the name; the sentence — AND the second-order note
+           where there is one — is the description. See the component header for
+           the run-together name this replaced.
+
+           The note has to be named explicitly: an explicit `aria-describedby`
+           discards every other text node in the wrapping label, so listing only
+           `descId` left the note announced to nobody. That mattered most on
+           exactly the option where it says the most — what a public page
+           publishes about a club full of children. */
         aria-labelledby={titleId}
-        aria-describedby={descId}
+        aria-describedby={copy.note ? `${descId} ${descId}-note` : descId}
         onChange={() => onChange(group, value)}
       />
       <span className="org-policy-text">
@@ -158,10 +165,13 @@ function PolicyOption({ group, value, copy, checked, disabled, onChange }) {
           * a public page is the setting where what is actually disclosed is
           * worth listing beside the choice.
           *
-          * Inside the described element, so it is read as part of the
-          * description rather than being announced separately or not at all.
+          * Named in `aria-describedby` alongside the consequence, because it is
+          * a SIBLING of that element rather than inside it — and an explicit
+          * `aria-describedby` discards everything it does not name.
           */}
-        {copy.note && <span className="org-policy-note">{copy.note}</span>}
+        {copy.note && (
+          <span className="org-policy-note" id={`${descId}-note`}>{copy.note}</span>
+        )}
       </span>
     </label>
   );

@@ -74,12 +74,38 @@ export const HANDLE_MAX = 40;
  * two spellings of the same handle and a uniqueness index that cannot see they
  * are the same.
  *
- * Starting with a letter keeps a handle from being mistaken for an internal id
- * — every id in this schema is `<prefix>-<random>` and several are all-digits
- * after the prefix — and it is the same rule `validateUsername` applies for the
- * same reason.
+ * Starting with a letter is the same rule `validateUsername` applies. It is NOT
+ * on its own enough to keep a handle from being mistaken for an internal id —
+ * see `ID_SHAPED` below, which is.
  */
 const HANDLE_SHAPE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/**
+ * A handle that could be an internal id.
+ *
+ * ── The bug this closes ──
+ *
+ * Ids in this schema are `<prefix>-<crypto.randomUUID()>`, and an organization
+ * id — `org-` plus 36 characters — is EXACTLY `HANDLE_MAX`, starts with a
+ * letter, and is lowercase alphanumerics separated by single hyphens. So it
+ * satisfied every rule above. The comment here used to claim otherwise.
+ *
+ * That mattered because `loadOrganization` resolves a key against `slug` OR
+ * `id`. A manager of any club could read another club's id — it is on the
+ * directory payload — set their own handle to it, and shadow the victim on
+ * every id-addressed path: the legacy notification and audit links this feature
+ * deliberately keeps working would land the victim's members on the attacker's
+ * page, and on an `open` club their Join would put them on a stranger's roster.
+ *
+ * `loadOrganization` no longer resolves the two namespaces ambiguously, which
+ * is the real fix. This is the second lock: with it, the collision cannot be
+ * created in the first place.
+ *
+ * Matched anywhere in the handle rather than anchored, and written for a UUID
+ * rather than for the `org-` prefix, so it covers every id shape this schema
+ * uses — present and future — instead of the one that was found.
+ */
+const ID_SHAPED = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/;
 
 export function normaliseHandle(value) {
   return String(value ?? '').trim().replace(/^@+/, '').toLowerCase();
@@ -120,6 +146,12 @@ export function validateHandle(value) {
   }
   if (RESERVED_HANDLES.includes(clean)) {
     return { ok: false, field: 'handle', error: 'That web address is reserved. Try another.' };
+  }
+  if (ID_SHAPED.test(clean)) {
+    /* Not "reserved" — this is not a word somebody wanted. Saying what is wrong
+       with the shape is the more useful refusal, and nobody types one of these
+       by accident. */
+    return { ok: false, field: 'handle', error: 'That web address is not available. Try another.' };
   }
   return { ok: true, value: clean };
 }

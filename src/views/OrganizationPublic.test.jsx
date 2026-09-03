@@ -107,7 +107,8 @@ describe('what pressing the button will do', () => {
   it('offers a request on a club that approves members', async () => {
     await show({ ...ORG, joinPolicy: 'request' });
     expect(screen.getByRole('button', { name: /Request to join/ })).toBeInTheDocument();
-    expect(screen.getByText('A manager reads every request and decides.')).toBeInTheDocument();
+    expect(screen.getByText('A manager of Chess Club will see your request and decide.'))
+      .toBeInTheDocument();
   });
 
   /**
@@ -122,6 +123,23 @@ describe('what pressing the button will do', () => {
     expect(screen.queryByRole('button', { name: /Join/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Request/ })).not.toBeInTheDocument();
     expect(screen.getByText(/admits members by invitation/)).toBeInTheDocument();
+  });
+
+  /**
+   * The dialog says the same thing the button did.
+   *
+   * A request-policy club offered "Request to join" and then opened a dialog
+   * headed "Join Chess Club" — telling the reader they were joining a club they
+   * were in fact asking to join.
+   */
+  it('opens a dialog about asking, not joining, on a request club', async () => {
+    await show({ ...ORG, joinPolicy: 'request' });
+    fireEvent.click(screen.getByRole('button', { name: /Request to join/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: /Sign in to ask to join Chess Club/ });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Request to join Chess Club' })).toBeInTheDocument();
+    expect(screen.getByText(/Asking to join an organization needs/)).toBeInTheDocument();
   });
 
   it('explains that joining needs an account, rather than failing', async () => {
@@ -158,6 +176,28 @@ describe('what pressing the button will do', () => {
   });
 });
 
+/**
+ * The loading branch used to omit the topbar and the centred column, so a
+ * stranger on a wide screen saw full-width skeletons with no branding, then the
+ * brand bar appeared and the content collapsed into a column — two layout
+ * shifts on the one page whose job is a first impression.
+ */
+describe('while it is loading', () => {
+  it('keeps the brand and the page column', async () => {
+    let resolve;
+    api.fetchPublicOrganization.mockReturnValue(new Promise((r) => { resolve = r; }));
+    const { container } = render(<MemoryRouter><OrganizationPublic /></MemoryRouter>);
+
+    expect(screen.getByRole('link', { name: /WeVolunteer/ })).toBeInTheDocument();
+    expect(container.querySelector('.invite-main')).toBeTruthy();
+    /* And says it is working, rather than being a silent empty document. */
+    expect(screen.getByRole('status', { name: /Loading/ })).toBeInTheDocument();
+
+    resolve({ organization: ORG });
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Chess Club' })).toBeInTheDocument());
+  });
+});
+
 describe('the bare legacy path, signed out', () => {
   /**
    * No lookup at all, which is the point.
@@ -184,10 +224,26 @@ describe('the bare legacy path, signed out', () => {
     expect(api.fetchPublicOrganization).not.toHaveBeenCalled();
   });
 
-  it('offers a way in rather than being a dead end', async () => {
+  /**
+   * Both doors, and signing up is the primary one.
+   *
+   * This is the page whose whole reason for existing is turning a stranger into
+   * an account, and it offered only Log in — the wrong door for somebody who
+   * has never been here.
+   */
+  it('offers signing up as well as logging in', async () => {
     params = { key: 'chess-club' };
     render(<MemoryRouter><OrganizationPublic /></MemoryRouter>);
-    expect(await screen.findByRole('link', { name: /Log in/ })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /Create an account/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Log in/ })).toBeInTheDocument();
+  });
+
+  /* And says what a working address looks like, rather than telling somebody to
+     open a link they have already opened. */
+  it('says what shape of address does work', async () => {
+    params = { key: 'chess-club' };
+    render(<MemoryRouter><OrganizationPublic /></MemoryRouter>);
+    expect(await screen.findByText(/\/organizations\/@name/)).toBeInTheDocument();
   });
 });
 
@@ -228,12 +284,36 @@ describe('an address that does not open', () => {
     );
     render(<MemoryRouter><OrganizationPublic /></MemoryRouter>);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Could not open this page' }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Could not reach the server' }))
       .toBeInTheDocument();
-    expect(screen.getByText(/Could not reach the server/)).toBeInTheDocument();
+    expect(screen.getByText(/Check your connection/)).toBeInTheDocument();
 
     api.fetchPublicOrganization.mockResolvedValue({ organization: ORG });
     fireEvent.click(screen.getByRole('button', { name: /Try again/ }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Chess Club' })).toBeInTheDocument());
+  });
+
+  /**
+   * A rate limit is its own answer, and offering a retry there is a trap.
+   *
+   * `/api/public/organizations/*` is bounded per device, because a handle is
+   * guessable and the ceiling is what stops an enumeration. The realistic way
+   * to meet it is entirely legitimate — one school, one address, a class
+   * opening the club link off an assembly slide — and a Try again button
+   * re-fires immediately, re-429s, and teaches the reader the page is broken.
+   */
+  it('does not offer a retry that cannot work when the limit is hit', async () => {
+    api.fetchPublicOrganization.mockRejectedValue(
+      Object.assign(new Error('Too many attempts. Please wait a few minutes and try again.'), {
+        status: 429,
+      }),
+    );
+    render(<MemoryRouter><OrganizationPublic /></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Too many tries just now' }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Try again/ })).not.toBeInTheDocument();
+    /* And a way onward rather than a dead end. */
+    expect(screen.getByRole('link', { name: /Go to WeVolunteer/ })).toBeInTheDocument();
   });
 });

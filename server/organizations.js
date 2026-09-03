@@ -26,7 +26,8 @@ import { isAvatarColor } from './avatarColors.js';
    costs no coupling, and the browser can import the same file for the settings
    form rather than holding a second copy of the words. */
 import {
-  JOIN_POLICIES, INVITE_POLICIES, VISIBILITIES, DEFAULT_VISIBILITY,
+  JOIN_POLICIES, INVITE_POLICIES, VISIBILITIES,
+  DEFAULT_VISIBILITY, DEFAULT_JOIN_POLICY, DEFAULT_INVITE_POLICY,
   normaliseJoinPolicy, normaliseInvitePolicy, normaliseVisibility,
 } from './organizationPolicy.js';
 
@@ -440,30 +441,53 @@ export async function canRunEvent(db, event, userId, { hasModerate = false } = {
   return await canManage(db, event.organization_id, userId);
 }
 
-export async function createOrganization(db, { name, description = '', tags = [], creator, now = new Date().toISOString() }) {
+export async function createOrganization(db, {
+  name, description = '', tags = [], creator,
+  /**
+   * The three settings a creator can choose, and they are HONOURED.
+   *
+   * They used to be dropped: the route validated `visibility`, `joinPolicy` and
+   * `invitePolicy` onto `check.value` and then called this function without
+   * them, so every new club got the column defaults. For visibility that was a
+   * privacy failure reachable on the first try through the ordinary form — an
+   * organizer chose "Only people signed in", saved, and got a club whose page
+   * was open to the internet, with the Share dialog then advertising the public
+   * address to every member. For the two policies it was quieter and just as
+   * wrong: a club created "Invitation only" was joinable by anybody.
+   *
+   * Defaulted here rather than required, because `bin/` scripts and the demo
+   * seed create organizations too and should keep getting the product's
+   * defaults without naming them.
+   */
+  visibility = DEFAULT_VISIBILITY,
+  joinPolicy = DEFAULT_JOIN_POLICY,
+  invitePolicy = DEFAULT_INVITE_POLICY,
+  now = new Date().toISOString(),
+}) {
   const orgId = `org-${crypto.randomUUID()}`;
   await db.prepare(`
     INSERT INTO organizations
       (id, name, slug, description, tags, created_by, created_by_name_snapshot, status,
-       visibility, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+       visibility, join_policy, invite_policy, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
   `).run(
     orgId, name, await uniqueSlug(db, name), description, JSON.stringify(tags),
     creator.id, creator.name,
     /**
-     * `DEFAULT_VISIBILITY`, written explicitly rather than left to the column.
+     * Normalised on the way in, so a caller that skipped `validateOrganization`
+     * — a `bin/` script, the demo seed — cannot write a value outside the
+     * vocabulary. `normaliseVisibility` in particular fails closed towards not
+     * publishing.
      *
-     * The column's DEFAULT is `'unlisted'`, which is right for migration 063 —
-     * every club that already existed was created when the page required a
-     * session, and nobody running one agreed to publish it. It is wrong for a
-     * club created today, by somebody who is looking at the setting.
-     *
-     * The two answers are deliberately different, so the value is stated here
-     * rather than inherited. Leaving it to the DEFAULT made every new club
-     * unlisted while the product said otherwise: the settings form showed
-     * `public`, the constant said `public`, and the row said `unlisted`.
+     * The column DEFAULTs are deliberately NOT what these resolve to when
+     * absent: the column says `unlisted` because migration 063 backfills every
+     * club that predates the setting, and `DEFAULT_VISIBILITY` says `public`
+     * because a club created today is created by somebody looking at the
+     * setting. Stating the value here is what keeps those two answers apart.
      */
-    DEFAULT_VISIBILITY,
+    normaliseVisibility(visibility),
+    normaliseJoinPolicy(joinPolicy),
+    normaliseInvitePolicy(invitePolicy),
     now, now,
   );
 
@@ -621,6 +645,60 @@ export function publicOrganization(row, { upcoming = [] } = {}) {
 }
 
 /**
+ * The counts every organization payload carries, as a SELECT fragment.
+ *
+ * Shared by the two resolvers below so they cannot disagree about what a
+ * member count is — one of them feeds the public projection and the other feeds
+ * the page, and a club that reported different numbers on the two would be a
+ * bug nobody could see from either.
+ */
+const WITH_COUNTS = `
+  SELECT o.*,
+         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+         (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
+    FROM organizations o
+`;
+
+/**
+ * The organization a route key names — a handle, or an id.
+ *
+ * ── Two questions, in order, and never one OR ──
+ *
+ * It used to be `WHERE o.slug = ? COLLATE nocase OR o.id = ?`, and the
+ * ambiguity was exploitable. An organization id is `org-` plus a UUID: exactly
+ * `HANDLE_MAX` characters, starts with a letter, lowercase alphanumerics and
+ * single hyphens — so it satisfied every rule `validateHandle` applied, and a
+ * manager could set their own handle to another club's id. The union plan
+ * returned the slug match first, so the attacker's club shadowed the victim's
+ * on every id-addressed path: the notification and audit links this feature
+ * deliberately keeps working would land the victim's own members on the
+ * attacker's page.
+ *
+ * `validateHandle` now refuses an id-shaped handle, which stops the collision
+ * being created. Asking two unambiguous questions is what makes it not matter
+ * if one exists anyway — an id always resolves to the row whose id it is.
+ *
+ * Handle first, because that is the canonical address and the common case. The
+ * id branch stays because notification payloads and audit rows written before
+ * handles existed name organizations by id and must keep resolving.
+ *
+ * Lives here rather than in the route for the reason `db.accessSurface.test.js`
+ * ratchets: this module receives a handle, so these statements can be given a
+ * pooled client during the PostgreSQL port.
+ */
+export async function organizationByKey(db, key) {
+  const raw = String(key ?? '');
+  const handle = normaliseHandle(raw);
+
+  const byHandle = handle
+    ? await db.prepare(`${WITH_COUNTS} WHERE o.slug = ? COLLATE nocase`).get(handle)
+    : null;
+  if (byHandle) return byHandle;
+
+  return (await db.prepare(`${WITH_COUNTS} WHERE o.id = ?`).get(raw)) ?? null;
+}
+
+/**
  * The organization at a handle, if it has a public page.
  *
  * ── One function, so "is this public" has one answer ──
@@ -644,13 +722,7 @@ export function publicOrganization(row, { upcoming = [] } = {}) {
 export async function publicOrganizationByHandle(db, handle) {
   const slug = normaliseHandle(handle);
   if (!slug) return null;
-  const row = await db.prepare(`
-    SELECT o.*,
-           (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
-           (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
-      FROM organizations o
-     WHERE o.slug = ? COLLATE nocase
-  `).get(slug);
+  const row = await db.prepare(`${WITH_COUNTS} WHERE o.slug = ? COLLATE nocase`).get(slug);
 
   if (!row || row.status !== 'active') return null;
   return normaliseVisibility(row.visibility) === 'public' ? row : null;

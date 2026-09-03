@@ -168,6 +168,83 @@ describe('sending one', () => {
     expect(options.signal).toBeInstanceOf(AbortSignal);
   });
 
+  /**
+   * The failure that used to read as an absence.
+   *
+   * The catch swallowed everything but an abort, leaving `results` holding its
+   * previous value — so a manager on a flaky school network was told the
+   * student they were looking for does not exist.
+   */
+  it('reports a failed search rather than saying nobody matched', async () => {
+    api.searchDirectory.mockRejectedValue(new Error('Could not reach the server.'));
+    await show([]);
+    fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));
+    fireEvent.change(screen.getByLabelText(/Who would you like to invite/), { target: { value: 'alex' } });
+
+    expect(await screen.findByText('Could not reach the server.')).toBeInTheDocument();
+    expect(screen.queryByText('Nobody matched that.')).not.toBeInTheDocument();
+  });
+
+  /**
+   * One status region, always mounted.
+   *
+   * It used to be two elements created and destroyed with their own text, and a
+   * live region has to exist BEFORE its contents change to be announced — so
+   * neither ever announced anything.
+   */
+  it('keeps one status region mounted so it can actually announce', async () => {
+    await show([]);
+    fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));
+
+    /* Present and empty before anything is typed. */
+    const status = screen.getByRole('status');
+    expect(status).toBeInTheDocument();
+    expect(status).toHaveTextContent('');
+
+    fireEvent.change(screen.getByLabelText(/Who would you like to invite/), { target: { value: 'zz' } });
+    /* The SAME element now carries the message. */
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/Searching|Nobody matched/));
+  });
+
+  it('says how long an invitation lasts, where the note is written', async () => {
+    await show([]);
+    fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));
+    expect(screen.getByText(/stays open for two weeks/)).toBeInTheDocument();
+  });
+
+  /**
+   * The one refused case this component can see, and therefore fixes.
+   *
+   * `searchDirectory` is platform-wide with no membership filter, so results
+   * legitimately include people the server refuses. The most confusing of those
+   * is somebody whose invitation is listed one row above in this very card.
+   */
+  it('marks somebody already invited, and will not let them be chosen', async () => {
+    api.searchDirectory.mockResolvedValue({ users: [{ ...PERSON, id: 'user-9' }, OTHER], organizations: [] });
+    await show([INVITATION]);   /* INVITATION.id is 'user-9' */
+    fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));
+    fireEvent.change(screen.getByLabelText(/Who would you like to invite/), { target: { value: 'alex' } });
+    await screen.findByText('Alex Chen');
+
+    /* Marked in words, not by dimming alone. */
+    expect(screen.getByText(/already invited/)).toBeInTheDocument();
+    const radios = screen.getAllByRole('radio');
+    expect(radios.find(r => r.value === 'user-9')).toBeDisabled();
+    /* And the other person is still pickable. */
+    expect(radios.find(r => r.value === 'user-2')).not.toBeDisabled();
+  });
+
+  /* Marked rather than filtered out: a name that vanishes from a search reads
+     as "not on the platform", and the reason is visible one card above. */
+  it('still shows them, rather than hiding the name', async () => {
+    api.searchDirectory.mockResolvedValue({ users: [{ ...PERSON, id: 'user-9', name: 'Sam Patel' }], organizations: [] });
+    await show([INVITATION]);
+    fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));
+    fireEvent.change(screen.getByLabelText(/Who would you like to invite/), { target: { value: 'sam' } });
+
+    await waitFor(() => expect(screen.getAllByText('Sam Patel').length).toBeGreaterThan(0));
+  });
+
   it('says so when nobody matched', async () => {
     await show([]);
     fireEvent.click(await screen.findByRole('button', { name: /Invite somebody/ }));

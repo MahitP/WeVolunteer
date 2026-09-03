@@ -86,6 +86,20 @@ describe('who can join', () => {
     expect(screen.getByText(/separate setting below/)).toBeInTheDocument();
   });
 
+  /**
+   * The warning a manager switching to invitation-only actually needs.
+   *
+   * Nothing rotates a club's links when the policy tightens — a link on a
+   * printed flyer has to keep working — so a link shared publicly while the
+   * club was open becomes the way in the moment this is chosen. The share
+   * dialog now says the same thing from the other side.
+   */
+  it('warns that links already shared become a way in', () => {
+    show();
+    expect(screen.getByText(/already shared becomes a way in/)).toBeInTheDocument();
+    expect(screen.getByText(/regenerate any you put somewhere public/)).toBeInTheDocument();
+  });
+
   it('marks the current setting', () => {
     show({ joinPolicy: 'request' });
     const group = screen.getByRole('group', { name: 'Who can join?' });

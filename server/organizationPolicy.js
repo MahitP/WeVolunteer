@@ -154,9 +154,6 @@ export function normaliseVisibility(value) {
   return value === 'public' ? 'public' : 'unlisted';
 }
 
-/** True when a stranger with no session may read this club's public projection. */
-export const isPubliclyVisible = (org) =>
-  normaliseVisibility(org?.visibility) === 'public' && org?.status === 'active';
 
 /**
  * Every state the primary control can be in.
@@ -208,6 +205,7 @@ export function joinAffordance({
   hasPendingRequest = false,
   canJoinAtAll = true,
   hasInvite = false,
+  isInvited = false,
 } = {}) {
   const policy = normaliseJoinPolicy(joinPolicy);
 
@@ -225,9 +223,36 @@ export function joinAffordance({
   if (status !== 'active' || !canJoinAtAll) return { action: 'unavailable', policy };
   if (hasPendingRequest) return { action: 'pending', policy };
 
+  /**
+   * A DIRECT INVITATION admits, whatever the policy says. A link does not.
+   *
+   * ── Why these are two inputs and not one ──
+   *
+   * They look interchangeable and they are not, and conflating them gets one of
+   * the two wrong in a way nobody would notice:
+   *
+   *   `isInvited`  a row naming this person, created by a manager. The club has
+   *                already made, about this individual, the decision a request
+   *                exists to ask for. Making them queue up behind it as well
+   *                would be the club overruling itself — so this admits on a
+   *                `request` club.
+   *   `hasInvite`  a live share link for this club. It is an ADDRESS somebody
+   *                passed on, and it says nothing about who is holding it. On a
+   *                `request` club it must NOT admit: that club's whole point is
+   *                that a human approves each member, and a link that bypassed
+   *                the approval would make the setting decorative.
+   *
+   * Written as one `hasInvite` for a while, which made the invitation feature
+   * inert on a `request` club — the invitee was told to send a request, their
+   * Accept press was answered `request_required`, and the invitation sat pending
+   * against the club's outstanding list until it lapsed. Widening `hasInvite` to
+   * fix that broke the other half instead, and the route test caught it.
+   */
+  if (isInvited) return { action: 'join', policy };
+
   if (policy === 'open') return { action: 'join', policy };
   if (policy === 'request') return { action: 'request', policy };
-  /* invite */
+  /* invite — where a link is the club's stated way in */
   return { action: hasInvite ? 'join' : 'invite_required', policy };
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { Building2, Lock, LogIn, UserPlus2 } from 'lucide-react';
+import { Lock, LogIn, UserPlus2, WifiOff } from 'lucide-react';
 import PublicOrganizationView, {
   PublicOrganizationTopbar,
 } from '../components/organizations/PublicOrganizationView';
@@ -104,7 +104,13 @@ export default function OrganizationInvite() {
   if (state.loading || isCheckingSession) {
     return (
       <div className="invite-page">
-        <LoadingSkeleton heights={[180, 120]} className="stack-lg" />
+        {/* The topbar and the centred column, which this branch used to omit —
+            so a stranger on a wide screen got full-width skeletons with no
+            branding, then two layout shifts as the real page arrived. */}
+        <PublicOrganizationTopbar sub="Invitation" />
+        <main className="invite-main stack-lg" role="status" aria-label="Loading this invitation">
+          <LoadingSkeleton heights={[180, 120]} />
+        </main>
       </div>
     );
   }
@@ -141,7 +147,11 @@ export default function OrganizationInvite() {
               * token always lands on the failure branch.
               */
             headingLevel={1}
-            icon={invalid ? Lock : Building2}
+            /* A padlock on "we could not reach the server" says "you are not
+               allowed in". Only the invalid-link branch is about permission —
+               the same mapping `OrganizationPublic` uses, so the two pages that
+               share a renderer no longer give one failure two icons. */
+            icon={invalid ? Lock : WifiOff}
             title={invalid ? 'This invitation link does not work' : 'Could not open this invitation'}
             message={invalid
               ? 'It may have been replaced or switched off. Ask whoever shared it for the current link.'
@@ -162,7 +172,10 @@ export default function OrganizationInvite() {
   if (currentUser) {
     return (
       <div className="invite-page">
-        <LoadingSkeleton heights={[180, 120]} className="stack-lg" />
+        <PublicOrganizationTopbar sub="Invitation" />
+        <main className="invite-main stack-lg" role="status" aria-label="Opening this organization">
+          <LoadingSkeleton heights={[180, 120]} />
+        </main>
       </div>
     );
   }
@@ -216,6 +229,10 @@ export default function OrganizationInvite() {
         <SignInToJoinDialog
           organization={org}
           token={token}
+          /* So a request-policy club does not offer "Request to join" and then
+             open a dialog headed "Join Chess Club" — telling the reader they
+             are joining a club they are in fact asking to join. */
+          affordance={affordance}
           onClose={() => setAsking(false)}
         />
       )}

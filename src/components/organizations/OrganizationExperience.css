@@ -596,14 +596,18 @@
 }
 
 /**
- * Turn off on the left, Regenerate on the right.
+ * The dialog footer: one control, and the sentence that explains it.
  *
- * `space-between` rather than the modal footer's default alignment, so the two
- * are not adjacent: they are the two consequential controls in this dialog and a
- * misfire on either costs a manager the club's current link.
+ * It used to hold Regenerate and Turn off at opposite ends, which is what
+ * `space-between` was for. Those moved onto each link's own plate in the
+ * multi-link rewrite, and the footer now carries "New link" plus the
+ * at-capacity explanation — where `space-between` pushed the sentence as far
+ * from the button it describes as the dialog is wide.
  */
 .org-share-foot {
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: var(--s3);
+  align-items: center;
 }
 
 /* ── Sign in to join ────────────────────────────────────────────────────── */
@@ -812,6 +816,12 @@
  * hover away in the accessibility tree because the element is not `hidden`.
  */
 .org-request-note {
+  /* A sibling of the person link rather than a child of it, so the link's
+     accessible name is a name and not a name plus 300 characters of somebody's
+     free text. `flex-basis: 100%` gives it the whole row under both, which is
+     where it sat visually before. */
+  flex: 1 1 100%;
+  margin: var(--s1) 0 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
@@ -820,6 +830,25 @@
   color: var(--ink-2);
   font-size: 0.875rem;
   overflow-wrap: anywhere;
+}
+
+/**
+ * The rest of a long note, on hover or keyboard focus.
+ *
+ * The clamp keeps a queue of eight requests scannable; without this the fourth
+ * line of a note was simply unreachable for a sighted reader, on the one piece
+ * of text the manager is being asked to decide on. `:focus-within` is what makes
+ * it reachable by keyboard rather than by pointer only.
+ *
+ * `-webkit-line-clamp: unset` rather than a height animation: the row grows, the
+ * ones below move down, and nothing overlaps. A 300-character bound is what
+ * makes that safe to do in place.
+ */
+.org-request:hover .org-request-note,
+.org-request:focus-within .org-request-note {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
 }
 
 .org-invite-composer {
@@ -877,6 +906,11 @@
   display: flex;
   gap: var(--s3);
   align-items: center;
+  /* 44px unconditionally, matching `.org-policy-option` above — the other
+     row-shaped radio in this file. The house 44px rule is scoped to coarse
+     pointers for controls that would otherwise be small; a LIST ROW is a
+     comfortable height with a mouse and a necessary one with a thumb, so
+     there is nothing to gain from making it conditional. */
   min-height: 44px;
   padding: var(--s2) var(--s3);
   border-bottom: 1px solid var(--rule);
@@ -884,6 +918,21 @@
 }
 
 .org-invite-result:last-child { border-bottom: none; }
+
+/**
+ * Somebody the club has already invited.
+ *
+ * Dimmed and unpickable rather than absent, because a name that vanishes from a
+ * search reads as "not on the platform" — and the reason is a row this manager
+ * can see one card above. The words say it too ("already invited"), so the
+ * state is not carried by the dimming alone.
+ */
+.org-invite-result[data-unavailable] {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.org-invite-result[data-unavailable]:hover { background: none; }
 .org-invite-result:hover { background: var(--surface-2); }
 .org-invite-result:has(input:checked) { background: var(--brand-tint); }
 .org-invite-result:focus-within {
@@ -905,6 +954,19 @@
  */
 .org-share-address {
   border-style: dashed;
+}
+
+/**
+ * The line an unlisted club's manager sees where the address plate would be.
+ *
+ * Left-ruled rather than boxed: it is a pointer to a setting, not a value to
+ * copy, and giving it a plate would make it look like the thing it is saying
+ * does not exist.
+ */
+.org-share-unlisted {
+  margin: 0;
+  padding-left: var(--s3);
+  border-left: 2px solid var(--rule);
 }
 
 .org-share-labelrow {
@@ -952,8 +1014,9 @@
  * thing in the dialog.
  */
 .org-share-retired > summary {
-  min-height: 44px;
   display: flex;
+  /* Same reasoning as the rows above: a disclosure control somebody taps. */
+  min-height: 44px;
   align-items: center;
   color: var(--ink-2);
   font-size: 0.875rem;
@@ -967,9 +1030,10 @@
 }
 
 .org-share-retired-row {
-  /* Dimmer than a live link, but not so dim it fails contrast — `--ink-soft` is
-     the token that is still readable, and the state is carried by the words
-     ("Switched off", "Expired") rather than by the colour alone. */
+  /* Dimmer than a live link, but not so dim it fails contrast — `--ink-2` is
+     the token that is still readable against both grounds, and the state is
+     carried by the words ("Switched off", "Expired") rather than by the colour
+     alone. */
   color: var(--ink-2);
 }
 

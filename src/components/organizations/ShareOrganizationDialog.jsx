@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Link2, Copy, Share2, RefreshCw, Ban, Loader2, Plus, Pencil, CalendarClock, Check,
 } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
 import ConfirmDialog from '../common/ConfirmDialog';
 import { api } from '../../utils/api';
-import { publicUrl } from '../../config';
+import { publicUrl, APP_NAME } from '../../config';
 import { formatDay } from '../../utils/helpers';
 import { organizationPath } from '../../utils/organizationUrl';
 
@@ -52,14 +52,73 @@ import { organizationPath } from '../../utils/organizationUrl';
  * Both destructive controls sit behind a confirmation that says the one thing a
  * manager is most likely to fear: current members stay members.
  */
+/**
+ * What an invitation link does, per policy — and the half that is true of all
+ * three.
+ *
+ * ── The sentence that used to be here, and why it was dangerous ──
+ *
+ * For an `open` club this read "They are addresses to hand out — not
+ * passwords." That is a reasonable description of what the link does TODAY and
+ * a false description of what it is, and the gap is exploitable by nobody more
+ * exotic than a manager following the product's own advice:
+ *
+ *   1. The club is open, so the dialog says the link is not a password.
+ *   2. A manager posts it publicly — on a feed, in a bio — because they were
+ *      told it is just an address.
+ *   3. The club later switches to Invitation only.
+ *
+ * Nothing rotates a link when `join_policy` tightens, deliberately: a link
+ * already printed on a flyer must keep working, and silently invalidating it
+ * would be the worse failure. So step 3 turns the link from step 2 into a live
+ * credential sitting on a public feed, and no screen ever mentioned it.
+ *
+ * Every policy's sentence therefore now says the thing that does not change —
+ * these keep working, and there is a different value for the poster.
+ */
+/**
+ * The same three facts in the singular, for a member who may share.
+ *
+ * They get the club's primary link and nothing else — `canManage: false` hides
+ * the rest — so the plural sentence described a list they cannot see.
+ */
+const WHAT_ONE_LINK_DOES = {
+  open: 'Anybody with this link can open this organization’s page and join it. '
+    + 'It keeps working if a manager changes who can join, so treat it as private — for '
+    + 'something public, ask a manager for the organization’s public address.',
+  invite: 'Anybody with this link can open this organization’s page, and only people who have '
+    + 'it can join. Send it to the people you want in, and treat it as private.',
+  request: 'Anybody with this link can open this organization’s page and send a request. '
+    + 'A manager still accepts or declines every one — and the link keeps working if a manager '
+    + 'changes who can join, so treat it as private.',
+};
+
 const WHAT_THE_LINK_DOES = {
   open: 'Anybody with one of these links can open this organization’s page and join it. '
-    + 'They are addresses to hand out — not passwords.',
+    + 'They keep working if you change who can join, so treat them as private even while '
+    + 'anybody may join — for a poster, use the public address instead.',
   invite: 'Anybody with one of these links can open this organization’s page, and only people '
-    + 'who have one can join. Send them to the people you want in.',
+    + 'who have one can join. Send them to the people you want in, and treat them as private.',
   request: 'Anybody with one of these links can open this organization’s page and send a request. '
-    + 'A manager still accepts or declines every one.',
+    + 'A manager still accepts or declines every one — but the links keep working if you change '
+    + 'who can join, so treat them as private.',
 };
+
+/**
+ * The window the server will accept for an expiry.
+ *
+ * `validateExpiry` on the route refuses anything at or before now, and anything
+ * more than five years out — because "never" is expressed by leaving the field
+ * blank rather than by a date in the year 9999. These put the same bounds on
+ * the picker, so a manager cannot choose a date that will be refused after a
+ * round trip.
+ *
+ * Functions rather than constants: a dialog left open across midnight would
+ * otherwise offer a `min` of yesterday.
+ */
+const day = (offsetMs) => new Date(Date.now() + offsetMs).toISOString().slice(0, 10);
+const EXPIRY_MIN = () => day(24 * 60 * 60 * 1000);
+const EXPIRY_MAX = () => day(5 * 365 * 24 * 60 * 60 * 1000);
 
 export default function ShareOrganizationDialog({ orgKey, organization, policy, onClose, addToast, onChanged }) {
   const [state, setState] = useState({ loading: true, links: [], canManage: false, canCreate: false, error: '' });
@@ -83,9 +142,12 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
         });
       })
       .catch(err => {
-        if (!cancelled) {
-          setState({ loading: false, links: [], canManage: false, canCreate: false, error: err.message });
-        }
+        if (cancelled) return;
+        /* `canManage` and `canCreate` are PRESERVED across a failure. Resetting
+           them to false turned a manager whose fetch timed out into a member
+           looking at a broken dialog: the footer vanished, so the one control
+           that could have helped was gone along with the reason. */
+        setState(previous => ({ ...previous, loading: false, links: [], error: err.message }));
       });
     return () => { cancelled = true; };
   };
@@ -105,9 +167,23 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
       if (!navigator.clipboard) throw new Error('no clipboard');
       addToast?.(`${what} copied.`, 'success');
     } catch {
-      /* Not an error toast: nothing has gone wrong for the reader, and the value
-         they wanted is right here. `info` shows it long enough to select. */
-      addToast?.(url, 'info');
+      /**
+       * Point at the field, do not dump the URL into a toast.
+       *
+       * This used to pass `url`, on the reasoning that `info` "shows it long
+       * enough to select". It does not: `addToast` dismisses after five
+       * seconds, and selecting a hundred-character URL out of a disappearing
+       * strip is not an affordance. The 64-character token also has no break
+       * opportunity, so the toast rendered wider than a phone viewport allows.
+       *
+       * The real fallback is two lines up — a focusable input that selects its
+       * whole value on focus. This says so.
+       */
+      addToast?.(
+        'Copying is not available in this browser. Select the link in the box and copy it '
+        + 'by hand.',
+        'info',
+      );
     }
   };
 
@@ -115,7 +191,7 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
     try {
       await navigator.share({
         title: organization?.name,
-        text: `Join ${organization?.name ?? 'this organization'} on WeVolunteer.`,
+        text: `Join ${organization?.name ?? 'this organization'} on ${APP_NAME}.`,
         url,
       });
     } catch {
@@ -170,7 +246,16 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
       <Modal onClose={onClose} label={`Share ${organization?.name ?? 'this organization'}`}>
         <ModalHead
           title="Share this organization"
-          description={WHAT_THE_LINK_DOES[policy] ?? WHAT_THE_LINK_DOES.invite}
+          /**
+            * Singular for somebody who can only ever see one.
+            *
+            * A member with share rights is given the club's primary link and
+            * nothing else, so a sentence about "these links" describes a list
+            * they are not looking at. `canManage` is the server's answer about
+            * which reader this is.
+            */
+          description={(state.canManage ? WHAT_THE_LINK_DOES : WHAT_ONE_LINK_DOES)[policy]
+            ?? (state.canManage ? WHAT_THE_LINK_DOES : WHAT_ONE_LINK_DOES).invite}
           onClose={onClose}
         />
 
@@ -185,6 +270,28 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
             * address that answers "not found" to everybody outside the club is
             * not an address.
             */}
+          {/**
+            * An unlisted club: say the address EXISTS as an option.
+            *
+            * Absent-rather-than-broken is right for the address itself — one
+            * that answers 404 to everybody outside the club is not an address —
+            * but the original version said nothing at all. Migration 063
+            * backfills every club that predates the setting to `unlisted`, so
+            * on the day this shipped every existing manager opened Share, saw
+            * only invitation links, and had no signal that a public page was a
+            * thing they could have.
+            *
+            * Managers only: a member who may share cannot change the setting,
+            * so telling them where it lives is an instruction they cannot
+            * follow.
+            */}
+          {state.canManage && organization?.visibility !== 'public' && (
+            <p className="muted small org-share-unlisted">
+              This organization has no public address. You can turn on a page anybody can open in
+              Settings, under “Who can see this organization’s page?”.
+            </p>
+          )}
+
           {organization?.visibility === 'public' && publicAddress && (
             <div className="org-share-plate org-share-address">
               <label className="label" htmlFor="org-public-url">Public address</label>
@@ -211,7 +318,15 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
           {state.loading && <p className="muted">Loading the invitation links…</p>}
 
           {!state.loading && state.error && (
-            <p className="alert alert-danger" role="alert">{state.error}</p>
+            <div className="alert alert-danger stack-sm" role="alert">
+              <p>{state.error}</p>
+              {/* A way out. Both public pages got a retry for exactly this
+                  case; the dialog's only escape was to close and reopen it,
+                  with nothing saying that would help. */}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()}>
+                Try again
+              </button>
+            </div>
           )}
 
           {!state.loading && !state.error && state.links.length === 0 && (
@@ -287,16 +402,27 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
 
         {state.canManage && !creating && (
           <div className="modal-foot org-share-foot">
+            {/**
+              * `aria-disabled`, not `disabled`.
+              *
+              * `disabled` takes the button out of the tab order, so a keyboard
+              * or screen-reader user never landed on it — and the paragraph
+              * explaining why was associated with nothing. They met a control
+              * they could not reach and no reason for it. `aria-disabled` keeps
+              * it focusable and lets `aria-describedby` carry the reason; the
+              * handler refuses, so the state is still enforced.
+              */}
             <button
               type="button"
               className="btn btn-primary btn-sm"
-              disabled={!state.canCreate}
-              onClick={() => setCreating(true)}
+              aria-disabled={!state.canCreate}
+              aria-describedby={state.canCreate ? undefined : 'org-share-cap'}
+              onClick={() => { if (state.canCreate) setCreating(true); }}
             >
               <Plus size={15} aria-hidden="true" /> New link
             </button>
             {!state.canCreate && (
-              <p className="muted small">
+              <p className="muted small" id="org-share-cap">
                 This organization has as many working links as it can have. Switch one off to make
                 another.
               </p>
@@ -324,6 +450,12 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
              this, and two identically-named buttons in one flow is how somebody
              reads the confirmation as the thing they already pressed. */
           confirmLabel="Regenerate link"
+          /* Marked destructive, and Switch off is not the only one that should
+             be. Regenerating is the operation that breaks the printed flyer
+             this dialog keeps invoking — "every copy of this link stops
+             working" — while switching one of several links off is the milder
+             act. Styling them the other way round was backwards. */
+          destructive
           busy={busy === confirming.link.id}
           overlayClassName="modal-overlay-stacked"
           onConfirm={() => act('rotate', confirming.link)}
@@ -407,6 +539,16 @@ function LinkPlate({
         type="text"
         readOnly
         value={url}
+        /**
+         * Named "Invitation link: <label>", not just "<label>".
+         *
+         * With the visible `<label>` alone, a screen-reader user tabbing this
+         * dialog heard "Public address, edit text" and then "Autumn flyer, edit
+         * text" — and the one distinction this dialog exists to draw was
+         * carried entirely by a dashed border and visual grouping. The visible
+         * label stays as it is for the sighted reader.
+         */
+        aria-label={`Invitation link: ${link.label}`}
         onFocus={e => e.target.select()}
       />
 
@@ -450,7 +592,7 @@ function LinkPlate({
               {busy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : <RefreshCw size={14} aria-hidden="true" />}
               Regenerate
             </button>
-            <ExpiryControl link={link} onExpiry={onExpiry} />
+            <ExpiryControl link={link} busy={busy} onExpiry={onExpiry} />
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -501,13 +643,30 @@ function RenameForm({ label, busy, onSave, onCancel }) {
  * stops in October. So choosing a date says so in the sentence beside the field,
  * and "does not expire" is the default the field opens on.
  */
-function ExpiryControl({ link, onExpiry }) {
+function ExpiryControl({ link, busy, onExpiry }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(link.expiresAt ? link.expiresAt.slice(0, 10) : '');
+  /**
+   * The button this form replaces, so focus comes back to it.
+   *
+   * Closing the form unmounted the focused element and dropped focus to the
+   * document — inside an open modal, which means a keyboard user had to tab
+   * from the top of the dialog to get back to where they were.
+   */
+  const openerRef = useRef(null);
+  const [returnFocus, setReturnFocus] = useState(false);
+  const close = () => { setReturnFocus(true); setOpen(false); };
+
+  useEffect(() => {
+    if (!open && returnFocus) {
+      openerRef.current?.focus();
+      setReturnFocus(false);
+    }
+  }, [open, returnFocus]);
 
   if (!open) {
     return (
-      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}>
+      <button type="button" className="btn btn-ghost btn-sm" ref={openerRef} onClick={() => setOpen(true)}>
         <CalendarClock size={14} aria-hidden="true" />
         {link.expiresAt ? 'Change expiry' : 'Add an expiry'}
       </button>
@@ -524,17 +683,32 @@ function ExpiryControl({ link, onExpiry }) {
            day" rather than "at midnight as it begins" — which would make a link
            chosen for Saturday's event booth dead all of Saturday. */
         onExpiry(value ? new Date(`${value}T23:59:59`).toISOString() : null);
-        setOpen(false);
+        close();
       }}
     >
       <label className="label" htmlFor={inputId}>Stop working after</label>
+      {/**
+        * `min` and `max`, because the server refuses outside them.
+        *
+        * `validateExpiry` rejects any date at or before now and anything more
+        * than five years out. Without these the picker happily offered
+        * yesterday — which, for "Add an expiry", is a link that dies the moment
+        * it is created — and the refusal arrived as a toast after a round trip.
+        *
+        * `autoFocus` because this field replaces the button that was focused;
+        * without it focus fell to the document inside an open modal and a
+        * keyboard user had to Tab from the top of the dialog to find it.
+        */}
       <input
         id={inputId}
         className="input"
         type="date"
         value={value}
+        min={EXPIRY_MIN()}
+        max={EXPIRY_MAX()}
         onChange={e => setValue(e.target.value)}
         aria-describedby={`${inputId}-hint`}
+        autoFocus
       />
       <p id={`${inputId}-hint`} className="muted small">
         {value
@@ -544,8 +718,10 @@ function ExpiryControl({ link, onExpiry }) {
             + 'what you want for a flyer or a poster.'}
       </p>
       <div className="row row-wrap">
-        <button type="submit" className="btn btn-secondary btn-sm">Save</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+        {/* `disabled={busy}` like every other submit in this file — this was
+            the one without it. */}
+        <button type="submit" className="btn btn-secondary btn-sm" disabled={busy}>Save</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={close}>Cancel</button>
       </div>
     </form>
   );
@@ -593,6 +769,8 @@ function NewLinkForm({ busy, onCreate, onCancel }) {
         className="input"
         type="date"
         value={expires}
+        min={EXPIRY_MIN()}
+        max={EXPIRY_MAX()}
         onChange={e => setExpires(e.target.value)}
         aria-describedby="org-new-link-expiry-hint"
       />

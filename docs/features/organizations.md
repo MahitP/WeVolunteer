@@ -111,6 +111,45 @@ The canonical `@` form makes the collision class impossible by construction
 anyway. The list is belt and braces, and it is what keeps a club created before
 this change reachable.
 
+### A handle must not be able to impersonate an id
+
+The rules above were, for a while, satisfied by an organization's own id. `org-`
+plus a `crypto.randomUUID()` is **exactly 40 characters**, starts with a letter,
+and is lowercase alphanumerics separated by single hyphens — and this module's
+comment claimed the letter-first rule ruled ids out. It did not.
+
+That mattered because `loadOrganization` resolved a key with
+`slug = ? OR id = ?`. An organizer could read any club's id off the directory
+payload, set their own handle to it, and shadow that club on every id-addressed
+path: the notification and audit links this feature deliberately keeps working
+would land the victim's own members on the attacker's page, and on an `open`
+club their Join press would put them on a stranger's roster.
+
+Two locks now, and the order matters:
+
+1. **`loadOrganization` asks two unambiguous questions** — handle first, then id
+   — so an id always resolves to the row whose id it is, whatever anybody's
+   handle says. This is the fix that makes a collision harmless.
+2. **`validateHandle` refuses an id-shaped handle**, matched on a UUID anywhere
+   in the value rather than on the `org-` prefix, so it covers every id shape
+   this schema uses instead of the one that was found. This is the fix that
+   stops a collision existing.
+
+### What the public route accepts is wider than what a manager may choose
+
+`validateHandle` governs the *choice*. It is stricter than what is already in the
+column: `slugify` predates it and could return `hq`, `2024-team` or sixty
+characters, and migration 063 does **not** rewrite existing slugs — rewriting
+them would break the links those clubs have already handed out, which is the
+whole reason renaming stopped moving the address.
+
+So the public route does not gate on it. It bounds the length and lets
+`publicOrganizationByHandle` — which can only ever return a row that exists — be
+the authority. Gating on the stricter rules meant such a club could turn its page
+on, watch the Share dialog offer the address with a Copy button, and have every
+visitor answered 404: fail-closed, so nothing leaked, and the product simply lied
+to the manager about whether their page was public.
+
 ## 3. Visibility, which is a second axis
 
 `join_policy` answers *who may become a member*. `visibility` answers *who may
@@ -150,8 +189,25 @@ writes `public` explicitly. That is deliberate and it is the privacy argument:
   somebody looking at the setting.
 
 The column's `DEFAULT` is `'unlisted'`, so the value is stated at creation
-rather than inherited — leaving it to the default made every new club unlisted
-while the constant, the settings form and the API all said otherwise.
+rather than inherited.
+
+Both halves of that have now been wrong once, in opposite directions, which is
+worth recording because the shape of the mistake is the same both times —
+**a setting the product offers, and a write that does not carry it**:
+
+- First the value was left to the column default, so every new club was
+  `unlisted` while the constant, the form and the API all said `public`.
+- Then it was hard-coded to the constant, so `createOrganization` wrote
+  `'public'` and *discarded the creator's choice*. An organizer could tick
+  "Only people signed in", save, and get a club whose page a stranger could
+  read — with the Share dialog then advertising the address to every member.
+  The same call dropped `joinPolicy` and `invitePolicy`, so a club created
+  "Invitation only" was joinable by anybody.
+
+`createOrganization` now takes all three, defaulted to the constants so `bin/`
+scripts and the demo seed keep getting the product's defaults without naming
+them, and normalised on the way in so a caller that skipped
+`validateOrganization` cannot write outside the vocabulary.
 
 ## 4. Membership policy
 
@@ -232,6 +288,54 @@ The recruiting case email would serve — getting somebody with no account into 
 club — is already served, better, by a share link: a URL a human chooses how to
 send, naming no address, with the platform never mailing a stranger on a club's
 behalf.
+
+### An invitation admits, whatever the join setting says. A link does not.
+
+`joinAffordance` takes these as **two** inputs, and they look interchangeable:
+
+| | what it is | admits on `open` | on `request` | on `invite` |
+|---|---|---|---|---|
+| `isInvited` | a row naming this person, created by a manager | yes | **yes** | yes |
+| `hasInvite` | a live share link for this club | yes | **no** | yes |
+
+The asymmetry is the point. A club that invited somebody *by name* has already
+made, about that individual, the decision a request exists to ask for — making
+them queue up behind it as well would be the club overruling itself. A share
+link is an ADDRESS somebody passed on and says nothing about who is holding it,
+so on a request-to-join club it must not admit: that club's whole point is that
+a human approves each member, and a link that bypassed the approval would make
+the setting decorative.
+
+Written as one `hasInvite` for a while, which made the invitation feature inert
+on a `request` club — the invitee was told to send a request, their Accept press
+was answered `request_required`, and the invitation sat pending against the
+club's outstanding list until it lapsed. Widening it to fix that broke the other
+half instead; the route test caught it, which is the reason both directions are
+now asserted.
+
+Neither overrides the four states that come first: membership, a ban, an
+archived club, and a request already pending.
+
+### Every path onto the roster re-checks the ban
+
+There are three, and for a while only two did:
+
+| Path | Ban re-checked |
+|---|---|
+| `POST …/membership` | yes, at the moment of the act |
+| `POST …/join-requests` | yes, so the queue cannot be filled by a banned person |
+| `POST …/join-requests/:id/decision` with `accept` | **added** |
+
+Banning does not retire a pending request, so a queue could hold a row for
+somebody since banned with nothing marking them, and accepting re-admitted them
+with the ban still live. The check runs **before** `decideRequest` writes the
+status: after it, an early return would commit a request marked `accepted` with
+no membership row behind it — a worse state than the bug, and one no later read
+could tell from a real acceptance. Refusing leaves the request answerable, which
+is what the response tells the manager.
+
+Accepting a request also retires any invitation the same person was holding,
+exactly as joining does.
 
 ### A decline is final for the inviter, not for the invitee
 
@@ -659,3 +763,21 @@ Recorded so the next person does not have to re-derive it.
 | Telling the invitee who invited them | Makes a decline an answer to a classmate rather than to a club |
 | Sanitising the notes | Escaping already handles it; stripping mangles a child's `<3` |
 | A legal/privacy update | §9 — the public projection discloses nothing the notice's "Who can see your information" section contradicts, and it makes no exhaustiveness claim. Account-to-account invitations are already covered. **This stops being true the moment a public page publishes a member's name or an event's location** |
+| Rotating a club's links when the join setting tightens | A link on a printed flyer has to keep working; silently invalidating it is the worse failure. Both screens warn instead — see §9 |
+| Filtering the invite search to people the server would accept | The directory endpoint has six other callers and no membership flag. The one refused case this component can already see — somebody it has an outstanding invitation for — is marked and unpickable; the rest refuse on the server with a sentence naming the person |
+| A confirmation dialog on declining an invitation | It removes nothing the reader has. What it needs is the consequence *before* the press — that the club cannot ask again — and that is a sentence |
+
+### The guards that keep the arguments above honest
+
+Several of the claims in this document are load-bearing, so they are asserted
+rather than trusted:
+
+| Claim | What fails if it stops being true |
+|---|---|
+| The public projection discloses only the allowlist | `routes.organizationPublicPage.test.js` asserts the field list exactly, in three places |
+| The visibility setting's disclosure sentence is complete | `organizations.publicDisclosureCopy.test.js` derives the projection's fields and fails on one the sentence does not account for |
+| A public page carries no member and no event location | The same file, including inside the nested `upcoming` shape |
+| An invitation carries no token and no email column | `migrations.organizationPublicIdentity.test.js` and `migrations.postgres.test.js` assert the ABSENCE on both engines |
+| `shellWhenSignedIn` is honoured | `routeGating.guard.test.js` Guard 4 asserts `isPublicPath` answers differently for the two sessions, and that App.jsx passes the session at all |
+| The public endpoints are rate-limited | `routes.organizationPublicPage.test.js` reads the mount out of `app.js` |
+| An id cannot be claimed as a handle | `organizationHandles.test.js`, with the real id shape |

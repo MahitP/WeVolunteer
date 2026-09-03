@@ -126,14 +126,29 @@ export default function JoinRequestInbox({ orgKey, organizationName, policy, add
                       {request.username && <>@{request.username} · </>}
                       asked {formatDay(request.submittedAt)}
                     </span>
-                    {/* Inside the link, so the note travels with the person it
-                        belongs to on a narrow screen rather than wrapping into
-                        the actions. Text, never markup. */}
-                    {request.message && (
-                      <span className="org-request-note">{request.message}</span>
-                    )}
                   </span>
                 </Link>
+
+                {/**
+                  * The note, OUTSIDE the link.
+                  *
+                  * It used to sit inside it, so the link's accessible name was
+                  * the person's name, their handle, the date AND up to 300
+                  * characters of somebody's free text, read out as the name of
+                  * a navigation control. That is the same run-together-name
+                  * defect this feature fixed for the settings radios, in a
+                  * worse place — and clicking the note, which is the only
+                  * place the decision information lives, navigated away to a
+                  * profile.
+                  *
+                  * `.org-request` already wraps and `.org-request-note` takes
+                  * the full row, so the layout is unchanged. Text, never
+                  * markup: React escapes it, and the server stores it verbatim
+                  * rather than "sanitising" a child's `<3`.
+                  */}
+                {request.message && (
+                  <p className="org-request-note">{request.message}</p>
+                )}
 
                 {/**
                   * Both verbs, both visible.

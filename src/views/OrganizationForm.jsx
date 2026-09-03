@@ -425,8 +425,14 @@ export default function OrganizationForm({ addToast }) {
                     <AlertCircle size={12} aria-hidden="true" />{errors.handle}
                   </span>
                 )}
+                {/* Every rule `validateHandle` enforces, not two of the four.
+                    It also requires at least three characters and a letter
+                    first, so "ab" and "3d-printing" were both typed happily and
+                    refused on save — with the real rule arriving only in the
+                    error. */}
                 <span className="field-hint" id="org-handle-hint">
-                  Lowercase letters, numbers and hyphens.{' '}
+                  At least 3 characters, starting with a letter. Lowercase letters, numbers and
+                  hyphens.{' '}
                   <strong>Changing this stops the old address working</strong> — anywhere you have
                   printed or posted it. Invitation links are not affected.
                 </span>
@@ -460,7 +466,12 @@ export default function OrganizationForm({ addToast }) {
         </div>
 
         <div className="card-foot row-between">
-          <Link className="btn btn-ghost" to={editing ? organizationPath(key) : '/directory'}>Cancel</Link>
+          <Link className="btn btn-ghost" /* `loadedHandle`, not the route `key`. The edit route still serves an
+                 id — links written before handles existed use one — and
+                 `organizationPath('org-abc123')` produces
+                 `/organizations/@org-abc123`, which resolves to nothing.
+                 `loadedHandle` is the slug the server sent back. */
+              to={editing ? organizationPath(loadedHandle || key) : '/directory'}>Cancel</Link>
           <div className="row org-actions">
             {editing && (
               <button type="button" className="btn btn-danger" disabled={submitting}

@@ -9,8 +9,6 @@ import { formatDay } from '../../utils/helpers';
    on it in `organizationPolicy.js`. */
 import { NOTE_MAX } from '../../organizationPolicy';
 
-
-
 /**
  * Inviting named people, and the invitations that are still outstanding.
  *
@@ -40,6 +38,25 @@ export default function InvitationManager({ orgKey, organizationName, addToast, 
   const [state, setState] = useState({ loading: true, invitations: [], error: '' });
   const [busy, setBusy] = useState(null);
   const [composing, setComposing] = useState(false);
+  /**
+   * The "Invite somebody" button, so focus can come back to it.
+   *
+   * The composer replaces that button, and closing it — by Cancel, or by a
+   * successful invitation — unmounted the focused element and dropped focus to
+   * the document. A keyboard user then had to tab from the top of the page to
+   * get back to where they were.
+   */
+  const openerRef = useRef(null);
+  const [returnFocus, setReturnFocus] = useState(false);
+
+  useEffect(() => {
+    if (!composing && returnFocus) {
+      openerRef.current?.focus();
+      setReturnFocus(false);
+    }
+  }, [composing, returnFocus]);
+
+  const closeComposer = () => { setReturnFocus(true); setComposing(false); };
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -76,7 +93,7 @@ export default function InvitationManager({ orgKey, organizationName, addToast, 
     try {
       await api.inviteToOrganization(orgKey, person.id, note);
       addToast?.(`${person.name} was invited to ${organizationName}.`, 'success');
-      setComposing(false);
+      closeComposer();
       load();
       onChanged?.();
     } catch (err) {
@@ -130,16 +147,29 @@ export default function InvitationManager({ orgKey, organizationName, addToast, 
                       invited {formatDay(invitation.createdAt)}
                       {invitation.expiresAt && <> · open until {formatDay(invitation.expiresAt)}</>}
                     </span>
-                    {/* The note that was sent, so a manager can see what this
-                        person was actually told — and tell two invitations
-                        apart when a co-manager wrote one of them. Text, never
-                        markup: React escapes it, and the server stores it
-                        verbatim rather than "sanitising" a child's `<3`. */}
-                    {invitation.message && (
-                      <span className="org-request-note">{invitation.message}</span>
-                    )}
                   </span>
                 </Link>
+
+                {/**
+                  * The note, OUTSIDE the link.
+                  *
+                  * It used to sit inside it, so the link's accessible name was
+                  * the person's name, their handle, the date AND up to 300
+                  * characters of somebody's free text, read out as the name of
+                  * a navigation control. That is the same run-together-name
+                  * defect this feature fixed for the settings radios, in a
+                  * worse place — and clicking the note, which is the only
+                  * place the decision information lives, navigated away to a
+                  * profile.
+                  *
+                  * `.org-request` already wraps and `.org-request-note` takes
+                  * the full row, so the layout is unchanged. Text, never
+                  * markup: React escapes it, and the server stores it verbatim
+                  * rather than "sanitising" a child's `<3`.
+                  */}
+                {invitation.message && (
+                  <p className="org-request-note">{invitation.message}</p>
+                )}
 
                 <span className="row org-request-actions">
                   {/* Named per person, because a screen-reader user tabbing
@@ -163,12 +193,20 @@ export default function InvitationManager({ orgKey, organizationName, addToast, 
         {composing ? (
           <InviteComposer
             organizationName={organizationName}
+            /* So the results can say who is already waiting on one. See the
+               note in the composer for why this is the slice worth doing. */
+            invited={state.invitations}
             busy={busy === 'new'}
             onInvite={invite}
-            onCancel={() => setComposing(false)}
+            onCancel={closeComposer}
           />
         ) : (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setComposing(true)}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            ref={openerRef}
+            onClick={() => setComposing(true)}
+          >
             <UserPlus2 size={15} aria-hidden="true" /> Invite somebody
           </button>
         )}
@@ -193,11 +231,27 @@ export default function InvitationManager({ orgKey, organizationName, addToast, 
  * each send immediately makes a mis-click an invitation. Choosing, then
  * writing an optional note, then pressing Send is three deliberate steps for an
  * action that reaches into somebody else's notifications.
+ *
+ * ── Why the already-invited are marked and not filtered ──
+ *
+ * `searchDirectory` is a platform-wide search with no membership filter, so the
+ * results legitimately include people the server will refuse: existing members,
+ * the caller, banned people, and — most confusingly — somebody whose invitation
+ * is listed one row above in this very card. Every one of those was a
+ * select-then-press-then-error round trip, which is the failure `joinAffordance`
+ * exists to prevent everywhere else in this feature.
+ *
+ * The outstanding list is the half this component already holds, so that is the
+ * half it fixes: those rows say "already invited" and cannot be chosen. The
+ * others still refuse on the server with a sentence naming the person, because
+ * fixing them properly means a membership flag on the directory result and that
+ * is a change to an endpoint six other callers share.
  */
-function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
+function InviteComposer({ organizationName, invited = [], busy, onInvite, onCancel }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState('');
   const [chosen, setChosen] = useState(null);
   const [note, setNote] = useState('');
   const abortRef = useRef(null);
@@ -213,6 +267,7 @@ function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
     }
 
     setSearching(true);
+    setError('');
     const timer = setTimeout(() => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -229,7 +284,14 @@ function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
         .catch(err => {
           /* An aborted request is the expected outcome of typing, not a
              failure worth reporting. */
-          if (err?.name !== 'AbortError') setSearching(false);
+          if (err?.name === 'AbortError') return;
+          /* Anything else is reported. Swallowing it left `results` holding its
+             previous value and the UI rendering "Nobody matched that." — so a
+             manager on a flaky school network was told the student they were
+             looking for does not exist. */
+          setResults([]);
+          setError(err?.message || 'Could not search just now.');
+          setSearching(false);
         });
     }, 250);
 
@@ -239,6 +301,17 @@ function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const over = note.length > NOTE_MAX;
+  /**
+   * What the status region says, in one expression.
+   *
+   * An empty string when there is nothing to report, which is what keeps the
+   * element mounted and silent rather than mounted and repeating itself.
+   */
+  const searchStatus = error
+    ? error
+    : (searching
+      ? 'Searching…'
+      : (query.trim().length >= 2 && results.length === 0 ? 'Nobody matched that.' : ''));
 
   return (
     <form
@@ -263,25 +336,43 @@ function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
       </div>
       <p id="org-invite-hint" className="muted small">
         Search for somebody already on this platform. There is no way to invite an email
-        address, on purpose.
+        address, on purpose. An invitation stays open for two weeks, and you can withdraw it
+        at any time.
       </p>
 
-      {searching && <p className="muted small" aria-live="polite">Searching…</p>}
-
-      {!searching && query.trim().length >= 2 && results.length === 0 && (
-        <p className="muted small" aria-live="polite">Nobody matched that.</p>
-      )}
+      {/**
+        * One region, always mounted.
+        *
+        * These used to be two elements created and destroyed with their own
+        * text, and a live region has to EXIST before its contents change for
+        * the change to be announced — so in most screen readers neither ever
+        * announced. A student typed a name, heard nothing, and had no way to
+        * know whether a search had happened.
+        *
+        * `role="status"` rather than `aria-live="polite"` on a `<p>`: same
+        * politeness, and it says what the element is.
+        */}
+      <p className="muted small" role="status">{searchStatus}</p>
 
       {results.length > 0 && (
         <fieldset className="org-invite-results">
           <legend className="sr-only">Choose somebody to invite</legend>
-          {results.map(person => (
-            <label key={person.id} className="org-invite-result">
+          {results.map(person => {
+            const pending = invited.some(i => i.id === person.id);
+            return (
+            <label
+              key={person.id}
+              className="org-invite-result"
+              /* `data-` rather than a second class: the state is one thing the
+                 stylesheet dims, not a variant with its own rules. */
+              data-unavailable={pending ? 'true' : undefined}
+            >
               <input
                 type="radio"
                 name="org-invite-person"
                 value={person.id}
                 checked={chosen?.id === person.id}
+                disabled={pending}
                 onChange={() => setChosen(person)}
               />
               <span className="avatar" aria-hidden="true">
@@ -291,10 +382,14 @@ function InviteComposer({ organizationName, busy, onInvite, onCancel }) {
               </span>
               <span className="stack-xs">
                 <span className="org-request-name">{person.name}</span>
-                {person.username && <span className="muted small">@{person.username}</span>}
+                <span className="muted small">
+                  {person.username && <>@{person.username}</>}
+                  {pending && <>{person.username ? ' · ' : ''}already invited</>}
+                </span>
               </span>
             </label>
-          ))}
+            );
+          })}
         </fieldset>
       )}
 
