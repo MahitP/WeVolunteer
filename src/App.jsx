@@ -31,6 +31,7 @@ import {
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
+import { consumePendingRedirect } from './utils/pendingInvite';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
   X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
@@ -1165,9 +1166,31 @@ function AppShell({ toasts, addToast, removeToast }) {
     await signOut();
   };
 
+  /**
+   * Where somebody lands after signing in or signing up.
+   *
+   * ── The invitation hand-off ──
+   *
+   * Somebody who opened a club's invitation link with no account, pressed Join,
+   * and was sent here to make one is not trying to reach the dashboard. The club
+   * they came for is written to `sessionStorage` before they leave the invitation
+   * page and read back once, here.
+   *
+   * This is deliberately NOT a `returnTo`. What comes back is a SLUG that this
+   * application's own server produced, and it is interpolated into a fixed
+   * `/organizations/` prefix — so there is no input that can make this navigate
+   * anywhere else, and therefore nothing to validate and no open-redirect
+   * surface to get wrong. `consumePendingRedirect` marks it spent, so a later
+   * sign-in in the same tab lands on the dashboard like any other.
+   *
+   * A storage failure (a private window, blocked site data) simply returns null
+   * and the person lands on the dashboard. Losing the destination is the right
+   * way for that to fail; losing the sign-in would not be.
+   */
   const handleLoginSuccess = () => {
     refreshAll();
-    navigate('/');
+    const invite = consumePendingRedirect();
+    navigate(invite ? `/organizations/${encodeURIComponent(invite.slug)}` : '/');
   };
 
   const setViewingProfileState = (profile) => {

@@ -483,9 +483,21 @@ describe('requests to join an organization', () => {
      * Two presses at once produce ONE request.
      *
      * Driven in parallel rather than asserted from the index's existence,
-     * because what is being checked is that the violation is caught and
+     * because what is being checked is that the conflict is absorbed and
      * reported as the same success — a route that let the unique error escape
      * would answer 500 to the second press of an ordinary button.
+     *
+     * ── The PostgreSQL-only failure these caught ──
+     *
+     * `requestToJoin` originally let the insert throw and caught
+     * `isUniqueViolation`. That is correct on SQLite and a trap on PostgreSQL,
+     * where a constraint violation aborts the whole surrounding transaction — so
+     * the re-read that followed it failed with "current transaction is aborted",
+     * inside the transaction that also notifies the managers. It showed up as
+     * ONE flaky failure in a full PostgreSQL run and passed every time this file
+     * was run alone, because a conflict only happens when two presses genuinely
+     * overlap. Run these with `TEST_POSTGRES_URL` set; on SQLite they are green
+     * either way, which is exactly why the PostgreSQL suite exists.
      */
     it('files one request for two simultaneous asks', async () => {
       const [a, b] = await Promise.all([ask(), ask()]);

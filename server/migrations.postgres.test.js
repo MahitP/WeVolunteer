@@ -198,6 +198,42 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     `);
   };
 
+  /**
+   * `organizations` at the shape a pre-057 deployment has it, as far as the
+   * migrations above the baseline care.
+   *
+   * ── Why this table is here at all ──
+   *
+   * The same reason `users` is, one migration later. The fixture provisioned
+   * `events` alone, because every post-baseline migration happened to touch only
+   * that; 060 indexed `users` and answered `relation "users" does not exist`, and
+   * 062 adds two columns to `organizations` and answered the same thing about it.
+   * Both were failures of the STAND-IN, not of the migration: a real deployed
+   * database has had `organizations` since migration 031, and 040 gave it the
+   * identity columns.
+   *
+   * Only the columns the post-baseline migrations name, plus the primary key and
+   * the two NOT NULLs an insert here needs. Restating the whole table would make
+   * this fixture a second copy of the schema that drifts, which is the reason the
+   * file gives for writing `events` out by hand rather than importing the
+   * generated one.
+   */
+  const provisionOrganizations = async () => {
+    await db.exec(`
+      DROP TABLE IF EXISTS organizations CASCADE;
+      CREATE TABLE organizations (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO organizations (id, name, slug, created_at, updated_at)
+        VALUES ('org1', 'Chess Club', 'chess-club', '2026-08-01', '2026-08-01');
+    `);
+  };
+
   const categoryConstraints = async () => await db.prepare(`
     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
      WHERE conrelid = 'events'::regclass AND contype = 'c'
@@ -236,6 +272,7 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     await provisionAtBaseline();
     await provisionEvents();
     await provisionUsers();
+    await provisionOrganizations();
   });
 
   it('starts out refusing a category the widened vocabulary admits', async () => {
@@ -285,6 +322,94 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     expect(row?.indexdef).toBeTruthy();
     /* Both columns, in the order the migration argues for. */
     expect(row.indexdef).toMatch(/\(role, leaderboard_opt_in\)/);
+  });
+
+  /** 062: the membership policy, on a database that predates it. */
+  it('adds the organization membership policy columns, defaulted', async () => {
+    await runPostgresMigrations(db);
+
+    const cols = await db.prepare(
+      "SELECT column_name, is_nullable, column_default FROM information_schema.columns"
+      + " WHERE table_schema = current_schema() AND table_name = 'organizations'"
+      + "   AND column_name IN ('join_policy', 'invite_policy')"
+      + " ORDER BY column_name"
+    ).all();
+    expect(cols.map(c => c.column_name)).toEqual(['invite_policy', 'join_policy']);
+    expect(cols.every(c => c.is_nullable === 'NO')).toBe(true);
+
+    /**
+     * And the club that was already there is `open`.
+     *
+     * This is the property that makes the migration safe to ship without a
+     * coordinated release: an organization created before any of this existed
+     * was joinable by anybody, and `'open'` is what says so. Asserted on the
+     * ROW rather than on the default, because a default that existing rows did
+     * not receive would be exactly as broken and would look identical in the
+     * catalogue.
+     */
+    const row = await db.prepare(
+      "SELECT join_policy AS jp, invite_policy AS ip FROM organizations WHERE id = 'org1'"
+    ).get();
+    expect(row).toEqual({ jp: 'open', ip: 'helpers' });
+  });
+
+  it('adds the invitation-link and join-request tables with their constraints', async () => {
+    await runPostgresMigrations(db);
+
+    const tables = (await db.prepare(
+      "SELECT table_name FROM information_schema.tables"
+      + " WHERE table_schema = current_schema()"
+      + "   AND table_name IN ('organization_share_links', 'organization_join_requests')"
+      + " ORDER BY table_name"
+    ).all()).map(t => t.table_name);
+    expect(tables).toEqual(['organization_join_requests', 'organization_share_links']);
+
+    /**
+     * The partial unique index IS the "no duplicate active requests" rule, so it
+     * is asserted with its predicate rather than by name alone. An index that
+     * lost the `WHERE` would silently stop a declined student from ever asking
+     * again — a behaviour change with no error anywhere.
+     */
+    const live = await db.prepare(
+      "SELECT indexdef FROM pg_indexes"
+      + " WHERE schemaname = current_schema() AND indexname = 'idx_org_join_requests_live'"
+    ).get();
+    expect(live?.indexdef).toBeTruthy();
+    expect(live.indexdef).toMatch(/UNIQUE/i);
+    expect(live.indexdef).toMatch(/WHERE \(status = 'pending'/);
+
+    /* And the database really refuses the second one. */
+    const file = async (id, user) => await db.prepare(
+      "INSERT INTO organization_join_requests (id, organization_id, user_id, status, created_at)"
+      + " VALUES (?, 'org1', ?, 'pending', '2026-09-03')"
+    ).run(id, user);
+    await file('r1', 'u2');
+    await expect(file('r2', 'u2')).rejects.toThrow();
+    /* A different person is unaffected, and a decided request does not block a
+       later one. */
+    await expect(file('r3', 'u1')).resolves.toBeTruthy();
+    await db.prepare("UPDATE organization_join_requests SET status = 'rejected' WHERE id = 'r1'").run();
+    await expect(file('r4', 'u2')).resolves.toBeTruthy();
+  });
+
+  it('gives the invitation-link table one row per organization and a unique token', async () => {
+    await runPostgresMigrations(db);
+
+    const mint = async (org, token) => await db.prepare(
+      'INSERT INTO organization_share_links (organization_id, token, created_at) VALUES (?, ?, ?)'
+    ).run(org, token, '2026-09-03');
+
+    await mint('org1', 'a'.repeat(64));
+    /* One live link per club: the primary key is what makes rotation an UPDATE
+       with no window in which the club has no link at all. */
+    await expect(mint('org1', 'b'.repeat(64))).rejects.toThrow();
+
+    await db.prepare(
+      "INSERT INTO organizations (id, name, slug, created_at, updated_at)"
+      + " VALUES ('org2', 'Robotics', 'robotics', '2026-08-01', '2026-08-01')"
+    ).run();
+    /* And no two clubs can share a token. */
+    await expect(mint('org2', 'a'.repeat(64))).rejects.toThrow();
   });
 
   /** Nullable and unset, so every existing event stays correctable. */

@@ -27,6 +27,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An organization can be handed to somebody as a link, and can decide who gets
+  in.** Membership had exactly one mode — `POST …/membership` inserted a `member`
+  row for anybody who was not banned — and there was no way to share a club at
+  all: slugs are derived from the name and every organization route requires a
+  session, so an organizer could not put a club on a flyer, in a group chat, or
+  in an email to a parent.
+
+  A club now chooses one of three settings, and the settings screen names the
+  consequence rather than the value: **Anyone** (join straight away),
+  **Invitation only** (the club's link is what admits people), or **Request to
+  join** (a manager accepts or declines, from a queue on the organization page).
+  A second setting says who may pass the link on — managers and student
+  organizers, or any member — and it is enforced on the endpoint, not by hiding
+  a button.
+
+  **The link is an address, not a credential.** It opens an allowlisted public
+  projection of the club — name, mark, description, tags, member and event
+  counts, the join setting, and up to three upcoming opportunities by title and
+  date. No member, no founder, no event *location*, no hours, no organization id.
+  It grants no session and it never makes anybody a member by itself: the token
+  travels with the Join press and is re-resolved there, which is what makes
+  regenerating or switching a link off take effect on the next request rather
+  than whenever a page happens to reload. Nobody loses their membership when a
+  link is replaced, and both confirmations say so.
+
+  **An invitation-only club is still findable.** Discovering a club and being
+  allowed into it are different questions, so it stays in browse and in search
+  and a visitor without a link is told they need one — rather than the club
+  quietly disappearing, which is the behaviour a manager choosing that setting
+  most often assumes and would be worse for everybody.
+
+  Migration 062 adds the two settings to `organizations`, one row per club
+  holding its link, and a request table whose partial unique index *is* the "no
+  duplicate active requests" rule. Every existing club defaults to **Anyone**, so
+  nothing changes for anybody until a manager chooses otherwise.
+
+- **The organization page was rebuilt around the question it exists to answer.**
+  It was five stacked cards in source order with a 22-pixel avatar, and the most
+  destructive thing a member can do — Leave — sat in the position a newcomer's
+  Join occupies. There is now one masthead carrying the club's mark on a plate of
+  its own colour, its vital statistics in the utility face, and exactly one
+  primary action with one sentence underneath saying what pressing it will do.
+  Below it, what the club is *doing* on the left and the reader's own record on
+  the right, and a manager's controls in a visibly separate band with their own
+  heading. Leaving moved into the actions menu.
+
+  The same masthead serves the signed-out invitation page, so somebody arriving
+  with a link sees the club presented the way a member does. Pressing Join with
+  no account explains why an account is needed and comes back to the club
+  afterwards — carrying a slug the server produced, interpolated into a fixed
+  path, rather than a `returnTo` parameter that would have to be validated for
+  ever.
+
+- **A club's list of members is now shown to its members.** `GET
+  /api/organizations/:key` returned up to a hundred of them to every signed-in
+  account holding `directory.read` — a named roster of children in a club the
+  reader has nothing to do with. Every row went through the same strict
+  serializer as directory search, which is the wrong question: the *list* is the
+  disclosure, and no per-field allowlist can answer it. Non-members now get the
+  count, which names nobody and is what actually answers "is this club real and
+  how big is it".
+
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
   cosmetic underneath a 25-row limit: when the students at positions 25 and 26
@@ -159,6 +221,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry constant.
 
 ### Fixed
+
+- **A student who appealed an organization ban and was turned down was never
+  told.** `_insertInApp` bound `link` straight into the INSERT, and four content
+  cases omit it deliberately — `ORGANIZATION_BAN_APPEAL_STANDS`'s own note says a
+  link back to a club somebody cannot rejoin "would be a taunt". Neither engine
+  binds `undefined`, and `dispatch` catches best-effort, so the failure was
+  silent and total: no in-app row and no email job for the one message whose
+  absence reads as the club ignoring them. Coerced at the single place that
+  writes the row, with a guard over the whole notification registry.
 
 - **A lower version number could compare as higher, permanently.** The version
   comparator was `(major - major) || (minor - minor) || (patch - patch)` over

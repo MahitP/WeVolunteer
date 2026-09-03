@@ -917,6 +917,53 @@ export const api = {
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
       { method: 'PATCH', body: JSON.stringify({ memberRole }) }),
 
+  /**
+   * Joining, with the invitation token when there is one.
+   *
+   * The token goes in the BODY and never in the URL: a query parameter would put
+   * a live link into browser history, into any proxy log, and into anything that
+   * prefetches. `joinOrganization` above keeps its no-argument shape for the
+   * clubs that need none.
+   */
+  joinOrganizationWithInvite: async (key, shareToken) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/membership`, {
+      method: 'POST',
+      body: JSON.stringify(shareToken ? { shareToken } : {}),
+    }),
+
+  // ── Organization invitation links ──────────────
+  fetchOrganizationShareLink: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`),
+  /** Mints the first link, or replaces the one there is. Managers only. */
+  createOrganizationShareLink: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`, { method: 'POST', body: '{}' }),
+  revokeOrganizationShareLink: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/share-link`, { method: 'DELETE' }),
+
+  /**
+   * The public projection an invitation link opens. UNAUTHENTICATED.
+   *
+   * Goes through `apiFetch` like everything else — it sends credentials, which is
+   * harmless and means a signed-in reader following a link is not treated as a
+   * stranger by the transport. What the endpoint returns does not depend on the
+   * session: it is the same allowlisted projection either way.
+   */
+  fetchOrganizationInvite: async (token) =>
+    apiFetch(`/api/public/organizations/invite/${encodeURIComponent(token)}`),
+
+  // ── Requests to join ───────────────────────────
+  requestToJoinOrganization: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests`, { method: 'POST', body: '{}' }),
+  withdrawOrganizationJoinRequest: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests/mine`, { method: 'DELETE' }),
+  fetchOrganizationJoinRequests: async (key) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/join-requests`),
+  decideOrganizationJoinRequest: async (key, requestId, decision) =>
+    apiFetch(
+      `/api/organizations/${encodeURIComponent(key)}/join-requests/${encodeURIComponent(requestId)}/decision`,
+      { method: 'POST', body: JSON.stringify({ decision }) },
+    ),
+
   // ── Organization announcements ─────────────────
   /**
    * The organization logo.

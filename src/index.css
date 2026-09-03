@@ -8088,6 +8088,29 @@ input:disabled + .premium-slider {
      nobody has chosen a colour. */
   --avatar-bg: var(--brand-tint);
   --swatch: var(--brand-tint);
+  /**
+   * A club's own colour, reaching its whole page rather than only its avatar.
+   *
+   * Set inline by `OrganizationMasthead` from the same eight-value palette
+   * above, and declared here for the same reason `--avatar-bg` is: the token
+   * guard reads declarations, and a property that only ever appears in a style
+   * attribute looks undefined to it. The fallback is what applies to a club that
+   * never chose a colour.
+   *
+   * Used in two places and no more — the emblem plate and a three-pixel spine.
+   * These values are pale pastels and are deliberately NOT re-tuned for dark
+   * mode, so a filled band in one of them would be a bright slab on a dark page.
+   *
+   * ── Why the fallback is a fixed neutral and not `--brand-tint` ──
+   *
+   * The eight palette values are pale in BOTH themes, so the emblem plate is
+   * always a light ground and its glyph is `--neutral-900`, a primitive that is
+   * also fixed. `--brand-tint` is not fixed: under dark mode it resolves to a
+   * dark translucent green, which would leave a club that never chose a colour
+   * with near-black ink on a near-black tile. A pale neutral keeps the one
+   * assumption the emblem rests on true for every club.
+   */
+  --org-accent: var(--neutral-100);
 }
 
 /* The "keeping up to date" callout in the Legal Center. Bordered rather than

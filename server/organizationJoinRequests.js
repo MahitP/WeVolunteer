@@ -24,7 +24,6 @@
  */
 
 import crypto from 'node:crypto';
-import { isUniqueViolation } from './db/dialectSql.js';
 
 /** Every status the column may hold — mirrors the CHECK in migration 062. */
 export const REQUEST_STATUSES = Object.freeze(['pending', 'accepted', 'rejected', 'withdrawn']);
@@ -56,45 +55,56 @@ export async function pendingRequestFor(db, organizationId, userId) {
  * ── Idempotent by construction, not by checking first ──
  *
  * `idx_org_join_requests_live` is a partial unique index over
- * `(organization_id, user_id) WHERE status = 'pending'`, so a second concurrent
- * insert is a unique violation rather than a second row. Catching it and
- * returning the existing request makes a double press the same success as a
- * single one — which is what the join route already does with
- * `ON CONFLICT DO NOTHING`, and for the same reason: tapping a button twice is
- * not an error worth an error page.
+ * `(organization_id, user_id) WHERE status = 'pending'`, and the insert names
+ * that index as its conflict target — so a second concurrent press writes
+ * nothing and reports `changes === 0` rather than a second row. Re-reading then
+ * returns the request that exists, which makes a double press the same success
+ * as a single one: tapping a button twice is not an error worth an error page.
  *
  * A read-then-write check would look identical in every test written on one
  * connection and would produce two live requests under real concurrency, after
- * which accepting one leaves the other pending for ever.
+ * which accepting one leaves the other pending for ever. That is why the index
+ * exists and why this defers to it.
+ *
+ * ── Why `ON CONFLICT DO NOTHING` and not a caught unique violation ──
+ *
+ * The first version let the insert throw and caught `isUniqueViolation`. That
+ * is correct on SQLite and a trap on PostgreSQL: a constraint violation aborts
+ * the whole surrounding transaction, so the re-read that follows it fails with
+ * "current transaction is aborted" — and this function runs inside the
+ * transaction that also fans the notification out to the managers. It surfaced
+ * as one flaky failure in a full PostgreSQL run and passed every time the file
+ * was run alone, because a conflict only happens when two presses genuinely
+ * overlap.
+ *
+ * Naming the conflict target avoids the exception entirely, on both engines,
+ * with no savepoint: verified against SQLite and PostgreSQL 17, where the
+ * partial index is inferred from `(organization_id, user_id) WHERE status =
+ * 'pending'` and the second insert reports zero rows written.
  *
  * @returns {{ id: string, createdAt: string, created: boolean }}
  */
 export async function requestToJoin(db, organizationId, userId, { now = new Date() } = {}) {
-  const existing = await pendingRequestFor(db, organizationId, userId);
-  if (existing) return { ...existing, created: false };
-
   const id = newId();
   const createdAt = now.toISOString();
-  try {
-    await db.prepare(`
-      INSERT INTO organization_join_requests
-        (id, organization_id, user_id, status, created_at)
-      VALUES (?, ?, ?, 'pending', ?)
-    `).run(id, organizationId, userId, createdAt);
-  } catch (err) {
-    /* `isUniqueViolation` rather than a message match: the string SQLite uses
-       ("UNIQUE constraint failed") is not the one PostgreSQL uses, and
-       `certificates.js` records what happens when only one is recognised — a
-       retryable collision becomes a hard failure on the other engine. */
-    if (!isUniqueViolation(err)) throw err;
-    const raced = await pendingRequestFor(db, organizationId, userId);
-    /* The row that exists now is authoritative. If it has somehow gone already
-       — decided between the violation and this read — report no request rather
-       than inventing one. */
-    return raced ? { ...raced, created: false } : { id: null, createdAt: null, created: false };
-  }
 
-  return { id, createdAt, created: true };
+  const inserted = (await db.prepare(`
+    INSERT INTO organization_join_requests
+      (id, organization_id, user_id, status, created_at)
+    VALUES (?, ?, ?, 'pending', ?)
+    ON CONFLICT (organization_id, user_id) WHERE status = 'pending' DO NOTHING
+  `).run(id, organizationId, userId, createdAt)).changes > 0;
+
+  if (inserted) return { id, createdAt, created: true };
+
+  /* Somebody — possibly this person, one press earlier — already has one. The
+     row that exists is authoritative. If it has gone in the meantime, decided
+     between the insert and this read, report no request rather than inventing
+     one. */
+  const existing = await pendingRequestFor(db, organizationId, userId);
+  return existing
+    ? { ...existing, created: false }
+    : { id: null, createdAt: null, created: false };
 }
 
 /**

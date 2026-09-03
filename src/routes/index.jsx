@@ -31,6 +31,7 @@ const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
+const OrganizationInvite = React.lazy(() => import('../views/OrganizationInvite'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
 const OrganizationsHome = React.lazy(() => import('../views/OrganizationsHome'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
@@ -519,6 +520,32 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
+  /**
+   * An organization's invitation link.
+   *
+   * Public for the same reason `/verify/:code` is: the link is handed to
+   * somebody OUTSIDE the app — put on a flyer, pasted into a group chat, mailed
+   * to a parent — and asking them to make an account before they can see what
+   * they are being invited to is how a share link stops being worth sharing.
+   *
+   * What it opens is the allowlisted projection in `publicOrganization`, never
+   * the organization page: no member, no event location, no hours, no id.
+   * `/organizations/:key` is unchanged and still requires a session and
+   * `directory.read`.
+   *
+   * Three segments, so it cannot collide with `/organizations/:key`; the static
+   * `invite` outranks `/organizations/:key/edit` in the router's own ranking.
+   * And deliberately NO `requiredCap` — `routeGating.guard.test.js` fails the
+   * build on a gate key written into this table, because there is no principal
+   * here for it to apply to and it would read as enforcement while enforcing
+   * nothing.
+   *
+   * A reader who IS signed in is redirected by the view itself to
+   * `/organizations/<slug>`, which is strictly better for them: the shell, the
+   * navigation, their own service record, and a Join their session can actually
+   * complete.
+   */
+  { path: '/organizations/invite/:token', element: <OrganizationInvite /> },
 ];
 
 /**

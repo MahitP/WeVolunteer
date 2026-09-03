@@ -15,6 +15,9 @@ import { useState, useEffect } from 'react';
 
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { AlertCircle, Building2, Archive, ImagePlus } from 'lucide-react';
+import MembershipPolicyFields from '../components/organizations/MembershipPolicyFields';
+import '../components/organizations/OrganizationExperience.css';
+import { DEFAULT_JOIN_POLICY, DEFAULT_INVITE_POLICY } from '../organizationPolicy';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -50,7 +53,12 @@ export default function OrganizationForm({ addToast }) {
   const navigate = useNavigate();
   const editing = Boolean(key);
 
-  const [form, setForm] = useState({ name: '', description: '', tags: [], avatar: null, avatarColor: null, allowReplies: true });
+  const [form, setForm] = useState({
+    name: '', description: '', tags: [], avatar: null, avatarColor: null, allowReplies: true,
+    /* The same defaults migration 062 gives a new row, so a club created through
+       this form and one created by the API agree about who may join it. */
+    joinPolicy: DEFAULT_JOIN_POLICY, invitePolicy: DEFAULT_INVITE_POLICY,
+  });
   const [imageUrl, setImageUrl] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(editing);
@@ -74,6 +82,8 @@ export default function OrganizationForm({ addToast }) {
           avatar: res.organization.avatar ?? null,
           avatarColor: res.organization.avatarColor ?? null,
           allowReplies: res.organization.allowReplies !== false,
+          joinPolicy: res.organization.joinPolicy ?? DEFAULT_JOIN_POLICY,
+          invitePolicy: res.organization.invitePolicy ?? DEFAULT_INVITE_POLICY,
           /* Stored as plain labels; `TagInput` renders `{tag, label}` chips.
              Mapping in here and back out on submit keeps the shared editor
              usable without teaching it a second storage format. */
@@ -122,6 +132,7 @@ export default function OrganizationForm({ addToast }) {
       const body = {
         name: form.name.trim(), description: form.description, tags,
         avatar: form.avatar, avatarColor: form.avatarColor, allowReplies: form.allowReplies,
+        joinPolicy: form.joinPolicy, invitePolicy: form.invitePolicy,
       };
       const res = editing
         ? await api.updateOrganization(key, body)
@@ -196,7 +207,20 @@ export default function OrganizationForm({ addToast }) {
             )}
             {editing && (
               <span className="field-hint">
-                Renaming changes the organization&rsquo;s link. Old links will stop working.
+                {/**
+                  * Two different links, and a manager needs to know which one a
+                  * rename touches.
+                  *
+                  * The web address carries the slug, which is derived from the
+                  * name and does change — that half was already here. The
+                  * invitation link is a random token in its own table and is
+                  * untouched by a rename, which is the reassurance that matters
+                  * once a club has put one on a flyer. Left unsaid, a manager who
+                  * read the old sentence would reasonably conclude that renaming
+                  * their club breaks every invitation they have handed out.
+                  */}
+                Renaming changes this organization&rsquo;s web address, so the old address stops
+                working. Any invitation link you have shared keeps working.
               </span>
             )}
           </div>
@@ -275,30 +299,6 @@ export default function OrganizationForm({ addToast }) {
           </div>
 
           <div className="field">
-            {/**
-              * One setting for the whole organization, not one per post.
-              *
-              * A manager deciding "we do not take replies" is describing how
-              * their club communicates, not annotating an individual notice.
-              *
-              * The hint says what turning it off does NOT do, because that is
-              * the thing a manager hesitates over: nobody's words are deleted.
-              */}
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={form.allowReplies}
-                onChange={e => set('allowReplies', e.target.checked)}
-              />
-              <span>Allow replies to announcements</span>
-            </label>
-            <span className="field-hint">
-              Members can reply to anything this organization posts. Turning it off
-              stops new replies; the ones already written stay visible.
-            </span>
-          </div>
-
-          <div className="field">
             <label htmlFor="org-desc">Description <span className="muted">(optional)</span></label>
             <textarea
               id="org-desc" className="textarea" rows={4} value={form.description}
@@ -328,6 +328,71 @@ export default function OrganizationForm({ addToast }) {
               <span className="field-error"><AlertCircle size={12} aria-hidden="true" />{errors.tags}</span>
             )}
             <span className="field-hint">Helps students find this organization when they search.</span>
+          </div>
+
+          {/**
+            * ── How the club RUNS, after what the club IS ──
+            *
+            * Everything above this rule is identity: the name, the mark, the
+            * colour, the description, the tags — the things a student reads.
+            * Everything below it is policy: who may get in, who may pass the
+            * invitation link on, and whether members may reply. They used to be
+            * interleaved, which put the description between two halves of the
+            * same question and left "Allow replies" sitting between an emoji
+            * picker and a membership setting.
+            *
+            * One rule and one heading rather than a second card: the form is
+            * already one card, and nesting a surface inside it for three fields
+            * would make the page look like two forms.
+            *
+            * ── Why membership is here and not on a screen of its own ──
+            *
+            * There is one settings screen for an organization and this is it.
+            * Splitting it would mean a manager who came to change who can join
+            * has to work out which of two screens holds it, and it would make the
+            * club's name and its front door two separate saves.
+            *
+            * ── Why the wording is a consequence and not a value ──
+            *
+            * The stored values are `open`, `invite` and `request`, and a screen
+            * that showed those would have told the manager the value and not the
+            * effect. See `MembershipPolicyFields`, and `JOIN_POLICY_COPY` for the
+            * words — they live beside the vocabulary they describe, so a fourth
+            * mode cannot be added without somebody writing down what it does.
+            */}
+          <div className="field org-policy-section">
+            <h2 className="org-policy-section-heading">How this organization runs</h2>
+
+            <MembershipPolicyFields
+              joinPolicy={form.joinPolicy}
+              invitePolicy={form.invitePolicy}
+              disabled={submitting}
+              onChange={set}
+            />
+
+          <div className="field">
+            {/**
+              * One setting for the whole organization, not one per post.
+              *
+              * A manager deciding "we do not take replies" is describing how
+              * their club communicates, not annotating an individual notice.
+              *
+              * The hint says what turning it off does NOT do, because that is
+              * the thing a manager hesitates over: nobody's words are deleted.
+              */}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={form.allowReplies}
+                onChange={e => set('allowReplies', e.target.checked)}
+              />
+              <span>Allow replies to announcements</span>
+            </label>
+            <span className="field-hint">
+              Members can reply to anything this organization posts. Turning it off
+              stops new replies; the ones already written stay visible.
+            </span>
+          </div>
           </div>
         </div>
 

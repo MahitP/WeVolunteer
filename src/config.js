@@ -179,6 +179,34 @@ export function publicOrigin() {
 }
 
 /**
+ * An absolute URL for a path this application serves — for a link somebody is
+ * about to copy or share.
+ *
+ * ── Why this is separate from `publicOrigin()` ──
+ *
+ * That one returns a BARE origin with no scheme, because it is printed on paper:
+ * "Verify at volunteers.example.org/verify/WEV-…" reads as an address, and a
+ * printed `https://` is noise. A link going to the clipboard is the opposite —
+ * it has to be a real URL, or half the places somebody pastes it will not
+ * linkify it and the other half will guess the scheme.
+ *
+ * The default is the origin the page is served from, which is correct with no
+ * configuration: whoever is copying is already on the right host. `VITE_PUBLIC_URL`
+ * overrides it for a deployment whose public address differs from the one the
+ * app is reached at internally, and is normalised whether or not it carries a
+ * scheme or a trailing slash.
+ */
+export function publicUrl(path = '/') {
+  const configured = import.meta.env.VITE_PUBLIC_URL;
+  const raw = configured || (typeof window !== 'undefined' ? window.location.origin : '');
+  const trimmed = String(raw).replace(/\/+$/, '');
+  /* A configured value may omit the scheme (`publicOrigin()` strips it, and an
+     operator who set one for that reason should not have to set a second). */
+  const origin = /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return `${origin}${String(path).startsWith('/') ? path : `/${path}`}`;
+}
+
+/**
  * Help and support destinations.
  *
  * Deliberately empty by default, following the same rule as PRIVACY_URL: the

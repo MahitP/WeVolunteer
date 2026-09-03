@@ -39,9 +39,23 @@ import { createRedisLimitStore } from './redis/limitStore.js';
  * limit is irrelevant to a search of that space. What it bounds is somebody
  * walking a list of tokens harvested elsewhere, and the cost of an unauthenticated
  * endpoint being used as a free database probe.
+ *
+ * ── Why the number is 120 and not 20 ──
+ *
+ * `verifyLimiter` sits at 20 because one school office checks a handful of
+ * printouts. The expected shape HERE is the opposite: a teacher puts a club's
+ * link on the board and thirty students open it in the same lesson, from one
+ * school address, inside one window — and the signed-in ones resolve the token
+ * here too before being redirected. At 20 the students at the back of the class
+ * would be told the link does not work, which is the failure this whole feature
+ * exists to avoid.
+ *
+ * 120 covers a full year group and is still far below anything useful as a probe
+ * against a 256-bit space. It matches `MAIL_IP_CEILING`, which reasons about the
+ * same campus from the same starting point.
  */
 export const ORG_INVITE_RATE_LIMIT = Number(process.env.ORG_INVITE_RATE_LIMIT)
-  || (DEMO_MODE ? 1000 : 30);
+  || (DEMO_MODE ? 1000 : 120);
 
 export const shareTokenLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -56,6 +70,12 @@ export const shareTokenLimiter = rateLimit({
 
 /**
  * Joining, and asking to join, per ACCOUNT.
+ *
+ * This is the ONLY limiter on the authenticated join route, and the reason it is
+ * not `shareTokenLimiter` as well is the same reason that one is keyed on the
+ * address: a school NATs its whole campus, so an address-keyed limiter on a
+ * route a class uses together refuses the students at the back. That route has a
+ * principal; the public one does not.
  *
  * ── Keyed on the account, never the address ──
  *

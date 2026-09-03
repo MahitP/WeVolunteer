@@ -37,7 +37,12 @@ const payload = (viewer) => ({
   },
   members: [BOSS, HELPER, MEMBER],
   events: [],
-  viewer: { isMember: true, memberRole: null, canManage: false, canPost: false, hours: 0, events: 0, history: [], ...viewer },
+  viewer: {
+    isMember: true, memberRole: null, canManage: false, canPost: false,
+    affordance: 'member', joinPolicy: 'open', canInvite: false, shareLink: null,
+    pendingRequests: null,
+    hours: 0, events: 0, history: [], ...viewer,
+  },
   totals: null,
 });
 
@@ -58,6 +63,7 @@ describe('organization roster ranks', () => {
        crash; mocked here so the tests measure the roster instead. */
     api.fetchOrganizationAnnouncements.mockResolvedValue({ announcements: [] });
     api.fetchOrganizationAppeals.mockResolvedValue({ appeals: [] });
+    api.fetchOrganizationJoinRequests.mockResolvedValue({ requests: [], pendingRequests: 0 });
   });
 
   it('names the rank somebody holds', async () => {

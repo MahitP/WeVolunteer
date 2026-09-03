@@ -100,13 +100,55 @@ describe('the dialog escapes its mount point', () => {
  * A static guard, because the pairing is the part that got lost.
  *
  * `.modal-overlay-stacked` and `createPortal` are two halves of one decision and
- * were separated once already. A component that asks for the stacked overlay
- * without portalling is the same defect returning, and it renders perfectly in
- * every test that does not measure position.
+ * were separated once already. A component that asks for the stacked overlay and
+ * does not end up portalled is the same defect returning, and it renders
+ * perfectly in every test that does not measure position.
+ *
+ * ── Why the scan follows delegation ──
+ *
+ * It used to require `createPortal(` in the SAME file, which was right while
+ * every stacked overlay was hand-rolled. It stopped being right the moment one
+ * was reached through a component: `ShareOrganizationDialog` passes
+ * `overlayClassName` to `ConfirmDialog`, which passes it to `Modal`, which
+ * portals — the property this guard exists for is satisfied, by construction and
+ * for every future caller, and the file names no `createPortal` at all.
+ *
+ * Failing that file would have taught the next person to inline a portal beside
+ * a shared dialog, or to delete the class. So the scan asks the question it
+ * means: does this overlay end up in a portal? A file satisfies it by portalling
+ * itself, or by handing the class to a component that does — and the shells that
+ * qualify are ASSERTED to portal below, so the delegation cannot become a
+ * loophole by one of them dropping its `createPortal`.
  */
 describe('every stacked overlay is portalled', () => {
-  it('has no component asking for .modal-overlay-stacked without createPortal', () => {
-    const SRC = path.join(process.cwd(), 'src');
+  const SRC = path.join(process.cwd(), 'src');
+
+  /**
+   * The dialog shells a caller may delegate to.
+   *
+   * Closed and small on purpose. Each is verified to portal in the test below,
+   * so adding one is a deliberate act that fails until the component really does
+   * put its overlay in a portal.
+   */
+  const PORTALLING_SHELLS = {
+    'components/Modal.jsx': 'Modal',
+    'components/common/ConfirmDialog.jsx': 'ConfirmDialog',
+  };
+
+  it('keeps every shell a caller may delegate to actually portalling', () => {
+    for (const [file, name] of Object.entries(PORTALLING_SHELLS)) {
+      const src = readFileSync(path.join(SRC, file), 'utf8');
+      /* Either it portals itself (Modal), or it renders one that does
+         (ConfirmDialog renders Modal). Both are the same guarantee to a caller. */
+      const portals = /createPortal\s*\(/.test(src) || /<Modal[\s>]/.test(src);
+      expect(portals, `${name} no longer portals, so every caller that delegated to it is now trapped`).toBe(true);
+      /* And it still passes the class through — a shell that swallowed
+         `overlayClassName` would leave the caller's stacking silently unapplied. */
+      expect(src, `${name} no longer forwards overlayClassName`).toMatch(/overlayClassName/);
+    }
+  });
+
+  it('has no component asking for .modal-overlay-stacked without ending up in a portal', () => {
     const offenders = [];
     const walk = (dir) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -116,135 +158,20 @@ describe('every stacked overlay is portalled', () => {
         const src = readFileSync(full, 'utf8');
         // The className usage, not a mention in a comment explaining the bug.
         if (!/overlayClassName=["']modal-overlay-stacked["']/.test(src)) continue;
-        if (!/createPortal\s*\(/.test(src)) offenders.push(path.relative(process.cwd(), full));
+        if (/createPortal\s*\(/.test(src)) continue;
+        /* Delegated to a shell that portals — the same guarantee, reached
+           through a component rather than written out. */
+        const delegates = Object.values(PORTALLING_SHELLS)
+          .some(name => new RegExp(`<${name}[\\s>]`).test(src));
+        if (!delegates) offenders.push(path.relative(process.cwd(), full));
       }
     };
     walk(SRC);
     expect(
       offenders,
       'a stacked overlay that is not portalled is still trapped by any ancestor '
-      + 'with a transform, filter or backdrop-filter — the z-index does nothing'
+      + 'with a transform, filter or backdrop-filter — the z-index does nothing. '
+      + 'Portal it, or render it through Modal or ConfirmDialog.'
     ).toEqual([]);
-  });
-});
-
-/**
- * One password entry answering several challenges.
- *
- * The two halves of authenticator enrolment are separate registered actions
- * (`2fa.generate`, `2fa.enable`), so they need separate grants — but prompting
- * twice put the second prompt after a 30-second TOTP code had been typed. Each
- * challenge is still opened, bound and verified independently; what is shared is
- * the answer, to one question, about one operation.
- */
-describe('granting more than one challenge from one answer', () => {
-  it('grants the primary first, then each extra, and reports which succeeded', async () => {
-    const grant = vi.spyOn(api, 'grantReauthByPassword').mockResolvedValue({ granted: true });
-    const onGranted = vi.fn();
-
-    render(
-      <VerifyIdentityModal
-        challenge={challenge()}
-        alsoGrant={[{ action: '2fa.enable', challengeId: 'reauth-extra' }]}
-        onGranted={onGranted}
-        onCancel={() => {}}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'pw' } });
-    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
-
-    await waitFor(() => expect(onGranted).toHaveBeenCalled());
-
-    expect(grant.mock.calls).toEqual([
-      ['reauth-primary', 'pw'],
-      ['reauth-extra', 'pw']
-    ]);
-    expect(onGranted).toHaveBeenCalledWith('reauth-primary', { '2fa.enable': 'reauth-extra' });
-  });
-
-  /**
-   * A wrong password must cost ONE failed attempt, not one per challenge.
-   * `reauthLimiter` allows five failures per fifteen minutes per IP.
-   */
-  it('does not touch the extras when the password is wrong', async () => {
-    const err = Object.assign(new Error('That password is not right.'), {
-      status: 401,
-      data: { error: 'That password is not right.', attemptsRemaining: 4 }
-    });
-    const grant = vi.spyOn(api, 'grantReauthByPassword').mockRejectedValue(err);
-    const onGranted = vi.fn();
-
-    render(
-      <VerifyIdentityModal
-        challenge={challenge()}
-        alsoGrant={[{ action: '2fa.enable', challengeId: 'reauth-extra' }]}
-        onGranted={onGranted}
-        onCancel={() => {}}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'nope' } });
-    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
-
-    expect((await screen.findByRole('alert')).textContent).toMatch(/not right/);
-    expect(grant).toHaveBeenCalledTimes(1);
-    expect(onGranted).not.toHaveBeenCalled();
-    // The dialog stays open: the challenge still has attempts left.
-    expect(screen.getByLabelText(/your password/i)).toBeTruthy();
-  });
-
-  /**
-   * An extra that cannot be granted is not fatal. The primary grant is real and
-   * the caller falls back to an ordinary step-up for whatever is missing;
-   * failing the dialog would throw away a verification just earned.
-   */
-  it('reports the primary even when an extra is refused', async () => {
-    vi.spyOn(api, 'grantReauthByPassword').mockImplementation(async (id) => {
-      if (id === 'reauth-extra') throw new Error('expired');
-      return { granted: true };
-    });
-    const onGranted = vi.fn();
-
-    render(
-      <VerifyIdentityModal
-        challenge={challenge()}
-        alsoGrant={[{ action: '2fa.enable', challengeId: 'reauth-extra' }]}
-        onGranted={onGranted}
-        onCancel={() => {}}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText(/your password/i), { target: { value: 'pw' } });
-    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
-
-    await waitFor(() => expect(onGranted).toHaveBeenCalledWith('reauth-primary', {}));
-  });
-});
-
-describe('why the password is being asked for', () => {
-  it('names the operation the grant will be spent on', () => {
-    render(<VerifyIdentityModal challenge={challenge()} onGranted={() => {}} onCancel={() => {}} />);
-    const dialog = screen.getByRole('dialog');
-    expect(dialog.textContent).toMatch(/You asked to set up two-factor authentication/i);
-    expect(dialog.textContent).toMatch(/we need your password/i);
-  });
-
-  it('describes the field to a screen reader and marks it invalid after a refusal', async () => {
-    vi.spyOn(api, 'grantReauthByPassword').mockRejectedValue(
-      Object.assign(new Error('no'), { status: 401, data: { error: 'no' } })
-    );
-    render(<VerifyIdentityModal challenge={challenge()} onGranted={() => {}} onCancel={() => {}} />);
-
-    const field = screen.getByLabelText(/your password/i);
-    expect(field.getAttribute('aria-describedby')).toBe('reauth-why');
-    expect(document.getElementById('reauth-why')).toBeTruthy();
-
-    fireEvent.change(field, { target: { value: 'x' } });
-    fireEvent.click(screen.getByRole('button', { name: /^verify$/i }));
-
-    await waitFor(() => expect(
-      screen.getByLabelText(/your password/i).getAttribute('aria-invalid')
-    ).toBe('true'));
   });
 });

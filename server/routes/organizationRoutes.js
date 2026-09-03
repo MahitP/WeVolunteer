@@ -35,7 +35,7 @@ import {
   pendingRequests, pendingRequestCount, decideRequest, requestSubject,
   REQUEST_DECISIONS,
 } from '../organizationJoinRequests.js';
-import { shareTokenLimiter, joinAttemptLimiter } from '../organizationLimiters.js';
+import { joinAttemptLimiter } from '../organizationLimiters.js';
 import { syncOrganizerCapabilities } from '../organizationRoles.js';
 import { profileSummary } from '../profileSerializer.js';
 import {
@@ -519,9 +519,20 @@ router.patch('/api/organizations/:key', authenticateToken, requireCap('organizat
  * `tokenOpens` asks whether the token opens THIS organization, not merely
  * whether it resolves to something. A Chess Club link must not admit anybody to
  * the Robotics Club.
+ *
+ * ── One limiter, keyed on the ACCOUNT ──
+ *
+ * `joinAttemptLimiter` and deliberately NOT `shareTokenLimiter`, even though
+ * this route consumes a token. That one is keyed on the device address, which is
+ * right for the public endpoint (there is no principal there) and wrong here: a
+ * school leaves the internet from one address, so a teacher sharing a link with
+ * a class of thirty would have the students at the back refused — the exact
+ * failure `mailLimiter`, `reportLimiter` and `checkinLimiters` all record. This
+ * route has a principal, so it is bounded per account instead, which caps a
+ * client looping tokens without capping a classroom.
  */
 router.post('/api/organizations/:key/membership', authenticateToken, requireCap('organization.join'),
-  joinAttemptLimiter, shareTokenLimiter, async (req, res) => {
+  joinAttemptLimiter, async (req, res) => {
   const row = await loadOrganization(req, res);
   if (!row) return;
   if (row.status !== 'active') {

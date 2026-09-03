@@ -11,10 +11,11 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * asserted against the running app by the sweep instead: a fixture that 404s
  * fails the route, which is the signal that a seed changed.
  *
- * The 12 parameterised routes these serve: /events/:id/edit, /checkin/:eventId,
+ * The 13 parameterised routes these serve: /events/:id/edit, /checkin/:eventId,
  * /users/id/:id, /users/:handle, /users/:handle/badges,
  * /users/:handle/certificates, /users/:handle/hours, /organizations/:key,
- * /organizations/:key/edit, /verify/:code, /legal/:slug, /appeal/:token.
+ * /organizations/:key/edit, /organizations/invite/:token, /verify/:code,
+ * /legal/:slug, /appeal/:token.
  */
 export const FIXTURES = {
   /* Real values from the demo seed, read out of the database rather than
@@ -30,12 +31,23 @@ export const FIXTURES = {
   handle: 'dsorensen',
   code: 'WEV-8DLE-CNMH',
   slug: 'terms-of-service',
-  /* No fixture is possible for these two with the demo seed: `organizations` is
-     empty, and an appeal token is minted per decision and cannot be invented.
-     Named here so the reason is recorded rather than looking like an oversight —
-     walk.mjs reports them as unmeasured, which is the honest outcome. */
+  /* No fixture is possible for these with the demo seed: `organizations` is
+     empty, an appeal token is minted per decision, and an organization
+     invitation token is 32 random bytes stored per club — so all three would
+     have to be invented. Named here so the reason is recorded rather than
+     looking like an oversight; walk.mjs reports them as unmeasured, which is the
+     honest outcome.
+
+     `token` is shared by `/appeal/:token` and `/organizations/invite/:token`,
+     and both are unmeasurable for the same reason, so one placeholder is
+     accurate for both. It stays a placeholder rather than becoming a real
+     invitation link on purpose: seeding one would put a live bearer token into
+     a committed fixture, which is the thing every other token in this codebase
+     is arranged to avoid. The invitation page's own states are covered by
+     `src/views/OrganizationInvite.test.jsx`, and its dialog inherits the shared
+     `Modal` whose behaviour `dialogSemantics.test.jsx` pins. */
   key: 'no-seeded-organization',
-  token: 'no-seeded-appeal-token'
+  token: 'no-seeded-token'
 };
 
 const SRC = fs.readFileSync(path.join(ROOT, 'src/routes/index.jsx'), 'utf8');
