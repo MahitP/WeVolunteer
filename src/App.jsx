@@ -12,8 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
-import LocationPrompt from './components/location/LocationPrompt';
-import LegalUpdateModal from './components/LegalUpdateModal';
+import AppNotices from './components/notifications/AppNotices';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -1741,17 +1740,32 @@ function AppShell({ toasts, addToast, removeToast }) {
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}
           <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
-          {/* Inside the signed-in shell, not in main.jsx with the provider: a
-              banner asking to use your location has no business on the sign-in
-              screen, and the browser would refuse the permission there anyway
-              because nobody has pressed anything yet. */}
-          <LocationPrompt />
-          {/* Inside the signed-in shell for the same reason as the banner
-              above: "which documents has THIS account not been shown" is only
-              answerable once there is an account, and the Terms promise notice
-              in the app rather than at the sign-in screen. Renders nothing when
-              there is nothing to say, which is almost always. */}
-          <LegalUpdateModal />
+          {/**
+            * The notice slot: the location opt-in, legal document changes, and
+            * the mandatory re-acceptance dialog, in that priority order.
+            *
+            * Inside the signed-in shell, not in main.jsx with the provider. A
+            * banner asking to use your location has no business on the sign-in
+            * screen — the browser would refuse the permission there anyway,
+            * because nobody has pressed anything yet — and "which documents has
+            * THIS account not been shown" is only answerable once there is an
+            * account. The Terms promise notice in the app, not at the sign-in
+            * screen.
+            *
+            * `key` on the user id, because everything it holds is about one
+            * account. Signing out and back in as somebody else must not leave
+            * the previous account's pending notices, or its dismissals, on
+            * screen. Same reason `NotificationsBell` above is keyed.
+            *
+            * Renders nothing at all when there is nothing to say, which is
+            * almost always — see the note in the component about why "nothing"
+            * has to mean no node rather than an empty one.
+            */}
+          <AppNotices
+            key={currentUser.id}
+            onAccepted={refreshAll}
+            onSignOut={handleLogout}
+          />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy

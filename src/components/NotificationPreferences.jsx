@@ -109,6 +109,30 @@ export default function NotificationPreferences({ addToast }) {
         </label>
       </div>
 
+      {/**
+        * What these switches do NOT control.
+        *
+        * `MANDATORY_NOTICE_EVENTS` in `server/services/notificationContent.js`
+        * is a closed set of notices `dispatch` sends over both the global
+        * opt-out and the per-category preference: a suspension, a warning, an
+        * appeal outcome, a spent recovery code, and a change to a legal
+        * document. The reasoning is recorded there, and the Privacy Policy
+        * already publishes "Security emails cannot be switched off."
+        *
+        * The panel did not say so. Somebody who turned email off and then
+        * received a legal-change notice would reasonably conclude the toggle
+        * was broken — and the more useful reading, that some messages are
+        * served rather than sent, was available nowhere in the product. Saying
+        * it here is not a new limitation; it is the existing behaviour stated
+        * where the promise is made.
+        */}
+      <p className="dim small">
+        Some messages are always sent, whatever you choose below: changes to the
+        documents you agreed to, and notices about your account&apos;s standing or
+        security. They carry nothing promotional, and they are the messages you
+        would most want to receive.
+      </p>
+
       <div className="premium-pref-card">
         {CATEGORIES.map(c => {
           const meta = NOTIFICATION_CATEGORIES[c.id] || NOTIFICATION_CATEGORIES.SYSTEM;

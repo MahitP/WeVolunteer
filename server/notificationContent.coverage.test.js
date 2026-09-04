@@ -143,7 +143,27 @@ const SAMPLE = {
    * not be added to the coverage battery until now.
    */
   reasoning: 'The messages you sent after being asked to stop were the reason.',
-  reviewerName: 'a WeVolunteer administrator'
+  reviewerName: 'a WeVolunteer administrator',
+  /**
+   * The legal-notice payload.
+   *
+   * `slug` was missing, and both legal cases build their link as
+   * `/legal/${payload.slug}` — so "has a link" passed on the truthy string
+   * `/legal/undefined` while the fixture was two fields short of this object's
+   * stated contract. The link assertion below now checks the value rather than
+   * its truthiness, which is what made the gap visible.
+   *
+   * `effectiveDateLabel` and `alreadyInEffect` are what
+   * `LEGAL_ACCEPTANCE_REQUIRED` uses to choose its tense; without them it falls
+   * back to the dateless sentence, which is correct copy and not the branch a
+   * real dispatch takes.
+   */
+  slug: 'privacy-policy',
+  version: '1.1.0',
+  excerpt: 'We now keep volunteer attendance records for three school years rather than one.',
+  changeCount: 1,
+  effectiveDateLabel: 'October 6, 2026',
+  alreadyInEffect: false
 };
 
 const ALL_PRIORITIES = Object.values(NOTIFICATION_PRIORITY);
@@ -201,6 +221,9 @@ describe('every dispatched notification event is fully mapped', () => {
       it('has a link, since every notification here has somewhere to go', () => {
         const c = getInAppContent(event, SAMPLE);
         expect(c.link, `dispatched from ${from}`).toBeTruthy();
+        /* Truthiness alone let `/legal/undefined` through — a link that is
+           present, clickable, and lands on a not-found panel. */
+        expect(c.link, `dispatched from ${from}`).not.toMatch(/undefined|null/);
       });
 
       it('interpolates its payload rather than leaving "undefined" in the copy', () => {
@@ -271,6 +294,7 @@ describe('every MANDATORY notice is fully mapped, however it is dispatched', () 
         expect(c.body.trim().length, why).toBeGreaterThan(0);
         expect(ALL_PRIORITIES, why).toContain(c.priority);
         expect(c.link, why).toBeTruthy();
+        expect(c.link, why).not.toMatch(/undefined|null/);
       });
 
       it('interpolates its payload rather than leaving "undefined" in the copy', () => {

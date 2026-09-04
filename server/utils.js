@@ -14,6 +14,7 @@ import { withheldCapabilitiesFor } from './organizerAgreement.js';
 import { sweepExpiredChallenges, peekChallenge } from './reauth.js';
 import { sweepCheckinTokens } from './checkinTokens.js';
 import { sweepErrors } from './errorReporter.js';
+import { dispatchLegalChangeNotices } from './legalNotices.js';
 import { sendErrorAlerts, sendBackupAlert } from './alerting.js';
 import { forUpdate, isUniqueViolation } from './db/dialectSql.js';
 /* Read here rather than inside alerting.js — that module imports nothing on
@@ -1108,6 +1109,22 @@ export async function runNotificationSweep() {
       }
     }
     
+    /**
+     * Legal document changes.
+     *
+     * Above the purges rather than among them because it CREATES notifications
+     * rather than removing them, and it is the one sweep task whose absence is
+     * a broken promise instead of a growing table: §13 of the Terms says a
+     * change that matters will be told to the reader in the app before it takes
+     * effect, and until this ran nothing outside the browser told anybody.
+     *
+     * Its own errors are caught inside `dispatchLegalChangeNotices` per
+     * recipient, and the whole call sits in the shared try below, so a failure
+     * here cannot abandon the purges underneath it.
+     */
+    const legal = await dispatchLegalChangeNotices(db, { now });
+    created += legal.notified;
+
     const removed = await purgeExpiredNotifications(now);
     const revocations = await purgeExpiredRevocations(now);
     if (revocations > 0) console.log(`[Sessions] Purged ${revocations} expired revocation(s).`);

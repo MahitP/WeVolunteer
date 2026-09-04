@@ -156,6 +156,112 @@ MAJOR/MINOR by the rule above. That friction is the feature. Keep each document'
 registry version, and the pinned hash moving together — that is the drift the pin exists to
 catch.
 
+### What MAJOR and MINOR actually DO, now that they do something
+
+Until v1.5 the distinction was a rule written down here and enforced by nothing except judgement.
+It is now the input to the notification system, and the consequences differ enough that they are
+worth reading before choosing a number. `server/legalConsentGate.js` is the single place the rule
+lives; everything below is derived from it.
+
+**A MINOR or PATCH bump** on any document produces the ordinary change notice — a quiet banner in
+the signed-in shell, in the same slot and the same treatment as the location opt-in, offering a
+link to the document and a dismiss control. Dismissing it writes `legal_change_notices`, which is
+deliberately **not** the consent table: nobody's dismissal of a banner ever becomes evidence that
+they agreed to something.
+
+**A MAJOR bump on a `scope: 'signup'` document** — the Terms, the Privacy Policy, the Community
+Guidelines — does considerably more. From the version's own **effective date**:
+
+- every account that had accepted an earlier version is shown a dialog it cannot dismiss, offering
+  the document, an accept, and a sign-out;
+- and until it accepts, the platform **withholds the participation capabilities** from that
+  account server-side: applying to events, messaging, posting, creating events, adding hours. The
+  list is `SIGNUP_CONSENT_GATED_CAPABILITIES` and it deliberately does not include reading, editing
+  your own account, marking attendance, resolving reports, or `legal.edit` — so an owner who
+  publishes a MAJOR version by mistake keeps every power needed to publish the correction.
+
+**Between publication and the effective date, nothing is withheld.** §13 of the Terms promises
+notice "at least 30 days before it takes effect", so a MAJOR revision dated in the future is
+announced — by email, in the notification centre and by the in-app banner, all worded as advance
+notice and naming the date — and only becomes mandatory when that date arrives. The TEXT is public
+from the moment you save; only the obligation waits.
+
+**The editor enforces the 30 days.** A MAJOR version of a signup document dated sooner than
+`MATERIAL_NOTICE_DAYS` (30) ahead is refused, with the earliest legal date named in the message.
+The date picker's floor moves with it. Two things to check when you meet that refusal:
+
+1. **Is it really material?** If the change does not leave anybody worse off it is a clarification
+   under §13's own test — give it a MINOR version and no notice period applies.
+2. **Is something obliging it sooner?** A regulator, a subprocessor withdrawn for a security
+   failure, a clause that turns out to be unlawful. Then use the override.
+
+**The notice-period override.** The panel offers "Something obliges this to take effect sooner",
+which opens a required written reason (40–500 characters). It is:
+
+- never the default — the floor applies unless you open the panel and write something;
+- owner-only and step-up gated, because it inherits the editor's own `legal.edit` + AAL2 gate;
+- **audited under its own action**, `LEGAL_NOTICE_PERIOD_OVERRIDDEN`, with your name, the date
+  chosen, the date the rule wanted, and your reason — searchable in the Audit Explorer, which
+  filters on `SELECT DISTINCT action`;
+- refused when it was not needed, so an override cannot sit in the trail against a publication
+  that gave the full notice anyway.
+
+It changes which effective dates are accepted and **nothing else**. The acceptance requirement,
+the capability withholding and the hash-pinned consent record are untouched, and the reader still
+receives the material notice.
+
+### How people are told
+
+Three channels, from one decision. `dispatchLegalChangeNotices` runs inside
+`runNotificationSweep` — at boot and every fifteen minutes — and for each account that is behind on
+a published revision it enqueues **one** notification through the platform's existing
+`notificationService`, which writes the in-app row and the email job:
+
+| | MINOR / PATCH | MAJOR (signup document) |
+|---|---|---|
+| Event | `LEGAL_DOCUMENT_UPDATED` | `LEGAL_ACCEPTANCE_REQUIRED` |
+| In-app banner | yes, dismissible | advance notice until effective, then the mandatory dialog |
+| Notification centre | yes, IMPORTANT (kept 365 days) | yes, CRITICAL |
+| Email | "we updated this, nothing to do" | "significant change, effective *date*, you will be asked to accept" |
+
+**One legal change, one message.** The two events are mutually exclusive and chosen by severity, so
+a material change never produces the ordinary email as well — and the effective date arriving does
+not send a second one, because the in-app dialog is the second touch and it is unavoidable.
+
+**Deduplication is a lease, not a log.** `recordNotified` performs a conditional insert on
+`legal_change_notices(user_id, slug, version)` and returns whether *this* call claimed it; the claim
+and the enqueue commit in one transaction. So refreshing, signing out and in, a restart, several
+processes or four concurrent sweeps produce exactly one message, and a rolled-back enqueue leaves
+the lease open for the next pass to retry.
+
+**These are mandatory notices.** Both events are in `MANDATORY_NOTICE_EVENTS`, so they are sent
+over the global email opt-out and the per-category preference — the Privacy Policy already
+publishes "Security emails cannot be switched off", and a notification preference cannot be a way
+to opt out of being told that the agreement you are held to has been rewritten. The notification
+preferences panel says so in place.
+
+**Email is a channel, never an authority.** Nothing in the delivery path can release a withheld
+capability or satisfy a re-consent, and nothing about a provider outage changes what is enforced:
+`signupConsentWithholdingsFor` reads acceptance rows and the effective date and never reads
+`notified_at`. A failed send is retried by the notification job with the worker's backoff and
+five-attempt ceiling; a delivered one is deleted.
+
+**Four states, kept apart.** `notified_at` (we told them) · `acknowledged_at` (they dismissed the
+banner) · a `legal_acceptances` row (they agreed) · viewing the document (nothing at all). Only an
+authenticated `POST /api/legal/updates/accept` writes the third, and it refuses any version other
+than the one in effect.
+
+**An account with no acceptance row for a document is never gated.** That covers every seeded and
+legacy account: there is no previous version they were shown, so there is nothing they can be asked
+to re-accept.
+
+**The two onboarding agreements are unaffected by all of this.** The Organizer Agreement and the
+Student Organizer Agreement have had their own re-acceptance gate since v1.0 — matched on
+`(slug, version)`, so *any* bump re-withholds their capabilities and sends the holder to
+`/organizer-agreement`. They are excluded from the notice system entirely rather than given a
+second surface, so publishing one produces no banner and no dialog: it produces the screen it
+always did.
+
 **Links between these documents are checked by `server/legalContent.test.js`.** It extracts links
 by running the published body through the real renderer (`src/utils/policyMarkdown.js`) rather
 than a regex of its own, and fails the build on a `.md` path, an unregistered slug, a `#fragment`

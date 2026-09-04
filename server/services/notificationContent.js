@@ -61,6 +61,13 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
    */
   'LEGAL_DOCUMENT_UPDATED',
   /**
+   * And its material sibling, for the same reason and more strongly: this is
+   * the notice that a document the reader is held to has changed in a way that
+   * will require their agreement. A notification preference cannot be a way to
+   * arrive at a blocking dialog with no warning.
+   */
+  'LEGAL_ACCEPTANCE_REQUIRED',
+  /**
    * Being banned from an organization is a mandatory notice for the same reason
    * a suspension is: it is an enforcement decision recorded against the person,
    * it is what an appeal is heard against, and it is worthless if they do not
@@ -229,6 +236,7 @@ export const EVENT_CATEGORIES = {
    * beside maintenance notices.
    */
   LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
+  LEGAL_ACCEPTANCE_REQUIRED: 'ACCOUNT',
   /* Membership of a club is a relationship with the platform, not an event. */
   ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
   ORGANIZATION_BANNED: 'ACCOUNT',
@@ -492,6 +500,24 @@ export function getInAppContent(event, payload) {
      * an indefinite suspension is still a real option and must not be described
      * as having an end.
      */
+    /**
+     * ── The two legal-change notices, and why there are exactly two ──
+     *
+     * §13 of the published Terms draws one line and this pair is it: "A change
+     * that leaves you worse off … gets a new major version and we ask you to
+     * accept it again. A clarification gets a minor version and notice only."
+     *
+     * `LEGAL_DOCUMENT_UPDATED` is the second sentence; `LEGAL_ACCEPTANCE_REQUIRED`
+     * is the first. `dispatchLegalChangeNotices` in `legalNotices.js` picks
+     * between them from the version number and sends EXACTLY ONE per person per
+     * document version — an ordinary "we updated something" mail followed by a
+     * "you must accept this" mail about the same change would teach the reader
+     * that the first kind means nothing.
+     *
+     * Neither may state or imply that the reader has accepted anything. Only
+     * `POST /api/legal/updates/accept` records that, and the wording here is
+     * chosen so that a reader who does nothing at all is described accurately.
+     */
     case 'LEGAL_DOCUMENT_UPDATED': {
       /**
        * The excerpt is a SAMPLE, and the copy says so.
@@ -507,6 +533,10 @@ export function getInAppContent(event, payload) {
       const others = payload.changeCount > 1
         ? `\n\nThat is one of ${payload.changeCount} changes.`
         : '';
+      /* Stated because it is what an acceptance record points at, and because a
+         reader comparing this mail to the page should be able to tell whether
+         they are looking at the same revision. */
+      const version = payload.version ? ` (version ${payload.version})` : '';
 
       return {
         kind,
@@ -516,9 +546,84 @@ export function getInAppContent(event, payload) {
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: `${payload.title} has been updated`,
         body:
-          `We have made changes to the ${payload.title}.${quoted}${others}\n\n`
-          + 'Please read the full document. If you do not agree with the changes, '
-          + 'you can close your account at any time.',
+          `We have updated the ${payload.title}${version}.${quoted}${others}\n\n`
+          + 'This was a clarification, so there is nothing you need to do and '
+          + 'nothing has been recorded as accepted on your behalf — this is a '
+          + 'notice that the document changed. Please read it when you have a '
+          + 'moment. If you do not agree with the changes, you can close your '
+          + 'account at any time.',
+        link: `/legal/${payload.slug}`,
+        ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    /**
+     * A material change: the reader will be asked to accept it.
+     *
+     * ── Why this is sent during the notice period rather than on the day ──
+     *
+     * The Terms promise notice "at least 30 days before it takes effect", and
+     * the ICO's guidance on the right to be informed says the same thing in the
+     * general case: a change to how personal data is used has to be
+     * communicated BEFORE the new processing begins, actively rather than by
+     * quietly editing a page. So the mail goes out when the revision is
+     * published, names the date, and says what will be asked for then.
+     *
+     * The effective date arriving is not a second email. It is the in-app
+     * dialog, which is unavoidable by construction — see
+     * `SIGNUP_CONSENT_GATED_CAPABILITIES`. A reminder mail on the day would be
+     * a second message about one change, which is the duplication this pair is
+     * designed to avoid.
+     *
+     * ── What it must not say ──
+     *
+     * Not "you have accepted", not "by continuing to use WeVolunteer you
+     * agree", and not "click here to accept". The link goes to the document.
+     * Acceptance happens in the application, behind a session, through a POST —
+     * never from a link in an email.
+     */
+    case 'LEGAL_ACCEPTANCE_REQUIRED': {
+      const quoted = payload.excerpt
+        ? `\n\n\u201c${payload.excerpt}\u201d`
+        : '';
+      const others = payload.changeCount > 1
+        ? `\n\nThat is one of ${payload.changeCount} changes.`
+        : '';
+      const version = payload.version ? ` (version ${payload.version})` : '';
+
+      /**
+       * Two tenses, because this notice is sent in both situations.
+       *
+       * Normally the revision is dated at least thirty days ahead and this is
+       * advance notice. It can also be in effect already — a change published
+       * under the notice-period override in the Legal Center, which requires an
+       * owner to give a written reason and is audited. The same message has to
+       * be truthful in both cases, so the sentence about WHEN is built from the
+       * date rather than assumed.
+       */
+      const when = payload.effectiveDateLabel;
+      const timing = payload.alreadyInEffect
+        ? 'This change is now in effect, so the next time you open WeVolunteer we '
+          + 'will ask you to review the new version and accept it.'
+        : when
+          ? `This change takes effect on ${when}. From that date, WeVolunteer will `
+            + 'ask you to review the new version and accept it before you carry on '
+            + 'volunteering, messaging or posting.'
+          : 'When this change takes effect, WeVolunteer will ask you to review the '
+            + 'new version and accept it before you carry on volunteering, messaging '
+            + 'or posting.';
+
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: `An important update to the ${payload.title}`,
+        body:
+          `We have made a significant change to the ${payload.title}${version} — one `
+          + `that a reasonable reader of the previous version would want to know `
+          + `about.${quoted}${others}\n\n${timing}\n\n`
+          + 'Nothing has been recorded as accepted on your behalf, and reading the '
+          + 'document does not accept it. You can read it now, and if you would '
+          + 'rather not agree you can close your account at any time.',
         link: `/legal/${payload.slug}`,
         ctaText: `Read the ${payload.title}`,
       };

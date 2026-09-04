@@ -47,23 +47,84 @@ export default function Modal({
    * own stacking level — see `.modal-overlay-stacked`. Everything else can ignore
    * it, and the default is unchanged.
    */
-  overlayClassName = ''
+  overlayClassName = '',
+  /**
+   * A dialog whose answer is required, and which therefore has no "close".
+   *
+   * ── What changes, and why each piece has to ──
+   *
+   * `role="alertdialog"` instead of `role="dialog"`. The APG's alertdialog
+   * pattern is specifically for a modal that "interrupts the user's workflow to
+   * communicate an important message and acquire a response", and the role is
+   * what lets a screen reader treat it differently from an ordinary dialog —
+   * some announce it more assertively or play a system alert sound. That
+   * difference is the whole point here: this is not a panel somebody opened.
+   *
+   * `aria-describedby`, which the same pattern requires, pointing at the
+   * element carrying the message. Without it a reader gets the dialog's name
+   * and then has to go looking for what it wants.
+   *
+   * No Escape (see `useModal`), no backdrop click, and `ModalHead` renders no
+   * `X`. All three are the same decision: a control that dismisses a dialog
+   * which immediately reopens is a control that appears broken, and the two
+   * real answers are buttons in the dialog.
+   *
+   * ── The one thing that does NOT change ──
+   *
+   * `aria-modal="true"` was already here, and the APG is blunt about the
+   * obligation it carries: a dialog marked modal that does not behave as one
+   * has "severe negative ramifications", because assistive technology stops
+   * exposing everything outside it. That is honest for this dialog and for
+   * every other one in the app, because `useModal` contains the tab cycle and
+   * the overlay covers the page — this mode makes it MORE true, not less.
+   */
+  mandatory = false,
+  /**
+   * `aria-labelledby` / `aria-describedby` targets, when the dialog has a
+   * visible title and message to point at.
+   *
+   * Preferred over `label` where they exist: an `aria-label` is a second copy
+   * of a heading that is already on screen, and the copy is the one that goes
+   * stale. `label` stays for the dialogs whose name is not rendered anywhere.
+   */
+  labelledBy = null,
+  describedBy = null,
+  /**
+   * CSS selector for where focus should land, queried inside the dialog.
+   *
+   * Omit it and focus goes to the first control that is not the close button,
+   * which is right for every dialog whose first control is safe to arm. See
+   * the note in `useModal`.
+   */
+  initialFocus = null,
 }) {
-  const dialogRef = useModal(onClose);
+  const dialogRef = useModal(
+    mandatory ? undefined : onClose,
+    { dismissible: !mandatory, initialFocus }
+  );
 
   /* Guarded for the server/test renderers that have no document — the component
      is imported by suites that never mount it. */
   const host = typeof document !== 'undefined' ? document.body : null;
 
   const dialog = (
-    <div className={`modal-overlay ${overlayClassName}`} onClick={onClose}>
+    <div
+      className={`modal-overlay ${overlayClassName}`}
+      onClick={mandatory ? undefined : onClose}
+    >
       <div
         ref={dialogRef}
         className={`modal ${size === 'lg' ? 'modal-lg' : ''} ${className}`}
         onClick={e => e.stopPropagation()}
-        role="dialog"
+        role={mandatory ? 'alertdialog' : 'dialog'}
         aria-modal="true"
-        aria-label={label}
+        /* `aria-labelledby` wins where it is supplied: naming the heading that
+           is already on screen beats a second copy of it in an attribute. When
+           neither is given the dialog would have no accessible name at all, so
+           `label` remains the fallback and every existing caller passes it. */
+        aria-labelledby={labelledBy || undefined}
+        aria-label={labelledBy ? undefined : label}
+        aria-describedby={describedBy || undefined}
       >
         {children}
       </div>
@@ -73,19 +134,28 @@ export default function Modal({
   return host ? createPortal(dialog, host) : dialog;
 }
 
-/** Standard dialog header: title, optional description, and a close control. */
-export function ModalHead({ title, description, onClose, children }) {
+/**
+ * Standard dialog header: title, optional description, and a close control.
+ *
+ * `titleId` / `descriptionId` are for a dialog that names itself through
+ * `aria-labelledby` rather than `aria-label` — pass the same values to `Modal`.
+ * Omitting `onClose` renders no close control, which is what a mandatory dialog
+ * wants: an `X` that puts the same dialog straight back is worse than no `X`.
+ */
+export function ModalHead({ title, description, onClose, children, titleId, descriptionId }) {
   return (
     <div className="modal-head">
       {children || (
         <div>
-          <h2>{title}</h2>
-          {description && <p className="lead">{description}</p>}
+          <h2 id={titleId}>{title}</h2>
+          {description && <p className="lead" id={descriptionId}>{description}</p>}
         </div>
       )}
-      <button className="modal-close" onClick={onClose} aria-label="Close dialog">
-        <X size={18} />
-      </button>
+      {onClose && (
+        <button className="modal-close" onClick={onClose} aria-label="Close dialog">
+          <X size={18} />
+        </button>
+      )}
     </div>
   );
 }

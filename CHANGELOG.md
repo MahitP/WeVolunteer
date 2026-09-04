@@ -21,11 +21,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Organizer Agreement** withholds fifteen capabilities from every organizer
 > until each accepts it again, because acceptance is matched on `(slug, version)`.
 > That is correct — the agreement is what those capabilities are granted against —
-> and the editor now warns before saving that particular document. Publishing any
-> of the other nine changes nothing for existing users; there is still no
-> re-consent flow for signup documents.
+> and the editor now warns before saving that particular document.
+>
+> Publishing a signup document is no longer inert either. A **MINOR** bump raises
+> a quiet banner and sends an email; a **MAJOR** bump on the Terms, the Privacy
+> Policy or the Community Guidelines asks every existing account to accept the new
+> version and withholds the participation capabilities until it does, from the
+> version's own effective date — and the editor now **refuses** to date one sooner
+> than the 30 days §13 promises, unless an owner gives a written reason that is
+> audited under its own action. See "A legal change now reaches the people it
+> binds" below.
 
 ### Added
+
+- **A legal change now reaches the people it binds, at the weight it deserves.**
+  §13 of the published Terms says, in the product's own words: *"A change that
+  leaves you worse off … gets a new major version and we ask you to accept it
+  again. A clarification gets a minor version and notice only."* Half of that was
+  implemented. Every change, however small, opened a modal over whatever somebody
+  was doing — the right weight for a change you have to act on and far too much
+  for a reworded sentence, and dismissing two of those is how a reader learns
+  that legal notices are something to click past. The half that mattered more was
+  missing entirely: **nothing asked a signup document's readers to accept a new
+  version**, so a major revision of the Terms produced a popup and no consent
+  record.
+
+  The two weights are now separated, and which one a change gets is decided by
+  the server, in one place, from the version number:
+
+  - **A clarification** (MINOR or PATCH) is a banner in the signed-in shell —
+    same slot, same treatment and the same close control as the location opt-in,
+    because two notices that look like they came from different products is
+    exactly what the shared `NoticeBanner` primitive now prevents. Dismissing it
+    records "seen" in `legal_change_notices`, which is deliberately not the
+    consent table.
+  - **A material change** (MAJOR, on a `scope: 'signup'` document) is a dialog
+    that cannot be dismissed, and the dialog is not the enforcement: the
+    participation capabilities are withheld server-side per request, by the same
+    mechanism the Organizer Agreement has always used, so editing the dialog out
+    of the bundle changes nothing about what the account may do. The withheld set
+    deliberately excludes reading, closing your own account, marking somebody
+    else's attendance, resolving reports and `legal.edit` — an owner who publishes
+    a major version by mistake keeps every power needed to fix it.
+  - **Never both**, for the same change. And the two onboarding agreements, which
+    have had their own re-acceptance screen since v1.0, are excluded from this
+    system entirely rather than given a second surface.
+
+  **The 30-day promise is now implementable, and implemented.** The same section
+  promises notice "at least 30 days before it takes effect", so a major revision
+  dated in the future is *announced* by the ordinary banner — naming the date and
+  saying an acceptance will be asked for — and becomes mandatory only when that
+  date arrives. Requiring the acceptance on publication would have made the
+  product break its own terms every time an owner used the editor correctly.
+
+  No migration. `legal_change_notices` (039) already keyed dismissals by
+  `(user, document, version)` and `legal_acceptances` already recorded consent;
+  the feature needed a rule, not a table.
+
+- **And they are told outside the app, too.** The in-app banner and the dialog
+  only reach somebody who is already looking at WeVolunteer, which is a poor way
+  to keep a promise about advance notice — and the ICO's guidance on the right to
+  be informed says the same in the general case: a change has to be communicated
+  actively, before the new processing begins, rather than by editing a page and
+  waiting to be visited.
+
+  `dispatchLegalChangeNotices` now runs inside the existing `runNotificationSweep`
+  (boot, then every fifteen minutes) and dispatches through the platform's own
+  `notificationService`, so a legal change produces a **notification-centre entry**
+  (kept 365 days at IMPORTANT, or CRITICAL for a material one) and an **email**
+  through the existing outbox — the same branded template, per-event sender
+  identity, escaping, retry, backoff, stale-job reclaim and queue-health surface
+  everything else uses. No new email framework, no new queue, no new table.
+
+  Two events, chosen by severity and mutually exclusive: `LEGAL_DOCUMENT_UPDATED`
+  says a clarification changed and there is nothing to do;
+  `LEGAL_ACCEPTANCE_REQUIRED` says a significant change is coming, names the date,
+  and says an acceptance will be asked for then. Both state plainly that nothing
+  has been recorded as accepted and that reading the document does not accept it.
+  Both are `MANDATORY_NOTICE_EVENTS`, so they survive an email opt-out — the
+  Privacy Policy already publishes that security email cannot be switched off, and
+  a preference cannot be a way to not be told the contract was rewritten. The
+  preferences panel now says which messages those are, which it never did.
+
+  **Exactly once, and provably.** `recordNotified` stopped being a log and became
+  a lease: a conditional insert that reports whether *this* call claimed the
+  notification, committed in the same transaction as the enqueue. Four concurrent
+  sweeps in four separate processes against one fresh change produce one message
+  (measured). A rolled-back enqueue leaves the lease open, so a retry still
+  delivers. And email is never an authority: `signupConsentWithholdingsFor` reads
+  acceptance rows and the effective date and never reads `notified_at`, so an
+  outage cannot release a capability and a delivery cannot satisfy a re-consent.
+
+- **The 30 days §13 promises are now enforced, not documented.** A MAJOR version of
+  a signup document dated sooner than thirty days out is refused, with the earliest
+  legal date in the message and both ways out named — use a MINOR version if the
+  change is really a clarification, or give a written reason if something obliges
+  it sooner. The date picker's floor moves with the version number, computed from a
+  day count the server sends so the browser and the refusal cannot drift.
+
+  The override is deliberate rather than a hole: never the default, a required
+  40–500 character reason, owner-only behind the editor's existing `legal.edit`
+  plus step-up gate, refused when there was no notice period to override, and
+  audited under its own action `LEGAL_NOTICE_PERIOD_OVERRIDDEN` so it can be found
+  by filtering rather than by reading prose. It changes which effective dates are
+  accepted and nothing else.
+
+- **Modal dialogs are bottom sheets on a phone again, which they were supposed to
+  be all along.** Two `@media (max-width: 700px)` blocks two thousand lines apart
+  both declared `.modal`: the first described a content-sized sheet with a rounded
+  top edge, the second re-declared it with `height: 100vh` and square corners. The
+  second won, so the first had not applied to anything for as long as both existed
+  — and every dialog in the product was a full-screen sheet, including the ones
+  containing a paragraph and two buttons, which rendered as a screenful of void
+  with the actions stranded at the bottom.
+
+  The `height` line is gone and the design lives in one place, measured in `dvh`
+  rather than `vh` for the reason this stylesheet already gives four other times.
+  Every dialog was checked for one that genuinely needs the full screen and none
+  does — the check-in scanner, the closest candidate, caps its own viewfinder at
+  `50dvh` — so no opt-in class was added for a case that does not exist.
+
+- **Several documents changing at once is one banner, not a pile.** It names one
+  document and counts the rest, and its `X` acknowledges all of them — a count
+  that comes back tomorrow having only dismissed one of three is worse than no
+  count. Mandatory acceptances are queued one at a time, each accepted on its
+  own: a single button recording agreement to two documents somebody may feel
+  differently about is a weaker record than two.
 
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
