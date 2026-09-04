@@ -178,6 +178,46 @@ describe('redactMessage — one rule, one realistic positive', () => {
     expect(redactMessage('phone 5551234567 unreachable')).not.toContain('5551234567');
   });
 
+  /**
+   * A bare IPv4 literal in free text.
+   *
+   * The structured path never leaked one — `logEvent`'s allowlist drops an `ip`
+   * field outright — so this is specifically about a message somebody wrote,
+   * which is where it was actually found. An address is not a URL, an email,
+   * hex, or a seven-digit run, so before this rule it walked past the whole
+   * table.
+   */
+  it.each([
+    ['public', 'signed in from 203.0.113.7', '203.0.113.7'],
+    ['private', 'peer 192.168.1.15 refused', '192.168.1.15'],
+    ['loopback', 'bound to 127.0.0.1 already', '127.0.0.1'],
+    ['in parentheses', 'origin (198.51.100.9) blocked', '198.51.100.9'],
+    ['at a sentence end', 'came from 10.0.0.254.', '10.0.0.254'],
+    ['with a port', 'connect ECONNREFUSED 10.0.0.254:5432', '10.0.0.254'],
+    ['inside a URL', 'GET http://198.51.100.9/health failed', '198.51.100.9'],
+    ['at the maximum octet', 'broadcast 255.255.255.255 seen', '255.255.255.255'],
+  ])('removes a %s IP address', (_label, input, leaked) => {
+    const out = redactMessage(input);
+    expect(out).not.toContain(leaked);
+    expect(out).toContain(REDACTED);
+  });
+
+  /**
+   * The other half, and the reason the octets are bounded to 0-255 rather than
+   * written `\d{1,3}`. Over-redaction has its own cost — the phone rule's note
+   * says it, and a message where every number is `[redacted]` cannot be
+   * debugged from. These are the shapes a looser rule would have eaten.
+   */
+  it.each([
+    ['a three-part version', 'release 1.2.0 booted'],
+    ['an ISO timestamp', '2026-09-04T15:30:00.123Z started'],
+    ['a stack position', 'thrown at /srv/app/x.js:123:456'],
+    ['an out-of-range octet', 'not an address 999.1.1.1 here'],
+    ['a coordinate pair', 'coords 51.5074, -0.1278'],
+  ])('leaves %s alone', (_label, input) => {
+    expect(redactMessage(input)).toBe(input);
+  });
+
   it('truncates AFTER redacting, so a secret near the end cannot survive the cut', () => {
     const out = redactMessage(`${'x'.repeat(600)} student@example.org`);
     expect(out).not.toContain('student@example.org');
