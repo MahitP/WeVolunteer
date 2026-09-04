@@ -30,7 +30,8 @@ import { app } from './app.js';
 import { PORT, IS_PRODUCTION, DEMO_MODE } from './config.js';
 import { createServer } from 'http';
 import { initSocketServer } from './realtime/socketServer.js';
-import { initDatabase, completeDatabaseInit, assertSchemaReady, db } from './db.js';
+import { initDatabase, completeDatabaseInit, assertSchemaReady, db, ENGINE } from './db.js';
+import { describeRemoteDatabase, POSTGRES } from './db/engine.js';
 import { runNotificationSweep } from './utils.js';
 
 // The JWT_SECRET guard that used to sit here has been removed as dead code.
@@ -41,6 +42,64 @@ import { runNotificationSweep } from './utils.js';
 if (IS_PRODUCTION && DEMO_MODE) {
   console.error('FATAL: DEMO_MODE cannot be enabled in production.');
   process.exit(1);
+}
+
+/**
+ * Demo mode over a database that is somewhere else.
+ *
+ * The refusal above keys on `NODE_ENV`, which is the wrong question and was
+ * always the wrong question. What makes demo seeding dangerous is not the mode
+ * this process believes it is in — it is whose database is on the other end.
+ *
+ * `npm run dev` sets `DEMO_MODE=true` and reads the same `.env` the server
+ * does. While that named a local SQLite file, the worst case was a file the
+ * developer could delete. With a real `DATABASE_URL` in it, the command a
+ * developer types from muscle memory provisions a remote database and seeds
+ * accounts whose shared password is published in the README — including an
+ * administrator that demo mode exempts from the two-factor policy — and the
+ * refusal above stays quiet, because a laptop does not set `NODE_ENV`.
+ *
+ * `db.js` already prints a loud warning for this. A warning is the wrong
+ * instrument: it appears in a scrolling log at the moment the rows are being
+ * written, and the rows persist after the service is later started correctly.
+ *
+ * Local PostgreSQL is untouched, so the everyday development loop is unchanged.
+ */
+const remoteDatabase = describeRemoteDatabase();
+if (DEMO_MODE && remoteDatabase) {
+  console.error('FATAL: DEMO_MODE is set and the database is not on this machine.');
+  console.error(`       Target: ${remoteDatabase}`);
+  console.error('');
+  console.error('       Demo seeding inserts accounts that share a password published in');
+  console.error('       the README, one of them an administrator exempt from the 2FA');
+  console.error('       policy. Those rows would be written to that database and would');
+  console.error('       outlive this process.');
+  console.error('');
+  console.error('       If you meant to run against it, start without demo mode:');
+  console.error('         npm start --prefix server');
+  console.error('       If you meant to develop locally, unset DATABASE_URL and');
+  console.error('       DATABASE_ENGINE, or point them at a local database.');
+  process.exit(1);
+}
+
+/**
+ * A `DATABASE_URL` that nothing is going to use.
+ *
+ * `DATABASE_ENGINE` defaults to SQLite, so a deployment that sets the URL and
+ * forgets the engine runs happily on a local file while its operator believes
+ * it is on PostgreSQL — the same class of mistake `resolveEngine` refuses a
+ * typo for, arriving by omission instead.
+ *
+ * A warning rather than a refusal, because the combination is legitimate: the
+ * privileged `bin/` tools read `DATABASE_URL` and take their engine from their
+ * own flags, so a developer can reasonably keep both in `.env` while serving
+ * from SQLite. Stating it is enough; refusing would break that.
+ */
+if (!remoteDatabase && process.env.DATABASE_URL && ENGINE !== POSTGRES) {
+  console.warn(
+    '[db] DATABASE_URL is set but DATABASE_ENGINE is not "postgres", so this '
+    + 'process is serving from SQLite and the URL is unused.'
+  );
 }
 
 /**

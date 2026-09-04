@@ -279,3 +279,60 @@ export function postgresConfig(env = process.env) {
     ssl: sslDisabled ? undefined : { rejectUnauthorized: env.DATABASE_SSL_INSECURE !== 'true', ...(ca ? { ca } : {}) },
   };
 }
+
+/**
+ * Hostnames that mean "this machine".
+ *
+ * A unix-socket connection string has no host at all, which is as local as it
+ * gets. `.localhost` is reserved by RFC 6761 and always resolves to loopback.
+ */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0', '']);
+
+/**
+ * The database this process will open, but only when it is somewhere ELSE.
+ *
+ * ── The failure this exists to prevent ──
+ *
+ * `npm run dev` sets `DEMO_MODE=true` and reads the same `.env` the server
+ * does. Demo mode seeds accounts that share a password published in the README,
+ * one of which is an administrator exempted from the two-factor policy. That
+ * was safe for as long as `.env` named a local SQLite file: the blast radius
+ * was a file the developer could delete.
+ *
+ * It stops being safe the moment `.env` holds a real `DATABASE_URL`. The
+ * command a developer types from muscle memory then provisions a remote
+ * database and seeds published credentials into it, and the existing refusal
+ * does not fire, because it keys on `NODE_ENV=production` and a laptop does not
+ * set that.
+ *
+ * `NODE_ENV` was never the right discriminator. What makes seeding dangerous is
+ * not which mode this process thinks it is in — it is **whose database is on
+ * the other end of the socket**. That is the question this answers.
+ *
+ * Returns a printable `host:port/database` for a remote target, or `null` for a
+ * local one. SQLite is always local: it is a file on this machine, and
+ * `bin/lib/db-safety.mjs` is what guards production-shaped file paths.
+ *
+ * @returns {string|null}
+ */
+export function describeRemoteDatabase(env = process.env) {
+  let engine;
+  /* An invalid engine is somebody else's error to report — `resolveEngine`
+     throws a better message than this function could, at a better moment. */
+  try { engine = resolveEngine(env); } catch { return null; }
+  if (engine !== POSTGRES) return null;
+
+  const raw = env.DATABASE_URL;
+  if (!raw) return null;
+
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase();
+    if (LOCAL_HOSTS.has(host) || host.endsWith('.localhost')) return null;
+    return `${u.hostname}${u.port ? `:${u.port}` : ''}${u.pathname}`;
+  } catch {
+    /* Unparseable: it fails loudly when the pool connects, and calling an
+       unreadable string "remote" would be a guess. */
+    return null;
+  }
+}
