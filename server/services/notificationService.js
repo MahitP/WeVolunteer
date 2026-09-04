@@ -115,7 +115,36 @@ class NotificationService {
   async _insertInApp(userId, { kind, priority, title, body, link }, dedupeKey) {
     const id = `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const notification = {
-      id, user_id: userId, kind, priority: priority || 'NORMAL', title, body: body || '', link, read: 0, created_at: new Date().toISOString(), dedupe_key: dedupeKey
+      id,
+      user_id: userId,
+      kind,
+      priority: priority || 'NORMAL',
+      title,
+      body: body || '',
+      /**
+       * `?? null`, and it is not defensive tidying.
+       *
+       * A notification with nothing useful to press omits `link` entirely — four
+       * of them do, and each is deliberate: `ORGANIZATION_BAN_APPEAL_STANDS`'s
+       * own note says a link back to the organization somebody cannot rejoin
+       * "would be a taunt". `link` was then bound straight into the INSERT, and
+       * neither engine will bind `undefined` — SQLite raises "Provided value
+       * cannot be bound to SQLite parameter 7".
+       *
+       * The throw was caught by `dispatch`'s best-effort handler, so the failure
+       * was silent and total: the in-app row was never written and no email job
+       * was enqueued. A student who appealed an organization ban and was turned
+       * down was simply never told the outcome — the one notification whose
+       * absence looks like the club ignoring them.
+       *
+       * Coerced HERE rather than by adding `link: null` to each of the four,
+       * because the next content case that has nothing to link to will omit it
+       * too, and this is the one place that has to survive that.
+       */
+      link: link ?? null,
+      read: 0,
+      created_at: new Date().toISOString(),
+      dedupe_key: dedupeKey,
     };
     await db.prepare(`
       INSERT INTO notifications (id, user_id, kind, priority, title, body, link, read, created_at, dedupe_key)

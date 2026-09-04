@@ -145,6 +145,30 @@ export const EVENT_CATEGORIES = {
   NEW_APPLICATION: 'APPLICATION',
   SPOT_RELEASED: 'APPLICATION',
   VOLUNTEER_RELEASED_SPOT: 'APPLICATION',
+  /**
+   * A student asking to join a club, filed under APPLICATION rather than
+   * ACCOUNT.
+   *
+   * It is the same shape as `NEW_APPLICATION`: somebody applied to a thing you
+   * run, and it is sitting in a queue waiting for you to decide it. A manager
+   * who has turned Applications on and Account off has said "tell me about
+   * things awaiting my decision", and this is one.
+   *
+   * The two OUTCOMES go the other way, under ACCOUNT, beside
+   * `ORGANIZATION_MEMBERSHIP_REMOVED` — from the student's side they are news
+   * about where they stand, not about an application queue.
+   */
+  ORGANIZATION_JOIN_REQUEST_RECEIVED: 'APPLICATION',
+  /**
+   * An invitation into a club.
+   *
+   * APPLICATION rather than ACCOUNT, alongside the join request it mirrors:
+   * both are "somebody is waiting for you to decide about a club", and a
+   * student who has turned Application notifications on has said that is what
+   * they want to hear about. ACCOUNT is for things that happened TO their
+   * account and cannot be declined.
+   */
+  ORGANIZATION_INVITATION_RECEIVED: 'APPLICATION',
 
   // EVENT
   /**
@@ -231,6 +255,8 @@ export const EVENT_CATEGORIES = {
   LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
   /* Membership of a club is a relationship with the platform, not an event. */
   ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_ACCEPTED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_REJECTED: 'ACCOUNT',
   ORGANIZATION_BANNED: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
@@ -524,6 +550,121 @@ export function getInAppContent(event, payload) {
       };
     }
 
+    /**
+     * Somebody wants in, and a manager has to answer.
+     *
+     * ── Why the body names one person and nothing else ──
+     *
+     * This is dispatched to every manager, which means it is also enqueued as
+     * email, which means it leaves the building. `FRIEND_SIGNED_UP` makes the
+     * same argument and lands the same way: the recipient is being told that
+     * something needs their attention, and the detail lives behind the link,
+     * where the reader is authenticated and the disclosure is already governed.
+     *
+     * So: a name and a club. Not a grade, not a school, not an email address,
+     * and not a message. A request may now carry a short note (migration 063),
+     * but the note is not repeated here: it was written for the club's managers
+     * to read on the page, and copying it into a notification would also copy
+     * it into an email, which leaves the platform. What this says is that
+     * somebody is waiting; the page says who and why.
+     */
+    /**
+     * Every organization deep link below is the canonical `@handle` form.
+     *
+     * A notification row persists its `link`, so these strings outlive the
+     * request that wrote them — which is exactly why the handle stopped moving
+     * when a club is renamed. Before that change, a rename silently dead-linked
+     * every historical notification a club had ever sent; now the address in a
+     * row from last term still resolves. See `organizationHandles.js`.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_RECEIVED': {
+      const org = payload.organizationName || 'your organization';
+      const who = payload.actorName || 'Somebody';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `Someone asked to join ${org}`,
+        body: `${who} asked to join ${org}. It is waiting for a manager to accept or decline.`,
+        link: payload.organizationSlug
+          ? `/organizations/@${payload.organizationSlug}#requests`
+          : '/organizations',
+        ctaText: 'Review the request',
+      };
+    }
+
+    /**
+     * You have been invited.
+     *
+     * ── What this does NOT say ──
+     *
+     * **Who invited you.** The club invites, not the individual member who
+     * pressed the button. Naming them would make declining an answer to a
+     * classmate rather than to a club, which is precisely the pressure a
+     * thirteen-year-old should not be under.
+     *
+     * **The note, if there is one.** A notification body is copied into an
+     * email, which leaves the platform; a note written to one person stays on
+     * the page they open. The body says there is one, so nobody misses it.
+     *
+     * The invitation lapses, so the body says so without printing a date — the
+     * page shows the date, and a body that hardcoded one would be wrong the
+     * moment the row was read a fortnight later.
+     */
+    case 'ORGANIZATION_INVITATION_RECEIVED': {
+      const org = payload.organizationName || 'an organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You have been invited to join ${org}`,
+        body: `${org} invited you to join. Open it to accept or decline — `
+          + 'the invitation does not last for ever.',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
+      };
+    }
+
+    case 'ORGANIZATION_JOIN_REQUEST_ACCEPTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You are now a member of ${org}`,
+        body:
+          `A manager accepted your request to join ${org}. `
+          + 'You will be told when it posts a new opportunity.',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
+      };
+    }
+
+    /**
+     * Declined — and carrying no reason, on purpose.
+     *
+     * The alternative is a free-text field in which a club manager writes a
+     * judgement about a named minor, which is then copied into an email that
+     * leaves the platform. A ban carries a reason because a ban is an
+     * enforcement decision with an appeal heard against it; declining a request
+     * is neither, and it is reversible by simply asking again.
+     *
+     * It says the door is not locked for that reason: without that sentence the
+     * message reads as permanent, which it is not — the partial unique index is
+     * scoped to `pending`, so a declined student may ask again.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_REJECTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `${org} did not accept your request`,
+        body:
+          `Your request to join ${org} was not accepted. `
+          + 'Nothing about your account, your hours or any other organization changes, '
+          + 'and you can ask again later.',
+        /* No CTA. The decision is made, and a button back to a club that has
+           just said no is not something to press. */
+      };
+    }
+
     case 'ORGANIZATION_MEMBERSHIP_REMOVED': {
       const org = payload.organizationName || 'an organization';
       const actor = payload.actorName || 'A manager';
@@ -535,7 +676,7 @@ export function getInAppContent(event, payload) {
         body:
           `${actor} removed you from ${org}.${why}`
           + '\n\nYou can still join this organization again.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `View ${org}`,
       };
     }
@@ -609,7 +750,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has looked at your appeal and lifted the ban. `
           + 'You can join again whenever you like.' + why,
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : undefined,
         ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
       };
     }
@@ -636,7 +777,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has lifted the ban. You can join again whenever `
           + 'you like.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `Go to ${org}`,
       };
     }

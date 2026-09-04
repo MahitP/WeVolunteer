@@ -31,6 +31,8 @@ const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
+const OrganizationInvite = React.lazy(() => import('../views/OrganizationInvite'));
+const OrganizationPublic = React.lazy(() => import('../views/OrganizationPublic'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
 const OrganizationsHome = React.lazy(() => import('../views/OrganizationsHome'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
@@ -519,6 +521,61 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
+  /**
+   * An organization's invitation link.
+   *
+   * Public for the same reason `/verify/:code` is: the link is handed to
+   * somebody OUTSIDE the app — put on a flyer, pasted into a group chat, mailed
+   * to a parent — and asking them to make an account before they can see what
+   * they are being invited to is how a share link stops being worth sharing.
+   *
+   * What it opens is the allowlisted projection in `publicOrganization`, never
+   * the organization page: no member, no event location, no hours, no id.
+   * `/organizations/:key` is unchanged and still requires a session and
+   * `directory.read`.
+   *
+   * Three segments, so it cannot collide with `/organizations/:key`; the static
+   * `invite` outranks `/organizations/:key/edit` in the router's own ranking.
+   * And deliberately NO `requiredCap` — `routeGating.guard.test.js` fails the
+   * build on a gate key written into this table, because there is no principal
+   * here for it to apply to and it would read as enforcement while enforcing
+   * nothing.
+   *
+   * A reader who IS signed in is redirected by the view itself to
+   * `/organizations/<slug>`, which is strictly better for them: the shell, the
+   * navigation, their own service record, and a Join their session can actually
+   * complete.
+   */
+  { path: '/organizations/invite/:token', element: <OrganizationInvite /> },
+  /**
+   * An organization's canonical public address, `/organizations/@robotics`.
+   *
+   * ── Why this is the same pattern as the authenticated page ──
+   *
+   * React Router cannot express "a segment beginning with `@`" — the `@` is part
+   * of the parameter's VALUE, which is the same reason `/users/@:handle` cannot
+   * be written either. So this declares `/organizations/:key`, the very pattern
+   * `APP_ROUTES` uses, and the two are separated by SESSION rather than by path:
+   * `shellWhenSignedIn` tells `isPublicPath` to stand down for a reader who has
+   * one, so a member opening their club's public address still gets the shell,
+   * their own service record and a Join their session can complete.
+   *
+   * ── What a signed-out reader gets, and what they do not ──
+   *
+   * The `@handle` form opens `publicOrganization` — the allowlisted projection,
+   * carrying no member, no event location, no hours and no id — and only for a
+   * club that chose to be public. The bare legacy form `/organizations/robotics`
+   * is NOT a public address and the view does not even look it up: it says the
+   * page needs an account. That asymmetry is the point. The handle is an
+   * ADDRESS a club chose to publish; the bare path is the authenticated page it
+   * always was.
+   *
+   * Deliberately NO `requiredCap`, like every entry in this table —
+   * `routeGating.guard.test.js` fails the build on a gate key written here,
+   * because there is no principal for it to apply to and it would read as
+   * enforcement while enforcing nothing.
+   */
+  { path: '/organizations/:key', element: <OrganizationPublic />, shellWhenSignedIn: true },
 ];
 
 /**
@@ -529,9 +586,16 @@ export const PUBLIC_ROUTES = [
  * matches exactly one segment, which is the same rule the router applies and
  * the same one `server/clientRoutes.js` uses for its allowlist.
  */
-export function isPublicPath(pathname) {
+export function isPublicPath(pathname, { signedIn = false } = {}) {
   const segments = String(pathname || '').split('?')[0].split('/').filter(Boolean);
-  return PUBLIC_ROUTES.some(({ path }) => {
+  return PUBLIC_ROUTES.some(({ path, shellWhenSignedIn }) => {
+    /* A route the shell also serves stops being public the moment there IS a
+       session. Without this, a member opening their own club's public address
+       would be answered by the standalone public page — no navigation, no
+       Join, no service record — while signed in, which reads as being signed
+       out. The flag lives on the route rather than in a second list here, so it
+       cannot drift from the entry it describes. */
+    if (shellWhenSignedIn && signedIn) return false;
     const pattern = path.split('/').filter(Boolean);
     if (pattern.length !== segments.length) return false;
     return pattern.every((seg, i) => seg.startsWith(':') || seg === segments[i]);

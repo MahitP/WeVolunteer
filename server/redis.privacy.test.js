@@ -173,10 +173,19 @@ describe('Redis is never a source of truth', () => {
   });
 
   it('the set of modules that touch Redis at all is the reviewed one', () => {
-    /* Four callers, and each is a deliberate decision recorded in
-       docs/operations/upstash.md: two limiter surfaces, two third-party caches,
-       and a read-only status panel. A fifth should arrive with a note here
-       rather than by accident — this list is the review, not a formality. */
+    /* Each is a deliberate decision recorded in docs/operations/upstash.md:
+       three limiter surfaces, two third-party caches, and a read-only status
+       panel. A new one should arrive with a note here rather than by accident —
+       this list is the review, not a formality.
+
+       `organizationLimiters.js` is the third limiter surface. It qualifies under
+       the same rule as the limiters in app.js and no more: both of its throttles
+       tick on abuse rather than on volume — an unauthenticated invitation-link
+       lookup and an attempt to join — so the command budget the module header
+       reasons about is not at risk, and neither counter is ever read as truth
+       about anything. Nothing about organization membership is stored in Redis;
+       the source of truth is `organization_members` and
+       `organization_join_requests`. */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
       .filter(f => /from\s+['"][^'"]*redis\/[a-zA-Z]+\.js['"]/.test(read(f)))
@@ -185,6 +194,7 @@ describe('Redis is never a source of truth', () => {
 
     expect(callers).toEqual([
       path.join('server', 'app.js'),                      // limiter stores
+      path.join('server', 'organizationLimiters.js'),     // invite + join throttles
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter
       path.join('server', 'routes', 'geocodeRoutes.js'),  // address cache + throttle

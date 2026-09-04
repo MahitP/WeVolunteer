@@ -27,6 +27,119 @@ import {
 const SERVER = path.join(process.cwd(), 'server');
 
 /**
+ * Every notification's content must be WRITABLE, not merely present.
+ *
+ * ── The failure this exists to prevent ──
+ *
+ * `_insertInApp` binds `link` straight into the INSERT, and neither engine will
+ * bind `undefined` — SQLite raises "Provided value cannot be bound to SQLite
+ * parameter 7". Four content cases omit `link` on purpose, because they have
+ * nothing useful to press: `ORGANIZATION_BAN_APPEAL_STANDS`'s own note says a
+ * link back to the club somebody cannot rejoin "would be a taunt".
+ *
+ * So the copy was right and the row was never written. `dispatch` catches
+ * best-effort, so the failure was silent AND total — no in-app row, no email
+ * job. A student who appealed an organization ban and was turned down was never
+ * told the outcome, which is the one notification whose absence reads as the
+ * club ignoring them.
+ *
+ * The file above proves every dispatched event HAS content. This proves the
+ * content can be stored, which is a different claim and the one that failed.
+ */
+describe('every notification can actually be written to the database', () => {
+  /**
+   * The columns `_insertInApp` binds and does NOT coerce.
+   *
+   * `link` is deliberately absent from this list: omitting it is a legitimate
+   * editorial choice made by four cases already, so the fix belongs at the one
+   * place that writes the row rather than at each case — and the assertion that
+   * the coercion is still there is the last test in this block. `body` is
+   * coerced too (`body || ''`), and is included anyway because an `undefined`
+   * body is a copy bug even when it stores cleanly.
+   */
+  const BOUND = ['kind', 'priority', 'title'];
+
+  /**
+   * A payload carrying every field any case reads.
+   *
+   * Realistic rather than empty, because two cases legitimately take their whole
+   * text from the payload — `DIRECT_MESSAGE` is composed at the dispatch site in
+   * `messageRoutes.js` — so an empty payload would report them as broken while
+   * they are correct in every real call.
+   */
+  const FULL_PAYLOAD = Object.freeze({
+    organizationName: 'Chess Club',
+    organizationSlug: 'chess-club',
+    organizationId: 'org-1',
+    actorName: 'Priya Patel',
+    actorUsername: 'priya',
+    eventTitle: 'Beach cleanup',
+    eventId: 'evt-1',
+    reason: 'A reason',
+    reasoning: 'Some reasoning',
+    title: 'New message from Priya Patel',
+    body: 'Some message text',
+    link: '/messages?conversation=c-1',
+    slug: 'terms-of-service',
+    changeCount: 2,
+    remaining: 3,
+    suspendedUntil: null,
+  });
+
+  it('never leaves a bound field `undefined`', () => {
+    const offenders = [];
+    for (const event of Object.keys(EVENT_CATEGORIES)) {
+      const content = getInAppContent(event, FULL_PAYLOAD);
+      for (const field of BOUND) {
+        /* `undefined` only. `null` is a value both engines bind happily, and is
+           what "there is nothing here" is supposed to look like. */
+        if (content[field] === undefined) offenders.push(`${event}.${field}`);
+      }
+    }
+    expect(
+      offenders,
+      'these fields are `undefined`, which no database driver will bind — the '
+      + 'notification is then silently never written at all. Return a value, or '
+      + 'coerce it in `_insertInApp` the way `link` is.',
+    ).toEqual([]);
+  });
+
+  it('never leaves a body `undefined` either', () => {
+    /* Separate from the assertion above because `body` IS coerced (`body || ''`),
+       so this is a copy defect rather than a write failure: a notification that
+       stores an empty body says nothing to the person who receives it. */
+    const offenders = Object.keys(EVENT_CATEGORIES)
+      .filter(event => getInAppContent(event, FULL_PAYLOAD).body === undefined);
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * The coercion itself, so removing it fails here rather than in production.
+   * Read from source because `_insertInApp` is a private method on a singleton
+   * and driving it needs a database.
+   */
+  it('keeps the coercion in `_insertInApp`', () => {
+    const src = readFileSync(path.join(SERVER, 'services', 'notificationService.js'), 'utf8');
+    expect(src).toMatch(/link:\s*link\s*\?\?\s*null/);
+  });
+
+  /**
+   * And the four cases that omit `link` still omit it.
+   *
+   * Not a list to keep in step — it is derived — but a floor: if this drops to
+   * zero, somebody has "fixed" the omission by giving every notice a link,
+   * which would put a button back on the two messages that deliberately have
+   * none. The coercion above is what makes omitting one safe.
+   */
+  it('still has cases that deliberately offer nothing to press', () => {
+    const linkless = Object.keys(EVENT_CATEGORIES)
+      .filter(event => getInAppContent(event, {}).link === undefined);
+    expect(linkless).toContain('ORGANIZATION_BAN_APPEAL_STANDS');
+    expect(linkless).toContain('ORGANIZATION_JOIN_REQUEST_REJECTED');
+  });
+});
+
+/**
  * Pulls event names out of one file's source.
  *
  * Extracted from the walkers below so the pattern itself is testable — see "the

@@ -470,6 +470,22 @@ explicit security review**, regardless of size. The 2026-07-30 auth audit found
 four broken auth flows that had been shipped and believed working. Small diffs
 in this area have an outsized blast radius.
 
+That review is the **`security-review` skill**, which is the authoritative
+mechanism — a hand-written summary is not a substitute for running it, and its
+findings must be resolved before the change is release-ready rather than
+recorded and carried.
+
+This paragraph exists because the rule above was written without naming the
+mechanism, and the Organization work in 1.4.0 reached its final hardening pass
+before anybody established what "explicit security review" was supposed to mean
+in practice. A gate nobody can name is a gate that gets satisfied by assertion.
+
+**This document is the only place that rule lives.** `CLAUDE.md` and
+`AGENTS.md` are gitignored on purpose (§6.5) — assistant-facing files are not
+part of the product — so a rule written only there protects one checkout and
+nobody else's, which is the same failure that ignore rule was added to prevent.
+An assistant file may point here; it may not be where the rule is kept.
+
 #### Deploy failures
 
 - `npm run build` fails, or emits an error
@@ -978,6 +994,13 @@ once the commit exists.
 
 ### 6.7 Known accepted advisories
 
+> **Status, 2026-09-03: `npm audit` reports zero entries at every severity**,
+> with and without `--omit=dev`. The react-router entries in item 1 no longer
+> appear against the pinned `react-router-dom@7.18.2`, and item 3 was closed on
+> this date. The assessments below are kept regardless of the count: the
+> reasoning is what saves the next person re-deriving it if an entry returns.
+> Counts in this section go stale by design; the assessments do not.
+
 `npm audit` reports **three** high-severity entries, which are **two** distinct
 advisories. Re-verified at the v1.2c final release review; the count was two at
 v1.2b and the third arrived through a transitive dev dependency without any
@@ -1032,6 +1055,54 @@ folded into it, because touching `package-lock.json` invalidates every gate that
 had already been run against it. **That sequencing is the general rule, not a
 one-off: a dependency change is its own commit, with its own four gates, never a
 late amendment to a reviewed release.**
+
+**3 — qs query-string parsing: array-limit bypass, and denial of service via
+attacker-controlled `isBuffer`.**
+[GHSA-x5fp-wj9c-mxmx](https://github.com/advisories/GHSA-x5fp-wj9c-mxmx) and
+[GHSA-4mjr-xmp4-gh2g](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g),
+reported as three moderate entries through `qs` → `body-parser` → `express`.
+
+**Fixed by pinning `qs` to 6.16.0 through a root `overrides` entry.** That is the
+only route available, and the reason is worth writing down because `npm audit`
+actively misleads here: `express@4.22.2` and `body-parser@1.20.6` both declare
+`qs: "~6.15.1"`, and the patched release is **6.16.0** — a minor bump the tilde
+range excludes. No `express` 4.x or `body-parser` 1.x release widens it. So
+`npm audit fix` reports "fix available", runs, changes nothing, and reports the
+same three entries again. It is not wrong that a patch exists; it fails to notice
+that nothing in the tree can reach it. **Do not read that loop as a broken
+lockfile and start deleting things.**
+
+Neither advisory was reachable in this application, which is why the pin is a
+tidy-up rather than an incident:
+
+- Both changed code paths in `qs` are gated behind `comma: true` and
+  `throwOnLimitExceeded: true`. Express 4 passes only `{ allowPrototypes: true }`
+  (`node_modules/express/lib/middleware/query.js`), and this repository never
+  calls `app.set('query parser', …)`, so neither option is ever on.
+- `express.urlencoded()` is not mounted anywhere, so `body-parser`'s copy of `qs`
+  is never invoked at all. Only `express`'s own `req.query` parsing uses it.
+- The `tags` comma handling in `server/eventQuery.js` is **our own**
+  `String(...).split(',')`, not `qs`'s `comma` option — so the "bracket-key comma
+  parsing" the advisory describes is not the code path that feeds the browse
+  filters, despite looking like it from the advisory title alone.
+
+Verified rather than argued: parsing twenty query shapes — repeated `tags`,
+comma `tags`, `tags[]=a,b`, array overflow past `arrayLimit` at 25 and 30
+elements, the `constructor[isBuffer]` and `__proto__` shapes, malformed brackets,
+and the full browse filter string — through both 6.15.3 and 6.16.0 under
+Express's exact options produced **identical output in all twenty**, both raw and
+after `parseEventFilters`.
+
+**Remove the override once `express` or `body-parser` widens its `qs` range**
+(a 4.22.3 or 1.20.7 depending on `~6.16.0`). Left in place after that it silently
+pins `qs` against future patches, which is the failure mode this entry exists to
+prevent. Until then it must stay: dropping it returns all three entries.
+
+`npm ls` exits non-zero with `ELSPROBLEMS … invalid: qs@6.16.0` while the
+override stands. That is an npm reporting quirk for overrides under workspaces,
+not a broken tree — a tree built entirely by npm from the same manifests
+reproduces it exactly, and `npm ci` installs cleanly with 0 vulnerabilities. No
+gate runs `npm ls`.
 
 ### 6.8 Step-up re-authentication (AAL2)
 

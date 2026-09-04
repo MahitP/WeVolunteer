@@ -30,6 +30,7 @@ import EventApplicantsTab from './EventApplicantsTab';
 import AttendeeList from './AttendeeList';
 import ReportModal from './ReportModal';
 import Modal from './Modal';
+import { organizationPath } from '../utils/organizationUrl';
 
 
 export default function EventModal({
@@ -735,7 +736,7 @@ export default function EventModal({
                       {event.organizationSlug && (
                         <>
                           {' '}
-                          <Link to={`/organizations/${event.organizationSlug}`}>
+                          <Link to={organizationPath(event.organizationSlug)}>
                             See {event.organizationName || 'the organization'}
                           </Link>
                         </>
