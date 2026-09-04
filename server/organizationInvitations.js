@@ -144,9 +144,17 @@ const INVITATION_COLUMNS = `
 export function invitationState(invitation, now = new Date()) {
   if (!invitation) return 'missing';
   if (invitation.status !== 'pending') return invitation.status;
+
   const expiresAt = invitation.expiresAt ?? invitation.expires_at;
-  if (expiresAt && new Date(expiresAt).getTime() <= now.getTime()) return 'expired';
-  return 'pending';
+  if (!expiresAt) return 'pending';
+
+  /* An expiry nobody can parse reads as EXPIRED — `linkState` carries the
+     argument, and it applies identically here: `NaN <= now` is false, so the
+     previous shape let a malformed row stand as pending for ever. */
+  const at = new Date(expiresAt).getTime();
+  if (Number.isNaN(at)) return 'expired';
+
+  return at <= now.getTime() ? 'expired' : 'pending';
 }
 
 export const invitationStands = (invitation, now = new Date()) =>

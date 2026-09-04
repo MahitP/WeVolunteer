@@ -196,6 +196,27 @@ including which schools have one.
 string `'public'` opens a club, so a typo, a NULL from an unmigrated row, or a
 value from a future version can only ever publish less.
 
+**Every state machine on this feature fails closed**, and that is worth stating
+as a rule rather than three times as a coincidence:
+
+| Value | Malformed or unknown reads as |
+|---|---|
+| `visibility` | `unlisted` — publishes less |
+| a link's `expires_at` | `expired` — admits nobody |
+| an invitation's `expires_at` | `expired` — admits nobody |
+| `join_policy` | `invite` — the narrowest door |
+| `invite_policy` | `helpers` — the narrower audience |
+
+The two expiries were the exception until pre-launch hardening: the comparison
+was `if (expiresAt && new Date(expiresAt) <= now)`, and `NaN <= now` is false,
+so an unparseable date fell through to *live*. Unreachable through the API —
+`validateExpiry` refuses one and every stored value goes through
+`toISOString()` — and fixed anyway, because what this decides is whether a
+credential still opens a club full of children, and a row written by a
+migration or a `bin/` script must not be able to revive a lapsed link by being
+malformed. An ABSENT expiry still means "never lapses"; only a present,
+unreadable one is treated as past.
+
 ### The asymmetry between the migration and creation
 
 Migration 063 backfills every existing club to `unlisted`. `createOrganization`

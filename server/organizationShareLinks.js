@@ -167,9 +167,30 @@ export function validateLabel(value, { fallback = DEFAULT_LABEL } = {}) {
 export function linkState(link, now = new Date()) {
   if (!link) return 'missing';
   if (link.revokedAt ?? link.revoked_at) return 'revoked';
+
   const expiresAt = link.expiresAt ?? link.expires_at;
-  if (expiresAt && new Date(expiresAt).getTime() <= now.getTime()) return 'expired';
-  return 'live';
+  /* Absent means "never lapses", which is the default and the flyer-friendly
+     answer. Only a value that is actually there gets compared. */
+  if (!expiresAt) return 'live';
+
+  /**
+   * An expiry nobody can parse reads as EXPIRED, not as live.
+   *
+   * `validateExpiry` refuses an unparseable date before any write and
+   * everything stored goes through `toISOString()`, so this is unreachable
+   * through the API today. It is here because the direction of the failure
+   * matters more than its reachability: this decides whether a CREDENTIAL still
+   * opens a club full of children, and a row written by a migration, a `bin/`
+   * script, or a hand-edited database must not be able to make a lapsed link
+   * work again by being malformed.
+   *
+   * `NaN <= now` is false, which is why the previous shape fell through to
+   * `live` — the wrong way round for exactly this kind of comparison.
+   */
+  const at = new Date(expiresAt).getTime();
+  if (Number.isNaN(at)) return 'expired';
+
+  return at <= now.getTime() ? 'expired' : 'live';
 }
 
 /** True when this link would admit somebody right now. */

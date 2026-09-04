@@ -6,8 +6,12 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
   SOFT_MAX_LIVE_LINKS, createShareLink, liveLinkCount, revokeShareLink, shareLinksFor,
+  linkState, linkIsLive,
 } from './organizationShareLinks.js';
-import { SOFT_MAX_PENDING_INVITATIONS, inviteUser, pendingInvitationCount } from './organizationInvitations.js';
+import {
+  SOFT_MAX_PENDING_INVITATIONS, inviteUser, pendingInvitationCount,
+  invitationState, invitationStands,
+} from './organizationInvitations.js';
 import migration062 from './migrations/062_organization_membership_policy.js';
 import migration063 from './migrations/063_organization_public_identity.js';
 
@@ -276,5 +280,61 @@ describe('the product does not claim a hard cap', () => {
       expect(prose, `${name} should say authorization does not read it`)
         .toMatch(/Nothing in authorization reads it/i);
     }
+  });
+});
+
+/**
+ * The expiry state machine fails CLOSED.
+ *
+ * ── Why this is worth a test when it is unreachable through the API ──
+ *
+ * `validateExpiry` refuses an unparseable date before any write, and everything
+ * stored goes through `toISOString()`. So nothing a request can send produces a
+ * malformed `expires_at`.
+ *
+ * The direction of the failure still matters more than its reachability,
+ * because this decides whether a CREDENTIAL still opens a club full of
+ * children. A row written by a migration, a `bin/` script, or a hand-edited
+ * database must not be able to make a lapsed link work again by being
+ * malformed — and the previous shape did exactly that: `NaN <= now` is false,
+ * so `if (expiresAt && new Date(expiresAt) <= now)` fell through to "live".
+ */
+describe('an unparseable expiry', () => {
+  it('reads as expired on a link, not as live', () => {
+    const now = new Date('2026-09-04T12:00:00.000Z');
+    for (const bad of ['not-a-date', '9999-99-99', 'Infinity', '0000-00-00']) {
+      expect(linkState({ revokedAt: null, expiresAt: bad }, now), bad).toBe('expired');
+      expect(linkIsLive({ revokedAt: null, expiresAt: bad }, now), bad).toBe(false);
+    }
+  });
+
+  it('reads as expired on an invitation, not as pending', () => {
+    const now = new Date('2026-09-04T12:00:00.000Z');
+    for (const bad of ['not-a-date', '9999-99-99']) {
+      expect(invitationState({ status: 'pending', expiresAt: bad }, now), bad).toBe('expired');
+      expect(invitationStands({ status: 'pending', expiresAt: bad }, now), bad).toBe(false);
+    }
+  });
+
+  /**
+   * And an ABSENT expiry still means "never lapses", which is the default and
+   * the reason a printed flyer keeps working.
+   *
+   * Failing closed on a malformed value must not turn into failing closed on no
+   * value — that would silently kill every link a club never put a date on.
+   */
+  it('does not confuse "malformed" with "not set"', () => {
+    const far = new Date('2099-01-01T00:00:00.000Z');
+    for (const absent of [null, undefined, '']) {
+      expect(linkState({ revokedAt: null, expiresAt: absent }, far), String(absent)).toBe('live');
+      expect(invitationState({ status: 'pending', expiresAt: absent }, far), String(absent))
+        .toBe('pending');
+    }
+  });
+
+  /** A revoked link reads as revoked whatever its expiry says. */
+  it('still reports what the manager actually did, first', () => {
+    const now = new Date('2026-09-04T12:00:00.000Z');
+    expect(linkState({ revokedAt: '2026-01-01', expiresAt: 'not-a-date' }, now)).toBe('revoked');
   });
 });
