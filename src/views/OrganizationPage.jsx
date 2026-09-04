@@ -400,6 +400,21 @@ export default function OrganizationPage({ addToast, currentUser }) {
    * joinable and offers the other answer.
    */
   const invitation = viewer.invitation ?? null;
+  /**
+   * Is the invitation banner on screen?
+   *
+   * Derived ONCE, because two places depend on it and they have to agree: the
+   * banner renders on it, and the plate suppresses its own control on it. They
+   * were written as two conditions — `invitation && !viewer.isMember` for the
+   * banner and `!invitation` for the plate — and the pair produced a state with
+   * no control at all: a member still carrying an invitation row got neither
+   * the banner nor the plate's control.
+   *
+   * The server does not send `viewer.invitation` to a member, so that state is
+   * unreachable through it today. It was reachable in a test in one line, which
+   * is the whole argument for deriving this rather than repeating it.
+   */
+  const showingInvitation = Boolean(invitation) && !viewer.isMember;
 
   /**
    * The two secondary actions that are NOT buttons.
@@ -447,22 +462,15 @@ export default function OrganizationPage({ addToast, currentUser }) {
         * button, and naming them would make declining an answer to a classmate
         * rather than to a club.
         *
-        * ── Why Accept appears twice on this page ──
+        * ── This banner is the ONLY place the decision is offered ──
         *
-        * The plate also offers "Join <club>", because an invitation makes the
-        * affordance `join` and the plate renders the affordance. Considered and
-        * kept: giving the banner sole ownership would mean adding an `invited`
-        * affordance to the server's vocabulary for a cosmetic reason, and
-        * removing the plate's control would leave an invited reader's plate with
-        * no primary action at all.
-        *
-        * The redundancy is harmless in a way worth being explicit about — both
-        * controls do the same reversible thing, both are labelled
-        * unambiguously, and neither can do anything the other cannot. What the
-        * banner adds is the Decline, which has no other home, and the reason
-        * the club is suddenly joinable.
+        * The plate suppresses its own control while this is up; the note on
+        * `JoinAction`'s call site carries the measurement that decided it. In
+        * short: an invited reader used to get three tab stops and two primary
+        * buttons for one choice, with Decline between the two Accepts and
+        * nothing saying they were the same act.
         */}
-      {invitation && !viewer.isMember && (
+      {showingInvitation && (
         <section className="org-invitation" aria-labelledby="org-invitation-heading">
           <div className="org-invitation-body stack-sm">
             <h2 id="org-invitation-heading" className="org-invitation-title">
@@ -497,8 +505,10 @@ export default function OrganizationPage({ addToast, currentUser }) {
             </p>
           </div>
           <div className="row row-wrap org-invitation-actions">
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={join}>
-              <Check size={16} aria-hidden="true" /> Accept
+            {/* `btn-lg`, because this is now the page's primary action for this
+                reader — the plate does not draw a second one. */}
+            <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={join}>
+              <Check size={16} aria-hidden="true" /> Accept and join {org.name}
             </button>
             <button type="button" className="btn btn-ghost" disabled={busy} onClick={declineInvitation}>
               Decline
@@ -512,15 +522,53 @@ export default function OrganizationPage({ addToast, currentUser }) {
         charterLead={org.createdAt ? `Since ${new Date(org.createdAt).getFullYear()}` : null}
         action={
           <div className="row row-wrap org-plate-controls">
-            <JoinAction
-              affordance={affordance}
-              organization={org}
-              request={viewer.joinRequest}
-              ban={viewer.ban}
-              busy={busy}
-              onJoin={join}
-              onRequest={() => setRequesting(true)}
-            />
+            {/**
+              * Suppressed while the invitation banner is up, because the banner
+              * owns that decision.
+              *
+              * ── The defect this replaced ──
+              *
+              * An invited reader had THREE tab stops for one choice: "Accept"
+              * (primary) and "Decline" (ghost) in the banner, then "Join
+              * <club>" (primary again) in the plate. Two primary buttons doing
+              * the same thing, with the negative option between them — and
+              * nothing said the third was the first. Measured in a browser: a
+              * screen-reader user heard "Accept, button", "Decline, button",
+              * "Join Community Garden Crew, button" and had no way to tell that
+              * the third was the same act as the first.
+              *
+              * ── Why the banner won rather than the plate ──
+              *
+              * Accept and Decline are one decision and belong together. Moving
+              * Accept to the plate would split the pair across two regions,
+              * leaving a reader who hears "Decline" with no positive
+              * counterpart nearby — worse than the duplication. And Decline
+              * cannot go into the plate's actions menu: making "no" harder to
+              * reach than "yes" is a pressure a thirteen-year-old should not be
+              * under.
+              *
+              * The plate keeps its identity and its note ("You have an
+              * invitation, so you can join now"), which is the state; the
+              * banner, immediately above it, is the action. Once the invitation
+              * is answered the banner goes and the plate resumes drawing the
+              * control for whatever state follows.
+              *
+              * Safe to key on `invitation` alone: `joinAffordance` checks
+              * membership, bans, archived clubs and pending requests BEFORE it
+              * looks at an invitation, so whenever one is present the affordance
+              * is `join` and there is no other state being hidden.
+              */}
+            {!showingInvitation && (
+              <JoinAction
+                affordance={affordance}
+                organization={org}
+                request={viewer.joinRequest}
+                ban={viewer.ban}
+                busy={busy}
+                onJoin={join}
+                onRequest={() => setRequesting(true)}
+              />
+            )}
 
             {/* Share sits beside the primary action rather than in the menu:
                 handing the club's address to somebody is the second most common

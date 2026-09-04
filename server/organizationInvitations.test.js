@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import {
-  INVITATION_STATUSES, INVITATION_TTL_MS, MAX_PENDING_INVITATIONS, NOTE_MAX,
+  INVITATION_STATUSES, INVITATION_TTL_MS, SOFT_MAX_PENDING_INVITATIONS, NOTE_MAX,
   invitationState, invitationStands, invitationFor, pendingInvitationFor,
   pendingInvitations, pendingInvitationCount, inviteUser, resolveInvitation,
   acceptInvitationOnJoin, expireLapsedInvitations, invitableUser,
@@ -100,7 +100,7 @@ describe('the vocabulary', () => {
 
   it('bounds the note and the outstanding list', () => {
     expect(NOTE_MAX).toBe(300);
-    expect(MAX_PENDING_INVITATIONS).toBe(100);
+    expect(SOFT_MAX_PENDING_INVITATIONS).toBe(100);
   });
 });
 
@@ -215,7 +215,7 @@ describe('inviting somebody', () => {
        schema is right to enforce it — an invitation naming nobody would be an
        invitation nobody can accept. Written directly rather than through
        `inviteUser`, because the COUNT is what is under test. */
-    for (let i = 0; i < MAX_PENDING_INVITATIONS; i += 1) {
+    for (let i = 0; i < SOFT_MAX_PENDING_INVITATIONS; i += 1) {
       await db.prepare('INSERT INTO users (id, name) VALUES (?, ?)')
         .run(`bulk-user-${i}`, `Bulk Student ${i}`);
       await db.prepare(`

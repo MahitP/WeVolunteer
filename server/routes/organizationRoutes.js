@@ -32,7 +32,7 @@ import {
   createShareLink, revokeShareLink, rotateShareLink, renameShareLink, setShareLinkExpiry,
   shareLinksFor, shareLinkById, primaryShareLink, liveLinkCount, recordShareLinkUse,
   resolveShareToken, openingLinkId, shareLinkPath, linkState, linkIsLive,
-  validateLabel, MAX_LIVE_LINKS,
+  validateLabel, SOFT_MAX_LIVE_LINKS,
 } from '../organizationShareLinks.js';
 import {
   inviteUser, resolveInvitation, pendingInvitationFor, pendingInvitations,
@@ -2024,7 +2024,7 @@ router.get('/api/organizations/:key/share-links', authenticateToken, requireCap(
       links: primary ? [shareLinkView(primary, { forManager: false, now })] : [],
       canManage: false,
       canCreate: false,
-      maxLinks: MAX_LIVE_LINKS,
+      maxLinks: SOFT_MAX_LIVE_LINKS,
     });
   }
 
@@ -2036,8 +2036,8 @@ router.get('/api/organizations/:key/share-links', authenticateToken, requireCap(
   res.json({
     links: [...live, ...retired].map(link => shareLinkView(link, { forManager: true, now })),
     canManage: true,
-    canCreate: live.length < MAX_LIVE_LINKS,
-    maxLinks: MAX_LIVE_LINKS,
+    canCreate: live.length < SOFT_MAX_LIVE_LINKS,
+    maxLinks: SOFT_MAX_LIVE_LINKS,
   });
 });
 
@@ -2093,9 +2093,9 @@ router.post('/api/organizations/:key/share-links', authenticateToken, requireCap
   const expiry = validateExpiry(req.body?.expiresAt);
   if (!expiry.ok) return res.status(400).json({ error: expiry.error, field: expiry.field });
 
-  if (await liveLinkCount(db, row.id) >= MAX_LIVE_LINKS) {
+  if (await liveLinkCount(db, row.id) >= SOFT_MAX_LIVE_LINKS) {
     return res.status(409).json({
-      error: `This organization already has ${MAX_LIVE_LINKS} working invitation links. `
+      error: `This organization already has ${SOFT_MAX_LIVE_LINKS} working invitation links. `
         + 'Switch one off before making another.',
       code: 'too_many_links',
     });

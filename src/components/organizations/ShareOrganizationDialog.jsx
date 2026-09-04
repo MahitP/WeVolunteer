@@ -138,6 +138,9 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
           links: res.links ?? [],
           canManage: Boolean(res.canManage),
           canCreate: Boolean(res.canCreate),
+          /* The server's own number, so the sentence cannot disagree with the
+             rule that produced it. */
+          maxLinks: res.maxLinks,
           error: '',
         });
       })
@@ -421,10 +424,14 @@ export default function ShareOrganizationDialog({ orgKey, organization, policy, 
             >
               <Plus size={15} aria-hidden="true" /> New link
             </button>
+            {/* Says what is true rather than "as many as it can have" — the
+                ceiling is a product sanity limit the server applies, not a
+                database constraint, and copy that describes it as a hard cap is
+                copy that will be wrong the day the number changes. */}
             {!state.canCreate && (
               <p className="muted small" id="org-share-cap">
-                This organization has as many working links as it can have. Switch one off to make
-                another.
+                This organization already has {state.maxLinks ?? 10} working invitation links.
+                Switch one off to make another.
               </p>
             )}
           </div>

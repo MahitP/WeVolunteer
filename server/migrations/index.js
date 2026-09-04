@@ -72,6 +72,7 @@ import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
 import organizationMembershipPolicy from './062_organization_membership_policy.js';
 import organizationPublicIdentity from './063_organization_public_identity.js';
+import resyncGuardianScopeHash from './064_resync_guardian_scope_hash.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -427,7 +428,20 @@ export const MIGRATIONS = [
    * references that table, so §8.3's child-row guards do not apply, and the copy
    * is row-counted regardless.
    */
-  organizationPublicIdentity
+  organizationPublicIdentity,
+
+  /**
+   * Clears the one published Privacy Policy row nobody has accepted, so the
+   * boot does not refuse the re-scoped guardian bullet.
+   *
+   * Order does not matter against the organization migrations — it touches
+   * `legal_documents` and nothing else — but it MUST run before
+   * `syncLegalDocuments`, which the boot sequence guarantees by running the
+   * migration runner first. Third of its kind after 054 and 061; each one
+   * reconciles the edit its own commit made, which is what keeps the pair
+   * auditable.
+   */
+  resyncGuardianScopeHash
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

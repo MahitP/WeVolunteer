@@ -779,7 +779,49 @@ switched off wholesale.
 There is deliberately no feature flag — it would be a fourth thing to wire
 through every new route, and these statements are a better answer.
 
-## 13. What was considered and refused
+## 13. The two soft limits, and why they stay soft
+
+`SOFT_MAX_LIVE_LINKS` (10) and `SOFT_MAX_PENDING_INVITATIONS` (100) are checked
+with a read followed by a write, so a concurrent burst can overshoot. Reviewed
+deliberately at pre-launch hardening; advisory is the correct design, on four
+grounds, each asserted in `organizations.softLimits.test.js`:
+
+**1. Nothing in authorization reads either.** Who may create a link or send an
+invitation is `requireCap('organization.manage.own')` and `canManage`. Neither
+consults a count, so no security decision changes when a count is wrong.
+
+**2. Overshoot is bounded and self-correcting.** Measured rather than reasoned
+about: an eight-way burst against a club holding nine produced **seventeen**
+live links, and the very next attempt refused every one. Each attempt re-reads,
+so a burst of N overshoots by at most N and the breach does not compound.
+
+**3. The bounds that matter are enforced properly, elsewhere.**
+
+| Question the ceiling looks like it answers | What actually answers it |
+|---|---|
+| Can a manager spam one person with invitations? | `idx_org_invitations_live` — a partial UNIQUE index. One pending invitation per person per club, enforced by the **database** |
+| Can they ask again after a no? | The decline-is-final rule in `inviteUser` |
+| Can they blast a hundred people quickly? | `joinAttemptLimiter` — 20 per 15 minutes, keyed on the **account** |
+| Can they mint links without bound? | `apiLimiter`, plus the ceiling itself: sustained creation requires sustained revocation, because the check re-reads |
+
+**4. Exceeding either crosses no privilege boundary.** The actor is a manager of
+that club, who can already hand the club's one link to any number of people. A
+club briefly holding seventeen links it can see and revoke is not a state an
+attacker gains anything from creating.
+
+Hard enforcement would mean a lock held across a write, or a counter column with
+its own drift problem. Neither is worth paying for the above — and the rule the
+brief sets is the right one: do not harden merely because hard limits sound
+safer.
+
+**What was fixed instead.** The names now carry a `SOFT_` prefix, so a reader of
+`if (count >= SOFT_MAX_LIVE_LINKS)` asks the right question about concurrency
+rather than assuming the database is holding the line. Both constants state that
+authorization does not read them. And the manager-facing copy stopped claiming a
+constraint: "This organization has as many working links as it can have" became
+the number the server actually applied.
+
+## 14. What was considered and refused
 
 Recorded so the next person does not have to re-derive it.
 

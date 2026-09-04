@@ -81,8 +81,43 @@ export const INVITATION_STATUSES = Object.freeze([
  */
 export const INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-/** How many invitations one club may have outstanding at once. */
-export const MAX_PENDING_INVITATIONS = 100;
+/**
+ * How many invitations one club may have outstanding at once — a PRODUCT SANITY
+ * LIMIT, and the name says so.
+ *
+ * ── Reviewed as an abuse vector, because it is the one that looks like one ──
+ *
+ * An invitation reaches into another person's notifications and the recipients
+ * are minors, so "unlimited pending invitations" is a fair thing to worry about.
+ * The worry is answered by three mechanisms, none of which is this number:
+ *
+ *   - `idx_org_invitations_live`, a partial UNIQUE index over
+ *     `(organization_id, invited_user_id) WHERE status = 'pending'`. One
+ *     pending invitation per person per club, enforced by the DATABASE. This is
+ *     the control that makes repeat-invitation impossible.
+ *   - The decline-is-final rule in `inviteUser`. A person who says no cannot be
+ *     asked again by that club, so decline-invite-decline is not a loop.
+ *   - `joinAttemptLimiter` on the route: 20 per 15 minutes, keyed on the
+ *     ACCOUNT. Reaching a hundred distinct recipients therefore takes over an
+ *     hour of sustained effort, and the index means they must be a hundred
+ *     DIFFERENT people.
+ *
+ * So the spam bound is the rate limiter and the index, both of which hold under
+ * concurrency. This number bounds the length of a manager's own outstanding
+ * list, which is a usability property.
+ *
+ * ── Why advisory is correct ──
+ *
+ * Nothing in authorization reads it. Overshoot is bounded by in-flight request
+ * count and self-corrects on the next attempt, because the check re-reads — and
+ * in-flight count here is itself capped at 20 per window by the limiter. Hard
+ * enforcement would mean a lock or a counter column, paid to prevent a list
+ * being briefly longer than a hundred.
+ *
+ * `organizations.softLimits.test.js` pins this, including that no database
+ * constraint claims to enforce it.
+ */
+export const SOFT_MAX_PENDING_INVITATIONS = 100;
 
 /**
  * How long the optional note may be — the same bound a join request's note has,
@@ -234,7 +269,7 @@ export async function inviteUser(db, organizationId, invitedUserId, {
   if (invitationStands(previous, now)) return { ok: false, reason: 'pending' };
   if (previous?.status === 'declined') return { ok: false, reason: 'declined' };
 
-  if (await pendingInvitationCount(db, organizationId) >= MAX_PENDING_INVITATIONS) {
+  if (await pendingInvitationCount(db, organizationId) >= SOFT_MAX_PENDING_INVITATIONS) {
     return { ok: false, reason: 'full' };
   }
 

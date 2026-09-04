@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import OrganizationPage from './OrganizationPage';
 import { api } from '../utils/api';
@@ -214,6 +214,138 @@ describe('the primary action', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Join Chess Club$/ }));
     await waitFor(() => expect(api.joinOrganizationWithInvite).toHaveBeenCalledWith('chess-club', token));
   });
+
+/**
+ * A reader who has been invited by name is offered the decision ONCE.
+ *
+ * ── The defect these pin ──
+ *
+ * The banner drew "Accept" (primary) and "Decline" (ghost), and the plate then
+ * drew "Join <club>" (primary again) — because an invitation makes the
+ * affordance `join` and the plate renders the affordance. Three tab stops and
+ * two primary buttons for one choice, with the negative option sitting between
+ * the two positives, and nothing to tell a screen-reader user that the third
+ * control was the same act as the first. Measured in a browser before the fix:
+ * "Accept, button", "Decline, button", "Join Community Garden Crew, button".
+ */
+describe('the invitation banner', () => {
+  const invited = (over = {}) => show({
+    viewer: {
+      affordance: 'join',
+      joinPolicy: 'invite',
+      invitation: {
+        id: 'oinv-1',
+        message: 'We could use your help on Thursdays.',
+        expiresAt: '2026-09-18T09:00:00.000Z',
+      },
+      ...over,
+    },
+    organization: { joinPolicy: 'invite' },
+  });
+
+  it('says who invited the reader in, and shows the note and the date', async () => {
+    await invited();
+    expect(screen.getByRole('heading', { name: /You have been invited to join Chess Club/ }))
+      .toBeInTheDocument();
+    expect(screen.getByText('We could use your help on Thursdays.')).toBeInTheDocument();
+    expect(screen.getByText(/This invitation is open until/)).toBeInTheDocument();
+  });
+
+  /**
+   * ONE control that accepts, and it is the banner's.
+   *
+   * Counted rather than asserted by name, because the failure was two controls
+   * with two different names doing one thing — a name-based assertion would
+   * have passed throughout.
+   */
+  it('offers exactly one way to accept', async () => {
+    await invited();
+
+    const accepting = screen.getAllByRole('button')
+      .filter(b => /accept|^join /i.test(b.textContent.trim()));
+    expect(
+      accepting.map(b => b.textContent.trim()),
+      'an invited reader should have one control that accepts, not two',
+    ).toHaveLength(1);
+  });
+
+  it('does not draw a second primary in the plate', async () => {
+    const { container } = await invited();
+
+    const primaries = [...container.querySelectorAll('.btn-primary')]
+      .map(b => b.textContent.trim());
+    expect(primaries).toEqual(['Accept and join Chess Club']);
+    /* The plate keeps its explanation, which is the state rather than the
+       action. */
+    expect(screen.getByText('You have an invitation, so you can join now.')).toBeInTheDocument();
+  });
+
+  /** Accept and Decline are one decision and stay in one region. */
+  it('keeps Accept and Decline together, with Accept the louder of the two', async () => {
+    const { container } = await invited();
+    const banner = container.querySelector('.org-invitation');
+
+    const accept = within(banner).getByRole('button', { name: /Accept and join Chess Club/ });
+    const decline = within(banner).getByRole('button', { name: /^Decline$/ });
+    expect(accept.className).toMatch(/btn-primary/);
+    expect(decline.className).toMatch(/btn-ghost/);
+    /* Accept first in the DOM, so it is first in the tab order too. */
+    expect(accept.compareDocumentPosition(decline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('accepts through the ordinary join, carrying no token', async () => {
+    await invited();
+    fireEvent.click(screen.getByRole('button', { name: /Accept and join Chess Club/ }));
+    /* No token: an invitation is server-side state named after this reader, so
+       there is nothing for the client to present. */
+    await waitFor(() => expect(api.joinOrganizationWithInvite)
+      .toHaveBeenCalledWith('chess-club', undefined));
+  });
+
+  it('says what declining costs before the press', async () => {
+    await invited();
+    expect(screen.getByText(/cannot invite you again/)).toBeInTheDocument();
+  });
+
+  it('declines without a confirmation, because nothing is being taken away', async () => {
+    await invited();
+    fireEvent.click(screen.getByRole('button', { name: /^Decline$/ }));
+    await waitFor(() => expect(api.declineOrganizationInvitation).toHaveBeenCalledWith('chess-club'));
+  });
+
+  /**
+   * And the plate resumes owning the control once there is no banner.
+   *
+   * Suppressing it unconditionally would have left every other reader without a
+   * primary action, so this is the assertion that the suppression is scoped to
+   * the one state that needs it.
+   */
+  it('gives the plate its control back when there is no invitation', async () => {
+    await show({
+      viewer: { affordance: 'invite_required', joinPolicy: 'invite' },
+      organization: { joinPolicy: 'invite' },
+    });
+    expect(screen.queryByRole('heading', { name: /You have been invited/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Invitation required/ })).toBeInTheDocument();
+  });
+
+  /**
+   * A member carrying an invitation row gets the member state, not nothing.
+   *
+   * This found a real bug. The banner rendered on
+   * `invitation && !viewer.isMember` and the plate suppressed its control on
+   * `!invitation` — two conditions for one question, and the pair left this
+   * reader with no control at all. The server does not send
+   * `viewer.invitation` to a member, so it was unreachable through the API and
+   * reachable here in one line, which is why both now read the same derived
+   * boolean.
+   */
+  it('is absent for a member, and the plate still shows their state', async () => {
+    await invited({ isMember: true, affordance: 'member' });
+    expect(screen.queryByRole('heading', { name: /You have been invited/ })).not.toBeInTheDocument();
+    expect(screen.getByText('You are a member')).toBeInTheDocument();
+  });
+});
 
   it('does not offer another club’s link on this club', async () => {
     rememberPendingInvite({ slug: 'robotics', token: 'c'.repeat(64) });

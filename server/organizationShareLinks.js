@@ -47,8 +47,9 @@
  * therefore has a LABEL and its own life, and revoking one leaves the rest
  * alone.
  *
- * `MAX_LIVE_LINKS` bounds the set, because a club with forty live links has lost
- * the property that makes revoking one of them meaningful.
+ * `SOFT_MAX_LIVE_LINKS` bounds the set, because a club with forty live links has
+ * lost the property that makes revoking one of them meaningful. It is a product
+ * sanity limit and not a security boundary — see the constant.
  *
  * ── What is counted, and what deliberately is not ──
  *
@@ -91,25 +92,47 @@ const newToken = () => crypto.randomBytes(32).toString('hex');
 const TOKEN_SHAPE = /^[0-9a-f]{64}$/;
 
 /**
- * How many live links one club may hold.
+ * How many live links one club may hold — a PRODUCT SANITY LIMIT.
  *
- * Not a resource limit — the rows are tiny. It is a usability limit: the reason
- * to have several links is to be able to retire one of them knowingly, and a
- * list of forty is a list nobody reads before pressing Revoke. Ten covers every
- * real case the brief names (general, flyer, Instagram, event booth) four times
- * over. Revoked links do not count against it; they are history.
+ * ── This is not a security boundary, and the name says so ──
  *
- * ── It is advisory, and that is the right trade ──
+ * Nothing in authorization reads it. The gates that decide who may create,
+ * rename, revoke or regenerate a link are `requireCap('organization.manage.own')`
+ * and `canManage`, and they are unaffected by how many links exist. Exceeding
+ * this number crosses no privilege boundary: the actor is a manager of that
+ * club, who could hand the club's one link to any number of people anyway.
  *
- * The route counts before it inserts, and those are two statements: two managers
- * creating a link at nine could both pass and leave eleven. There is no
- * constraint that would fix it — "at most ten rows where revoked_at IS NULL" is
- * not expressible as a unique index — so the alternative is a lock held across
- * a write for a limit whose entire purpose is that a list stays readable. A club
- * that briefly has eleven links is not a problem anybody experiences; a lock on
- * this path would be.
+ * What it is for: the reason to have several links is to be able to retire one
+ * of them knowingly, and a list of forty is a list nobody reads before pressing
+ * Revoke. Ten covers every real case the brief names — general, flyer,
+ * Instagram, event booth — four times over. Revoked links do not count against
+ * it; they are history.
+ *
+ * ── Why advisory is the correct design, not merely the existing one ──
+ *
+ * The route counts before it inserts, so a concurrent burst can overshoot. That
+ * was measured rather than reasoned about: an eight-way burst against a club
+ * holding nine produced seventeen live links, and the very next attempt refused
+ * every one. So the overshoot is **bounded by in-flight request count and
+ * self-corrects**, never unbounded — because each attempt re-reads.
+ *
+ * "At most ten rows where `revoked_at IS NULL`" is not expressible as a unique
+ * index on either engine, so hard enforcement means a lock held across a write,
+ * or a counter column with its own drift problem. Both are real costs paid to
+ * prevent a club briefly holding seventeen links it can see and revoke — which
+ * is not a problem anybody experiences, and not one an attacker gains anything
+ * from creating.
+ *
+ * The bounds that ARE security-relevant sit elsewhere and are enforced properly:
+ * the capability and ownership checks above, and `apiLimiter` on the route.
+ * Sustained creation past the ceiling also requires sustained REVOCATION, since
+ * the check re-reads — so the ceiling bounds the live set even while permitting
+ * churn.
+ *
+ * `organizations.softLimits.test.js` pins all of that, including that no
+ * database constraint claims to enforce it.
  */
-export const MAX_LIVE_LINKS = 10;
+export const SOFT_MAX_LIVE_LINKS = 10;
 
 /** How long a label may be. Long enough for "Autumn open-day flyer". */
 export const LABEL_MAX = 40;
