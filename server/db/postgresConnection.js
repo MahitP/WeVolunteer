@@ -30,6 +30,51 @@
  */
 import pg from 'pg';
 
+/** OpenSSL's ways of saying "I cannot verify who this server is". */
+const TLS_TRUST_CODES = new Set([
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_UNTRUSTED',
+]);
+
+/**
+ * A TLS trust failure, explained. Anything else is returned untouched.
+ *
+ * A managed database whose root is not in Node's trust store — Supabase's is
+ * self-signed and is not — fails every connection with
+ * `SELF_SIGNED_CERT_IN_CHAIN` from inside a pool callback. On the first real
+ * production boot that arrived as a stack trace through four files, none of
+ * which names a setting, and it reads as "the database is broken" when it means
+ * "one environment variable is missing".
+ *
+ * Explained here rather than refused in `postgresConfig`, because a missing CA
+ * is only a defect for SOME providers: one presenting a certificate from a
+ * public authority verifies against Node's own store and needs no
+ * `DATABASE_SSL_CA` at all. Refusing on the configuration would break that
+ * perfectly good deployment to help this one. The error is the only thing that
+ * knows which case it is.
+ *
+ * The original is kept as `cause`, and `rejectUnauthorized` is never touched:
+ * this makes the failure legible, never permissible.
+ */
+export function explainTlsFailure(err) {
+  if (!TLS_TRUST_CODES.has(err?.code)) return err;
+  return new Error(
+    `Could not verify the database server's TLS certificate (${err.code}).\n`
+    + '  The server presented a chain Node does not trust. A managed provider\n'
+    + '  often uses its own root — Supabase does, and it is self-signed, so it\n'
+    + '  has to be supplied explicitly:\n'
+    + '\n'
+    + '    DATABASE_SSL_CA=deploy/certs/supabase-root-2021.crt\n'
+    + '\n'
+    + '  A path relative to the repository root, an absolute path, or the PEM\n'
+    + '  inline all work. Verification stays on either way.',
+    { cause: err },
+  );
+}
+
 const { Pool, types } = pg;
 
 /**
@@ -275,6 +320,35 @@ export class PostgresDatabase extends PostgresExecutorBase {
     pool.on('error', (err) => {
       console.error('[db] idle PostgreSQL client error (client discarded):', err.message);
     });
+
+    /**
+     * A TLS failure, explained where it happens rather than left as OpenSSL's.
+     *
+     * A managed database whose root is not in Node's trust store — Supabase's
+     * is self-signed and is not — fails every connection with
+     * `SELF_SIGNED_CERT_IN_CHAIN`, thrown from inside a pool callback. On the
+     * first real production boot that arrived as a stack trace through four
+     * files, none of which names a setting, and it reads as "the database is
+     * broken" when it means "one environment variable is missing".
+     *
+     * Wrapped here rather than refused in `postgresConfig`, because a missing
+     * CA is only a defect for SOME providers: one presenting a certificate from
+     * a public authority verifies against Node's own store and needs no
+     * `DATABASE_SSL_CA` at all. Refusing on the configuration would have broken
+     * that perfectly good deployment to help this one. The error itself is the
+     * only place that knows which case this is.
+     *
+     * The original error is kept as `cause`, and `rejectUnauthorized` is not
+     * touched: this makes the failure legible, never permissible.
+     */
+    const connect = pool.connect.bind(pool);
+    pool.connect = async (...args) => {
+      try {
+        return await connect(...args);
+      } catch (err) {
+        throw explainTlsFailure(err);
+      }
+    };
 
     super(pool, translate);
     this.#pool = pool;

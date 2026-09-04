@@ -1,4 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** The repository root, so a relative CA path does not depend on the cwd. */
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
  * Which database engine this process uses.
@@ -249,7 +254,35 @@ export function postgresConfig(env = process.env) {
   let ca;
   const caSource = env.DATABASE_SSL_CA;
   if (!sslDisabled && caSource) {
-    ca = caSource.includes('BEGIN CERTIFICATE') ? caSource : readFileSync(caSource, 'utf8');
+    if (caSource.includes('BEGIN CERTIFICATE')) {
+      ca = caSource;
+    } else {
+      /**
+       * A relative path is resolved against the REPOSITORY, not the cwd.
+       *
+       * `.env.example` and the deployment template both write
+       * `deploy/certs/supabase-root-2021.crt`, which resolves under systemd
+       * (`WorkingDirectory=/srv/wevolunteer`) and does not resolve under
+       * `npm start --prefix server`, where the cwd is `server/`. Same string,
+       * same repository, two different answers — and the failure is a file-not-
+       * found at boot rather than anything that names the cause.
+       */
+      const resolved = path.isAbsolute(caSource)
+        ? caSource
+        : [path.resolve(process.cwd(), caSource), path.resolve(ROOT, caSource)].find(existsSync)
+          ?? path.resolve(ROOT, caSource);
+
+      if (!existsSync(resolved)) {
+        throw new Error(
+          `FATAL: DATABASE_SSL_CA points at a file that does not exist.\n`
+          + `       Given:    ${caSource}\n`
+          + `       Resolved: ${resolved}\n`
+          + '       Supply an absolute path, a path relative to the repository root,\n'
+          + '       or the certificate PEM inline.'
+        );
+      }
+      ca = readFileSync(resolved, 'utf8');
+    }
   }
 
   /**
