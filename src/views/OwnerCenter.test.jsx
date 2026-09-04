@@ -122,6 +122,59 @@ describe('the headline verdict', () => {
     expect(await screen.findByText(/All systems operational/i)).toBeInTheDocument();
   });
 
+  /**
+   * The false green this page fixed one level down, gathered into the headline.
+   *
+   * "Not configured" and "All paused" are muted because neither is a fault, and
+   * the verdict counted only danger and warn — so a deployment with no backups
+   * and every monitor paused read "All systems operational". Two of the systems
+   * were not operational; they were not running. Found against the real account
+   * at launch, where both were true at once.
+   */
+  it('does not claim ALL systems are operational when some are not running', async () => {
+    stubApi({
+      h: health({ backup: { status: 'unconfigured' } }),
+      m: monitoring({
+        monitors: {
+          state: 'ok',
+          monitors: [{ id: '1', name: 'API', url: 'https://x.test', status: 'paused', paused: true }],
+          up: 0, down: 0, paused: 1,
+        },
+      }),
+    });
+    renderOwner();
+
+    const verdict = await screen.findByRole('status');
+    expect(verdict).toHaveTextContent(/Operational · 2 inactive/i);
+    expect(verdict).not.toHaveTextContent(/All systems operational/i);
+  });
+
+  /**
+   * Not promoted to a warning, on purpose: a dashboard that is permanently
+   * yellow for a deliberate choice is one people stop reading.
+   */
+  it('keeps an inactive system green rather than crying wolf', async () => {
+    stubApi({ h: health({ backup: { status: 'unconfigured' } }) });
+    renderOwner();
+
+    const verdict = await screen.findByRole('status');
+    expect(verdict).toHaveTextContent(/Operational · 1 inactive/i);
+    expect(verdict.className).toMatch(/tone-ok/);
+    expect(verdict).not.toHaveTextContent(/needs attention/i);
+  });
+
+  /* A real failure still outranks an inactive one. */
+  it('reports attention ahead of inactivity when both are true', async () => {
+    stubApi({
+      h: health({ backup: { status: 'unconfigured' }, database: { state: 'unavailable' } }),
+    });
+    renderOwner();
+
+    const verdict = await screen.findByRole('status');
+    expect(verdict).toHaveTextContent(/needs attention/i);
+    expect(verdict).not.toHaveTextContent(/inactive/i);
+  });
+
   it('counts what needs attention rather than declaring it', async () => {
     stubApi({
       h: health({ database: { state: 'error' }, backup: { status: 'stale', ageHours: 90, count: 1 } }),
@@ -210,13 +263,21 @@ describe('the systems grid', () => {
       i: infrastructure({ redis: { state: 'not_configured', configureWith: 'SOME_VARS' } }),
     });
     renderOwner();
-    await screen.findByText(/All systems operational/i);
+    /* Waits on the row this case is about, not on the headline: the verdict
+       now reads "Operational · 1 inactive" for exactly this scenario, and a
+       wait on the old wording would make the case fail for a reason that has
+       nothing to do with what it asserts. */
+    /* Scoped to the Redis row: more than one system can read "Not configured"
+       at once, so a bare text wait is ambiguous. */
+    await waitFor(() => expect(within(systemRow('Redis')).getByText('Not configured')).toBeInTheDocument());
 
     /* The pilot runs without Upstash and every caller has an in-process
        fallback. A dashboard that shows red for a supported configuration
        teaches its reader to ignore red. */
     expect(within(systemRow('Redis')).getByText('Not configured')).toBeInTheDocument();
     expect(screen.queryByText(/systems need attention/i)).toBeNull();
+    /* Neutral, and specifically still GREEN — the point of the case. */
+    expect(screen.getByRole('status').className).toMatch(/tone-ok/);
   });
 
   /**

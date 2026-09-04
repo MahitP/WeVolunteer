@@ -167,9 +167,21 @@
   --brand-soft: var(--brand-soft-light);
   --brand-background: var(--brand-background-light);
   --brand-translucent-soft: rgba(15, 107, 69, 0.1);
-  --brand-panel-bg: var(--brand-primary);
+  --brand-panel-bg: var(--brand-surface);
   --brand-panel-border: transparent;
   --brand: var(--brand-primary);
+  /**
+   * The brand green when it is a SURFACE carrying `--ink-inv`, as distinct from
+   * `--brand`, which is the same colour used as ink, a border or an accent.
+   *
+   * Light mode does not need the split — `--brand` is `#0f6b45`, which is
+   * 6.54:1 against white — so these alias straight through and nothing here
+   * changes. The split exists for dark mode, where the two roles genuinely
+   * conflict: see the note beside the dark values.
+   */
+  --brand-surface: var(--brand);
+  --brand-surface-hover: var(--brand-hover);
+  --brand-surface-active: var(--brand-active);
   --brand-tint: var(--brand-soft);
   --brand-tint-2: var(--brand-background);
   --brand-ink: var(--green-800);
@@ -381,13 +393,19 @@
   --ink-3: var(--text-muted);
   --ink-inv: #ffffff;
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
-     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
-     dashboard card that tells somebody when their next shift is. 0.8 gives
-     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
-     alpha over a coloured surface is exactly where a muted token stops being
-     readable without anybody noticing. */
-  --ink-inv-3: rgba(255, 255, 255, 0.8);
+  /* 0.85 in dark mode, and the reason is a correction worth recording.
+
+     This token was 0.8, with a note reasoning about `--brand-panel-bg` at
+     #0f6b45 — but that is the LIGHT value. In dark mode `--brand-panel-bg`
+     resolved through `--brand-primary-dark`, so the surface was really #2fa873
+     and 0.8 composited to 2.46:1, not the 4.81:1 the note claimed. The
+     arithmetic was right and the colour it was performed against was wrong,
+     which is the failure a measured comment is supposed to prevent.
+
+     With `--brand-surface` now #19764e (see the brand tokens below), 0.85 gives
+     4.52:1 and stays visibly secondary to `--ink-inv`. Light mode keeps 0.8 on
+     #0f6b45, where the original 4.81:1 measurement does hold. */
+  --ink-inv-3: rgba(255, 255, 255, 0.85);
 
   --border: rgba(199, 208, 203, 0.13);
   --border-hover: rgba(199, 208, 203, 0.24);
@@ -400,9 +418,39 @@
   --brand-soft: var(--brand-soft-dark);
   --brand-background: var(--brand-background-dark);
   --brand-translucent-soft: rgba(47, 191, 131, 0.14);
-  --brand-panel-bg: var(--brand-primary);
+  --brand-panel-bg: var(--brand-surface);
   --brand-panel-border: transparent;
   --brand: var(--brand-primary);
+  /**
+   * Dark mode is where `--brand` as ink and `--brand` as surface stop agreeing.
+   *
+   * `--brand-primary-dark` (#2fa873) is chosen to be READABLE ON a dark page —
+   * it is right for a link, an icon or a chip, and a darker green there would
+   * disappear. Used as a SURFACE under white text it is 3.01:1, against the
+   * 4.5:1 body-text requirement. Every `.btn-primary` in the product was that,
+   * in all three states, and none of it was caught: the route sweep runs in
+   * light mode, where `--brand` is #0f6b45 and passes at 6.54:1.
+   *
+   *   base   #2fa873  3.01:1
+   *   hover  #7de2b8  1.56:1   ← the worst of the three, and invisible in review
+   *   active #21a36f  3.21:1
+   *
+   * So the surface roles get their own values, and `--brand` keeps the lighter
+   * green for the ink/accent job it was picked for. The values below are solved
+   * rather than eyeballed, against four constraints at once: white text >= 4.5:1
+   * (1.4.3), the button's edge >= 3:1 against BOTH the page (#0d100f) and a card
+   * (#171c19) (1.4.11), and hover/active staying visibly distinct from base.
+   *
+   *   base   #19764e  white 5.61:1   edge 3.41 / 3.08
+   *   hover  #1e8459  white 4.67:1   lighter than base, as dark-mode hover reads
+   *   active #15653f  white 7.08:1   darker, as a press reads
+   *
+   * No single green satisfies all four — the search returns empty — which is
+   * why this is a three-value split and not one darker token.
+   */
+  --brand-surface: #19764e;
+  --brand-surface-hover: #1e8459;
+  --brand-surface-active: #15653f;
   --brand-tint: var(--brand-soft);
   --brand-tint-2: var(--brand-background);
   --brand-ink: var(--green-dark-300);
@@ -1008,13 +1056,16 @@ time { font-variant-numeric: tabular-nums; }
   cursor: not-allowed;
 }
 
+/* `--brand-surface`, not `--brand`: this is the brand green carrying white text,
+   which is a different contrast problem from the same green used as ink. In
+   light mode the two are the same value. See the tokens. */
 .btn-primary {
-  background: var(--brand);
+  background: var(--brand-surface);
   color: var(--ink-inv);
   box-shadow: var(--sh-1);
 }
-.btn-primary:not(:disabled):hover { background: var(--brand-hover); }
-.btn-primary:not(:disabled):active { background: var(--brand-active); }
+.btn-primary:not(:disabled):hover { background: var(--brand-surface-hover); }
+.btn-primary:not(:disabled):active { background: var(--brand-surface-active); }
 
 .btn-secondary {
   background: var(--surface-elevated);
@@ -1026,6 +1077,28 @@ time { font-variant-numeric: tabular-nums; }
   background: var(--surface-hover);
   border-color: var(--input-border-hover);
 }
+
+/**
+ * The focus ring, restated for buttons that paint their own shadow.
+ *
+ * `:focus-visible { box-shadow: var(--focus) }` near the top of this file is
+ * (0,1,0). So is `.btn-primary { box-shadow: var(--sh-1) }` — and it comes
+ * later, so on every raised button the resting shadow won and the focus ring
+ * was never painted. `:focus-visible` matched, the token resolved, and nothing
+ * appeared: a 2.4.7 failure on the primary and secondary buttons across the
+ * product, keyboard-only, in both themes.
+ *
+ * `focusIndicators.test.js` could not see it. That guard asserts no rule zeroes
+ * an outline and its replacement together, which is a different mistake; here
+ * every declaration is individually correct and the cascade eats the result —
+ * exactly the shape that file's own header warns about.
+ *
+ * `.btn:focus-visible` is (0,2,0), so it beats any single-class shadow whatever
+ * the source order, and it restates rather than replaces: the ring is still
+ * `--focus`, and the forced-colors block still puts a real outline back for
+ * High Contrast Mode.
+ */
+.btn:focus-visible { box-shadow: var(--focus); }
 
 .btn-ghost { background: transparent; color: var(--ink-2); }
 .btn-ghost:not(:disabled):hover { background: var(--surface-3); color: var(--ink); }

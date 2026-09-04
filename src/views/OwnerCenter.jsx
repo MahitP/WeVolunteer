@@ -114,6 +114,22 @@ export default function OwnerCenter() {
     [health.data, monitoring.data, infrastructure.data],
   );
   const needAttention = services.filter(s => s.tone === 'danger' || s.tone === 'warn');
+  /**
+   * Systems that are not failing and are also not running.
+   *
+   * "Not configured" and "All paused" are `muted` because neither is a fault,
+   * and the per-row copy already says so. The headline was a different claim
+   * though: it counted only danger and warn, so a deployment with no backups
+   * and every monitor paused still read "All systems operational" — the same
+   * false green as the "Operational · 0 up" this page already fixed one level
+   * down, just gathered up into the one line an owner actually glances at.
+   *
+   * They are NOT promoted to a warning. A dashboard that is permanently yellow
+   * for a deliberate choice is how a reader learns to stop looking, which is
+   * the argument for pausing the launch monitor in the first place. The verdict
+   * simply stops saying "all", and names the count.
+   */
+  const inactive = services.filter(s => s.tone === 'muted');
   const anythingLoaded = health.data || monitoring.data || analytics.data || infrastructure.data;
 
   return (
@@ -141,7 +157,9 @@ export default function OwnerCenter() {
             {!anythingLoaded
               ? 'Checking…'
               : needAttention.length === 0
-                ? <><CheckCircle2 size={15} aria-hidden="true" /> All systems operational</>
+                ? (inactive.length === 0
+                  ? <><CheckCircle2 size={15} aria-hidden="true" /> All systems operational</>
+                  : <><CheckCircle2 size={15} aria-hidden="true" /> Operational · {inactive.length} inactive</>)
                 : <><AlertTriangle size={15} aria-hidden="true" /> {needAttention.length} {needAttention.length === 1 ? 'system needs' : 'systems need'} attention</>}
           </p>
           <button
