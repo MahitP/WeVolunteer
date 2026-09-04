@@ -212,6 +212,50 @@ The p99 for scenario A moved the other way, 90 → 98 ms, on an eight-second run
 That is within the noise of a single run and is recorded rather than explained
 away; the medians and the throughput moved far outside it.
 
+## On real Supabase hardware — 2026-09-03
+
+Everything above is a local PostgreSQL 17.9 on an SSD with warm cache. This is
+the same comparison run against a real Supabase project (PostgreSQL 17.6,
+us-east-2, free tier) at 20,000 events, in a throwaway schema that was dropped
+afterwards.
+
+The measurement is the server's own `Execution Time` from `EXPLAIN (ANALYZE)`,
+not wall-clock: the round trip from the laptop that ran it was ~250 ms and would
+have drowned the thing being measured.
+
+| case | matched | before | after | |
+|---|---|---|---|---|
+| rare term | 905 | 130.3 ms | **32.0 ms** | 4.1x |
+| rare phrase | 904 | 130.9 ms | **35.3 ms** | 3.7x |
+| common noun | 7,089 | 101.7 ms | **86.5 ms** | 1.2x |
+| very common term | 20,000 | 80.8 ms | **68.9 ms** | 1.2x |
+| organizer name | 2,200 | 124.1 ms | **42.6 ms** | 2.9x |
+| unicode | 50 | 320.9 ms | **113.3 ms** | 2.8x |
+| no results | 0 | 309.9 ms | **99.8 ms** | 3.1x |
+| `100%` typed literally | 0 | 320.1 ms | **97.0 ms** | 3.3x |
+| no search (control) | 20,000 | 5.8 ms | 5.8 ms | — |
+
+Faster in every case, unchanged where it had to be, and the differential held on
+the real service: identical row counts and identical exact totals from both
+arms, every case.
+
+**The speedups are smaller than the local numbers, and that is the honest
+result.** Two reasons, and neither is a defect in the change:
+
+* **Scale.** This is 20,000 events against the local run's 100,000, and the
+  whole point of the rewrite is that the old form is linear while the new one is
+  not — so the gap widens with the corpus. At 20,000 locally the rare-term gain
+  was 1.3x; here it is 4.1x, because the free tier's slower CPU makes the
+  scanned rows cost more.
+* **Cold buffers on a small shared instance.** A search matching nothing runs in
+  0.9 ms locally and 99.8 ms here. Nothing is scanned in either case; the
+  difference is reading index pages from disk on a free-tier machine with little
+  cache. That number will fall on any paid instance and falls further once the
+  index is warm.
+
+What transfers regardless of hardware is the shape: the old predicate reads
+every candidate row, the new one does not, and no case got worse.
+
 ## Where the remaining time goes
 
 Three cases are worth naming, because they are the ceiling rather than an

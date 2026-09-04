@@ -291,14 +291,33 @@ record('search_path', true, sp.search_path);
 
 const ssl = await one(`SELECT ssl, version AS tls, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid()`)
   .catch(() => null);
-/* Null rather than a failure when the connection was never asked to use TLS —
-   a local PostgreSQL with SSL off is a correct development setup, not a
-   finding. Against a Supabase host it is always TLS, and then it IS a
-   finding. */
+/**
+ * `pg_stat_ssl` describes the BACKEND's connection, which through a pooler is
+ * not the one the client made.
+ *
+ * Supavisor terminates the client's TLS itself and opens its own connection to
+ * PostgreSQL inside the same network, normally without TLS. So a perfectly
+ * encrypted client session reports `ssl = false` here — and reporting that as a
+ * failure tells an operator their production credentials travel in the clear,
+ * which is false and is the worst possible thing for a diagnostic to say.
+ *
+ * The client leg is already established two rows above: the pinned CA verified
+ * the certificate and the hostname before any of this ran. What this row can
+ * honestly report is the pooler's own hop, so that is what it says.
+ */
 if (ssl) {
-  record('TLS in force on this session',
-    ssl.ssl === true ? true : (sslForSession === false ? null : false),
-    ssl.ssl === true ? `${ssl.tls ?? ''} ${ssl.cipher ?? ''}`.trim() : 'plaintext session');
+  const pooled = /\.pooler\.supabase\.com$/.test(target.host);
+  if (ssl.ssl === true) {
+    record('TLS on the session', true, `${ssl.tls ?? ''} ${ssl.cipher ?? ''}`.trim());
+  } else if (pooled) {
+    record('TLS on the session', null,
+      "pg_stat_ssl reports the POOLER's hop to PostgreSQL, not this client's — "
+      + 'the client leg is TLS, verified above');
+  } else if (sslForSession === false) {
+    record('TLS on the session', null, 'this connection did not request TLS');
+  } else {
+    record('TLS on the session', false, 'requested TLS, and the backend reports none');
+  }
 }
 
 const ext = (await db.query(`

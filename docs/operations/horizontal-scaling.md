@@ -24,14 +24,38 @@ conflating them is how a deployment gets surprised. Four levels:
 | **Production-proven** | Executed against the real third-party service | The Upstash path: 11/11 checks live, including the token-bucket Lua spending atomically and refilling by elapsed time (3.0000 of 5 tokens after two spends 1 ms apart). Latency avg **234 ms**, max 332 ms — which is the number the Socket.IO adapter decision rests on. |
 | **Integration-proven** | Two real processes, real database, real protocol | Two backend instances against one PostgreSQL and one Redis (`bin/multi-instance-check.mjs`, 10/10). The transaction pooler (`pooler.behaviour.test.js`, 8/8 through pgbouncer). Cross-instance Socket.IO broadcast through real PostgreSQL LISTEN/NOTIFY. |
 | **Locally proven** | Real code, simulated dependency | The limiter bounds across 2–4 simulated instances; the abuse-cost ceilings; Redis outage and breaker behaviour. |
-| **Unverified** | Stated, not measured | **Supavisor's transaction-pooling BEHAVIOUR** — prepared-statement handling, backend swapping between checkouts, concurrent transaction isolation. pgbouncer proves transaction pooling as a *protocol*; it is not the same implementation. Everything in front of that behaviour is now proven — see below. |
+| **Unverified** | Stated, not measured | **Nothing, as of 2026-09-03.** Supavisor's transaction-pooling behaviour was the last item and is now production-proven: `pooler.behaviour.test.js` 8/8 against a real Supabase project on port 6543 — see below. |
 
-The honest summary: everything the application does *itself* is proven at one of
-the top three levels. The single unverified item is one vendor's implementation
-of a protocol whose behaviour is proven against another implementation of the
-same protocol.
+The honest summary: every claim in this document is now proven at one of the top
+three levels, against the services the deployment actually uses.
 
-### What the real Supabase path has now been tested against — 2026-09-03
+### Supabase, end to end — 2026-09-03
+
+A real Supabase project (PostgreSQL **17.6**, us-east-2, free tier) was
+provisioned into a throwaway schema, exercised, and dropped. `public` was never
+touched and the project was left byte-for-byte as it was found, `pg_trgm`
+included.
+
+| | Result |
+|---|---|
+| `applyPostgresSchema` + all 64 migrations, against the real service | **67 tables**, 64 migration rows, in 23.3 s over a 250 ms link |
+| `pg_trgm` install path | Installed **1.6 into the `extensions` schema** — the Supabase convention migration 064 targets, now confirmed rather than inferred |
+| The four trigram indexes | All four created, in the migration's own run |
+| `search_path` as Supabase serves it | `"$user", public, extensions` — which is why the opclass is schema-qualified |
+| **`pooler.behaviour.test.js` through Supavisor, port 6543** | **8/8.** Ordinary statements; connections reused without pinning; **120 statements leaving zero named prepared statements**; a transaction pinned to one backend so `FOR UPDATE` means what it says; concurrent transactions serialised on one row; rollback leaving nothing; the pool recovering after a failed statement; more concurrent work than the pool has clients |
+| Free-tier server limits | `max_connections=60`, `statement_timeout=2min`, `idle_in_transaction=0` |
+
+The prepared-statement result is the one that matters most, because it is the
+reason `postgresConnection.js` leaves `pg`'s statement caching off. Until now
+that decision rested on pgbouncer behaving the way the documentation says
+Supavisor does. It now rests on Supavisor.
+
+One caveat worth carrying: the timeouts in `pooler.behaviour.test.js` are sized
+for a local pooler. Over a real network the 120-round-trip case takes ~30 s and
+needs `--testTimeout=240000`. The test was not weakened to accommodate a slow
+link; the run was given a longer clock.
+
+### What the connection path proved before authentication ever succeeded
 
 A disposable Supabase project was pointed at with `DATABASE_ENGINE=postgres` and
 a `DATABASE_URL`. The credential in it is rejected (`28P01`) on both of the two
