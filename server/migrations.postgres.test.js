@@ -575,3 +575,131 @@ describe.skipIf(!live)('a PostgreSQL database provisioned from the generated sch
     for (const [name] of TRIGRAM_INDEXES) expect(present, `${name} is missing`).toContain(name);
   }, 60000);
 });
+
+/**
+ * Upgrading a deployment that was provisioned at an OLDER schema version.
+ *
+ * ── The failure this reproduces ──
+ *
+ * `applyPostgresSchema` used to run the generated DDL first and the migrations
+ * second. The DDL is generated from a fully-migrated SQLite database, so it
+ * describes the finished shape — including `CREATE INDEX IF NOT EXISTS
+ * idx_events_first_slot_start ON events(status, first_slot_start, id)`.
+ *
+ * On a database provisioned before migration 63, `CREATE TABLE IF NOT EXISTS
+ * events` is a no-op that does NOT add the column, and the index two lines
+ * later fails with `column "first_slot_start" does not exist`. The boot dies
+ * there — for every existing deployment, on every release that adds a column
+ * and an index over it.
+ *
+ * Found on the real Supabase database, which another checkout had provisioned
+ * at migration 61 while this branch stood at 64.
+ *
+ * ── Why the state is built by REMOVING rather than by checking out an old tree ──
+ *
+ * The test needs a database in the shape an older release left behind. Applying
+ * the current schema and then undoing migrations 62-64 produces exactly that
+ * shape and needs no second checkout, and each undo is written against what the
+ * migration adds, so a new migration that adds a column and an index over it
+ * belongs in the list below.
+ */
+describe.skipIf(!live)('upgrading a database provisioned at an older version', () => {
+  let db;
+  const oldSchema = `${SCHEMA}_upgrade`;
+
+  beforeAll(async () => {
+    if (!live) return;
+    const bootstrap = new PostgresDatabase({
+      connectionString: BASE_URL, max: 1, translate: translatePlaceholders,
+    });
+    await bootstrap.exec(`DROP SCHEMA IF EXISTS ${oldSchema} CASCADE`);
+    await bootstrap.exec(`CREATE SCHEMA ${oldSchema}`);
+    await bootstrap.close();
+
+    const u = new global.URL(BASE_URL);
+    u.searchParams.set('options', `-c search_path=${oldSchema}`);
+    db = new PostgresDatabase({ connectionString: u.toString(), max: 4, translate: translatePlaceholders });
+
+    const { applyPostgresSchema } = await import('./db/postgresSchema.js');
+    await applyPostgresSchema(db);
+
+    /* Now wind it back to what a deployment at migration 61 looks like. */
+    await db.exec('DROP TABLE IF EXISTS scheduler_leases CASCADE');            // 62
+    await db.exec('DROP INDEX IF EXISTS idx_events_first_slot_start');         // 63
+    await db.exec('DROP INDEX IF EXISTS idx_events_browse_order');             // 63
+    await db.exec('ALTER TABLE events DROP COLUMN IF EXISTS first_slot_start'); // 63
+    for (const name of ['idx_events_title_trgm', 'idx_events_description_trgm',
+      'idx_events_location_trgm', 'idx_users_name_trgm']) {                    // 64
+      await db.exec(`DROP INDEX IF EXISTS ${name}`);
+    }
+    await db.prepare('DELETE FROM schema_migrations WHERE version > 61').run();
+  }, 180000);
+
+  afterAll(async () => {
+    if (!live) return;
+    await db?.close();
+    const cleanup = new PostgresDatabase({
+      connectionString: BASE_URL, max: 1, translate: translatePlaceholders,
+    });
+    await cleanup.exec(`DROP SCHEMA IF EXISTS ${oldSchema} CASCADE`);
+    await cleanup.close();
+  });
+
+  it('starts from a database that genuinely lacks the later changes', async () => {
+    const [at] = await db.prepare('SELECT MAX(version) AS v FROM schema_migrations').all();
+    expect(Number(at.v)).toBe(61);
+
+    const [col] = await db.prepare(`
+      SELECT COUNT(*)::int AS n FROM pg_attribute
+       WHERE attrelid = to_regclass('events') AND attname = 'first_slot_start' AND NOT attisdropped
+    `).all();
+    expect(col.n, 'the fixture did not actually remove the column').toBe(0);
+  });
+
+  it('applies the outstanding migrations instead of failing on an index', async () => {
+    const { applyPostgresSchema } = await import('./db/postgresSchema.js');
+
+    /* The assertion IS that this resolves. Before the fix it rejected with
+       `column "first_slot_start" does not exist`. */
+    await expect(applyPostgresSchema(db)).resolves.toBeUndefined();
+  }, 180000);
+
+  it('ends with the column, the table and every index the newer version needs', async () => {
+    const [col] = await db.prepare(`
+      SELECT COUNT(*)::int AS n FROM pg_attribute
+       WHERE attrelid = to_regclass('events') AND attname = 'first_slot_start' AND NOT attisdropped
+    `).all();
+    expect(col.n, 'migration 63 did not add its column').toBe(1);
+
+    expect(await db.prepare("SELECT to_regclass('scheduler_leases') AS t").get()
+      .then((r) => r.t), 'migration 62 did not create its table').toBeTruthy();
+
+    const present = new Set((await db.prepare(`
+      SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = ? AND c.relkind = 'i'
+    `).all(oldSchema)).map((r) => r.name));
+
+    for (const name of ['idx_events_first_slot_start', 'idx_events_browse_order']) {
+      expect(present, `${name} is missing after the upgrade`).toContain(name);
+    }
+  });
+
+  it('records the migrations it actually ran, with their real checksums', async () => {
+    const rows = await db.prepare(
+      'SELECT version, checksum FROM schema_migrations WHERE version > 61 ORDER BY version'
+    ).all();
+    expect(rows.map((r) => Number(r.version))).toEqual([62, 63, 64]);
+    for (const row of rows) {
+      expect(row.checksum, 'a migration that RAN must not be recorded as baseline')
+        .not.toBe(POSTGRES_BASELINE_CHECKSUM);
+    }
+  });
+
+  it('is idempotent — a second boot changes nothing', async () => {
+    const { applyPostgresSchema } = await import('./db/postgresSchema.js');
+    const before = await db.prepare('SELECT COUNT(*)::int AS n, MAX(version) AS v FROM schema_migrations').get();
+    await applyPostgresSchema(db);
+    const after = await db.prepare('SELECT COUNT(*)::int AS n, MAX(version) AS v FROM schema_migrations').get();
+    expect(after).toEqual(before);
+  }, 180000);
+});
