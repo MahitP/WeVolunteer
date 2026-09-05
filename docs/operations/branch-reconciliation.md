@@ -1,13 +1,56 @@
-# Branch reconciliation for the release candidate
+# Branch reconciliation
 
-**Date:** 2026-09-06
-**Release branch:** `claude/release-candidate`
+**Originally written:** 2026-09-06, for `claude/release-candidate`
+**Superseded:** 2026-09-06 — every branch below is now merged into `main` and
+deleted. `main` is the only branch, locally and on the remote.
 
-This records which branches were folded into the release, which were left out,
-and — for the one branch that was neither — exactly what was taken from it and
-why the rest was not.
+> **Read the status table first; the reasoning below it is history.**
+>
+> This document was written during a freeze pass that deliberately excluded the
+> perf-scaling branch, and it says so at length — including "this branch should
+> not be deleted". That decision was **reversed** in the same 24 hours, on
+> instruction, and the branch was integrated in full. The argument for excluding
+> it is kept below because it is a good argument and it records what the risk
+> actually was; it is no longer the decision.
 
 ---
+
+## Final status
+
+| Branch | Unique vs `main` | Outcome |
+|---|---|---|
+| `claude/release-candidate` | 0 | **Merged and deleted.** The integration branch: it had already folded in production-architecture and owner-center, plus four of its own fixes. |
+| `claude/wevolunteer-production-architecture-89e97f` | 0 | **Merged and deleted**, via the release candidate. |
+| `claude/owner-center-certificate-upgrade-7eef59` | 0 | **Merged and deleted**, via the release candidate. |
+| `claude/wevolunteer-perf-scaling-ad3613` | 0 | **Merged and deleted** — in full, reversing the decision recorded below. Seven conflicts, resolved deliberately. |
+| `mahit/wevolunteer-legal-notifications-banner-aa4769` | 2 commits, **0 tree difference** | **Deleted.** Its tree was byte-identical to `origin/main`, which is an ancestor of `main`, so PR #8's squash carried it verbatim. Nothing was lost. |
+
+### What the full perf-scaling merge actually cost
+
+The concerns below were real and were answered rather than dismissed:
+
+- **Limiter storage and worker coordination** — merged. `apiLimiter` moved onto
+  the coordinated volume store; the Redis privacy allowlist became the UNION of
+  both sides (seven modules) rather than either.
+- **Migrations** — reconciled. The branch had already merged `main` and given up
+  its own colliding numbers; a convergence test now compares the fresh and
+  upgraded provisioning paths and found one index that disagreed between them.
+- **`ipKeyGenerator`** — the defect named at the bottom of this document was
+  fixed on trunk, and the merge exposed that the branch's own copy still passed
+  `(req, res)`. Trunk's `req.ip` won. The branch's guard for it now strips
+  comments, because it was firing on the paragraph explaining the bug.
+
+Re-measured after integration rather than trusting the numbers quoted below:
+see `docs/operations/post-integration-measurements.md`. The headline held —
+migration 066 takes the default browse page from 95.6 ms to 17.9 ms at p50 at
+10,000 events — and the filtered variants did **not**: they still cost
+90–180 ms, and no candidate rewrite is uniformly faster.
+
+---
+
+## Original record, from the freeze pass
+
+*Everything below is the 2026-09-06 freeze-pass reasoning, kept unedited.*
 
 ## Branch inventory
 
@@ -90,6 +133,10 @@ architecture deliberately does not have.
 **This branch should not be deleted.** It is the right starting point for the
 first scaling project after the pilot, and it holds real verification against
 Supabase and Upstash that is worth keeping.
+
+> **Superseded.** The branch was merged in full and then deleted — its history
+> is in `main`, so the verification work it holds is kept rather than lost. See
+> the status table at the top.
 
 ---
 
