@@ -118,6 +118,32 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
     return res.status(400).json({ error: 'Missing required badge fields.' });
   }
 
+  /**
+   * Lengths, checked on the server as well as in the form.
+   *
+   * The form's `maxLength` was the only limit, so the real ceiling was
+   * `express.json`'s 100 kB. Nothing renders these as HTML — every site is a
+   * React text child and no export interprets them — so this is not a
+   * vulnerability, which is why it is a bounds check rather than sanitisation.
+   * It exists because a 4,000-character badge name breaks the table it is
+   * listed in for every administrator afterwards, and because the `icon` column
+   * is documented as "one emoji" and had nothing enforcing it.
+   *
+   * `Array.from` counts CODE POINTS, not UTF-16 units: an emoji is one glyph and
+   * two units, and a flag or a skin-tone sequence is more — `'🏅'.length` is 2,
+   * so a byte-wise cap of 2 would reject exactly the values this column is for.
+   * Eight code points allows a ZWJ sequence and still refuses a word.
+   */
+  const LIMITS = { name: 80, description: 400, category: 40 };
+  for (const [field, max] of Object.entries(LIMITS)) {
+    if (String(req.body[field] ?? '').length > max) {
+      return res.status(400).json({ error: `That ${field} is too long (maximum ${max} characters).`, field });
+    }
+  }
+  if (Array.from(String(icon)).length > 8) {
+    return res.status(400).json({ error: 'An icon is a single emoji.', field: 'icon' });
+  }
+
   if (!isKnownCriteriaType(criteria_type)) {
     return res.status(400).json({
       error: `Unknown criteria_type "${criteria_type}". `
@@ -204,6 +230,19 @@ router.post('/api/admin/badges', authenticateToken, requireCap('event.moderate')
 router.post('/api/admin/badges/award', authenticateToken, requireCap('event.moderate'), async (req, res) => {
   const { userId, badgeId, reason } = req.body;
   if (!userId || !badgeId) return res.status(400).json({ error: 'User and Badge required.' });
+
+  /**
+   * `active` is NOT checked here, and that is deliberate rather than an
+   * omission — recorded because `AdminBadges` filters its dropdown to active
+   * definitions and the next reader should not mistake that for an invariant
+   * this route upholds.
+   *
+   * Enforcing it would add no boundary: the only callers who can reach this
+   * route hold `event.moderate`, and the same capability can flip `active` back
+   * to 1 in one request to the route above. It would also break the legitimate
+   * case — a badge retired for new recipients while one straggler who earned it
+   * before the cutoff still has to be given it by hand.
+   */
 
   try {
     const recipient = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId);
