@@ -541,6 +541,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
+  if (pathname.startsWith('/admin/badges')) return 'badges';
   if (pathname.startsWith('/admin/legal')) return 'legalEditor';
   /**
    * The Legal Center, and every document under it.
@@ -744,6 +745,7 @@ export const PAGE_META = {
     welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
+    badges: { title: 'Badges', sub: 'What the platform recognises, and who holds what' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
        so no other persona can reach the page and an entry under one would be a
        title nobody will ever see. */
@@ -1658,6 +1660,10 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/impact': {},
     '/admin/audit-logs': {},
     '/admin/roster': {},
+    /* Declared EMPTY, not omitted: `withProps` throws on a missing entry so a
+       new route cannot mount with every prop silently absent. AdminBadges reads
+       everything it needs from `api` and takes no shell state. */
+    '/admin/badges': {},
     '/admin/legal': { addToast },
     '/admin/impact': {},
     '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }

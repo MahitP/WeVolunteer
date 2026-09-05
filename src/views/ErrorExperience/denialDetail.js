@@ -38,7 +38,11 @@
  * Only the ones `APP_ROUTES` actually declares need to be here; the rest of the
  * table gates API calls, which never reach this screen.
  */
-const FEATURE_NAMES = Object.freeze({
+/* Exported for `denialDetail.test.js`, which derives the fallback case's fixture
+   as "a real capability that is neither route-gated nor named here". That case
+   has been broken twice by naming a capability directly and having a new route
+   gate it, so it computes the complement instead and needs to see this map. */
+export const FEATURE_NAMES = Object.freeze({
   'event.view': 'browsing volunteer opportunities',
   'event.create': 'posting a new opportunity',
   'attendance.mark': 'the check-in scanner',
@@ -61,6 +65,10 @@ const FEATURE_NAMES = Object.freeze({
      heading. A refusal that names a destination by a name the product no longer
      shows anywhere sends the reader looking for something they cannot find. */
   'report.resolve': 'the Admin area',
+  /* Named for the destination the reader was refused, not for moderation in
+     general: `event.moderate` gates `/admin/badges`, and "moderating events"
+     would describe a different power to somebody who clicked Badges. */
+  'event.moderate': 'badge administration',
   'audit.read': 'the Audit Explorer',
   'analytics.impact': 'the community impact figures',
   'admin.create': 'the Administrator Roster',

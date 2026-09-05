@@ -103,6 +103,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/admin/appeals',
   '/admin/audit-logs',
   '/admin/roster',
+  /* Badge administration. A literal path with no parameter, and the person
+     whose badges are being changed is chosen inside the page rather than in the
+     URL — so a report from here names the screen and never which student. */
+  '/admin/badges',
   /* The Legal Center editor. A literal path with no parameter, and the document
      being edited is chosen inside the page rather than in the URL — so a report
      from here names the editor and never which policy was open. */

@@ -54,20 +54,16 @@ import { buildStreak, attendanceMonths } from '../volunteerInsights.js';
  * `manual` is a member and is deliberately never auto-awarded: it is how an
  * administrator says "this one is mine to give".
  */
-export const BADGE_CRITERIA_TYPES = Object.freeze([
-  'hours',
-  'events_attended',
-  'events_created',
-  'attendance_rate',
-  'streak_months',
-  'early_adopter',
-  'manual',
-]);
-
-/** Whether `type` is a criteria type this service can evaluate. */
-export function isKnownCriteriaType(type) {
-  return BADGE_CRITERIA_TYPES.includes(type);
-}
+/**
+ * The vocabulary moved to `server/badgeCriteria.js`, which imports nothing.
+ *
+ * This module imports `db.js`, so it cannot be pulled into the browser bundle —
+ * and the badge administration form needs these strings. Re-exported rather
+ * than relocated silently, so every existing importer of
+ * `BADGE_CRITERIA_TYPES`/`isKnownCriteriaType` from here keeps working and the
+ * evaluator below still reads the same list it validates against.
+ */
+export { BADGE_CRITERIA_TYPES, isKnownCriteriaType } from '../badgeCriteria.js';
 
 /**
  * The minimum-evidence rule now lives in `server/reliability.js`.

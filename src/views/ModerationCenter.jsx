@@ -37,7 +37,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -171,6 +171,26 @@ export const AREAS = [
    * UX; `server/routes/legalAdminRoutes.js` is the boundary, and publishing
    * additionally re-proves identity through `legal.publish`.
    */
+  /**
+   * Badges — the surface four finished endpoints never had.
+   *
+   * Listed BEFORE the Legal Center because it is programme administration like
+   * everything above it, and the Legal Center is the owner-only document
+   * surface that sits at the end.
+   *
+   * `event.moderate`, so an ordinary administrator sees it: defining what the
+   * platform recognises and correcting a wrong award are the job, not a
+   * privilege reserved for the owner.
+   */
+  {
+    id: 'badges',
+    to: '/admin/badges',
+    cap: 'event.moderate',
+    icon: Award,
+    title: 'Badges',
+    blurb: 'What the platform recognises, who holds what, and how to award or take one back. '
+      + 'Every change is recorded against your name.',
+  },
   {
     id: 'legal',
     to: '/admin/legal',

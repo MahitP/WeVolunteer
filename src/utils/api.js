@@ -1573,6 +1573,39 @@ export const api = {
     body: JSON.stringify({ token }),
   }),
 
+  /* ── Badge administration ───────────────────────────────────────────────────
+     Four endpoints that were finished, validated, transactional and audited,
+     and had no caller at all: an administrator could not define a badge, award
+     one by hand, or take back a wrong one except with curl. The revoke route's
+     own note says it exists because attendance can be un-marked — the hours
+     come back off the ledger — while the badge earned on those hours stays on
+     the profile that also shows the corrected record. That correction path was
+     real, built, and impossible to perform. */
+
+  fetchBadgeDefinitions: async () => apiFetch('/api/admin/badges'),
+
+  /* Create when `id` is absent, update when it is present — one endpoint, as
+     the server has it. The 400 carries `{ error, field }`, which is what lets
+     the form put the message on the control that caused it. */
+  saveBadgeDefinition: async (badge) => apiFetch('/api/admin/badges', {
+    method: 'POST',
+    body: JSON.stringify(badge),
+  }),
+
+  awardBadge: async ({ userId, badgeId, reason }) => apiFetch('/api/admin/badges/award', {
+    method: 'POST',
+    body: JSON.stringify({ userId, badgeId, reason }),
+  }),
+
+  /* The reason travels in the body of a DELETE, which is where the route reads
+     it from (`req.body?.reason`) and where it belongs: it is written into the
+     audit row, not into the URL. */
+  revokeBadge: async ({ userId, badgeId, reason }) =>
+    apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/badges/${encodeURIComponent(badgeId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    }),
+
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
   /* `organizationId` is only meaningful for an `organization_ban` appeal; the

@@ -73,6 +73,7 @@ const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
 const WellyView = React.lazy(() => import('../views/WellyView'));
 const AcceptInvitation = React.lazy(() => import('../views/AcceptInvitation'));
+const AdminBadges = React.lazy(() => import('../views/AdminBadges'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -343,6 +344,23 @@ export const APP_ROUTES = [
   { path: '/impact', element: <ImpactDashboard />, requiredCap: 'analytics.impact' },
   { path: '/admin/audit-logs', element: <AdminAuditExplorer />, requiredCap: 'audit.read' },
   { path: '/admin/roster', element: <AdminRoster />, requiredCap: 'admin.create' },
+  /**
+   * Badge administration.
+   *
+   * `event.moderate`, matching every endpoint the page calls — the four in
+   * `server/routes/badgeRoutes.js` are gated on it, including revoke, because
+   * taking a recognition away from a student is not a lesser act than giving
+   * one and a split would create a role that can only delete.
+   *
+   * NOT SUPER_ONLY, deliberately, and that is the difference from
+   * `/admin/roster` above. Defining what the platform recognises and correcting
+   * a wrong award are programme administration, which is what an administrator
+   * is for; `admin.create` is about who holds administrative access at all.
+   * The page also reads `/api/directory/search` to find a person, which admins
+   * hold through `directory.read`, so nothing here needs a capability the role
+   * does not already have.
+   */
+  { path: '/admin/badges', element: <AdminBadges />, requiredCap: 'event.moderate' },
   /**
    * The Legal Center editor.
    *
