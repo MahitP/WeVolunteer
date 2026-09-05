@@ -1659,7 +1659,10 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/appeals/new': {},
     '/impact': {},
     '/admin/audit-logs': {},
-    '/admin/roster': {},
+    /* \`currentUser\` for the student-roster export control, which is gated on
+       \`roster.export\` — the capability the endpoint requires, rather than on
+       this page's own. */
+    '/admin/roster': { currentUser },
     /* Declared EMPTY, not omitted: `withProps` throws on a missing entry so a
        new route cannot mount with every prop silently absent. AdminBadges reads
        everything it needs from `api` and takes no shell state. */

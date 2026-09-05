@@ -724,6 +724,20 @@ export const api = {
 
   exportRosterCSV: async (eventId) => apiFetch(`/api/events/${eventId}/roster.csv`),
 
+  /**
+   * The PLATFORM roster as CSV — every active student, with contact details.
+   *
+   * Not to be confused with `exportRosterCSV` above, which is one event's
+   * accepted volunteers and belongs to the organizer who runs it. This one is
+   * every child on the platform, and it is behind `roster.export`, which is
+   * SUPER_ONLY and ungrantable — see the note in `server/authz.js`. It used to
+   * be behind `report.resolve`, and had no UI, so the only way to run it was
+   * curl.
+   *
+   * Every call writes a `ROSTER_EXPORTED` audit row.
+   */
+  exportStudentRosterCSV: async () => apiFetch('/api/admin/reports/export'),
+
   // ── Applications ────────────────────────────────
   fetchApplications: async () => apiFetch('/api/applications'),
 

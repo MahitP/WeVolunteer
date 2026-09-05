@@ -146,8 +146,13 @@ const EXPECTED = [
   // before any db lookup, so no real report is needed to reach either gate.
   ['PATCH', '/api/admin/reports/rep-fake-000',
     { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
+  /* `roster.export`, not `report.resolve` — so an ordinary administrator is now
+     REFUSED. The endpoint returns every active student's name, email, school and
+     credited hours, and the capability that used to open it means "resolve the
+     safety reports people file". SUPER_ONLY and therefore ungrantable; see the
+     note in server/authz.js. */
   ['GET', '/api/admin/reports/export',
-    { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
+    { student: 403, organizer: 403, admin: 403, super_admin: 'allow', partner: 403 }],
   ['GET', '/api/admin/system/status',
     { student: 403, organizer: 403, admin: 'allow', super_admin: 'allow', partner: 403 }],
 

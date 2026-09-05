@@ -46,6 +46,12 @@ const ACTIONS = {
   /* Reading the message bodies preserved with a safety report. The most
      invasive power on this platform, and the reason the read is double-logged. */
   REPORT_EVIDENCE_VIEWED:   ['Report evidence read', TONES.GRAVE],
+  /* GRAVE, and it is the only row on this page that is about every student at
+     once: one file containing the name, email and school of every child on the
+     platform left the system. Nothing about that is routine, and the endpoint
+     wrote no row at all until the capability was separated from
+     `report.resolve`. */
+  ROSTER_EXPORTED:          ['Student roster exported', TONES.GRAVE],
   /* Manual badge awards and revocations. Routine rather than notable: a badge
      is a recognition, it carries no authority, and an administrator handing one
      out is ordinary work. They are logged at all because the alternative is a

@@ -959,7 +959,15 @@ router.patch('/api/admin/reports/:id', authenticateToken, requireCap('report.res
  * stops it recurring.
  */
 // A5. Export Data to CSV
-router.get('/api/admin/reports/export', authenticateToken, requireCap('report.resolve'), async (req, res) => {
+/**
+ * The student roster, as CSV.
+ *
+ * Gated on `roster.export` rather than `report.resolve` — see the note on that
+ * capability in `server/authz.js`. It returns every active student's name,
+ * email, school, join date and credited hours, and the capability that used to
+ * open it meant "resolve the safety reports people file".
+ */
+router.get('/api/admin/reports/export', authenticateToken, requireCap('roster.export'), async (req, res) => {
   try {
     const students = await db.prepare(`
       SELECT 
@@ -992,7 +1000,27 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('report.re
     ]);
     
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    
+
+    /**
+     * Audited, because a bulk PII egress that leaves no trace is the one thing
+     * this endpoint must not be.
+     *
+     * Written BEFORE the response, and deliberately not caught: `recordAudit`
+     * never swallows, so an audit row that cannot be written takes the export
+     * down with it. Exported-but-not-recorded is the failure this prevents, and
+     * it is the same ordering `BADGE_AWARDED` uses for the same reason.
+     *
+     * No `targetUserId`: the subject is every student at once, which is
+     * precisely what makes the row worth having. The count is the part an
+     * incident review needs.
+     */
+    await recordAudit(db, {
+      adminId: req.user.id,
+      action: 'ROSTER_EXPORTED',
+      details: `Downloaded the student roster as CSV — ${rows.length} student${rows.length === 1 ? '' : 's'}, `
+        + 'including name, email, school and credited hours.',
+    });
+
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="wevolunteer_students_export.csv"');
     res.send(csvContent);
