@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -18,7 +18,39 @@ import path from 'path';
  * SMTP_* are set because importing app.js transitively imports email.js, which
  * exits in production without SMTP.
  */
+/**
+ * This file is the one place in the suite that depends on a BUILD ARTEFACT.
+ *
+ * The probes below assert that a non-API route is answered by the SPA
+ * catch-all with `text/html`. In production `app.js` serves that from `dist/`,
+ * so on a tree where `npm run build` has not run there is no `index.html` to
+ * send: the catch-all's `sendFile` fails, the request falls through, and two
+ * cases fail with `expected 'application/json' to match /text\/html/` and a
+ * bare `500`. Neither message names the actual cause, and both look exactly
+ * like a middleware-ordering regression — which is what this file exists to
+ * detect. A developer chasing that on a fresh clone is chasing nothing.
+ *
+ * CI is unaffected: `.github/workflows/ci.yml` runs `Build Application` before
+ * `Run Tests`. This guard is for everyone else, and it fails loudly with the
+ * command to run rather than quietly with a wrong diagnosis.
+ */
+function requireBuiltClient() {
+  const indexHtml = path.join(process.cwd(), 'dist', 'index.html');
+  if (!existsSync(indexHtml)) {
+    throw new Error(
+      'app.ordering.test.js requires the built client.\n\n'
+      + `  Expected: ${indexHtml}\n\n`
+      + 'These probes assert the production SPA catch-all serves index.html, which\n'
+      + 'cannot be true without a build. Run:\n\n'
+      + '  npm run build\n\n'
+      + 'then re-run this file. (CI builds before testing, so this only affects\n'
+      + 'local runs on a tree that has never been built.)'
+    );
+  }
+}
+
 function bootProdAndProbe() {
+  requireBuiltClient();
   const dir = mkdtempSync(path.join(tmpdir(), 'wev-ordering-'));
   const dbFile = path.join(dir, 'test.db');
   const root = process.cwd().replace(/\\/g, '/');
