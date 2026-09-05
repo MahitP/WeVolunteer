@@ -1,0 +1,103 @@
+/* ==========================================================================
+   The shell notice banner
+   --------------------------------------------------------------------------
+   One treatment, two consumers: the location opt-in and the legal
+   change notice. The declarations are exactly the ones that shipped as
+   `.location-prompt` in `location/LocationDisplay.css`, moved here under
+   neutral names when the second consumer arrived, so the two notices cannot
+   drift into looking like they came from different products.
+
+   Quiet on purpose. Both of these interrupt somebody who opened the app to do
+   something else, and a notice styled like an alert reads as a demand. The
+   loud treatments in this product — `.alert-danger`, `.persona-banner` — are
+   for states you are IN, not for things you are being told.
+   ========================================================================== */
+
+/**
+ * The slot.
+ *
+ * ── Why the SLOT owns the bottom margin and the banner does not ──
+ *
+ * `.location-prompt` carried `margin-bottom: var(--s5)` itself. That works
+ * while there is exactly one banner and nothing else can ever occupy the space,
+ * and it fails in two ways the moment either of those stops being true:
+ *
+ *   • Two banners stack their two bottom margins, so the gap between the
+ *     notices and the page is different from the gap between the notices —
+ *     which reads as one of them belonging to the content below it.
+ *   • Spacing that belongs to a conditional element is spacing that exists
+ *     only when that element does. Every future refactor that keeps a wrapper
+ *     around the banner — an animation container, an error boundary, a
+ *     `<div>` somebody adds to group two of them — inherits the margin and
+ *     leaves it behind when the banner inside is gone. An empty strip above
+ *     the dashboard is the exact defect this arrangement makes unreachable.
+ *
+ * `AppNotices` renders this element only when it has something to put in it and
+ * returns `null` otherwise, so when there is no notice there is no node, no
+ * margin, and nothing between the topbar and the page.
+ */
+.app-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-bottom: var(--s5);
+}
+
+/**
+ * Appearing is animated; the space it takes is not.
+ *
+ * Both notices are decided asynchronously — the location banner waits on the
+ * Permissions API, the legal notice on a fetch — so they arrive a frame or two
+ * after the page has painted. Sliding in reads as the app telling you
+ * something; appearing instantly reads as the layout glitching. `rise` is the
+ * keyframe `.modal` already uses, so the vocabulary is the product's own, and
+ * the global `prefers-reduced-motion` block at the end of index.css mutes it.
+ */
+.app-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  animation: rise var(--t-mid);
+}
+
+.app-notice-icon {
+  display: inline-flex;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.app-notice-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.app-notice-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+/* Below the shell breakpoint the banner stacks, so the two buttons do not
+   squeeze the copy into a two-word column. */
+@media (max-width: 700px) {
+  .app-notice {
+    flex-wrap: wrap;
+  }
+  .app-notice-body {
+    flex-basis: 100%;
+    order: 2;
+  }
+  .app-notice-actions {
+    order: 3;
+    width: 100%;
+    justify-content: space-between;
+  }
+}

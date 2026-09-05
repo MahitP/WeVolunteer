@@ -627,4 +627,153 @@ describe('the Legal Center editor', () => {
       })).status).toBe(200);
     });
   });
+  /* ── The 30-day material-change rule ───────────────────────────────────── */
+
+  describe('the notice period a material change owes its readers', () => {
+    /**
+     * A signup document, because the rule applies to exactly those.
+     *
+     * `community-guidelines` rather than the Terms or the Privacy Policy: the
+     * consent fixtures in the reconsent suite are keyed to those two, and this
+     * file's own header explains why each concern gets a slug nobody else
+     * touches. Publishing a revision of it disturbs nothing here.
+     */
+    const SIGNUP_DOC = 'community-guidelines';
+    const IN_THIRTY_DAYS = daysFromToday(30);
+
+    const GOOD_REASON = 'Our analytics subprocessor was terminated today after a breach '
+      + 'disclosure, and this document names them as a recipient of student data.';
+
+    it('refuses a MAJOR version dated sooner than 30 days out', async () => {
+      const res = await publishVerified(SIGNUP_DOC, {
+        body: body('We may now share your record with your district.'),
+        version: '2.0.0',
+        effectiveAt: today(),
+      });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body.field).toBe('effectiveAt');
+      /* The refusal has to teach, not merely block: the earliest legal date,
+         the reason it exists, and the two ways out. */
+      expect(res.body.error).toMatch(/30 days/);
+      expect(res.body.error).toMatch(IN_THIRTY_DAYS);
+      expect(res.body.error).toMatch(/MINOR/);
+      expect(res.body.error).toMatch(/written reason/);
+    });
+
+    it('and writes nothing when it refuses', async () => {
+      const rows = (await db.prepare(
+        "SELECT COUNT(*) AS c FROM legal_document_revisions WHERE slug = ? AND version = '2.0.0'"
+      ).get(SIGNUP_DOC)).c;
+      expect(rows).toBe(0);
+    });
+
+    it('accepts a MINOR version dated today — §13 gives those notice only', async () => {
+      const res = await publishVerified(SIGNUP_DOC, {
+        body: body('We have clarified how reports are triaged.'),
+        version: '1.0.1',
+        effectiveAt: today(),
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+    });
+
+    it('accepts a MAJOR version dated the full 30 days out', async () => {
+      const res = await publishVerified(SIGNUP_DOC, {
+        body: body('We may now remove an account for repeated no-shows.'),
+        version: '2.0.0',
+        effectiveAt: IN_THIRTY_DAYS,
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.version).toBe('2.0.0');
+      expect(res.body.effectiveAt).toBe(IN_THIRTY_DAYS);
+    });
+
+    describe('the emergency override', () => {
+      /* A second signup document, so the publications above cannot interfere
+         with the version ladder here. */
+      const OTHER_SIGNUP = 'privacy-policy';
+
+      it('refuses a reason that says nothing', async () => {
+        const res = await publishVerified(OTHER_SIGNUP, {
+          body: body('We now send diagnostics to a new processor.'),
+          version: '2.0.0',
+          effectiveAt: today(),
+          noticePeriodOverride: 'urgent',
+        });
+
+        expect(res.status).toBe(400);
+        expect(res.body.field).toBe('noticePeriodOverride');
+        expect(res.body.error).toMatch(/at least 40 characters/);
+      });
+
+      it('publishes with a written reason, and audits it under its own action', async () => {
+        const res = await publishVerified(OTHER_SIGNUP, {
+          body: body('We now send diagnostics to a new processor, effective immediately.'),
+          version: '2.0.0',
+          effectiveAt: today(),
+          noticePeriodOverride: GOOD_REASON,
+        });
+
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.effectiveAt).toBe(today());
+
+        /**
+         * Its own audit action, not a sentence inside the publication row.
+         *
+         * The Audit Explorer's filter is a `SELECT DISTINCT action`, so a thing
+         * without its own action name cannot be found by looking for it — and
+         * setting aside a promise the Terms make to every reader is the entry
+         * an auditor comes looking for first.
+         */
+        const row = await db.prepare(`SELECT action, details FROM admin_audit_logs
+          WHERE action = 'LEGAL_NOTICE_PERIOD_OVERRIDDEN'
+          ORDER BY created_at DESC LIMIT 1`).get();
+
+        expect(row, 'the override must be auditable').toBeTruthy();
+        expect(row.details).toMatch(/Reason given/);
+        expect(row.details).toContain(GOOD_REASON);
+        expect(row.details).toMatch(/30 days/);
+      });
+
+      it('refuses an override that had nothing to override', async () => {
+        /* An emergency recorded against a publication that did not need one
+           makes the audit trail less useful, not more. */
+        const res = await publishVerified(OTHER_SIGNUP, {
+          body: body('A further clarification about diagnostics.'),
+          version: '2.0.1',
+          effectiveAt: today(),
+          noticePeriodOverride: GOOD_REASON,
+        });
+
+        expect(res.status).toBe(400);
+        expect(res.body.field).toBe('noticePeriodOverride');
+        expect(res.body.error).toMatch(/no notice period to override/i);
+      });
+
+      it('cannot be reached without the editor capability', async () => {
+        /* The override inherits the gate rather than having one of its own:
+           `legal.edit` is SUPER_ONLY and the route additionally requires a
+           step-up grant, so an administrator cannot reach it at all. */
+        const res = await srv.call('POST', publishUrl(OTHER_SIGNUP), {
+          body: body('x'), version: '9.0.0', effectiveAt: today(),
+          noticePeriodOverride: GOOD_REASON,
+        }, admin);
+        expect(res.status).toBe(403);
+      });
+    });
+
+    it('tells the editor how many days the rule is, rather than hardcoding it', async () => {
+      /* The client computes the date picker's floor from this number, so one
+         value drives both the browser's `min` and the server's refusal. */
+      const res = await srv.call('GET', docUrl(SIGNUP_DOC), undefined, owner);
+      expect(res.body.materialNoticeDays).toBe(30);
+      expect(res.body.reconsentOnMajor).toBe(true);
+    });
+
+    it('and says which documents the rule does not apply to', async () => {
+      const res = await srv.call('GET', docUrl(EDITABLE), undefined, owner);
+      expect(res.body.reconsentOnMajor).toBe(false);
+    });
+  });
+
 });

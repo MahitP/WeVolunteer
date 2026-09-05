@@ -195,6 +195,10 @@ const ACTIONS = {
      is no bounded set of affected users to notify and no undo, which is the
      definition the scale uses for its top rung. */
   LEGAL_DOCUMENT_PUBLISHED: ['Legal document published', TONES.GRAVE],
+  /* Its own action rather than a sentence inside the row above, so it can be
+     found by filtering. Setting aside a notice period the Terms promise to
+     every reader is the gravest thing the Legal Center can do. */
+  LEGAL_NOTICE_PERIOD_OVERRIDDEN: ['Legal notice period overridden', TONES.GRAVE],
 };
 
 /**

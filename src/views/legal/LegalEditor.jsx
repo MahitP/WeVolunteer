@@ -9,7 +9,7 @@ import { STEP_UP } from '../../utils/stepUp';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import PolicyBody from '../../components/legal/PolicyBody';
 import { parsePolicyMarkdown, isSafeHref } from '../../utils/policyMarkdown';
-import { formatLegalDate, todayIso, latestEffectiveIso } from './legalDates';
+import { formatLegalDate, todayIso, latestEffectiveIso, isoPlusDays } from './legalDates';
 
 /**
  * The Legal Center editor — owner only.
@@ -118,6 +118,17 @@ export default function LegalEditor({ addToast }) {
   const [confirmDiscard, setConfirmDiscard] = React.useState(false);
   const [pendingSlug, setPendingSlug] = React.useState(null);
   const [preview, setPreview] = React.useState(false);
+  /**
+   * The notice-period override: off unless the owner opens it and writes why.
+   *
+   * Two pieces of state rather than one, because closing the panel has to
+   * discard the reason. A reason left behind in a hidden field would be sent on
+   * the next save and recorded in the audit trail against a publication nobody
+   * meant to except — and the server refuses an override that was not needed,
+   * so the owner would meet a confusing error instead.
+   */
+  const [overrideOpen, setOverrideOpen] = React.useState(false);
+  const [overrideReason, setOverrideReason] = React.useState('');
 
   const { run, modal: stepUpModal } = useStepUp();
 
@@ -268,6 +279,48 @@ export default function LegalEditor({ addToast }) {
     setPendingFocus('heading');
   };
 
+  /**
+   * Whether the version being typed is a MATERIAL change, and the date it may
+   * therefore first take effect.
+   *
+   * Guidance, never enforcement — `validatePublication` decides, and this is
+   * derived from the same two inputs it uses so the two agree. The day count
+   * comes from the server (`materialNoticeDays`) rather than a literal here,
+   * for the reason the route's comment gives: §13 owns the number and one copy
+   * of it is enough.
+   *
+   * Returns null while the version box is mid-edit and unparseable, so the
+   * panel does not flicker a warning at somebody halfway through typing "2".
+   */
+  const materialNotice = React.useMemo(() => {
+    if (!loaded?.reconsentOnMajor) return null;
+
+    const parse = (raw) => {
+      const parts = String(raw || '').trim().split('.');
+      if (parts.length < 2 || parts.some(p => !/^(0|[1-9]\d*)$/.test(p))) return null;
+      return Number(parts[0]);
+    };
+
+    const from = parse(loaded.version);
+    const to = parse(version);
+    if (from === null || to === null || to <= from) return null;
+
+    const days = Number(loaded.materialNoticeDays) || 30;
+    return { days, earliest: isoPlusDays(days), fromMajor: from, toMajor: to };
+  }, [loaded, version]);
+
+  /** True when the chosen date is inside the notice period the Terms promise. */
+  const insideNoticePeriod = Boolean(materialNotice) && effectiveAt < materialNotice.earliest;
+
+  /* Closing the panel when the warning no longer applies, so an override cannot
+     be left armed by changing the version back to a patch bump. */
+  React.useEffect(() => {
+    if (!insideNoticePeriod && overrideOpen) {
+      setOverrideOpen(false);
+      setOverrideReason('');
+    }
+  }, [insideNoticePeriod, overrideOpen]);
+
   const save = async () => {
     setSaving(true);
     setSaveError(null);
@@ -281,7 +334,18 @@ export default function LegalEditor({ addToast }) {
         { slug: loaded.slug, version: version.trim() },
         headers => api.publishLegalRevision(
           loaded.slug,
-          { body: draft, version: version.trim(), effectiveAt },
+          {
+            body: draft,
+            version: version.trim(),
+            effectiveAt,
+            /* Only when the panel is open AND the date is actually inside the
+               notice period. The server refuses an override it did not need,
+               which is deliberate — see `parseNoticeOverride` — so sending one
+               speculatively would turn a valid save into an error. */
+            ...(insideNoticePeriod && overrideOpen && overrideReason.trim()
+              ? { noticePeriodOverride: overrideReason.trim() }
+              : {}),
+          },
           headers
         )
       );
@@ -311,6 +375,8 @@ export default function LegalEditor({ addToast }) {
       setDraft(updated.body);
       setVersion(suggestNextVersion(updated.version));
       setEffectiveAt(todayIso());
+      setOverrideOpen(false);
+      setOverrideReason('');
       setSavedNotice(`Version ${updated.version} is now published.`);
       setDocuments(list => (list || []).map(
         d => (d.slug === updated.slug ? { ...d, ...updated } : d)
@@ -467,6 +533,96 @@ export default function LegalEditor({ addToast }) {
                 * icon is decorative, and a tint alone does not survive greyscale
                 * or a printed copy.
                 */}
+              {/**
+                * A MAJOR bump on a signup document, and what it commits the
+                * platform to.
+                *
+                * This is the one warning on the page that is about a promise
+                * rather than about a mechanism. §13 of the Terms says a change
+                * that leaves a reader worse off is announced "at least 30 days
+                * before it takes effect"; `signupConsentWithholdingsFor` starts
+                * withholding on that date; and `legal_document_revisions` is
+                * append-only, so there is no un-publish. An owner who learns
+                * all three from a rejected save has already had to think about
+                * it — which is the point of saying it here instead.
+                *
+                * `role="status"` and not `alert`: it appears because of what
+                * was typed in the version box a moment ago, and an assertive
+                * interruption on every keystroke is worse than a polite one.
+                */}
+              {materialNotice && (
+                <div className="legal-editor-warning" role="status">
+                  <AlertTriangle size={18} aria-hidden="true" />
+                  <div>
+                    <p className="legal-editor-warning-label">This is a material change</p>
+                    <p>
+                      <strong>
+                        Going from {materialNotice.fromMajor}.x to {materialNotice.toMajor}.x asks
+                        every existing account to accept this document again.
+                      </strong>{' '}
+                      From the date it takes effect, everyone who accepted an earlier version
+                      is shown a dialog they cannot dismiss, and cannot volunteer, message or
+                      post until they accept. Section 13 of the Terms promises {materialNotice.days}{' '}
+                      days&apos; notice before that happens, so the earliest date you can choose
+                      is <strong>{formatLegalDate(materialNotice.earliest)}</strong>.
+                    </p>
+                    <p className="small">
+                      If the change does not actually leave anybody worse off, it is a
+                      clarification — give it a MINOR version instead and no notice period
+                      applies.
+                    </p>
+
+                    {insideNoticePeriod && !overrideOpen && (
+                      <p className="small">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setOverrideOpen(true)}
+                        >
+                          Something obliges this to take effect sooner
+                        </button>
+                      </p>
+                    )}
+
+                    {insideNoticePeriod && overrideOpen && (
+                      <div className="stack-sm legal-editor-override">
+                        <label className="label" htmlFor="legal-override-reason">
+                          Why the {materialNotice.days}-day notice period cannot be given
+                        </label>
+                        <p className="dim small" id="legal-override-hint">
+                          Recorded in the audit trail beside the publication, under its own
+                          entry, with your name on it. Write what a reader would need to see:
+                          what obliged the change, and why waiting was not an option — a
+                          regulator, a subprocessor withdrawn for a security failure, a clause
+                          that turns out to be unlawful. At least 40 characters.
+                        </p>
+                        <textarea
+                          id="legal-override-reason"
+                          className="input"
+                          rows={3}
+                          value={overrideReason}
+                          onChange={e => setOverrideReason(e.target.value)}
+                          aria-describedby="legal-override-hint"
+                          aria-invalid={saveErrorField === 'noticePeriodOverride' || undefined}
+                          aria-errormessage={
+                            saveErrorField === 'noticePeriodOverride' ? 'legal-save-error' : undefined
+                          }
+                        />
+                        <p className="small">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => { setOverrideOpen(false); setOverrideReason(''); }}
+                          >
+                            Give the full notice period instead
+                          </button>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {loaded.reconsentOnPublish && (
                 <div className="legal-editor-warning">
                   <AlertTriangle size={18} aria-hidden="true" />
@@ -585,10 +741,12 @@ export default function LegalEditor({ addToast }) {
                        gated on this: `dirty` means the BODY changed, and adding
                        a second condition would make a valid save impossible to
                        explain when the button stayed grey. */
-                    min={todayIso()}
+                    min={materialNotice ? materialNotice.earliest : todayIso()}
                     max={latestEffectiveIso()}
                     aria-describedby="legal-effective-hint"
-                    aria-invalid={saveErrorField === 'effectiveAt' || undefined}
+                    aria-invalid={
+                      saveErrorField === 'effectiveAt' || insideNoticePeriod || undefined
+                    }
                     aria-errormessage={saveErrorField === 'effectiveAt' ? 'legal-save-error' : undefined}
                   />
                   {/* Says what the field does, not what it sounds like it does.
@@ -598,10 +756,20 @@ export default function LegalEditor({ addToast }) {
                       believe they had staged a change for next Monday while
                       having already replaced the live document. */}
                   <p className="dim small" id="legal-effective-hint">
-                    The date printed on the document. The new text goes live as soon
-                    as you save, whatever date you put here — this does not delay it.
-                    It cannot be earlier than today, earlier than the version it
-                    replaces, or more than a year ahead.
+                    The date printed on the document, and the date a material change
+                    starts being enforced. The new TEXT goes live as soon as you save,
+                    whatever date you put here — this does not delay publication. It
+                    cannot be earlier than today, earlier than the version it replaces,
+                    or more than a year ahead.
+                    {materialNotice && (
+                      <>
+                        {' '}
+                        <strong>
+                          Because this is a material change, it also cannot be earlier
+                          than {formatLegalDate(materialNotice.earliest)}.
+                        </strong>
+                      </>
+                    )}
                   </p>
                 </div>
 

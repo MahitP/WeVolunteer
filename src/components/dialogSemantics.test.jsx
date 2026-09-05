@@ -238,7 +238,13 @@ describe('the shared Modal description wiring', () => {
        value is undefined — which is what makes "no description" mean "no
        attribute" rather than "an attribute pointing at nothing". */
     expect(modalSrc).toMatch(/useState\(undefined\)/);
-    expect(modalSrc).toMatch(/setDescribedBy\(node \? MODAL_DESCRIPTION_ID : undefined\)/);
+    /* `setHeadDescribedBy`, not `setDescribedBy`: `Modal` also takes an explicit
+       `describedBy` prop now, for a dialog that builds its own head and names
+       its own id. The detected value keeps the head's name so the two cannot be
+       confused for each other — this one is only ever the standard head. */
+    expect(modalSrc).toMatch(/setHeadDescribedBy\(node \? MODAL_DESCRIPTION_ID : undefined\)/);
+    /* And the explicit id wins where a caller gave one. */
+    expect(modalSrc).toMatch(/aria-describedby=\{describedBy \|\| headDescribedBy\}/);
   });
 
   /** And it is not named outside the `modal-` class namespace by accident. */

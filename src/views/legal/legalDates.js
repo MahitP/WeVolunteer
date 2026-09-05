@@ -55,3 +55,20 @@ export function latestEffectiveIso(from = todayIso()) {
   at.setUTCDate(at.getUTCDate() + MAX_EFFECTIVE_DAYS_AHEAD);
   return at.toISOString().slice(0, 10);
 }
+
+/**
+ * `todayIso()` plus N days, as `YYYY-MM-DD`.
+ *
+ * Built from the date string in UTC and then read back as a plain date, the
+ * same way `latestEffectiveIso` is: adding days to a `Date` built from local
+ * midnight crosses a DST boundary twice a year and returns a day early or late.
+ *
+ * Used for the material-change notice floor. `N` comes from the server
+ * (`materialNoticeDays` on the editor payload), so the browser's picker floor
+ * and the server's refusal are computed from one number.
+ */
+export function isoPlusDays(days, from = todayIso()) {
+  const at = new Date(`${from}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + Number(days || 0));
+  return at.toISOString().slice(0, 10);
+}

@@ -2440,6 +2440,98 @@ time { font-variant-numeric: tabular-nums; }
 }
 
 /* ==========================================================================
+   The mandatory legal dialog
+   --------------------------------------------------------------------------
+   One dialog uses this: the re-acceptance gate for a legal document whose
+   major version moved. It is the only dialog in the product that cannot be
+   dismissed, so it is the only one that gets to look different — and the
+   difference has to read as "this is WeVolunteer asking you something
+   important", not as a browser alert or as an error.
+
+   So the green is the product's own green panel, token for token: the same
+   `--brand-panel-bg` on `--ink-inv` the next-shift card on the dashboard is
+   built from, which is the most prominent green object a student sees. Nothing
+   here invents a colour.
+
+   The BODY stays on `--surface`. A dialog that is green all the way through
+   would put four paragraphs of legal prose and a quotation on a saturated
+   background, and the two costs are not worth the extra green: body text on
+   `--brand-panel-bg` measures well below 4.5:1 for the dimmed classes this
+   dialog uses (`.small.dim` is `--ink-3`), and a fully-coloured panel is what
+   error dialogs look like. The frame, the head and the footer carry the
+   identity; the reading surface stays a reading surface.
+   ========================================================================== */
+
+.modal-overlay-mandatory {
+  /* Stronger than the base overlay on both axes, because the whole point is
+     that the page behind is not what the reader should be looking at. The
+     base blur is 8px; `--modal-overlay-strong` is the same token the stacked
+     dialog uses, and it exists for the same reason — see the note above it. */
+  background: var(--modal-overlay-strong);
+  backdrop-filter: blur(14px);
+}
+
+.modal-mandatory {
+  /* 2px, and in the brand rather than in `--rule`. It is the outline of the one
+     object on screen that matters. */
+  border: 2px solid var(--brand);
+  box-shadow: var(--sh-2);
+}
+
+.modal-mandatory .modal-head {
+  background: var(--brand-panel-bg);
+  color: var(--ink-inv);
+  border-bottom: none;
+  align-items: center;
+}
+
+/* `--ink-inv` for the heading, and its softer sibling for the line under it —
+   the same pair `.nextshift` uses, so the two green panels in the product
+   treat their secondary text identically. */
+.modal-mandatory .modal-head h2 { color: var(--ink-inv); }
+.modal-mandatory .modal-head .lead { color: var(--ink-inv-3); }
+
+.modal-mandatory-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s4);
+}
+
+.modal-mandatory-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  /* A circle of the panel's own white at low alpha, so the icon reads as part
+     of the band rather than as a sticker on it. */
+  padding: var(--s2);
+  border-radius: 999px;
+  background: var(--brand-translucent);
+  color: var(--ink-inv);
+}
+
+/**
+ * Nothing here for the phone, and that is the finding.
+ *
+ * The first version of this block stacked the three actions with
+ * `flex-wrap: wrap` and a 100% flex basis. It produced the opposite: measured
+ * in a browser at 375px, the footer's `scrollWidth` was 1037 against a 371
+ * client width, so "Sign out" and "Read the document" were clipped off the
+ * right edge by the dialog's own `overflow: hidden` — two of the three answers
+ * simply absent, on the one dialog in the product that has to be answered.
+ *
+ * The cause is that `.modal-foot` is ALREADY `flex-direction: column` on a
+ * phone — see "Phase 9: Thumb Reach" further down this file, which stacks
+ * every modal footer in the app and gives each button `width: 100%`. Adding
+ * `flex-wrap: wrap` to a column container makes it wrap into COLUMNS, which is
+ * exactly the row of three clipped buttons that was on screen.
+ *
+ * So this dialog needs no mobile rules at all: it inherits the same stacked
+ * footer as every other modal, with the primary action at the bottom nearest
+ * the thumb. Overriding the paint order to lift "Accept" to the top was the
+ * other thing tried here, and it was dropped for the same reason — it would
+ * give this one dialog a button order the rest of the product does not use.
+ */
+
+/* ==========================================================================
    Touch-target floors (mobile only)
    --------------------------------------------------------------------------
    Measured on a 375x812 viewport across Dashboard, Opportunities, Calendar,
@@ -3746,12 +3838,63 @@ time { font-variant-numeric: tabular-nums; }
 
   .demobar { overflow-x: auto; white-space: nowrap; }
 
+  /**
+   * ── Modals become bottom sheets on a phone ──
+   *
+   * One place, and it used to be two. A later `@media (max-width: 700px)` block
+   * further down this file ("Full-screen Mobile Sheets") re-declared `.modal`
+   * with `height: 100vh` and `border-radius: 0`, and because it came later it
+   * won — so the design stated here, a sheet sized to its content with a
+   * rounded top edge, had not applied to anything for as long as both blocks
+   * existed.
+   *
+   * The consequence was invisible on the dialogs that fill a screen anyway
+   * (EventModal, the certificate, the profile editor) and ugly on every one
+   * that does not. A confirmation with two buttons, the check-in code, the
+   * AI opt-in, the remove-member dialog and the legal acceptance dialog were
+   * all full-height sheets containing a paragraph and a void.
+   *
+   * `height` is what was wrong, not `max-height`. Removing it lets the sheet
+   * take the height of its content and stop, while `.modal-body`'s
+   * `overflow-y: auto` still handles a dialog whose content exceeds the cap —
+   * so a tall dialog is unchanged in every respect except an 8dvh strip of the
+   * page visible above it, which is what a bottom sheet is supposed to look
+   * like. Nothing needs the last eight per cent; a dialog that genuinely wants
+   * the full screen would ask for a class of its own — see the note below, which
+   * records that no dialog in the product currently does.
+   *
+   * `dvh`, not `vh`. Mobile browser chrome collapses and expands, and `100vh`
+   * is the TALLEST the viewport ever gets — this stylesheet makes that argument
+   * in four other places, and a sheet capped at `92vh` can still be taller than
+   * the visible viewport with the URL bar showing.
+   */
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal {
     max-width: none;
-    max-height: 92vh;
+    max-height: 92dvh;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
+    animation: slide-up var(--t-fast) forwards;
   }
+
+  /*
+   * ── No `.modal-fullscreen` opt-in, and that is a finding rather than an
+   *    omission ──
+   *
+   * The obvious shape for this refactor was to keep full-height as an opt-in so
+   * the dialogs that "need" it could ask. Every dialog in the product was
+   * checked for one that does, and none does. The tall ones — the opportunity
+   * dialog, the certificate, the profile editor — already fill the 92dvh cap
+   * and scroll inside `.modal-body`, so they are unchanged but for an 8dvh
+   * strip of page above them. The one that looked most like a full-screen
+   * experience, the check-in scanner, caps its own viewfinder at `50dvh` (see
+   * `.scanner-viewport`) and is shorter than the cap either way.
+   *
+   * So an opt-in class would have had no members, and an escape hatch nothing
+   * escapes through is dead weight that the next reader has to evaluate. If a
+   * genuinely full-screen dialog ever arrives, this is three lines and the
+   * reasoning is here waiting for it.
+   */
+
   .certificate { padding: var(--s6); }
 }
 
@@ -5699,24 +5842,27 @@ input:disabled + .premium-slider {
   .splash-screen svg.spin { color: var(--ink-inv) !important; }
 }
 
-/* Full-screen Mobile Sheets for Modals */
+/**
+ * Mobile sheet chrome: the safe areas only.
+ *
+ * The `.modal` and `.modal-overlay` declarations that used to be here are gone,
+ * and their removal is the fix rather than a tidy-up. This block sits AFTER the
+ * `max-width: 700px` block above, so its `height: 100vh` and `border-radius: 0`
+ * overrode that block's sheet design — the two had been contradicting each
+ * other, and the later one silently won. The design now lives once, up there,
+ * with the reasoning beside it.
+ *
+ * What genuinely belongs here is the notch and home-indicator padding, which is
+ * about the device rather than about the dialog: with `align-items: flex-end`
+ * the sheet's bottom edge is the viewport's, so the footer has to keep its
+ * buttons clear of the home indicator, and a full-height dialog
+ * has to keep its heading clear of the notch when the sheet reaches the cap.
+ */
 @media (max-width: 700px) {
-  .modal-overlay {
-    padding: 0;
-    align-items: flex-end; /* or flex-start for full height */
-  }
-  .modal {
-    max-width: none;
-    max-height: calc(100vh - env(safe-area-inset-top, 0px));
-    height: 100vh;
-    border-radius: 0;
-    animation: slide-up var(--t-fast) forwards;
-  }
-  
   .modal-head {
     padding-top: max(var(--s4), env(safe-area-inset-top));
   }
-  
+
   .modal-foot {
     padding-bottom: max(var(--s4), env(safe-area-inset-bottom));
   }
@@ -10639,6 +10785,35 @@ input:disabled + .premium-slider {
 }
 
 .legal-editor-warning p { margin: 0; line-height: 1.6; }
+
+/**
+ * Successive paragraphs inside a warning need air between them.
+ *
+ * The rule above zeroes every margin, which was right when the panel held one
+ * sentence. The material-change panel holds three plus a control, and with no
+ * gap they read as one wrapped paragraph — so the sentence saying "this is a
+ * clarification, use a MINOR version instead", which is the way OUT of the
+ * warning, ran straight into the sentence describing the consequence.
+ */
+.legal-editor-warning p + p { margin-top: var(--s3); }
+
+/**
+ * The notice-period override.
+ *
+ * Inset and bordered so it reads as a thing being opened inside the warning
+ * rather than as more of the warning's prose. `--warn-ink` on `--surface`
+ * rather than on the tint: the textarea needs an ordinary input background to
+ * be legible, and a form control on a tinted panel with a tinted field is the
+ * shape people fail to notice is editable.
+ */
+.legal-editor-override {
+  margin-top: var(--s4);
+  padding: var(--s4);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.legal-editor-override .input { width: 100%; }
 
 /* The word that carries the meaning. The icon is decorative and the tint does
    not survive greyscale or a printed copy, so neither may be the only signal. */

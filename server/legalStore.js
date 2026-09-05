@@ -438,6 +438,120 @@ export function validateBody(raw, { slug } = {}) {
 const MAX_EFFECTIVE_DAYS_AHEAD = 365;
 
 /**
+ * The advance notice a MATERIAL change owes its readers. Thirty days.
+ *
+ * ── This number is not a preference; it is published ──
+ *
+ * §13 of the Terms of Service, in the product's own words: *"We may change
+ * these terms. If a change matters, we will tell you in the app at least
+ * **30 days** before it takes effect, and you can close your account if you do
+ * not agree. We will not change them quietly."* The Privacy Policy makes the
+ * same promise without a number.
+ *
+ * So a MAJOR revision of a signup document dated fewer than thirty days out is
+ * not a judgement call an owner is entitled to make — it is the product
+ * breaking a term of its own contract, in the document that contains the term.
+ * The ICO's guidance on the right to be informed points the same way in the
+ * general case: a change to how personal data is used has to be communicated
+ * before the new processing begins, actively, not by editing a page.
+ *
+ * ── Why the editor enforces it rather than documenting it ──
+ *
+ * Because the failure is silent and immediate. `signupConsentWithholdingsFor`
+ * withholds the participation capabilities from the effective date, so a MAJOR
+ * revision saved with today's date locks every existing account out of
+ * volunteering the moment it commits — with no notice period, no email lead
+ * time, and no way to un-publish, because `legal_document_revisions` is
+ * append-only. There is no undo to fall back on, which is what makes a
+ * pre-commit refusal the only place this can be caught.
+ *
+ * ── Which changes it applies to ──
+ *
+ * Exactly the ones that trigger re-consent: a MAJOR bump on a `scope: 'signup'`
+ * document. Not a MINOR or PATCH bump, which §13 says gets "notice only" and
+ * which withholds nothing. Not a `notice`-scope document, which collects no
+ * acceptance in any version. And not the two onboarding agreements, whose
+ * audience is re-gated on ANY version change by a mechanism that predates this
+ * one — holding those to a thirty-day floor would be applying a rule from a
+ * different sentence of the Terms to a different consent flow.
+ */
+export const MATERIAL_NOTICE_DAYS = 30;
+
+/**
+ * Why a publication is allowed to skip the notice period, or null.
+ *
+ * ── Why an override exists at all ──
+ *
+ * The alternative — a hard floor with no exception — was considered and is
+ * wrong for a specific and foreseeable case: a change the product is obliged to
+ * make immediately. A regulator requiring a disclosure by a date, a
+ * subprocessor terminated for a security failure, a clause that turns out to be
+ * unlawful. In each of those, thirty days of the old text is not a protection
+ * for the reader; it is thirty more days of the thing that had to stop.
+ *
+ * It is also worth being clear about what does NOT need this. A correction that
+ * leaves nobody worse off is not a MAJOR change under §13's own test — it is a
+ * clarification, it takes a MINOR version, and it reaches none of this. An
+ * owner reaching for the override on a typo has mis-numbered the version, and
+ * the message below says so.
+ *
+ * ── What makes it defensible rather than a hole ──
+ *
+ *   • It is never the default. The floor applies unless a reason is supplied.
+ *   • It requires a WRITTEN reason of real length, stored in the audit trail
+ *     beside the publication it excused. "asdf" is refused.
+ *   • It inherits the editor's own gate: `legal.edit` plus a step-up
+ *     re-authentication, which is owner-only. No ordinary account can reach it,
+ *     and no client can reach it without one.
+ *   • It cannot weaken enforcement. It changes only which effective dates are
+ *     ACCEPTED; the acceptance requirement, the capability withholding and the
+ *     hash-pinned consent record are untouched, and the reader still gets the
+ *     material notice by email and in the app.
+ *
+ * ── Bounded, because an unbounded reason field is a rubber stamp ──
+ *
+ * Forty characters is about a sentence. It is not a test of sincerity; it is
+ * enough that the audit row reads as an explanation rather than as a keypress,
+ * and short enough that a genuine emergency is not obstructed.
+ */
+const MIN_OVERRIDE_REASON = 40;
+const MAX_OVERRIDE_REASON = 500;
+
+/**
+ * Normalises the override, refusing one that says nothing.
+ *
+ * Returns null when no override was requested, so the caller can treat "absent"
+ * and "invalid" differently — the second is a validation error the owner can
+ * fix, and the first is the ordinary path.
+ */
+export function parseNoticeOverride(raw) {
+  if (raw === undefined || raw === null || raw === false) return null;
+
+  const reason = typeof raw === 'string' ? raw.trim() : String(raw?.reason ?? '').trim();
+
+  if (reason.length < MIN_OVERRIDE_REASON) {
+    throw new LegalValidationError(
+      'Publishing a material change sooner than the 30 days the Terms promise needs a '
+      + `written reason of at least ${MIN_OVERRIDE_REASON} characters. It is stored in the `
+      + 'audit trail beside the publication, so write what a reader would need to see: '
+      + 'what obliged the change and why waiting was not an option. If the change does not '
+      + 'actually leave anybody worse off, it is a clarification — give it a MINOR version '
+      + 'instead and no override is needed.',
+      'noticePeriodOverride'
+    );
+  }
+  if (reason.length > MAX_OVERRIDE_REASON) {
+    throw new LegalValidationError(
+      `Keep the reason under ${MAX_OVERRIDE_REASON} characters. The detail belongs in the `
+      + 'document and in the change log; this is the line an auditor reads first.',
+      'noticePeriodOverride'
+    );
+  }
+
+  return reason;
+}
+
+/**
  * ── The effective-date model, in one place ──
  *
  * Publishing makes a revision the current public text IMMEDIATELY. Resolution
@@ -462,10 +576,27 @@ const MAX_EFFECTIVE_DAYS_AHEAD = 365;
  * refuse the second one for no reason a reader would recognise.
  */
 
-/** Today, as `YYYY-MM-DD`, from a clock the caller may pin. */
-function dayOf(instant) {
+/**
+ * Today, as `YYYY-MM-DD`, from a clock the caller may pin.
+ *
+ * Exported, because it is now the ONE definition of "what day is it" that the
+ * legal subsystem uses. `parseEffectiveAt` compares a submitted date against it
+ * to refuse backdating, and `legalConsentGate.js` compares a published
+ * `effective_at` against it to decide whether a material change has actually
+ * taken effect yet. Those two must agree: a date the editor accepted as "today"
+ * and a gate that thought today was yesterday would let an owner publish a
+ * revision that takes effect on a day the enforcement believes has not arrived.
+ *
+ * UTC, deliberately, and it is the same choice `legalDates.js` documents on the
+ * rendering side: `effective_at` is a calendar date with no zone, so it needs
+ * one calendar to be compared against, and picking the server's local one would
+ * make the answer depend on where the process happens to run.
+ */
+export function legalDay(instant = new Date()) {
   return new Date(instant).toISOString().slice(0, 10);
 }
+
+const dayOf = legalDay;
 
 /**
  * `YYYY-MM-DD`, matching `effectiveAt` throughout the registry.
@@ -626,7 +757,10 @@ async function highestVersion(db, slug) {
  * The caller also spends the re-authentication grant in the same transaction, so
  * the publication and the proof of identity commit or roll back together.
  */
-export async function publishRevision(db, { slug, version, body, effectiveAt, userId, now = null }) {
+export async function publishRevision(
+  db,
+  { slug, version, body, effectiveAt, userId, noticePeriodOverride = null, now = null }
+) {
   /**
    * The publication instant is decided BEFORE validation, not after.
    *
@@ -638,8 +772,17 @@ export async function publishRevision(db, { slug, version, body, effectiveAt, us
    */
   const at = now ?? new Date().toISOString();
 
-  const { version: nextVersion, body: cleanBody, effectiveAt: effective } =
-    await validatePublication(db, { slug, version, body, effectiveAt }, { now: at });
+  const {
+    version: nextVersion,
+    body: cleanBody,
+    effectiveAt: effective,
+    noticePeriodOverride: overrideReason,
+    materialNotice,
+  } = await validatePublication(
+    db,
+    { slug, version, body, effectiveAt, noticePeriodOverride },
+    { now: at }
+  );
 
   /* Non-null: `validatePublication` refuses an unregistered slug above. */
   const doc = documentBySlug(slug);
@@ -682,7 +825,18 @@ export async function publishRevision(db, { slug, version, body, effectiveAt, us
     `).run(slug, nextVersion, doc.title, doc.consentType, contentHash, effective, at);
   }
 
-  return { slug, version: nextVersion, contentHash, effectiveAt: effective, createdAt: at };
+  return {
+    slug,
+    version: nextVersion,
+    contentHash,
+    effectiveAt: effective,
+    createdAt: at,
+    /* Surfaced so the route can write it into the audit row. `publishRevision`
+       deliberately writes no audit itself — the route owns that, in the same
+       transaction, alongside the step-up spend. */
+    noticePeriodOverride: overrideReason,
+    materialNotice,
+  };
 }
 
 /**
@@ -701,11 +855,18 @@ export async function publishRevision(db, { slug, version, body, effectiveAt, us
  * Returns the normalised values, so the caller writes exactly what was checked
  * rather than re-deriving them from the request.
  */
-export async function validatePublication(db, { slug, version, body, effectiveAt }, { now = new Date() } = {}) {
+export async function validatePublication(
+  db,
+  { slug, version, body, effectiveAt, noticePeriodOverride = null },
+  { now = new Date() } = {}
+) {
   const doc = documentBySlug(slug);
   if (!doc) throw new LegalValidationError(`No such legal document: ${slug}`, 'slug');
 
   const nextVersion = parseNewVersion(version);
+  /* Parsed early so a malformed override is refused alongside a malformed
+     version, rather than after the body has been validated. */
+  const overrideReason = parseNoticeOverride(noticePeriodOverride);
 
   /**
    * The date this revision replaces, so the printed dates read as a timeline.
@@ -722,6 +883,60 @@ export async function validatePublication(db, { slug, version, body, effectiveAt
 
   const effective = parseEffectiveAt(effectiveAt, { now, previousEffectiveAt });
   const { body: cleanBody } = validateBody(body, { slug });
+
+  /**
+   * The thirty-day floor on a material change. See `MATERIAL_NOTICE_DAYS`.
+   *
+   * Checked HERE rather than in `parseEffectiveAt`, because that function
+   * validates a date against the calendar and this validates a date against the
+   * SEVERITY of the change beside it — it needs the version and the document's
+   * scope, neither of which a date parser should know about.
+   *
+   * The comparison is against the version currently IN EFFECT, resolved the
+   * same way every reader resolves it. Comparing against the registry constant
+   * would call a second 2.x revision material all over again and demand another
+   * thirty days for a change nobody's acceptance is behind on.
+   */
+  const noticeFloor = materialNoticeFloor(doc, nextVersion, previous, now);
+  if (noticeFloor && effective < noticeFloor.earliest && !overrideReason) {
+    throw new LegalValidationError(
+      `This is a material change — the major version goes from ${noticeFloor.fromMajor} to `
+      + `${noticeFloor.toMajor}, which under section 13 of the Terms means every existing `
+      + 'account is asked to accept it again. The Terms promise that kind of change is '
+      + `announced "at least ${MATERIAL_NOTICE_DAYS} days before it takes effect", so the `
+      + `earliest date you can choose is ${noticeFloor.earliest}.\n\n`
+      + 'Two other things are worth checking before you move the date. If the change does '
+      + 'not actually leave anybody worse off, it is a clarification: give it a MINOR '
+      + 'version instead and it needs no notice period at all. And if something genuinely '
+      + 'obliges this to take effect sooner — a regulator, a subprocessor withdrawn for a '
+      + 'security failure, a clause that turns out to be unlawful — you can publish it '
+      + 'sooner by giving a written reason, which is recorded in the audit trail.',
+      'effectiveAt'
+    );
+  }
+
+  /* An override with nothing to override is refused rather than ignored: it
+     would sit in the audit trail as an emergency that never happened, and the
+     next reader of that row would have no way to tell it was noise. */
+  if (overrideReason && !noticeFloor) {
+    throw new LegalValidationError(
+      'There is no notice period to override here. The 30-day rule applies only to a '
+      + 'MAJOR version of a document collected at signup, because that is the change '
+      + 'that asks every existing account to accept again. Remove the reason and publish '
+      + 'normally.',
+      'noticePeriodOverride'
+    );
+  }
+
+  if (overrideReason && effective >= noticeFloor.earliest) {
+    throw new LegalValidationError(
+      `This date already gives the full ${MATERIAL_NOTICE_DAYS} days\u2019 notice, so no `
+      + 'override is needed. Remove the reason and publish normally — an override recorded '
+      + 'against a publication that did not need one makes the audit trail less useful, '
+      + 'not more.',
+      'noticePeriodOverride'
+    );
+  }
 
   const highest = await highestVersion(db, slug);
   if (highest && compareVersions(nextVersion, highest) <= 0) {
@@ -753,7 +968,65 @@ export async function validatePublication(db, { slug, version, body, effectiveAt
     );
   }
 
-  return { slug, version: nextVersion, body: cleanBody, effectiveAt: effective };
+  return {
+    slug,
+    version: nextVersion,
+    body: cleanBody,
+    effectiveAt: effective,
+    /* Passed back so the caller audits the reason that was CHECKED rather than
+       the string that arrived, and so `publishRevision` does not have to parse
+       it a second time. Null on every ordinary publication. */
+    noticePeriodOverride: overrideReason,
+    /* Non-null when the thirty-day rule applied, so a caller can say so in the
+       audit row whether or not it was overridden. */
+    materialNotice: noticeFloor,
+  };
+}
+
+/**
+ * The earliest date a material change may take effect, or null when the rule
+ * does not apply to this publication.
+ *
+ * Pure, and separated from the validator so the client can be told the same
+ * answer without a round trip and the editor's `min=` attribute cannot drift
+ * from the server's refusal. Exported for that reason and for its own test.
+ *
+ * @param {object} doc the registry entry
+ * @param {string} nextVersion the version being published
+ * @param {object|null} previous the current revision row, if any
+ * @param {Date|string|number} now the publication instant
+ */
+export function materialNoticeFloor(doc, nextVersion, previous, now) {
+  /**
+   * Only the documents whose MAJOR bump triggers re-consent.
+   *
+   * `scope`, not `consentType`: the Organizer Agreement is also a contract and
+   * is re-gated on any version change by a different mechanism with its own
+   * screen, so holding it to this floor would apply one sentence of §13 to a
+   * consent flow the other sentence governs. `notice`-scope documents collect
+   * no acceptance in any version and so have nothing to re-consent.
+   */
+  if (doc.scope !== 'signup') return null;
+
+  /* The version a reader is being served right now — the newest revision, or
+     the registry's when none has been published. */
+  const currentVersion = previous?.version ?? doc.version;
+  const from = parseVersion(currentVersion);
+  const to = parseVersion(nextVersion);
+  if (!from || !to) return null;
+  if (to.major <= from.major) return null;
+
+  const earliest = legalDay(
+    new Date(new Date(legalDay(now)).getTime() + MATERIAL_NOTICE_DAYS * 86400000)
+  );
+
+  return {
+    earliest,
+    days: MATERIAL_NOTICE_DAYS,
+    fromMajor: from.major,
+    toMajor: to.major,
+    fromVersion: currentVersion,
+  };
 }
 
 /** The next patch version, offered in the error rather than left as an exercise. */

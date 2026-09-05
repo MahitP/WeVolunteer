@@ -7,6 +7,9 @@ import { db } from '../db.js';
 import { effectiveDocuments, resolveDocument } from '../legalStore.js';
 import { authenticateToken } from '../utils.js';
 import { pendingNoticesFor, acknowledgeNotice } from '../legalNotices.js';
+import { pendingSignupAcceptances } from '../legalConsentGate.js';
+import { recordAcceptances } from '../consent.js';
+import { runInTransaction } from '../db/connectionContext.js';
 
 /**
  * Publishes the legal documents the product asks people to rely on.
@@ -286,6 +289,116 @@ router.post('/api/legal/updates/acknowledge', authenticateToken, async (req, res
 
   await acknowledgeNotice(db, req.user.id, slug, version);
   res.json({ ok: true });
+});
+
+/**
+ * Accepts the updated version of a signup document.
+ *
+ * ── Why this is not the acknowledge route with a flag ──
+ *
+ * Because they write to different tables for a reason that is the whole point of
+ * migration 039: acknowledgement is "I have seen this" and lands in
+ * `legal_change_notices`; acceptance is "I agree to this" and lands in
+ * `legal_acceptances`, which is the record the product would produce if somebody
+ * ever asked it to prove consent. A single endpoint switching on a boolean in
+ * the request body would put the choice of WHICH of those two facts to record
+ * into a field the client fills in.
+ *
+ * ── What the client is allowed to decide: nothing ──
+ *
+ * The body names a slug and a version, and neither is trusted as a claim about
+ * anything. The version is compared against the version actually in effect and
+ * the request is refused if it does not match, so a stale tab cannot record an
+ * acceptance of a version it was never shown. Whether the document requires
+ * acceptance at all is recomputed here from `pendingSignupAcceptances` — the
+ * same function the capability gate reads — so a client that asks to accept a
+ * document nobody is being asked to accept is refused rather than being given a
+ * consent row it can point at later. And the version and hash that are WRITTEN
+ * come from `resolveDocument` inside `recordAcceptances`, never from the request.
+ *
+ * ── No step-up re-authentication, for the reason the Organizer Agreement gives ──
+ *
+ * The registered sensitive actions all change WHO CAN REACH an account. This
+ * adds an obligation to the person already signed in, and gating it would leave
+ * somebody who cannot complete a re-auth round trip locked out of the only
+ * action that restores their account.
+ *
+ * ── And no audit row ──
+ *
+ * `legal_acceptances` already records the user, the document, the version, the
+ * hash, the method, an IP prefix and a user-agent family. The audit trail is for
+ * administrative acts taken ABOUT other accounts, and one row per account per
+ * major revision would bury the grave entries — somebody being handed
+ * administrator authority — under thousands of routine ones. The Organizer
+ * Agreement writes an audit row because it is a handful of adults; the Terms of
+ * Service bind everybody.
+ */
+router.post('/api/legal/updates/accept', authenticateToken, async (req, res) => {
+  const { slug, version } = req.body ?? {};
+  if (typeof slug !== 'string' || typeof version !== 'string' || !slug || !version) {
+    return res.status(400).json({ error: 'slug and version are required.', code: 'slug_required' });
+  }
+
+  const registered = documentBySlug(slug);
+  if (!registered) {
+    return res.status(404).json({ error: 'No such legal document.' });
+  }
+
+  const owed = (await pendingSignupAcceptances(db, req.user.id))
+    .find(d => d.slug === slug);
+
+  if (!owed) {
+    /**
+     * 409 rather than 400 or 200.
+     *
+     * It is a conflict about state, not a malformed request, and it is the
+     * ordinary outcome of a double-submit or a second tab — the first request
+     * wrote the acceptance and this one is asking to write it again. A 200 would
+     * be simpler and would say something false: that this call recorded an
+     * acceptance. The client treats it as success-with-a-reload, which is the
+     * correct response to "somebody already did this".
+     */
+    return res.status(409).json({
+      error: 'There is no pending acceptance for this document on your account.',
+      code: 'not_required',
+    });
+  }
+
+  if (owed.version !== version) {
+    return res.status(409).json({
+      error: 'This document has moved on since the page was loaded. '
+        + 'Reload to read the current version before accepting it.',
+      code: 'version_stale',
+      version: owed.version,
+    });
+  }
+
+  /**
+   * Transactional, for the reason `consent.js`'s header gives about signup: a
+   * half-written acceptance is worse than none, because it looks like a record.
+   *
+   * `documents: [registered]` — the registry entry, not the resolved one.
+   * `recordAcceptances` resolves each target itself so the row carries the
+   * version and hash actually in effect, and handing it something already
+   * resolved would be two resolutions of the same document with a window
+   * between them.
+   *
+   * Only the document that changed. A bundled sibling — the Community
+   * Guidelines ride on the Terms' checkbox at signup — has its own version and
+   * its own acceptance row, so accepting one must not write a row claiming the
+   * other was accepted at a version nobody was shown.
+   */
+  await runInTransaction(db, async (tx) => {
+    await recordAcceptances(tx, {
+      userId: req.user.id,
+      method: 'reconsent',
+      context: `legal-update:${slug}`,
+      req,
+      documents: [registered],
+    });
+  });
+
+  res.json({ accepted: true, slug, version: owed.version });
 });
 
 export default router;

@@ -1094,6 +1094,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ slug, version }),
     }),
+  /**
+   * Records that the account AGREES to the version now in effect.
+   *
+   * A different endpoint from `acknowledgeLegalUpdate` and a different table
+   * behind it, which is the point: that one writes "we told them" and this one
+   * writes the consent record. `version` is sent so the server can refuse a
+   * stale tab; the version and hash it stores are the ones it resolves itself.
+   */
+  acceptLegalUpdate: async (slug, version) =>
+    apiFetch('/api/legal/updates/accept', {
+      method: 'POST',
+      body: JSON.stringify({ slug, version }),
+    }),
 
   // ── External hours ─────────────────────────────
   fetchExternalHours: async () => apiFetch('/api/external-hours'),

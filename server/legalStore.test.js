@@ -485,8 +485,11 @@ describe('parseEffectiveAt', () => {
  * asserting the property instead of the mechanism: two independent fixes, one
  * guarantee, and neither has to know about the other.
  *
- * THIS file is exempt: it pins `now` explicitly (`NOW` above), which is the
- * other correct way to test a date rule and is why its own literals are safe.
+ * Two files are exempt, both because the real clock never reaches them: this
+ * one pins `now` explicitly (`NOW` above), and `legalConsentGate.test.js` tests
+ * a function that takes the date as an argument. Pinning the clock is the other
+ * correct way to test a date rule, and is why those literals are safe. Each
+ * exemption carries its reason in `EXEMPT` below.
  * The registry in `legalDocuments.js` is not a test and is not scanned — its
  * dates are a record of when published documents took effect, which is a fact
  * about the past and does not move.
@@ -499,6 +502,13 @@ describe('effective dates in tests are computed, not written down', () => {
     /* Pins `now`, so its dates are relative to a fixed clock rather than to the
        real one. That is the other correct pattern and this file uses it. */
     ['legalStore.test.js', 'pins `now` explicitly'],
+    /* Stronger than pinning a clock: `noticeChannelFor(doc, seen, today)` takes
+       the date as an ARGUMENT and compares two strings, so no clock is reached
+       at all and its `TODAY` is a fixture like any other. Exempting the file
+       rather than the call is the same trade this list already makes above —
+       a future test here that does read the real clock would need its own
+       computed date, and the reason is written down so that is visible. */
+    ['legalConsentGate.test.js', 'passes `today` explicitly to a clock-free function'],
   ]);
 
   it('finds no literal effectiveAt in any server test', () => {
