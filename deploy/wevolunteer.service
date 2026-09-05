@@ -47,7 +47,33 @@ RestartSec=5
 StartLimitBurst=5
 StartLimitIntervalSec=120
 
-# The app writes only to its database directory.
+# ── Filesystem confinement ───────────────────────────────────────────────────
+#
+# ProtectSystem=strict makes the ENTIRE filesystem read-only except the paths
+# named below — including /srv/wevolunteer, where the checkout lives. That is
+# the intended hardening, and it has one consequence worth stating plainly
+# because it is not obvious and it breaks the boot:
+#
+#   The application's default uploads directory is <checkout>/public/uploads,
+#   resolved from the module's own location. It is created at IMPORT time. On
+#   this unit that path is inside the read-only mount, so without the override
+#   below the service does not fail at upload — it fails to START, with EROFS.
+#
+# So WEV_UPLOADS_DIR must be set in /etc/wevolunteer/wevolunteer.env:
+#
+#     WEV_UPLOADS_DIR=/var/lib/wevolunteer/uploads
+#
+# and the directory must exist and be owned by the service user:
+#
+#     sudo install -d -o wev -g wev -m 750 /var/lib/wevolunteer/uploads
+#
+# Export archives already default to /var/lib/wevolunteer/exports (they derive
+# from WEV_DB_PATH), so they need no override on the standard layout — but a
+# PostgreSQL deployment that leaves WEV_DB_PATH unset should set WEV_EXPORT_DIR
+# explicitly for the same reason.
+#
+# The application refuses to start with a message naming this exact fix rather
+# than an EROFS stack trace. See server/routes/profilePictureRoutes.js.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
