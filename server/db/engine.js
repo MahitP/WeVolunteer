@@ -1,5 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { assertNotProductionDatabase } from './productionDatabaseGuard.js';
+
+/** The repository root, so a relative CA path does not depend on the cwd. */
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
  * Which database engine this process uses.
@@ -175,13 +180,39 @@ export function postgresConfig(env = process.env) {
   }
 
   /**
-   * Pool size. Ten, deliberately, and not larger.
+   * Pool size, PER PROCESS.
    *
-   * This is one Node process — `instanceLock.js` enforces that — with three
-   * background workers and a scheduler. PostgreSQL does not go faster when given
-   * more concurrent connections than it has cores to serve them with, and a
-   * managed provider meters direct connections besides. If a pooler sits in
-   * front, the client-side pool competes with it rather than adding throughput.
+ * ── Measured, not reasoned ──
+ *
+ * This was 10, and the argument for it was that "PostgreSQL does not go faster
+ * when handed more concurrent connections than it has cores to serve them
+ * with". That is true of CPU-bound queries and it is the wrong model here: over
+ * a network a pooled client spends most of its life waiting on a round trip, not
+ * on database CPU, so the pool has to be sized for requests in flight rather
+ * than for cores.
+ *
+ * `bin/load-test.mjs --latency-profile same-region --soak 45 --pool-max N`, at
+ * 20 concurrent HTTP connections and a 3ms round trip:
+ *
+ *      pool    req/s     p50      p95      p99   peak waiting
+ *         5     67.7   203ms   1027ms   1164ms       19
+ *        10    127.2   120ms    481ms    526ms       17
+ *        15    269.2    56ms    161ms    194ms       13
+ *        20    403.4    37ms     97ms    106ms        9
+ *        25    486.8    29ms     73ms     80ms        5
+ *        40    501.8    24ms     58ms     64ms        0
+ *
+ * 25 takes ~97% of the achievable throughput and drops p95 by 6.6x against the
+ * old default; past it the curve is flat. With NO injected latency the same
+ * sweep is noise (863 / 1011 / 706 / 871 req/s at 10 / 20 / 30 / 50), because
+ * loopback makes the application's own event loop the bottleneck instead — which
+ * is exactly why the old number looked defensible for as long as it did.
+ *
+ * ── It still has a ceiling, and the ceiling is per process ──
+ *
+ * Supabase's Nano and Micro sizes allow 60 direct connections and 200 Supavisor
+ * pooler clients. 25 leaves room for eight instances against the pooler, or two
+ * against a direct connection — which is another reason to use the pooler.
    */
   /**
    * Refuse a preview or development process pointed at the production database.
@@ -195,7 +226,7 @@ export function postgresConfig(env = process.env) {
   const guard = assertNotProductionDatabase(env, connectionString);
   if (guard.warning) console.warn(guard.warning);
 
-  const max = Number(env.DATABASE_POOL_MAX ?? 10);
+  const max = Number(env.DATABASE_POOL_MAX ?? 25);
   if (!Number.isInteger(max) || max < 1 || max > 100) {
     throw new Error(`FATAL: DATABASE_POOL_MAX="${env.DATABASE_POOL_MAX}" must be an integer between 1 and 100.`);
   }
@@ -236,7 +267,35 @@ export function postgresConfig(env = process.env) {
   let ca;
   const caSource = env.DATABASE_SSL_CA;
   if (!sslDisabled && caSource) {
-    ca = caSource.includes('BEGIN CERTIFICATE') ? caSource : readFileSync(caSource, 'utf8');
+    if (caSource.includes('BEGIN CERTIFICATE')) {
+      ca = caSource;
+    } else {
+      /**
+       * A relative path is resolved against the REPOSITORY, not the cwd.
+       *
+       * `.env.example` and the deployment template both write
+       * `deploy/certs/supabase-root-2021.crt`, which resolves under systemd
+       * (`WorkingDirectory=/srv/wevolunteer`) and does not resolve under
+       * `npm start --prefix server`, where the cwd is `server/`. Same string,
+       * same repository, two different answers — and the failure is a file-not-
+       * found at boot rather than anything that names the cause.
+       */
+      const resolved = path.isAbsolute(caSource)
+        ? caSource
+        : [path.resolve(process.cwd(), caSource), path.resolve(ROOT, caSource)].find(existsSync)
+          ?? path.resolve(ROOT, caSource);
+
+      if (!existsSync(resolved)) {
+        throw new Error(
+          `FATAL: DATABASE_SSL_CA points at a file that does not exist.\n`
+          + `       Given:    ${caSource}\n`
+          + `       Resolved: ${resolved}\n`
+          + '       Supply an absolute path, a path relative to the repository root,\n'
+          + '       or the certificate PEM inline.'
+        );
+      }
+      ca = readFileSync(resolved, 'utf8');
+    }
   }
 
   /**
@@ -265,4 +324,61 @@ export function postgresConfig(env = process.env) {
     max,
     ssl: sslDisabled ? undefined : { rejectUnauthorized: env.DATABASE_SSL_INSECURE !== 'true', ...(ca ? { ca } : {}) },
   };
+}
+
+/**
+ * Hostnames that mean "this machine".
+ *
+ * A unix-socket connection string has no host at all, which is as local as it
+ * gets. `.localhost` is reserved by RFC 6761 and always resolves to loopback.
+ */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0', '']);
+
+/**
+ * The database this process will open, but only when it is somewhere ELSE.
+ *
+ * ── The failure this exists to prevent ──
+ *
+ * `npm run dev` sets `DEMO_MODE=true` and reads the same `.env` the server
+ * does. Demo mode seeds accounts that share a password published in the README,
+ * one of which is an administrator exempted from the two-factor policy. That
+ * was safe for as long as `.env` named a local SQLite file: the blast radius
+ * was a file the developer could delete.
+ *
+ * It stops being safe the moment `.env` holds a real `DATABASE_URL`. The
+ * command a developer types from muscle memory then provisions a remote
+ * database and seeds published credentials into it, and the existing refusal
+ * does not fire, because it keys on `NODE_ENV=production` and a laptop does not
+ * set that.
+ *
+ * `NODE_ENV` was never the right discriminator. What makes seeding dangerous is
+ * not which mode this process thinks it is in — it is **whose database is on
+ * the other end of the socket**. That is the question this answers.
+ *
+ * Returns a printable `host:port/database` for a remote target, or `null` for a
+ * local one. SQLite is always local: it is a file on this machine, and
+ * `bin/lib/db-safety.mjs` is what guards production-shaped file paths.
+ *
+ * @returns {string|null}
+ */
+export function describeRemoteDatabase(env = process.env) {
+  let engine;
+  /* An invalid engine is somebody else's error to report — `resolveEngine`
+     throws a better message than this function could, at a better moment. */
+  try { engine = resolveEngine(env); } catch { return null; }
+  if (engine !== POSTGRES) return null;
+
+  const raw = env.DATABASE_URL;
+  if (!raw) return null;
+
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase();
+    if (LOCAL_HOSTS.has(host) || host.endsWith('.localhost')) return null;
+    return `${u.hostname}${u.port ? `:${u.port}` : ''}${u.pathname}`;
+  } catch {
+    /* Unparseable: it fails loudly when the pool connects, and calling an
+       unreadable string "remote" would be a guess. */
+    return null;
+  }
 }

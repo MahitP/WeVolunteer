@@ -7,6 +7,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import { csrfGuard } from './csrfGuard.js';
 import { createRedisLimitStore } from './redis/limitStore.js';
+import { createVolumeLimitStore } from './redis/volumeLimit.js';
 import { shareTokenLimiter } from './organizationLimiters.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -646,6 +647,7 @@ export const authLimiter = rateLimit({
  * account inert.
  */
 export const signupLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'signup' }),
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.SIGNUP_RATE_LIMIT) || (DEMO_MODE ? 10000 : 300),
   standardHeaders: 'draft-7',
@@ -744,10 +746,6 @@ export const loginIpCeilingLimiter = rateLimit({
   handler: limitHandler('Too many failed sign-in attempts from this network.'),
 });
 
-/* In-process, and it must stay there: 600 requests per fifteen minutes per
-   device is the highest-volume limiter in the application, and metering it
-   through Upstash would cost more of the monthly allowance than every other
-   limiter combined. It is a volume control, not a credential control. */
 /**
  * The blanket API limiter's key: the SESSION when there is one, the address
  * otherwise.
@@ -793,9 +791,6 @@ export const loginIpCeilingLimiter = rateLimit({
  * mid-sign-in, before the second factor, and `authenticateToken` refuses it as a
  * full session; letting it name a bucket here would give the half-authenticated
  * state an identity the rest of the application does not grant it.
- *
- * Ported from claude/wevolunteer-perf-scaling-ad3613 (12adb5a). The rest of that
- * branch is deliberately not here — see docs/operations/branch-reconciliation.md.
  */
 export function apiLimiterKey(req, res) {
   const token = req.cookies?.[COOKIE_NAME];
@@ -810,15 +805,66 @@ export function apiLimiterKey(req, res) {
          which is both correct and the safe direction: it keys on the address. */
     }
   }
+  /**
+   * `ipKeyGenerator(req.ip)`, not `ipKeyGenerator(req, res)`.
+   *
+   * express-rate-limit 8.x declares `ipKeyGenerator(ip: string, ipv6Subnet?)` —
+   * it takes the ADDRESS, not the request. The perf branch's copy passed the
+   * request object, which is identical for no two callers but is also not an
+   * address: it stringifies to `[object Object]`, so every anonymous caller
+   * would have shared ONE bucket. That is exactly the failure the paragraph
+   * above describes, reintroduced by the fix for it.
+   *
+   * Caught by this merge. The other two call sites in this file — the login
+   * limiter and the IP ceiling — already pass `req.ip`.
+   */
   return `api:ip:${ipKeyGenerator(req.ip)}`;
 }
 
+/**
+ * In-process, and it must stay there — the one limiter deliberately left off
+ * the shared Redis store the five below use.
+ *
+ * At 600 requests per fifteen minutes per bucket this is by a wide margin the
+ * highest-volume limiter in the application, and metering it through Upstash
+ * would cost more of the monthly allowance than every other limiter combined —
+ * the arithmetic is in `docs/operations/upstash.md` §7.3. It is a volume
+ * control, not a credential control, and the credential controls (`loginFailures`
+ * in authRoutes.js, `mailLimiter`) are the ones that are shared.
+ *
+ * ── What keying it per session does to that arithmetic ──
+ *
+ * `apiLimiterKey` above buckets a signed-in caller by session rather than by
+ * address, so the number of live buckets now tracks concurrent USERS rather
+ * than egress addresses — more buckets, each smaller. That makes a shared store
+ * more expensive, not less, so the decision to keep this one in memory is
+ * strengthened by the re-key rather than reopened by it.
+ *
+ * The cost of staying in memory is bounded and known: a restart clears the
+ * counters, and a second instance would meter independently. For a volume
+ * brake, both are acceptable — and `docs/operations/horizontal-scaling.md`
+ * records it as such rather than as a solved problem.
+ */
+const API_LIMIT = Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600);
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  /* `API_RATE_LIMIT` follows the convention the other limiters already use
+  /**
+   * Shared, but not metered per request — see `redis/volumeLimit.js`.
+   *
+   * This limiter sits on every `/api` call, so metering each one exactly would
+   * cost about 6,600 Redis commands per user per month against a free plan that
+   * allows 500 per user at a thousand users. Instead the count is exact
+   * locally, and is reconciled through Redis only once a caller passes a
+   * quarter of the ceiling — which almost nobody ever does, so almost nobody
+   * ever costs a command.
+   */
+  store: createVolumeLimitStore({ name: 'api', limit: API_LIMIT }),
+  /* `API_RATE_LIMIT` follows the convention the four limiters above already use
      (`LOGIN_RATE_LIMIT`, `LOGIN_IP_CEILING`, `MAIL_RATE_LIMIT`,
-     `REAUTH_RATE_LIMIT`): a deployment that knows its own population can say so. */
-  limit: Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600),
+     `REAUTH_RATE_LIMIT`): a deployment that knows its own population can say so,
+     and `bin/load-test.mjs` can hold the production number while it measures. */
+  limit: API_LIMIT,
   keyGenerator: apiLimiterKey,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
@@ -1022,6 +1068,7 @@ export const appealLimiter = rateLimit({
    than a guessing control. `appealLimiter`, which bounds actually filing, is
    the one that carries a shared counter. */
 export const appealReadLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'appeal-read' }),
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 1000 : 60,
   standardHeaders: 'draft-7',
@@ -1053,6 +1100,7 @@ export const appealReadLimiter = rateLimit({
    500-group storage ceiling in errorReporter.js is the bound that matters here,
    and it is already durable. */
 export const errorReportLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'error-report' }),
   windowMs: 15 * 60 * 1000,
   limit: Number(process.env.ERROR_REPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 20),
   standardHeaders: 'draft-7',
@@ -1065,6 +1113,7 @@ export const errorReportLimiter = rateLimit({
    allowance as every failure-counting limiter above put together, to harden a
    control whose real protection is that it answers slowly and generically. */
 export const lookupLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'lookup' }),
   windowMs: 15 * 60 * 1000,
   limit: DEMO_MODE ? 5000 : 60,
   standardHeaders: 'draft-7',
@@ -1383,6 +1432,34 @@ async function probeReadable() {
 
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
+/**
+ * Connection-pool saturation, for a load run and for an operator who asks.
+ *
+ * ── Why it is behind a flag, and off by default ──
+ *
+ * `/health` is UNAUTHENTICATED, and this file already refuses to put detail on
+ * it — the 503 branches deliberately return no error text so the endpoint cannot
+ * become a filesystem oracle by echoing a path out of a SQLite message. Pool
+ * counts are not user data, but they do publish how much concurrent traffic the
+ * deployment is carrying, and that is not something an uptime monitor needs.
+ *
+ * ── Why it exists at all ──
+ *
+ * `waiting` is the number that matters and the only one nothing else reports.
+ * The pool is deliberately small (ten — see `db/engine.js` for the argument),
+ * so the failure mode under load is not an error, it is requests queueing for a
+ * client. That looks exactly like "the database got slower" from the outside,
+ * and `bin/load-test.mjs` cannot tell the two apart without this.
+ *
+ * Absent on SQLite, which has no pool, rather than reported as zeroes — a zero
+ * would read as "measured, and fine".
+ */
+function poolStats() {
+  if (process.env.HEALTH_POOL_STATS !== 'true') return {};
+  const stats = db.stats;
+  return stats ? { pool: stats } : {};
+}
+
 app.get('/health', async (req, res) => {
   const readable = await probeReadable();
 
@@ -1409,7 +1486,10 @@ app.get('/health', async (req, res) => {
     });
   }
 
-  res.json({ status: 'ok', database: 'connected', writable: true, version: VERSION });
+  res.json({
+    status: 'ok', database: 'connected', writable: true, version: VERSION,
+    ...poolStats(),
+  });
 });
 
 /**

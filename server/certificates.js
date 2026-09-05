@@ -162,6 +162,66 @@ export async function getOrCreateCertificateCode(db, userId, eventId) {
 }
 
 /**
+ * The codes for a whole page of one volunteer's events, in one query where it
+ * can be one query.
+ *
+ * ── What this replaces, and what it measured ──
+ *
+ * `GET /api/certificates` called `getOrCreateCertificateCode` once per event
+ * inside a `Promise.all`. In the steady state that is one SELECT per event; for
+ * an event with no certificate yet it is four statements. A volunteer's list
+ * grows for as long as they volunteer, so the cost of the page grows with their
+ * service record — the one number on this platform that is supposed to go up.
+ *
+ * Measured with `bin/load-test.mjs --db-latency 5`, against a student with 80
+ * completed events: **p50 914 ms, 20.8 req/s**. The `Promise.all` also made it a
+ * pool problem rather than only a latency one — eighty concurrent statements per
+ * request against a pool of ten, so twenty simultaneous readers queued sixteen
+ * hundred statements.
+ *
+ * ── Why the minting path is NOT reimplemented here ──
+ *
+ * Everything that decides what a certificate IS stays in
+ * `getOrCreateCertificateCode`: that an issued certificate is returned
+ * unconditionally whatever became of the event, that a cancelled event never
+ * mints a new one, the collision retry, and the re-select that guarantees the
+ * returned value is what is stored. Each of those is a published policy position
+ * with a test behind it, and a second copy would be a second thing to get wrong.
+ *
+ * So this batches the READ and delegates every WRITE. After the boot backfill
+ * has run — which issues a row for every credited attendance — the common case
+ * is that every code already exists and this costs exactly one statement.
+ *
+ * Returns a `Map` from event id to code. An event with no code and no way to get
+ * one (cancelled) is simply absent, matching `getOrCreateCertificateCode`'s
+ * `null`.
+ */
+export async function certificateCodesFor(db, userId, eventIds) {
+  const codes = new Map();
+  const ids = [...new Set(eventIds)].filter(Boolean);
+  if (!ids.length) return codes;
+
+  const marks = ids.map(() => '?').join(',');
+  for (const row of await db.prepare(
+    `SELECT event_id, code FROM certificates WHERE user_id = ? AND event_id IN (${marks})`
+  ).all(userId, ...ids)) {
+    codes.set(row.event_id, row.code);
+  }
+
+  /* Whatever is left needs issuing, one at a time and through the real path.
+     Sequential rather than concurrent on purpose: this is a write, it is rare
+     after the backfill, and a `Promise.all` of writes is what made the read
+     expensive in the first place. */
+  for (const eventId of ids) {
+    if (codes.has(eventId)) continue;
+    const code = await getOrCreateCertificateCode(db, userId, eventId);
+    if (code) codes.set(eventId, code);
+  }
+
+  return codes;
+}
+
+/**
  * Issues a certificate row for every distinct (user_id, event_id) with
  * credited attendance that doesn't have one yet. Idempotent: a second run
  * finds nothing left to do and returns `{ inserted: 0 }`.
@@ -170,19 +230,42 @@ export async function getOrCreateCertificateCode(db, userId, eventId) {
  * backfill.
  */
 export async function backfillCertificates(db) {
+  /**
+   * Only the pairs that still NEED a certificate, in one query.
+   *
+   * This used to select every credited (user, event) pair and then ask, one
+   * statement at a time, whether each already had a certificate. On the second
+   * and every subsequent boot the answer is "yes" for all of them, so the cost
+   * of discovering there was nothing to do was one statement per credited
+   * attendance row — and this runs on the boot path, before the server listens.
+   *
+   * On `node:sqlite` that was cheap enough not to notice. On PostgreSQL each one
+   * is a round trip: at 5 ms and fifty thousand attendance rows it is four
+   * minutes of boot spent learning that the work was already done.
+   *
+   * `NOT EXISTS` rather than a `LEFT JOIN … IS NULL`, because the certificates
+   * table's uniqueness is on the pair and this reads as the question being
+   * asked. The per-pair issuing path below is unchanged: everything that decides
+   * what a certificate is stays in `getOrCreateCertificateCode`.
+   */
   const pairs = await db.prepare(`
-    SELECT DISTINCT user_id, event_id FROM attendance WHERE present = 1
+    SELECT DISTINCT a.user_id, a.event_id
+      FROM attendance a
+     WHERE a.present = 1
+       AND NOT EXISTS (
+             SELECT 1 FROM certificates c
+              WHERE c.user_id = a.user_id AND c.event_id = a.event_id
+           )
   `).all();
 
   let inserted = 0;
   for (const { user_id, event_id } of pairs) {
-    const before = await db.prepare(
-      'SELECT 1 FROM certificates WHERE user_id = ? AND event_id = ?'
-    ).get(user_id, event_id);
-    if (before) continue;
-
-    await getOrCreateCertificateCode(db, user_id, event_id);
-    inserted++;
+    /* `getOrCreateCertificateCode` returns null for a cancelled event, which is
+       the published rule and not an error. Counting only what was actually
+       issued keeps the boot log's number honest — it used to count refusals as
+       insertions. */
+    const code = await getOrCreateCertificateCode(db, user_id, event_id);
+    if (code) inserted++;
   }
 
   return { inserted };

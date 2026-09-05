@@ -542,8 +542,16 @@ describe('the safety gate cannot be skipped by a new tool', () => {
       if (!DELETES.test(code)) continue;
 
       scanned++;
+      /* `refuseNonDisposablePostgres` is the third accepted gate and the newest.
+         The first two reason about a SQLite FILE — a path, its size, the rows in
+         it — which was the whole surface for as long as every destructive tool
+         operated on a file. A tool that writes to a PostgreSQL server has no
+         path to inspect, so it asks the same question of the row counts it has
+         just read. Same module, same refusal, same override variable; only the
+         thing being described differs. */
       const runsCheck = /guardDestructive\s*\(/.test(code)
-        || /refuseNonDisposableDatabase\s*\(/.test(code);
+        || /refuseNonDisposableDatabase\s*\(/.test(code)
+        || /refuseNonDisposablePostgres\s*\(/.test(code);
       if (!runsCheck) offenders.push(name);
     }
 

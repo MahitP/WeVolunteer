@@ -32,6 +32,327 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Search — the last O(n), and not asking the vendor twice
+
+> Measured before and after at three corpus sizes, with a differential that
+> requires both forms to return identical rows; the full matrix, the rejected
+> rewrites and the plans are in
+> [`docs/operations/search-measurements.md`](docs/operations/search-measurements.md).
+
+- **The search box is no longer linear in event count.** It was the last O(n)
+  left on the browse endpoint after the two-phase page: four `strpos` tests
+  OR-ed together over every event that survived the status filter, with `users`
+  joined in for the organizer's name. At 100,000 events, p50 before → after:
+
+  | | |
+  |---|---|
+  | a rare term | 127.5 ms → **7.5 ms** |
+  | an organizer's name | 129.1 ms → **5.2 ms** |
+  | a common term (34,696 matches) | 105.4 ms → **29.3 ms** |
+  | a search matching nothing | 458.8 ms → **0.9 ms** |
+  | an accented term | 420.9 ms → **3.0 ms** |
+  | `100%` typed literally | 472.1 ms → **1.0 ms** |
+  | the default browse, which had to not regress | 4.5 ms → 4.6 ms |
+
+  Faster in every one of twenty cases at all three scales. What made it possible
+  was noticing that the operator was not the main problem: **one of the four
+  columns is in another table**, so the disjunction spanned two relations and no
+  index on either could ever be used. Indexes were added first and the plan
+  ignored them, which is what sent the work back to the predicate's shape.
+
+- **Typing `%` or `_` still searches for those characters.** That is why the
+  predicate was a position test rather than a `LIKE` in the first place. The
+  needle is now escaped before it is bound instead, and the two forms are run
+  against a table of adversarial needles on both engines and required to select
+  the same rows.
+
+- **A repeated search, a second page, and thirty students searching the same
+  words are now one call to Pinecone rather than thirty-two.** The live service
+  was measured at 311–445 ms warm and about 3.2 s cold, so the vendor round trip
+  dominates a Discover request by an order of magnitude over everything else in
+  it. Candidate ids are remembered for 60 seconds, keyed on a hash of the
+  question and never on the viewer — and re-filtered by the same query with the
+  same permissions on every request, so a shared entry is a shared list of
+  candidates and never a shared answer.
+
+- **A Pinecone outage no longer costs every search 1.2 seconds.** Three
+  consecutive outage-shaped failures and searches skip the vendor for thirty
+  seconds, answering from the database alone — which is what Discover was before
+  the integration existed. One timeout per window instead of one per request.
+
+- **Fixed: a PostgreSQL-only migration would never have reached a new
+  deployment.** The PostgreSQL schema is generated from a booted SQLite
+  database, so anything SQLite cannot express is absent from it — and the
+  baseline seeder recorded every migration as already supplied. A fresh database
+  would have had every table, passed every test, and searched linearly for ever.
+  Such migrations now run rather than being recorded, and a test provisions a
+  database the way a deployment does and checks the indexes are there.
+
+- **`bin/verify-search-indexes.mjs`** answers "are the indexes actually there,
+  and is the planner using them" on a live database. It exists because migration
+  064 is allowed to decline: `CREATE EXTENSION` needs a privilege the
+  application's role may not have, and refusing to boot over an index is the
+  wrong trade for a query that is correct without one.
+
+- **Documented: Supabase's direct database host is IPv6-only and its pooler is
+  IPv4-only** — verified by DNS, and the reason a rotation or a `pg_dump` can
+  fail in a way that looks like a bad password. The credential-rotation runbook
+  now says to check the address family first.
+
+### Performance and scaling — second pass
+
+> Everything the first pass deliberately left alone, done. Each item was measured
+> before and after; the method and the full matrix are in
+> [`docs/operations/load-testing.md`](docs/operations/load-testing.md).
+
+- **A broadcast no longer costs a round trip per recipient.** `dispatch` made
+  five database round trips for every person it notified, and a fan-out was a
+  loop of it. It now makes three, and a fan-out makes four *in total* regardless
+  of audience — with the in-app content rendered once rather than N times.
+  Cancelling an event with 150 confirmed volunteers: **4,440 ms → 112 ms** at
+  5 ms of database latency. The nine-branch delivery rule, which decides whether
+  a suspended minor is told they have been suspended, lives in one function that
+  both paths feed; it was pinned by characterization tests written against the
+  old implementation *before* anything moved, and a differential suite runs every
+  case both ways and compares the rows written.
+- **The events aggregate folds over the filtered set.** It used to build the
+  earliest slot, total spots, total hours and accepted count over every event and
+  every slot in the database before the outer query discarded almost all of it.
+  At 10,000 events: a place filter **41.6 ms → 4.5 ms**, "mine" 46.0 → 9.5, a
+  text search 51.2 → 20.9, a category 44.0 → 17.5, a search matching nothing
+  51.3 → 16.1. The unfiltered default browse is unchanged, which is the number
+  that had to not move. Proved equivalent at 100 / 1,000 / 5,000 / 10,000 events
+  across sixteen filter, sort and paging combinations, comparing every returned
+  row.
+- **The certificates page and the conversations list stopped growing with the
+  user.** Certificates issued a get-or-create per completed event inside an
+  unbounded `Promise.all`; conversations had no `LIMIT` at all and decorated each
+  row with seven more queries. Both are bounded and batched.
+- **`DATABASE_POOL_MAX` is 25, not 10.** The old number was reasoned from
+  database cores, which is right for CPU-bound queries and wrong over a network
+  where a pooled client spends most of its life waiting. At a 3 ms round trip and
+  20 concurrent requests: **127 → 487 req/s, p95 481 ms → 73 ms**. The same sweep
+  on loopback is flat noise, which is why 10 looked defensible for as long as it
+  did.
+- **The client stops paying for realtime before there is a session.**
+  `socket.io-client` is loaded on demand rather than sitting in the bundle every
+  visitor downloads: eager first paint **175,020 → 162,478 bytes gzipped**. The
+  notifications bell polled every sixty seconds even while the socket was pushing
+  the same updates; it now polls only when the socket is down, and resyncs on
+  reconnect instead of waiting up to a minute for the next tick.
+- **A Socket.IO adapter seam, built and tested but switched off.** Rooms are
+  per-process, so a second instance would have delivered realtime events to
+  roughly half the connected users, silently — the one genuine multi-instance
+  blocker. `@socket.io/postgres-adapter` broadcasts over `LISTEN`/`NOTIFY`, so
+  the bus is the database that is already here: no new service, no new
+  credential. Disabled by default and the package is not even loaded; activation
+  is one environment variable. Tested with two real Socket.IO servers proving a
+  broadcast on one reaches a client attached to the other.
+
+### Scaling — the future paths, finished
+
+- **The browse total is exact and no longer costs a scan.** `EXPLAIN (ANALYZE,
+  BUFFERS)` found two problems where there appeared to be one: an `IS NULL` sort
+  prefix that no index can match, and — even after fixing it — that
+  `status IN (…)` splits a status-leading index into two ranges whose
+  concatenation is not ordered. A second index with the sort column leading
+  makes the page a walk that stops after sixty (12.7 ms → 0.105 ms), and moving
+  `COUNT(*) OVER ()` into its own CTE in the same statement lets each half take
+  the plan it wants. **10,000 events 127.9 ms → 3.5 ms; 50,000 events 601.1 ms →
+  5.0 ms.** Near-flat between the two, so the linear term is gone including from
+  the count — which is still exact, from the same predicate in the same
+  statement and the same snapshot. No counter, no cache, nothing stale.
+- **Authentication abuse protection is a layered system, and now says so.** Each
+  in-process limiter is strictly tighter than a shared cap on the same
+  dimension, so with N instances the global bound is `min(N × local, shared)`
+  and the shared cap never moves — at most 10 failures per account and 200 per
+  address block, whatever N is. Twenty instances attacking one account still
+  stop at ten.
+- **An IPv6 bypass is closed.** The shared address ceiling keyed on `req.ip`,
+  which is a correct key for IPv4 and no control at all for IPv6: a residential
+  allocation is a /64, so rotating inside one's own prefix drew a fresh ceiling
+  every attempt. It now groups by 56-bit prefix like every other IP-keyed
+  limiter here.
+- **The Redis path is proven against the real service** — 11/11 live checks
+  including the token-bucket Lua spending atomically and refilling by elapsed
+  time, at an average of 234 ms round trip.
+
+### Scaling — the last known gaps
+
+> Six limitations were carried out of the previous pass. All six are closed.
+> The method for each is in `docs/operations/horizontal-scaling.md`.
+
+- **The events browse is no longer linear in event count.** It sorted by the
+  earliest slot, a value computed per row, so the top sixty could not be chosen
+  without computing it for every candidate — and no index could help, because
+  the value existed nowhere to index. `events.first_slot_start` stores it and
+  the sort becomes a range scan: **66.6 ms → 5.7 ms at 10,000 events, 361.5 ms →
+  19.1 ms at 50,000.** The only derived value the schema stores, and the
+  distinction that permits it is that it is a derived *index*, not a derived
+  *fact*: exactly reconstructible from the same database, unlike credited hours,
+  which are a claim about the world. A checker detects drift and repairs it.
+- **Check-in scanning is a distributed token bucket.** Its burst-plus-refill
+  policy cannot be expressed by a fixed window, so the bucket itself is
+  distributed — one Lua script, because two instances doing read-compute-write
+  refill would issue two tokens for one and refill faster than configured.
+- **The sign-in address ceiling is shared.** It was in-process, so N instances
+  allowed N × 200 failures per address — the gap that matters for credential
+  stuffing, which never trips a per-account cap.
+- **The volume-limiter approximation is now a setting.** `RATE_LIMIT_MODE=exact`
+  is globally exact for any number of instances, proved for two, three and four.
+  It is not the default only because Upstash bills per command; on a plan that
+  meters connections instead, exact costs nothing. Changing provider is one
+  environment variable rather than a rewrite.
+- **Abuse cannot buy Redis commands.** A refused caller costs nothing to refuse
+  again; one key's spend in a window is capped however much traffic it sends.
+- **The transaction pooler is tested rather than argued.** Eight properties
+  against a real pooler, including that no named prepared statement survives —
+  the compatibility decision the whole PostgreSQL deployment rests on.
+
+### Deliberately measured and left alone
+
+- **Two notification loops were not batched.** `notifyPromotions` and the bulk
+  application decision are per-ROW, not per-recipient: one volunteer can be
+  promoted off two slots in the same sweep, and is owed a notice for each.
+  Batching deduplicates the recipient list and would silently collapse the
+  second. Both sites say so, and a test pins the collapsing behaviour.
+- **The rerank budget stays in process memory.** It would be N× a monthly
+  allowance across N instances, but reranking is off by default, the real ceiling
+  is the vendor's own 429, and the alternative is a database write on the read
+  path of every search.
+- **A 15-minute soak found nothing to fix.** Resident memory fell 164 MB → 102 MB
+  and the pending-job backlog stayed at zero.
+
+### Performance and scaling
+
+> **A measured pass over the request path, with a load test to prove it.**
+> Every number below was measured with `bin/load-test.mjs` against a synthetic
+> corpus of 2,000 users / 1,000 events / 8,092 applications / 2,171 credited
+> attendance rows / 120 open appeals, before and after,
+> using the identical harness. Full method and caveats in
+> [`docs/operations/load-testing.md`](docs/operations/load-testing.md).
+>
+> The single most useful thing built here is the load test itself. It found a
+> defect nobody had read — a volunteer's certificates page took **921 ms** and
+> got slower the more they had volunteered — and it caught its own first result
+> being nonsense (3,061 req/s, every response a 401), which is why every scenario
+> is now preflighted before it is measured.
+
+- **`GET /api/applications` is paginated and no longer reads whole tables.**
+  It had no `LIMIT` and no `ORDER BY`, so an administrator received *every*
+  application in the system in one response — each row carrying a volunteer's
+  name, school, grade, bio and badges. Alongside it, three batch loads read the
+  whole of `attendance` (twice) and the whole of `application_conflicts` on every
+  call, whoever was asking: a student fetching their own four applications pulled
+  a district's attendance history into two `Map`s. Now `?limit=&offset=` with a
+  500-row cap, the same opt-in shape `GET /api/events` already had, with the
+  batch loads scoped to the page. **408 → 1,821 req/s; p50 48 ms → 10 ms** on
+  loopback, and the whole-table reads are gone whatever the corpus size.
+  The bare-array response every current client expects is unchanged.
+- **The moderation queue's conflict-of-interest check is batched.**
+  `GET /api/admin/appeals` re-read each appeal row it already held and then made
+  five more statements per appeal — six each, about three hundred for a
+  120-appeal queue. The nine fairness rules were not rewritten: they live in one
+  function that both the single-appeal and the whole-page loader feed, and
+  `appeals.batchedConflicts.test.js` asserts the two agree.
+  **At 5 ms of database latency: p50 1,226 ms → 58 ms, 2.7 → 68 req/s.**
+- **A volunteer's certificates page no longer costs more the more they have
+  volunteered.** It issued a get-or-create per completed event inside a
+  `Promise.all` — eighty concurrent statements per request against a pool of ten.
+  The read is batched; every rule about what a certificate *is* stays in
+  `getOrCreateCertificateCode`. **At 5 ms of database latency: p50 921 ms → 66 ms,
+  21.2 → 297 req/s.**
+- **`GET /api/admin/stats` issues five statements instead of fourteen.** Ten
+  whole-table scalars became one statement, and the two `events` rollups became
+  one grouped scan. Worth **nothing on loopback and 2.5× at 5 ms of round-trip
+  latency**, which is the point: the PostgreSQL port turned every synchronous
+  read into a network round trip and nothing had audited the serial ones.
+- **Calling off an event no longer makes the organizer wait a round trip per
+  volunteer.** The fan-out dispatched confirmed volunteers strictly one at a
+  time, and each dispatch costs four to five round trips — so the request grew
+  with how popular the event had been. It now dispatches five at a time, which is
+  half the connection pool: an unbounded `Promise.all` would queue every
+  recipient's statements against a pool of ten and starve the rest of the server,
+  trading one slow request for a slow everything. **At 5 ms of database latency,
+  150 volunteers: 4,440 ms → 943 ms**, with the same 150 in-app rows and 150
+  outbox jobs written. Email sending was already asynchronous; this is the
+  enqueueing.
+- **One session sweep instead of one timer per socket.** Every connected socket
+  ran its own five-minute interval asking two questions of the database, so the
+  cost scaled with sockets rather than people and a student with a phone and a
+  laptop paid twice. One sweep now asks both for every socket at once — two
+  statements, whatever the connection count. The disconnect rules are unchanged.
+
+### Fixed — a rate limit that locked out buildings
+
+- **`apiLimiter` was keyed on the IP address alone**, so 600 requests per fifteen
+  minutes was the budget for a whole school's shared egress address. A signed-in
+  session makes several requests per screen; a few dozen students browsing at
+  lunchtime exhausted it and the next person to open the app was refused.
+
+  This is the third time this exact failure has been found here — `loginLimiter`
+  was re-keyed after ten students mistyping once locked out a building, and
+  `mailLimiter` after a campus shared five verification emails. `apiLimiter` is
+  the broadest limiter in the application and was the one left on a bare address.
+
+  It is now keyed on the **verified** session when the request carries one, and
+  on the address otherwise. Nothing gained budget: the per-bucket number is
+  unchanged, an anonymous caller is bounded identically, and one account is
+  bounded identically. A building simply stops sharing one bucket. The token is
+  verified rather than parsed, because keying on an unverified cookie would let
+  an attacker rotate it per request and buy an unlimited budget.
+  `API_RATE_LIMIT` tunes it, documented in `deploy/wevolunteer.env.example`.
+
+### Added — the seams for a second instance, without deploying one
+
+`server/instanceLock.js` still refuses a second production instance. What changed
+is that the list of reasons it must is short, evidenced and written down in
+[`docs/operations/horizontal-scaling.md`](docs/operations/horizontal-scaling.md).
+
+- **Leader leases for the four periodic sweeps** (`server/schedulerLease.js`,
+  migration 062). The notification sweep, Auto Select, retention and the search
+  indexer each do a whole scan on a timer, and there is no row for a sweep to
+  claim, so two processes would both do the whole scan. Retention is the one that
+  matters: the other three are idempotent by construction, and retention deletes.
+  The lease is a conditional upsert — the write *is* the claim — with a bounded
+  TTL, an owner-predicated release, and **fail-open** semantics, because a
+  database hiccup must not silently stop retention. Nothing observable changes on
+  one instance: the sole holder always acquires.
+- **A guard against `Promise.all` inside a transaction**
+  (`server/transactionConcurrency.test.js`). A transaction is one checked-out
+  `pg` client and a single client cannot serve concurrent queries. This pass
+  deliberately adds parallel and batched reads elsewhere, which makes the safe
+  shape and the corrupting one differ by a single enclosing call.
+- **Connection-pool counts on `/health`**, behind `HEALTH_POOL_STATS` and off by
+  default — `/health` is unauthenticated and deliberately carries no detail.
+  `waiting` is the number nothing else reports: the pool is small on purpose, so
+  saturation looks exactly like a slow database from outside and is not.
+- **Which Supabase port to connect to, and the pool arithmetic**, documented in
+  `deploy/wevolunteer.env.example`. The code has always been built for the
+  transaction-mode pooler — named prepared statements are off precisely because a
+  pooler can change the backend under a client — and no document said so.
+
+### Deliberately not done
+
+- **No queue was added.** The three DB-backed queues already claim atomically,
+  reclaim stranded work, cap attempts and classify terminal failures. QStash's
+  free tier is 1,000 messages a day, which a single event's reminder fan-out can
+  exceed. Adding one would have been a downgrade.
+- **No new indexes.** `docs/operations/postgres-scale-measurements.md` shows zero
+  sequential scans on the hot path at 50× pilot scale; an index here would slow
+  every write and move nothing.
+- **No caching layer over the database.** The Redis work measured a 222 ms warm
+  round trip against queries answering in 0.3–2 ms. Caching those would be a
+  regression, and it stayed rejected when that work merged — the Redis
+  integration caches third-party lookups and shares security counters, and
+  touches no SQL read path.
+- ~~**The events browse aggregate CTE is unchanged.**~~ **Superseded by the
+  second pass above**, which restructured it after all. The reasoning here — that
+  sort and pagination correctness on two dialects was the risk — was right about
+  the risk and wrong about the conclusion; what changed is that the risk was
+  answered with a differential harness (`bin/events-query-probe.mjs`) comparing
+  every row of the old and new queries at four scales, rather than accepted.
+
 ### Added
 
 - **A legal change now reaches the people it binds, at the weight it deserves.**

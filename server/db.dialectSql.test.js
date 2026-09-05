@@ -23,7 +23,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { PostgresDatabase } from './db/postgresConnection.js';
 import { translatePlaceholders } from './db/sqlPlaceholders.js';
-import { isPostgres, hoursBetween, greatest, monthOf, tableExists, probeWritable } from './db/dialectSql.js';
+import {
+  isPostgres, hoursBetween, greatest, monthOf, tableExists, probeWritable,
+  substringContains, substringPosition, escapeLikeLiteral,
+} from './db/dialectSql.js';
 
 const URL = process.env.TEST_POSTGRES_URL;
 const live = Boolean(URL);
@@ -36,6 +39,32 @@ const SHIFTS = [
   { start: '2026-01-01T00:00:00.000Z', end: '2026-01-02T00:00:00.000Z', hours: 24 },
 ];
 
+/**
+ * Text chosen for the characters that used to be the reason this codebase would
+ * not use `LIKE` at all: the two wildcards, the escape, and a null.
+ */
+const HAYSTACKS = [
+  'Chess Club #7',
+  'Discount 100% off everything',
+  'a_b regression fixture',
+  'back\\slash in the title',
+  'Caf\u00e9 Solidario',
+  'CAF\u00c9 SOLIDARIO',
+  'Beach Cleanup',
+  "O'Brien Memorial Park",
+  null,
+];
+
+/** Needles, including every one that would be pattern syntax if unescaped. */
+const NEEDLES = [
+  'chess', 'CHESS', 'Chess Club', 'club #7',
+  '100%', '%', '_', 'a_b', '%off%', '\\', 'back\\slash',
+  '', 'zzz-nothing-matches-zzz', "o'brien",
+];
+
+/** The subset whose case folding is the same on both engines. */
+const ASCII_NEEDLES = NEEDLES;
+
 let sqlite;
 let pg;
 
@@ -44,6 +73,10 @@ beforeAll(async () => {
   sqlite.exec('CREATE TABLE shifts (id integer primary key, start_datetime TEXT, end_datetime TEXT)');
   for (const [i, s] of SHIFTS.entries()) {
     sqlite.prepare('INSERT INTO shifts VALUES (?, ?, ?)').run(i, s.start, s.end);
+  }
+  sqlite.exec('CREATE TABLE haystacks (id integer primary key, body TEXT)');
+  for (const [i, body] of HAYSTACKS.entries()) {
+    sqlite.prepare('INSERT INTO haystacks VALUES (?, ?)').run(i, body);
   }
 
   if (!live) return;
@@ -59,6 +92,10 @@ beforeAll(async () => {
   await pg.exec('CREATE TABLE shifts (id integer primary key, start_datetime TEXT, end_datetime TEXT)');
   for (const [i, s] of SHIFTS.entries()) {
     await pg.prepare('INSERT INTO shifts VALUES (?, ?, ?)').run(i, s.start, s.end);
+  }
+  await pg.exec('CREATE TABLE haystacks (id integer primary key, body TEXT)');
+  for (const [i, body] of HAYSTACKS.entries()) {
+    await pg.prepare('INSERT INTO haystacks VALUES (?, ?)').run(i, body);
   }
 }, 60000);
 
@@ -207,5 +244,114 @@ describe('probeWritable', () => {
     } finally {
       await tx.rollback();
     }
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * substringContains — the predicate the search box runs
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Migration 064 replaced a position test with an escaped `LIKE` on PostgreSQL,
+ * so that a trigram index could answer it. The whole change rests on the claim
+ * that the two forms select exactly the same rows for every possible needle,
+ * including the ones made entirely of pattern syntax.
+ *
+ * That claim is asserted here rather than argued: for each needle, the rows
+ * matched by the shipped predicate must equal the rows matched by the form it
+ * replaced — on the same engine, with the same data.
+ */
+describe('substringContains', () => {
+  /** Ids matched by the shipped predicate. The needle is escaped for LIKE. */
+  const contains = (db, needle) => db
+    .prepare(`SELECT id FROM haystacks WHERE ${substringContains(db, 'lower(body)', 'lower(?)')} ORDER BY id`)
+    .all(isPostgres(db) ? escapeLikeLiteral(needle) : needle);
+
+  /** Ids matched by the pre-064 predicate, which takes the needle verbatim. */
+  const position = (db, needle) => db
+    .prepare(`SELECT id FROM haystacks WHERE ${substringPosition(db, 'lower(body)', 'lower(?)')} ORDER BY id`)
+    .all(needle);
+
+  const ids = (rows) => rows.map((r) => Number(r.id));
+
+  it.each(NEEDLES)('matches exactly what the position test matched on SQLite: %j', (needle) => {
+    expect(ids(contains(sqlite, needle))).toEqual(ids(position(sqlite, needle)));
+  });
+
+  it.skipIf(!live).each(NEEDLES)(
+    'matches exactly what the position test matched on PostgreSQL: %j',
+    async (needle) => {
+      expect(ids(await contains(pg, needle))).toEqual(ids(await position(pg, needle)));
+    },
+  );
+
+  it.skipIf(!live).each(ASCII_NEEDLES)('selects the same rows on both engines: %j', async (needle) => {
+    expect(ids(await contains(pg, needle))).toEqual(ids(contains(sqlite, needle)));
+  });
+
+  /**
+   * The characters that are the entire reason the position test was chosen
+   * originally, stated as behaviour rather than left to the table above.
+   */
+  it('does not let a typed % match everything', () => {
+    const all = ids(contains(sqlite, ''));
+    const percent = ids(contains(sqlite, '%'));
+    expect(percent.length).toBeGreaterThan(0);
+    expect(percent).not.toEqual(all);
+    expect(percent).toEqual(ids(position(sqlite, '%')));
+  });
+
+  it('does not let a typed _ match any single character', () => {
+    expect(ids(contains(sqlite, '_'))).toEqual(ids(position(sqlite, '_')));
+    /* 'a_b regression fixture' is the only row with a literal underscore. */
+    expect(ids(contains(sqlite, '_')).length).toBe(1);
+  });
+
+  it('treats NULL text as no match rather than as a match', () => {
+    /* The corpus carries a null body; every needle above must skip it. */
+    expect(ids(contains(sqlite, ''))).not.toContain(HAYSTACKS.indexOf(null));
+  });
+
+  it.skipIf(!live)('is answered by a trigram index when one exists', async () => {
+    await pg.exec('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    await pg.exec('CREATE INDEX IF NOT EXISTS haystacks_body_trgm ON haystacks USING gin (lower(body) gin_trgm_ops)');
+    /* Small tables are scanned whatever indexes exist, so this asserts the
+       index is USABLE — the planner accepts the operator and the expression —
+       rather than that it is chosen at three rows. */
+    const rows = await pg.prepare(`
+      EXPLAIN (FORMAT JSON) SELECT id FROM haystacks
+       WHERE ${substringContains(pg, 'lower(body)', 'lower(?)')}
+    `).all(escapeLikeLiteral('chess'));
+    expect(JSON.stringify(rows[0])).toBeTruthy();
+
+    await pg.exec('SET enable_seqscan = off');
+    const planned = await pg.prepare(`
+      EXPLAIN (FORMAT JSON) SELECT id FROM haystacks
+       WHERE ${substringContains(pg, 'lower(body)', 'lower(?)')}
+    `).all(escapeLikeLiteral('chess'));
+    await pg.exec('SET enable_seqscan = on');
+    expect(JSON.stringify(planned)).toMatch(/Bitmap Index Scan|Index Scan/);
+  });
+});
+
+describe('escapeLikeLiteral', () => {
+  it('escapes the three characters LIKE treats as syntax, and nothing else', () => {
+    expect(escapeLikeLiteral('100%')).toBe('100\\%');
+    expect(escapeLikeLiteral('a_b')).toBe('a\\_b');
+    expect(escapeLikeLiteral('c:\\path')).toBe('c:\\\\path');
+    expect(escapeLikeLiteral('plain words')).toBe('plain words');
+    expect(escapeLikeLiteral("O'Brien")).toBe("O'Brien");
+  });
+
+  it('escapes the backslash first, so its own escapes are not re-escaped', () => {
+    /* '\\%' is a backslash then a percent: two literal characters, which must
+       become an escaped backslash then an escaped percent. */
+    expect(escapeLikeLiteral('\\%')).toBe('\\\\\\%');
+  });
+
+  it('survives a non-string without throwing', () => {
+    expect(escapeLikeLiteral(null)).toBe('');
+    expect(escapeLikeLiteral(undefined)).toBe('');
+    expect(escapeLikeLiteral(42)).toBe('42');
   });
 });

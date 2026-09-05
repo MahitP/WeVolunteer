@@ -173,27 +173,47 @@ describe('Redis is never a source of truth', () => {
   });
 
   it('the set of modules that touch Redis at all is the reviewed one', () => {
-    /* Each is a deliberate decision recorded in docs/operations/upstash.md:
-       three limiter surfaces, two third-party caches, and two read-only status
-       panels. A new one should arrive with a note here rather than by accident —
-       this list is the review, not a formality.
-
-       `organizationLimiters.js` is the third limiter surface. It qualifies under
-       the same rule as the limiters in app.js and no more: both of its throttles
-       tick on abuse rather than on volume — an unauthenticated invitation-link
-       lookup and an attempt to join — so the command budget the module header
-       reasons about is not at risk, and neither counter is ever read as truth
-       about anything. Nothing about organization membership is stored in Redis;
-       the source of truth is `organization_members` and
-       `organization_join_requests`.
-
-       `integrations/upstash.js` is the Owner Center's read, added with the
-       Owner Center. It is read-only in the strongest sense available: it calls
-       `redisStatus()` (which owns the allowlist of what an operator may know)
-       and `redisPing()`, and nothing else. No key is named, no key is read, and
-       there is deliberately no destructive control anywhere on that page — the
-       one an operator would actually want, "clear the rate limits", would also
-       clear every credential-stuffing counter on a service used by children. */
+    /**
+     * Every module that may speak to Redis, and why. This list IS the review:
+     * a new entry means somebody decided that concern belongs in shared state,
+     * and had to say so here.
+     *
+     * The set grew when the volume limiters were distributed. Two mechanisms
+     * are in play and the distinction matters more than the count:
+     *
+     *   • EXACT sharing (`redis/limitStore.js`) — every increment metered. Used
+     *     where the limiter ticks rarely and the thing it bounds is abuse:
+     *     mail, re-authentication, appeals, certificate checks, signup, data
+     *     export, issue reports, moderation reports, check-in codes,
+     *     applications, error reports, lookups.
+     *   • APPROXIMATE sharing (`redis/volumeLimit.js`) — exact locally, and
+     *     reconciled through Redis only once a caller approaches the ceiling.
+     *     Used where the limiter ticks on every request and exact metering
+     *     would cost more than the whole free plan: `apiLimiter`, and the
+     *     message send throttle.
+     *
+     * What did NOT change: no route reads or writes user CONTENT through
+     * Redis, nothing here is a source of truth, and `travelRoutes.js` is still
+     * absent by design — its key would derive from a minor's location, which
+     * the test above enforces separately.
+     *
+     * `organizationLimiters.js` is a further limiter surface and qualifies
+     * under the same rule as the ones in app.js and no more: both of its
+     * throttles tick on ABUSE rather than on volume — an unauthenticated
+     * invitation-link lookup, and an attempt to join — so the command budget
+     * the module header reasons about is not at risk, and neither counter is
+     * ever read as truth about anything. Nothing about organization membership
+     * is stored in Redis; the source of truth is `organization_members` and
+     * `organization_join_requests`.
+     *
+     * `integrations/upstash.js` is the Owner Center's read, and it is read-only
+     * in the strongest sense available: it calls `redisStatus()` — which owns
+     * the allowlist of what an operator may know — and `redisPing()`, and
+     * nothing else. No key is named and no key is read. There is deliberately
+     * no destructive control on that page: the one an operator would actually
+     * want, "clear the rate limits", would also clear every credential-stuffing
+     * counter on a service used by children.
+     */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
       .filter(f => /from\s+['"][^'"]*redis\/[a-zA-Z]+\.js['"]/.test(read(f)))
@@ -201,12 +221,20 @@ describe('Redis is never a source of truth', () => {
       .sort();
 
     expect(callers).toEqual([
-      path.join('server', 'app.js'),                      // limiter stores
+      path.join('server', 'app.js'),                      // limiter stores, exact + volume
+      path.join('server', 'applicationLimiter.js'),       // exact: applications per user
+      path.join('server', 'checkinLimiters.js'),          // exact: check-in CODE guessing
+      /* The Owner Center's read. Read-only in the strongest sense: redisStatus()
+         and redisPing(), no key named and no key read. */
       path.join('server', 'integrations', 'upstash.js'),  // Owner Center, read-only
-      path.join('server', 'organizationLimiters.js'),     // invite + join throttles
+      path.join('server', 'messageThrottle.js'),          // volume: 20 messages a minute
+      path.join('server', 'organizationLimiters.js'),     // exact: invite lookup + join
+      path.join('server', 'reportLimiter.js'),            // exact: moderation report abuse
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter
       path.join('server', 'routes', 'geocodeRoutes.js'),  // address cache + throttle
+      path.join('server', 'routes', 'issueRoutes.js'),    // exact: issue reports per hour
+      path.join('server', 'routes', 'privacyRoutes.js'),  // exact: data export requests
       path.join('server', 'routes', 'weatherRoutes.js'),  // forecast cache
     ]);
   });

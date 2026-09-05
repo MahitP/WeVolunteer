@@ -31,6 +31,7 @@ import { createHash } from 'crypto';
 
 import { DEMO_MODE } from './config.js';
 import { limitHandler } from './rateLimitResponse.js';
+import { createRedisLimitStore } from './redis/limitStore.js';
 
 /**
  * Twenty a day. Enough that no honest student meets it — the queue's own
@@ -44,6 +45,7 @@ import { limitHandler } from './rateLimitResponse.js';
 export const REPORT_LIMIT = Number(process.env.REPORT_RATE_LIMIT) || (DEMO_MODE ? 1000 : 20);
 
 export const reportLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'report' }),
   windowMs: 24 * 60 * 60 * 1000,
   limit: REPORT_LIMIT,
   standardHeaders: 'draft-7',

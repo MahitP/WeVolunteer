@@ -374,6 +374,93 @@ That works out at **~98 commands per user per month**.
 | 500 | ~48,800 | 9.8% — comfortable | ~268,000 (54%) — **warning** |
 | 1,000 | ~97,600 | 19.5% — comfortable | ~535,800 (107%) — **exceeded** |
 
+### 7.4 What distributing the volume limiters added
+
+The table above predates the volume limiters being shared. Adding them the
+obvious way — the exact store, on every request — is the design that does not
+fit, and the arithmetic is worth keeping because it is the argument for the
+shape that shipped:
+
+> `apiLimiter` allows 600 requests a quarter hour and sits on every `/api` call.
+> At the traffic modelled above, roughly **2,200 API requests per user per
+> month**, metering each costs 3 commands: **6,600 commands per user per month**,
+> against an allowance that at 1,000 users is 500 per user. **Off by more than
+> thirteen times.** Request volume is the problem, so no amount of pipelining
+> helps.
+
+What shipped instead (`server/redis/volumeLimit.js`) shares nothing until a
+caller passes a quarter of the ceiling, then reports in batches, and decides
+refusals locally once at the limit. Measured against the loopback stub in a load
+run: **161,408 requests produced 15 `EVAL`s.**
+
+Per user per month, added to the ~98 above:
+
+| Source | Commands | Why |
+|---|---|---|
+| Exact-shared low-volume limiters | ~28 | signup, application, export, issue, report, check-in code, error report, lookup, appeal read — 3 commands each, and each ticks a handful of times a month |
+| `apiLimiter` coordination | ~1 | zero for anybody under 150 requests a quarter hour, which is nearly everybody; ~57 for a full 600-request window |
+| Message throttle coordination | ~0.5 | escalates above ten messages a minute, which ordinary use never reaches |
+
+**About 128 commands per user per month, or 25.6% of the free plan at 1,000
+users** — against 19.5% before, and against the >1,300% the naive design would
+have cost. The first bottleneck is still not the command allowance.
+
+Two costs are deliberately variable rather than fixed, and that is the honest
+caveat: both coordination figures scale with ABUSE rather than with users. A
+sustained attack raises them, which is the correct direction — the commands are
+spent bounding the attacker — and refusals themselves cost nothing, so the spend
+is capped by the limit rather than by the attacker's persistence.
+
+---
+
+### 7.5 What the final pass added, and the setting that removes the constraint
+
+Three more controls became shared, and one became configurable.
+
+| Source | Commands / user / month | Why |
+|---|---|---|
+| Login IP-failure ceiling | ~10 | Counted on FAILURE only. Giving `loginIpCeilingLimiter` a Redis store instead would have billed an increment on every request and a decrement on every success — the 107% figure below — for an identical security property. |
+| `checkinScanLimiter` token bucket | ~2 | 4 commands per scan, and scans are organizer-device actions at events. |
+| Everything from §7.4 | ~130 | |
+
+**About 140 commands per user per month, or 28% of the free plan at 1,000
+users.** The first bottleneck is still not the command allowance.
+
+#### The constraint is the provider's, and it is now one setting
+
+Everything approximate in this design exists because Upstash bills per COMMAND
+and `apiLimiter` sits on every request. Checked 2026-09-01, the free plan is
+500,000 commands, 256 MB, 10 GB bandwidth, **one database**, and pay-as-you-go is
+**$0.20 per 100K commands** — so exact enforcement at the modelled traffic is
+about 6.6M commands, roughly **$13 a month**, which is a real cost rather than an
+impossible one.
+
+Other free tiers meter differently. Aiven and Layerbase both offer Valkey
+(Redis-compatible) free plans that meter storage and connections rather than
+commands. On one of those, exact enforcement is free.
+
+So the strength is a setting, not a property of the code:
+
+```
+RATE_LIMIT_MODE=exact
+```
+
+`rateLimit.multiInstance.test.js` proves that path is exact across two, three and
+four instances today. Moving provider is that variable and a connection string —
+not a design somebody has to do under pressure, which is the state this
+integration was in before.
+
+#### And abuse cannot spend the allowance
+
+A limiter that meters every request turns "send more requests" into "cost the
+operator money". Asserted rather than intended: a caller already refused costs
+nothing to refuse again; one key's spend in a window is capped regardless of
+traffic; spend scales with distinct KEYS, and minting one means holding a
+verified session or another address; and an attack during an outage cannot
+amplify, because the breaker costs one timeout per window.
+
+---
+
 The right-hand column is the version of this integration that was built first
 and then measured. It is kept here because it is the whole argument for §4's
 scoping: the intuitive choice — share every security limiter — breaks the free

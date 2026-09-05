@@ -5,6 +5,7 @@ import cookie from 'cookie';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { isSessionRevoked } from '../utils.js';
+import { configureRealtimeAdapter } from './adapter.js';
 
 const SESSION_CHECK_INTERVAL = Number(process.env.SOCKET_SESSION_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 
@@ -35,6 +36,87 @@ function isAllowedOrigin(origin) {
   return false;
 }
 
+/**
+ * The session-invalidation sweep, run once for every connected socket together.
+ *
+ * ── What this replaces ──
+ *
+ * Each socket used to own a `setInterval` that asked two questions of its own:
+ * `SELECT token_version FROM users WHERE id = ?` and `isSessionRevoked(jti)`,
+ * which is a second SELECT. So the cost of keeping sessions honest was **two
+ * statements per connected socket per five minutes** — three hundred students
+ * with a tab open is 600 queries every five minutes, entirely to discover that
+ * almost nobody signed out. It also scaled with sockets rather than with users,
+ * so a student with a phone and a laptop paid twice.
+ *
+ * One sweep asks both questions for every socket at once: two statements
+ * total, regardless of how many are connected.
+ *
+ * ── What deliberately did NOT change ──
+ *
+ * The rule itself. A socket is disconnected when its user row is gone, when
+ * `token_version` has moved past the one the socket handshook with, or when its
+ * `jti` has been revoked — the same three conditions, in the same order, with
+ * the same `session.invalidated` emitted before the disconnect. The handshake
+ * check runs once, so this sweep is what stops an already-open socket streaming
+ * notifications to a session the user has ended.
+ *
+ * Never throws. A database error means this tick learns nothing and the next one
+ * tries again, which is what the per-socket version did by swallowing it too — a
+ * failed check must not tear down live connections.
+ */
+export async function sweepInvalidatedSockets(io) {
+  const sockets = await io.fetchSockets();
+  if (!sockets.length) return 0;
+
+  const userIds = [...new Set(sockets.map(s => s.data?.user?.id).filter(Boolean))];
+  const jtis = [...new Set(sockets.map(s => s.data?.jti).filter(Boolean))];
+  const marks = (n) => Array.from({ length: n }, () => '?').join(',');
+
+  /* Every socket carries a user by the time it is connected — the handshake
+     middleware sets `socket.data.user` or refuses — so an empty list here should
+     be unreachable. Guarded anyway, because the alternative is `IN ()`, which is
+     a SQL syntax error rather than an empty result, and a sweep that throws is a
+     sweep that stops enforcing sign-outs. */
+  if (!userIds.length) return 0;
+
+  const versionByUser = new Map();
+  for (const row of await db.prepare(
+    `SELECT id, token_version FROM users WHERE id IN (${marks(userIds.length)})`
+  ).all(...userIds)) {
+    versionByUser.set(row.id, row.token_version);
+  }
+
+  /* One lookup for every jti on the server, rather than `isSessionRevoked` per
+     socket. A token with no jti predates the mechanism and is allowed through,
+     exactly as `isSessionRevoked` allows it — see the note there. */
+  const revoked = new Set();
+  if (jtis.length) {
+    for (const row of await db.prepare(
+      `SELECT jti FROM revoked_sessions WHERE jti IN (${marks(jtis.length)})`
+    ).all(...jtis)) {
+      revoked.add(row.jti);
+    }
+  }
+
+  let cut = 0;
+  for (const socket of sockets) {
+    const userId = socket.data?.user?.id;
+    if (!userId) continue;
+    const current = versionByUser.get(userId);
+    const invalidated = current === undefined
+      || current !== socket.data.tokenVersion
+      || (socket.data.jti && revoked.has(socket.data.jti));
+    if (!invalidated) continue;
+
+    console.log(`[realtime] disconnected socket=${socket.id} user=${userId} reason=session_invalidated`);
+    socket.emit('session.invalidated');
+    socket.disconnect(true);
+    cut++;
+  }
+  return cut;
+}
+
 export function initSocketServer(httpServer) {
   const io = new Server(httpServer, {
     cors: {
@@ -44,6 +126,36 @@ export function initSocketServer(httpServer) {
   });
 
   setRealtimeServer(io);
+
+  /**
+   * The cross-instance bus, when one is configured.
+   *
+   * Awaited by `initSocketServer`'s caller through the returned promise rather
+   * than here, because `initSocketServer` is synchronous and every existing
+   * caller depends on that. See `server.js`, which awaits it before listening.
+   */
+  io.adapterReady = configureRealtimeAdapter(io);
+
+  /**
+   * One timer for the whole server, cleared when the server closes.
+   *
+   * Attached to `io` rather than held in module scope so a second server in the
+   * same process — which is what every socket test creates — gets its own, and
+   * closing one does not silence the other. `unref` because a periodic check is
+   * never a reason for the process to stay alive.
+   */
+  const sessionSweep = setInterval(() => {
+    sweepInvalidatedSockets(io).catch((err) => {
+      // A failed sweep costs one missed check. Taking the process down over it,
+      // or tearing down live sockets, would both be worse.
+      console.error('[realtime] session sweep failed:', err.message);
+    });
+  }, SESSION_CHECK_INTERVAL);
+  sessionSweep.unref?.();
+  io.on('close', () => clearInterval(sessionSweep));
+  /* `io.close()` does not emit 'close' on every version, so shutdown.js is given
+     a handle it can clear directly as well. Clearing twice is harmless. */
+  io.sessionSweepTimer = sessionSweep;
 
   io.use(async (socket, next) => {
     try {
@@ -116,28 +228,10 @@ export function initSocketServer(httpServer) {
     
     socket.join(`user:${user.id}`);
     
-    const interval = setInterval(async () => {
-      try {
-        const current = await db.prepare('SELECT token_version FROM users WHERE id = ?').get(user.id);
-        // Signed out mid-connection counts too: the handshake check only runs
-        // once, so without this an already-open socket kept streaming
-        // notifications to a session the user had ended.
-        if (!current || current.token_version !== socket.data.tokenVersion
-            || await isSessionRevoked(socket.data.jti)) {
-          console.log(`[realtime] disconnected socket=${socket.id} user=${user.id} reason=session_invalidated`);
-          socket.emit('session.invalidated');
-          socket.disconnect(true);
-        }
-      } catch (err) {
-        // DB error, ignore this check
-      }
-    }, SESSION_CHECK_INTERVAL);
-
     socket.on('disconnect', (reason) => {
-      clearInterval(interval);
       console.log(`[realtime] disconnected socket=${socket.id} user=${user.id} reason=${reason}`);
     });
-    
+
     // Typing indicators
     const typingBuckets = new Map();
     

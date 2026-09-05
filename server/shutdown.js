@@ -34,6 +34,7 @@ import { stopExportWorker } from './workers/exportWorker.js';
 import { releaseInstanceLock, stopInstanceLockHeartbeat } from './instanceLock.js';
 import { stopAutoSelectScheduler } from './services/autoSelectScheduler.js';
 import { stopRetentionWorker } from './workers/retentionWorker.js';
+import { closeRealtimeAdapter } from './realtime/adapter.js';
 import { logLifecycle, drainTelemetry } from './telemetry.js';
 import { shutdownOtel } from './observability/otel.js';
 import { stopIndexWorker } from './search/indexWorker.js';
@@ -107,11 +108,23 @@ export async function shutdown({ signal, httpServer, io, intervals = [] }) {
    * a dead socket until a timeout.
    */
   if (io) {
+    /* The shared session-invalidation sweep (`socketServer.js`) replaced a timer
+       per socket. One timer means one thing to stop, and stopping it here rather
+       than relying on `io`'s 'close' event is deliberate: the event is not
+       emitted on every Socket.IO version, and a surviving interval would hold a
+       reference to a closed server. Clearing an already-cleared timer is a
+       no-op, so doing both is safe. */
+    if (io.sessionSweepTimer) clearInterval(io.sessionSweepTimer);
     try {
       await new Promise(resolve => io.close(() => resolve()));
     } catch (err) {
       console.error('[Shutdown] Socket.IO close failed:', err);
     }
+    /* The adapter's own connection pool, when one was installed. Separate from
+       the application pool by design — it needs a session-mode connection for
+       LISTEN/NOTIFY — so it is a separate thing to close, and a pool left open
+       holds the process past a graceful stop. A no-op when no adapter ran. */
+    await closeRealtimeAdapter();
   }
 
   /**

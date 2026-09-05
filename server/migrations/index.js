@@ -73,6 +73,9 @@ import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hash
 import organizationMembershipPolicy from './062_organization_membership_policy.js';
 import organizationPublicIdentity from './063_organization_public_identity.js';
 import resyncGuardianScopeHash from './064_resync_guardian_scope_hash.js';
+import schedulerLeases from './065_scheduler_leases.js';
+import eventSlotSummary from './066_event_slot_summary.js';
+import searchTrigramIndexes from './067_search_trigram_indexes.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -441,7 +444,54 @@ export const MIGRATIONS = [
    * reconciles the edit its own commit made, which is what keeps the pair
    * auditable.
    */
-  resyncGuardianScopeHash
+  resyncGuardianScopeHash,
+  /**
+   * 065 — leader leases for the four periodic sweeps.
+   *
+   * A standalone table with no foreign keys, so it is order-independent.
+   *
+   * **Renumbered from 061**, which is why the number is worth a note. This was
+   * written as 061 while 060 was still on an unmerged branch, precisely so the
+   * two could not collide — and then 061 was taken as well, by the legal-hash
+   * repair above, on another branch and at the same time. Two migrations
+   * sharing a version is refused at boot ("Duplicate migration version").
+   *
+   * Renumbering was clean here only because neither had been applied to a real
+   * database from this branch yet. That is the whole lesson: reserving a gap
+   * protects against the collision you can see coming, and nothing protects
+   * against a parallel branch except merging often enough to find out. Once a
+   * version has been recorded in `schema_migrations` anywhere real, its number
+   * is no longer yours to change.*
+   * **Renumbered a second time, from 062-064 to 065-067.** The first
+   * renumbering (061 -> 062) was to dodge a collision on an unmerged branch.
+   * This one is the collision arriving anyway: `main` took 062, 063 and 064 for
+   * the organization-membership work while these three sat on a branch, and two
+   * migrations sharing a version is refused at boot.
+   *
+   * Trunk keeps its numbers and the branch moves, which is the only rule that
+   * scales past two people. It has a cost here that is worth writing down: these
+   * three had ALREADY been applied to the real Supabase database as 62, 63 and
+   * 64, so that database's bookkeeping now names the wrong migrations and has to
+   * be repaired before it is booted against this branch. See the deployment
+   * notes — it is not something the runner can fix for itself, because a version
+   * number is the only identity a recorded migration has.
+   */
+  schedulerLeases,
+  /**
+   * 066 — `events.first_slot_start`, and the index the browse sort needs.
+   *
+   * Additive, with its backfill in the same migration so no deployment serves
+   * a page ordered by a column that is NULL everywhere.
+   */
+  eventSlotSummary,
+  /**
+   * 067 — the trigram indexes the search box needs, on PostgreSQL only.
+   *
+   * Additive and index-only: nothing reads differently with or without it, and
+   * it declines rather than failing the boot when the role cannot install the
+   * extension.
+   */
+  searchTrigramIndexes
 ];
 
 const label = (m) => `${m.version}_${m.name}`;
@@ -821,6 +871,39 @@ export async function seedPostgresBaseline(db, migrations = MIGRATIONS) {
   await ensurePostgresBookkeeping(db);
   const now = new Date().toISOString();
   for (const m of [...migrations].sort((a, b) => a.version - b.version)) {
+    /**
+     * A `postgresOnly` migration RUNS here, rather than being recorded as
+     * already-present.
+     *
+     * The rest of this function rests on one fact: the generated schema is
+     * derived from a freshly-booted SQLite database, so it already contains
+     * every migration's effect and re-applying one would be the double-apply
+     * this file exists to prevent. That fact has an exception, and the
+     * exception is silent — a change SQLite cannot express is not in the
+     * SQLite database, so it is not in the generated schema either, so a fresh
+     * PostgreSQL database recorded it as applied and never got it.
+     *
+     * Migration 064's trigram indexes are the first of those, and the symptom
+     * was as quiet as it sounds: every table present, every test passing, the
+     * search box correct — and linear, on exactly the databases created after
+     * the fix for it shipped. `migrations.postgres.test.js` now asserts that a
+     * fresh database ends up with the indexes.
+     *
+     * Its checksum is recorded rather than the baseline sentinel, because code
+     * DID run and drift in it is worth catching.
+     */
+    if (m.postgresOnly) {
+      const [already] = await db.prepare(
+        'SELECT version FROM schema_migrations WHERE version = ?'
+      ).all(m.version);
+      if (already) continue;
+      await m.postgres.up(db);
+      await db.prepare(
+        'INSERT INTO schema_migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)'
+      ).run(m.version, m.name, now, checksumOf(m));
+      continue;
+    }
+
     await db.prepare(
       `INSERT INTO schema_migrations (version, name, applied_at, checksum)
             SELECT ?, ?, ?, ?

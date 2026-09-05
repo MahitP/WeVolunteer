@@ -81,8 +81,14 @@ describe('Admin CSV Export Route', () => {
      * student's address had been produced, or by whom.
      */
     const { db } = await import('./db.js');
+    /* `insertionTiebreak`, not a literal `rowid`: that column exists only on
+       SQLite, so this assertion passed on one engine and failed the whole case
+       with `column "rowid" does not exist` on the other. The dialect layer owns
+       the difference — see db/dialectSql.js. */
+    const { insertionTiebreak } = await import('./db/dialectSql.js');
     const row = await db.prepare(
-      "SELECT action, target_user_id, details FROM admin_audit_logs WHERE action = 'ROSTER_EXPORTED' ORDER BY rowid DESC LIMIT 1"
+      'SELECT action, target_user_id, details FROM admin_audit_logs '
+      + `WHERE action = 'ROSTER_EXPORTED' ORDER BY ${insertionTiebreak(db)} DESC LIMIT 1`
     ).get();
     expect(row, 'the export wrote no audit row').toBeTruthy();
     /* No target: the subject is every student at once, which is what makes the

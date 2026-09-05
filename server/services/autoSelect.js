@@ -470,18 +470,31 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
     const acceptStmt = await tx.prepare("UPDATE applications SET status = 'accepted', waitlist_order = NULL WHERE id = ?");
     for (const id of selectedIds) {
       await acceptStmt.run(id);
-
-      const appRow = await tx.prepare(`
-        SELECT a.user_id, s.name as slot_name
-        FROM applications a
-        JOIN slots s ON a.slot_id = s.id
-        WHERE a.id = ?
-      `).get(id);
-
-      if (appRow) {
-        await notificationService.dispatch('APPLICATION_ACCEPTED', { eventId: event.id, eventTitle: event.title }, appRow.user_id);
-      }
     }
+
+    /**
+     * Who was just accepted, in one statement rather than one per applicant.
+     *
+     * The loop above used to re-read each application it had just updated, join
+     * `slots`, and then dispatch — so a draw over sixty applicants cost sixty
+     * extra reads plus five round trips of notification each, all inside the
+     * transaction that holds a pooled client. The updates still run one at a
+     * time (each is a distinct row), but the read and the broadcast do not have
+     * to.
+     */
+    const acceptedRows = selectedIds.length > 0
+      ? await tx.prepare(`
+          SELECT a.id, a.user_id
+          FROM applications a
+          WHERE a.id IN (${selectedIds.map(() => '?').join(',')})
+        `).all(...selectedIds)
+      : [];
+
+    await notificationService.dispatchMany(
+      'APPLICATION_ACCEPTED',
+      { eventId: event.id, eventTitle: event.title },
+      acceptedRows.map(r => r.user_id),
+    );
 
     // 3. Set statuses and ranks for waitlisted applicants
     const waitlistApps = waitlistIds.length > 0
@@ -496,6 +509,13 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
     // Slot-specific waitlist counters
     const slotWaitlistIndex = {};
 
+    /**
+     * Ranks are assigned in `waitlistIds` order, which is the draw's order and
+     * is what makes "you are third" mean anything. That ordering is why the
+     * ranks are computed in this loop and the broadcast happens after it, rather
+     * than the notification being folded into the loop as before.
+     */
+    const rankByUser = new Map();
     for (const id of waitlistIds) {
       const app = waitlistApps.find(a => a.id === id);
       if (!app) continue;
@@ -504,9 +524,19 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
       const rank = slotWaitlistIndex[app.slot_id];
 
       await waitlistStmt.run(rank, id);
-
-      await notificationService.dispatch('APPLICATION_WAITLISTED', { eventId: event.id, eventTitle: event.title, waitlistRank: rank }, app.user_id);
+      rankByUser.set(app.user_id, rank);
     }
+
+    /* Each waitlisted volunteer is told their OWN rank, so the payload differs
+       per recipient — `payloadFor` keeps the reads and writes batched while the
+       content is rendered per person. */
+    await notificationService.dispatchMany(
+      'APPLICATION_WAITLISTED',
+      null,
+      [...rankByUser.keys()],
+      null,
+      (userId) => ({ eventId: event.id, eventTitle: event.title, waitlistRank: rankByUser.get(userId) }),
+    );
 
     // 4. Compute selection summary
     const totalApplicants = selectedIds.length + waitlistIds.length;

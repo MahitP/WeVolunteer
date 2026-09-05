@@ -42,6 +42,38 @@ import { ipKeyGenerator } from 'express-rate-limit';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Blanks whole-line comments so the scan cannot match prose.
+ *
+ * ── Why this is needed ──
+ *
+ * The scan below is line-oriented and looks for the literal call shape. Without
+ * this it also matches any COMMENT that writes that shape down — and the
+ * comment most likely to do so is the one explaining why the shape is wrong,
+ * beside the call site that was corrected. This repository documents defects
+ * next to the code they were found in, so a guard that fires on that
+ * documentation is a guard that discourages it. `app.js` tripped exactly this
+ * during the perf-scaling merge: the fix was right, and the paragraph
+ * describing it was the offender.
+ *
+ * Same line-oriented approach as `stripComments` in
+ * `src/serverModuleBoundary.test.js` and `server/authz.completeness.test.js`,
+ * for the reason recorded there: a regex that looks INSIDE a line for a comment
+ * opener gets opened by a string literal and swallows everything after it. A
+ * line is blanked only when the line ITSELF begins with `//`, `/*` or `*`,
+ * which cannot misfire on real code and keeps line numbers exact.
+ *
+ * It deliberately does NOT blank a trailing comment on a line of code —
+ * `foo(); // ipKeyGenerator(req, res)` still reports, because a line that
+ * contains real code is a line worth reading closely.
+ */
+function stripComments(source) {
+  return source.split('\n').map((line) => {
+    const t = line.trim();
+    return (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) ? '' : line;
+  }).join('\n');
+}
+
 describe('ipKeyGenerator is called with an address, never a request', () => {
   /**
    * A source scan rather than a behavioural probe, deliberately: the call sites
@@ -58,7 +90,7 @@ describe('ipKeyGenerator is called with an address, never a request', () => {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) { walk(full); continue; }
         if (!entry.name.endsWith('.js') || entry.name.includes('.test.')) continue;
-        const src = readFileSync(full, 'utf8');
+        const src = stripComments(readFileSync(full, 'utf8'));
         src.split('\n').forEach((line, i) => {
           if (/ipKeyGenerator\(\s*req\s*,/.test(line)) {
             offenders.push(`${path.relative(HERE, full)}:${i + 1}`);

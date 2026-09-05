@@ -385,3 +385,59 @@ export async function guardDestructive({ tool, dbPath, effect, assumeYes = hasYe
   announce({ tool, dbPath, effect });
   if (!(await confirmDestructive({ dbPath, assumeYes }))) process.exit(1);
 }
+
+/**
+ * The same refusal, for a tool that writes to a PostgreSQL SERVER.
+ *
+ * ── Why the gate had to grow ──
+ *
+ * Everything above reasons about a SQLite file: a path, its size, the rows in
+ * it. That was the whole surface for as long as every destructive tool operated
+ * on a file. `bin/supabase-check.mjs` broke that assumption — it takes a
+ * connection string and, with its write probe enabled, creates and drops a
+ * table on the far end.
+ *
+ * `tooling.scriptSafety.test.js` caught it immediately: a `bin/` script
+ * containing `DROP TABLE` that does not consult this module is a script that
+ * has invented its own idea of what is safe to destroy. It was right to, and
+ * the fix is for the shared gate to understand the other engine rather than for
+ * the tool to opt out of it.
+ *
+ * ── What it checks ──
+ *
+ * Emptiness of the APPLICATION, not of the database: a provisioned but unused
+ * deployment holds the reserved `system-cli` actor and nothing else, and that
+ * is still disposable. Anything more is somebody's data.
+ *
+ * The caller supplies the counts because this module deliberately opens no
+ * connections — it is a decision, not a client.
+ *
+ * @param {object}  o
+ * @param {string}  o.tool      the script, for the message
+ * @param {string}  o.target    a printable `host:port/database`, never a URL
+ * @param {number}  o.userRows  users excluding `system-cli`
+ * @param {number}  [o.otherRows] any other application rows the caller counted
+ * @param {string}  o.effect    what the tool would do
+ */
+export function refuseNonDisposablePostgres({ tool, target, userRows, otherRows = 0, effect }) {
+  const total = Number(userRows) + Number(otherRows);
+  if (!Number.isFinite(total) || total <= 0) return;
+
+  if (process.env.WEV_ALLOW_DESTROYING_REAL_DATA === '1') {
+    console.warn(`WARNING: ${target} holds ${total} application row(s).`);
+    console.warn('Proceeding only because WEV_ALLOW_DESTROYING_REAL_DATA=1 is set.');
+    return;
+  }
+
+  console.error(`REFUSING: ${target}`);
+  console.error('');
+  console.error(`  That database holds ${total} application row(s), so it is somebody's`);
+  console.error(`  deployment rather than a scratch one. ${tool} writes only to a`);
+  console.error('  disposable database.');
+  console.error('');
+  console.error(`  What it would have done: ${effect}`);
+  console.error('');
+  console.error('  Point it at a throwaway database instead, or drop the flag that');
+  console.error('  enables the write probe — every read-only check still runs without it.');
+  process.exit(1);
+}

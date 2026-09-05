@@ -42,6 +42,7 @@
 import { runAndConfirm, hasConfirmedRun } from './autoSelect.js';
 import { notificationService } from './notificationService.js';
 import { recordError } from '../errorReporter.js';
+import { withLease, LEASES } from '../schedulerLease.js';
 
 /** How long after the deadline the organizer keeps sole control. */
 const GRACE_HOURS = Number(process.env.AUTO_SELECT_GRACE_HOURS ?? 24);
@@ -245,10 +246,26 @@ export function startAutoSelectScheduler(db) {
      catch-up sweep to have finished — `startAutoSelectScheduler` is called at
      boot and in tests — can await it. Nothing in production does; the boot path
      deliberately does not block on it. */
-  const startupSweep = runAutoSelectSweep(db).catch(guard('startup sweep'));
+  /**
+   * Behind a leader lease, so a second instance does not run the same draw
+   * concurrently.
+   *
+   * The draw is already idempotent — a confirmed `auto_select_runs` row is the
+   * guard, and it lives in the database — so this is about not doing the work
+   * twice rather than about not doing it wrongly. On one instance the sole
+   * holder always acquires, and the lease fails OPEN, so nothing here can stop
+   * a draw from happening. See `schedulerLease.js`.
+   *
+   * `runAutoSelectSweep` itself stays unleased for direct callers: the tests
+   * drive it, and so would an operator forcing a catch-up by hand.
+   */
+  const leasedSweep = async () =>
+    (await withLease(db, LEASES.AUTO_SELECT, () => runAutoSelectSweep(db))).result;
+
+  const startupSweep = leasedSweep().catch(guard('startup sweep'));
 
   timer = setInterval(() => {
-    runAutoSelectSweep(db).catch(guard('tick'));
+    leasedSweep().catch(guard('tick'));
   }, INTERVAL_MS);
   // Never the reason the process stays alive; shutdown clears it explicitly.
   timer.unref?.();

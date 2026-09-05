@@ -41,9 +41,35 @@ describe('badge re-evaluation through the attendance route', () => {
      * volunteers being credited, so marking somebody absent — the one action
      * that should be able to take a badge away — recomputed nothing.
      */
+    /**
+     * The target has to be an accepted application that has NOT been credited
+     * yet, and whose volunteer holds no hours from anywhere else.
+     *
+     * This used to be `apps.find(a => a.status === 'accepted')` — the first
+     * accepted row in whatever order the endpoint happened to return. That
+     * worked only by accident. `GET /api/applications` now has a deterministic
+     * `ORDER BY applied_at DESC, id ASC` (it had no ORDER BY at all, which made
+     * its pagination unsound), and under that order the first accepted row is
+     * `app-past-p1` — a volunteer on a COMPLETED event who is already marked
+     * present for three hours.
+     *
+     * Crediting somebody who is already credited changes nothing, so the route
+     * correctly reports `unchanged: 1`, puts nobody in `credited`, and never
+     * calls `evaluateBadges`. That is right, and the fixture was wrong: it
+     * needed a volunteer with something to gain.
+     *
+     * The zero-hours condition matters for the second half. The badge is
+     * `hours >= 1`, so a volunteer holding credited hours from another event
+     * would keep it after being marked absent here — and the withdrawal this
+     * test exists to prove would look broken when it was working.
+     */
     const apps = (await srv.call('GET', '/api/applications', undefined, organizer)).body;
-    const target = apps.find(a => a.status === 'accepted');
-    expect(target, 'the seed has no accepted application').toBeTruthy();
+    const target = apps.find(a =>
+      a.status === 'accepted' && !a.attendance && a.volunteer.volunteeredHours === 0);
+    expect(
+      target,
+      'the seed has no accepted, uncredited application for a volunteer with no other hours'
+    ).toBeTruthy();
 
     /* Put the shift in the past so finalisation is permitted. */
     const start = new Date(Date.now() - 3 * 86400000).toISOString();

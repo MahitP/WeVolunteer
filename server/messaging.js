@@ -449,7 +449,13 @@ export async function resolvePeerConversation({ actor, friendId }) {
   return { ok: true, conversation: await decorateConversation(conversation, actor.id) };
 }
 
-export async function decorateConversation(conversation, viewerId) {
+/**
+ * @param {Map<string, object>} [events] pre-loaded event rows, keyed by id.
+ *   `listConversationsForUser` supplies this so the list costs one event query
+ *   instead of one per conversation. Omitted, the event is fetched here, which
+ *   is what every single-conversation caller wants.
+ */
+export async function decorateConversation(conversation, viewerId, events = null) {
   if (!conversation) return null;
   /* Every non-aggregated column is grouped, including the two from `users`.
      SQLite allows a bare column that is functionally dependent on the grouped
@@ -457,17 +463,19 @@ export async function decorateConversation(conversation, viewerId) {
      and answers `column "u.name" must appear in the GROUP BY clause`. Adding
      them changes no result here — `e.id` is the primary key, so each group has
      exactly one organizer. */
-  const event = await db.prepare(`
-    SELECT e.id, e.title, e.location, e.status, e.application_deadline,
-           u.name AS organizer_name, u.school AS organizer_school,
-           MIN(s.start_datetime) AS start_datetime,
-           MAX(s.end_datetime) AS end_datetime
-    FROM events e
-    JOIN users u ON u.id = e.organizer_id
-    LEFT JOIN slots s ON s.event_id = e.id
-    WHERE e.id = ?
-    GROUP BY e.id, u.name, u.school
-  `).get(conversation.event_id);
+  const event = events
+    ? (conversation.event_id ? events.get(conversation.event_id) ?? null : null)
+    : await db.prepare(`
+      SELECT e.id, e.title, e.location, e.status, e.application_deadline,
+             u.name AS organizer_name, u.school AS organizer_school,
+             MIN(s.start_datetime) AS start_datetime,
+             MAX(s.end_datetime) AS end_datetime
+      FROM events e
+      JOIN users u ON u.id = e.organizer_id
+      LEFT JOIN slots s ON s.event_id = e.id
+      WHERE e.id = ?
+      GROUP BY e.id, u.name, u.school
+    `).get(conversation.event_id);
   const participant = await getParticipant(conversation.id, viewerId);
   const other = await otherParticipant(conversation.id, viewerId);
   const lifecycle = await computeConversationLifecycle(conversation, new Date());
@@ -537,19 +545,74 @@ export function formatMessage(row) {
   };
 }
 
+/**
+ * The most conversations one list response may carry.
+ *
+ * This query had no `LIMIT`, and each row it returned cost seven further
+ * queries to decorate — so the response was unbounded in rows AND the
+ * `Promise.all` over it put seven times that many statements against a pool of
+ * ten, from one request.
+ *
+ * Two hundred is far past any real inbox here: conversations are created per
+ * event and per moderation thread, not by people messaging each other freely
+ * (the product has no open DMs). It is the same shape as the caps on events,
+ * applications and the appeals queue — bounded, ordered, and loud when it bites.
+ */
+export const CONVERSATION_LIST_MAX = 200;
+
 export async function listConversationsForUser(userId) {
   const rows = await db.prepare(`
     SELECT c.*
     FROM conversations c
     JOIN conversation_participants cp ON cp.conversation_id = c.id
     WHERE cp.user_id = ?
-    ORDER BY COALESCE(c.last_message_at, c.created_at) DESC
-  `).all(userId);
+    ORDER BY COALESCE(c.last_message_at, c.created_at) DESC, c.id ASC
+    LIMIT ?
+  `).all(userId, CONVERSATION_LIST_MAX);
+
+  if (rows.length === CONVERSATION_LIST_MAX) {
+    console.warn(
+      `[messaging] Conversation list for ${userId} hit the ${CONVERSATION_LIST_MAX} cap. `
+      + 'Older threads are not being shown; this list needs paginating.'
+    );
+  }
+
+  /**
+   * The event behind every conversation, in ONE query rather than one per row.
+   *
+   * `decorateConversation` looks its event up with a three-table join and a
+   * GROUP BY — comfortably the heaviest of its seven lookups — and the list ran
+   * it once per conversation. Passing them in pre-loaded leaves the single-row
+   * path untouched for its own callers while the list pays for one query
+   * instead of N.
+   *
+   * `Promise.all` is still how the remaining per-row lookups run, and it is now
+   * bounded by the cap above rather than by how many conversations somebody has
+   * accumulated.
+   */
+  const eventIds = [...new Set(rows.map(c => c.event_id).filter(Boolean))];
+  const eventsById = new Map();
+  if (eventIds.length) {
+    const marks = eventIds.map(() => '?').join(',');
+    for (const row of await db.prepare(`
+      SELECT e.id, e.title, e.location, e.status, e.application_deadline,
+             u.name AS organizer_name, u.school AS organizer_school,
+             MIN(s.start_datetime) AS start_datetime,
+             MAX(s.end_datetime) AS end_datetime
+      FROM events e
+      JOIN users u ON u.id = e.organizer_id
+      LEFT JOIN slots s ON s.event_id = e.id
+      WHERE e.id IN (${marks})
+      GROUP BY e.id, u.name, u.school
+    `).all(...eventIds)) {
+      eventsById.set(row.id, row);
+    }
+  }
 
   /* `Promise.all`, not a bare `.map`: `decorateConversation` is async now, and
      an array of pending promises serialises to `[{}, {}]` — an empty
      conversation list that looks like a real one. */
-  return Promise.all(rows.map(c => decorateConversation(c, userId)));
+  return Promise.all(rows.map(c => decorateConversation(c, userId, eventsById)));
 }
 
 export async function unreadCount(conversationId, userId) {

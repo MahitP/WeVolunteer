@@ -30,6 +30,51 @@
  */
 import pg from 'pg';
 
+/** OpenSSL's ways of saying "I cannot verify who this server is". */
+const TLS_TRUST_CODES = new Set([
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_UNTRUSTED',
+]);
+
+/**
+ * A TLS trust failure, explained. Anything else is returned untouched.
+ *
+ * A managed database whose root is not in Node's trust store — Supabase's is
+ * self-signed and is not — fails every connection with
+ * `SELF_SIGNED_CERT_IN_CHAIN` from inside a pool callback. On the first real
+ * production boot that arrived as a stack trace through four files, none of
+ * which names a setting, and it reads as "the database is broken" when it means
+ * "one environment variable is missing".
+ *
+ * Explained here rather than refused in `postgresConfig`, because a missing CA
+ * is only a defect for SOME providers: one presenting a certificate from a
+ * public authority verifies against Node's own store and needs no
+ * `DATABASE_SSL_CA` at all. Refusing on the configuration would break that
+ * perfectly good deployment to help this one. The error is the only thing that
+ * knows which case it is.
+ *
+ * The original is kept as `cause`, and `rejectUnauthorized` is never touched:
+ * this makes the failure legible, never permissible.
+ */
+export function explainTlsFailure(err) {
+  if (!TLS_TRUST_CODES.has(err?.code)) return err;
+  return new Error(
+    `Could not verify the database server's TLS certificate (${err.code}).\n`
+    + '  The server presented a chain Node does not trust. A managed provider\n'
+    + '  often uses its own root — Supabase does, and it is self-signed, so it\n'
+    + '  has to be supplied explicitly:\n'
+    + '\n'
+    + '    DATABASE_SSL_CA=deploy/certs/supabase-root-2021.crt\n'
+    + '\n'
+    + '  A path relative to the repository root, an absolute path, or the PEM\n'
+    + '  inline all work. Verification stays on either way.',
+    { cause: err },
+  );
+}
+
 const { Pool, types } = pg;
 
 /**
@@ -241,13 +286,17 @@ export class PostgresTransaction extends PostgresExecutorBase {
  *
  * ── Pool sizing ──
  *
- * `max` defaults to 10. That is a deliberate number rather than a large one:
- * this application is a single Node process (`instanceLock.js` enforces it) with
- * three background workers and a scheduler, and PostgreSQL performs worse, not
- * better, when handed more concurrent connections than it has cores to serve.
- * Supabase additionally meters direct connections, and its transaction-mode
- * pooler sits in front — so a large client-side pool competes with the server's
- * own pooling rather than adding throughput.
+ * `max` defaults to 25, and the number is measured rather than argued. It was 10,
+ * on the reasoning that PostgreSQL gains nothing from more concurrent
+ * connections than it has cores — which is right for CPU-bound queries and wrong
+ * here, because over a network a pooled client spends most of its life waiting
+ * on a round trip. `db/engine.js` carries the full sweep; the short version is
+ * that at a 3ms round trip and 20 concurrent requests, raising the pool from 10
+ * to 25 took throughput from 127 to 487 req/s and p95 from 481ms to 73ms, while
+ * the same sweep on loopback is flat noise.
+ *
+ * It is still per process, and the provider's ceiling is real: Supabase's entry
+ * sizes allow 60 direct connections and 200 through Supavisor.
  *
  * ── Statement caching is left off ──
  *
@@ -260,7 +309,7 @@ export class PostgresTransaction extends PostgresExecutorBase {
 export class PostgresDatabase extends PostgresExecutorBase {
   #pool;
 
-  constructor({ connectionString, max = 10, ssl, translate, idleTimeoutMillis = 30_000, connectionTimeoutMillis = 10_000 } = {}) {
+  constructor({ connectionString, max = 25, ssl, translate, idleTimeoutMillis = 30_000, connectionTimeoutMillis = 10_000 } = {}) {
     if (!translate) throw new Error('PostgresDatabase requires a placeholder translator.');
     const pool = new Pool({ connectionString, max, ssl, idleTimeoutMillis, connectionTimeoutMillis });
 
@@ -271,6 +320,35 @@ export class PostgresDatabase extends PostgresExecutorBase {
     pool.on('error', (err) => {
       console.error('[db] idle PostgreSQL client error (client discarded):', err.message);
     });
+
+    /**
+     * A TLS failure, explained where it happens rather than left as OpenSSL's.
+     *
+     * A managed database whose root is not in Node's trust store — Supabase's
+     * is self-signed and is not — fails every connection with
+     * `SELF_SIGNED_CERT_IN_CHAIN`, thrown from inside a pool callback. On the
+     * first real production boot that arrived as a stack trace through four
+     * files, none of which names a setting, and it reads as "the database is
+     * broken" when it means "one environment variable is missing".
+     *
+     * Wrapped here rather than refused in `postgresConfig`, because a missing
+     * CA is only a defect for SOME providers: one presenting a certificate from
+     * a public authority verifies against Node's own store and needs no
+     * `DATABASE_SSL_CA` at all. Refusing on the configuration would have broken
+     * that perfectly good deployment to help this one. The error itself is the
+     * only place that knows which case this is.
+     *
+     * The original error is kept as `cause`, and `rejectUnauthorized` is not
+     * touched: this makes the failure legible, never permissible.
+     */
+    const connect = pool.connect.bind(pool);
+    pool.connect = async (...args) => {
+      try {
+        return await connect(...args);
+      } catch (err) {
+        throw explainTlsFailure(err);
+      }
+    };
 
     super(pool, translate);
     this.#pool = pool;

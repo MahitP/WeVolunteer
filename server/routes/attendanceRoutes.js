@@ -12,7 +12,7 @@ import {
 import { checkinCodeLimiter, checkinScanLimiter } from '../checkinLimiters.js';
 import { csvCell } from '../csv.js';
 import { notificationService } from '../services/notificationService.js';
-import { getOrCreateCertificateCode } from '../certificates.js';
+import { certificateCodesFor } from '../certificates.js';
 import { badgeService } from '../services/badgeService.js';
 import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
@@ -457,8 +457,13 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
       ORDER BY last_end DESC
     `).all(req.user.id);
 
-    /* `Promise.all`: the certificate code is a per-row lookup now. */
-    res.json(await Promise.all(rows.map(async (r) => ({
+    /* One query for the page's codes rather than a lookup per row. See
+       `certificateCodesFor`: a volunteer's list grows with their service record,
+       so a per-row lookup made the page cost more the more somebody had
+       volunteered — measured at p50 914ms for an 80-event history. */
+    const codes = await certificateCodesFor(db, req.user.id, rows.map(r => r.event_id));
+
+    res.json(rows.map((r) => ({
       eventId: r.event_id,
       title: r.title,
       category: r.category,
@@ -472,8 +477,8 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
       organizationId: r.organization_id ?? null,
       organizationName: r.organization_name ?? null,
       organizationSlug: r.organization_slug ?? null,
-      code: await getOrCreateCertificateCode(db, req.user.id, r.event_id)
-    }))));
+      code: codes.get(r.event_id) ?? null
+    })));
   } catch (err) {
     console.error('Certificates error:', err);
     res.status(500).json({ error: 'Failed to load certificates' });

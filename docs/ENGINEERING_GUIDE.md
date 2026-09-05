@@ -2377,13 +2377,34 @@ larger and would have made the application slower.
   the month in an afternoon — and why environment separation is a key prefix
   rather than a second instance.
 
-- **Still deferred, and still triggered by a second instance.** The Socket.IO
-  adapter, a distributed lock replacing `instanceLock.js`, and the volume
-  limiters. This remains coupled to §10.1 and §10.7: multi-instance is a single
-  decision with several consequences, not several independent projects. What has
-  changed is that the *first* of those consequences — shared rate-limit state,
-  which `docs/plans/supabase-vercel-migration-plan.md` §4.4 names as the
-  prerequisite — is now built and tested.
+- **What the performance pass then removed from this list, without Redis.**
+  Three of the consequences named here have since been dealt with, and none of
+  them needed a second service:
+
+  - **The scheduler no longer double-runs.** All four periodic sweeps take a
+    leader lease from `scheduler_leases` (migration 062) before running — the
+    same conditional-claim idiom `instanceLock.js` and the job workers already
+    use. A distributed lock in Redis would have replaced a correct database
+    claim with a networked one.
+  - **Socket.IO has an adapter.** `@socket.io/postgres-adapter` broadcasts over
+    LISTEN/NOTIFY, so the bus is the database that is already here. The Redis
+    adapter was rejected on the **222 ms warm round trip** measured in
+    `operations/upstash.md` §1.2, which an adapter sitting on the message path
+    would pay on every realtime event. Built, tested against two real servers,
+    and **off** — activation is one environment variable.
+  - **The limiter KEYS were wrong in a way Redis would not have fixed.**
+    `apiLimiter` was keyed on the address alone, so a school shared 600 requests
+    a quarter hour for the whole building. It is now keyed on the verified
+    session with the address as fallback. Sharing the *store* without fixing the
+    *key* would have distributed the defect rather than removed it.
+
+- **Still deferred, and still triggered by a second instance.** A shared store
+  for the volume limiters — `apiLimiter` above all, whose per-session keying
+  makes a shared store more expensive rather than less — and retiring
+  `instanceLock.js`. This remains coupled to §10.1 and §10.7: multi-instance is
+  a single decision with several consequences, not several independent projects.
+  The full inventory, classified line by line, is in
+  [`operations/horizontal-scaling.md`](operations/horizontal-scaling.md).
 
 See [`docs/operations/upstash.md`](operations/upstash.md).
 
@@ -2521,6 +2542,58 @@ feature that makes this corpus more useful without making it more expensive.
 
 See [`docs/operations/pinecone.md`](operations/pinecone.md).
 
+### 10.10 Load testing (adopted)
+
+Like §10.9, this one has already happened, and it is recorded because the
+*reason* is the part worth keeping.
+
+- **What was missing.** Every performance number this project had came from
+  `bin/scale-probe.mjs`, which measures SQL. Nothing measured Express, JWT
+  verification, bcrypt, capability checks, serialisation, or two requests at
+  once — which is most of what a request costs.
+- **What it found that reading the code had not.** `GET /api/certificates` took
+  **921 ms at p50** for a volunteer with eighty completed events, because it
+  issued a get-or-create per event inside a `Promise.all`. The page cost more the
+  more somebody had volunteered. Now 66 ms.
+- **And a second one.** Cancelling an event with 150 confirmed volunteers took
+  **4,440 ms**, because the fan-out dispatched them one at a time and each
+  dispatch is four to five round trips. Now 943 ms, at five at a time — half the
+  connection pool, because an unbounded fan-out would starve every other request.
+- **The trap it also found.** The first run reported 3,061 req/s at a p50 of
+  0 ms, and every response was a 401. Every scenario is now preflighted before it
+  is measured, because a published number gets believed.
+- **The measurement that needs saying twice.** Consolidating
+  `GET /api/admin/stats` from fourteen serial statements to five is worth
+  **nothing on loopback and 2.5× at 5 ms of round-trip latency**. Round-trip
+  reduction cannot be measured on a database that answers in a tenth of a
+  millisecond, so `--db-latency` injects a plausible figure. Reporting the
+  loopback result alone would have called a real improvement zero.
+
+See [`docs/operations/load-testing.md`](operations/load-testing.md).
+
+### 10.11 The second performance pass (adopted)
+
+Recorded for the same reason §10.10 is: the *reasons* are the part worth keeping.
+
+- **Round trips, not queries, are the unit.** Every win in this pass came from
+  removing round trips rather than from making a query cheaper. `dispatch` did
+  five per recipient; the events aggregate folded the whole table; certificates
+  did a get-or-create per event. The PostgreSQL port turned each synchronous read
+  into a network round trip and nothing had audited the serial ones.
+- **Loopback hides all of it.** `DATABASE_POOL_MAX=10` measured identically to 25
+  on a database on the same machine, and 3.8× worse at a 3 ms round trip. Any
+  measurement that matters here has to be taken against a latency profile.
+- **Characterize before you optimize.** The notification rules decide whether a
+  suspended minor learns they were suspended. They were pinned by tests written
+  against the old implementation, which then passed unchanged against the new
+  one — that, not review, is what made the rewrite safe.
+- **The instrument lied three times.** The latency proxy reordered packets,
+  truncated a message mid-row (crashing the server with an `ERR_OUT_OF_RANGE`
+  inside `pg-protocol`), and leaked sockets until the pool timed out. All three
+  presented as server-side failures under load. A harness that cannot be told
+  apart from the defect it is hunting is worse than no harness, and the `local`
+  control run is what exposed each of them.
+
 ### 10.8 Sequencing
 
 Roughly ascending cost and risk, given today's foundations:
@@ -2532,9 +2605,10 @@ Roughly ascending cost and risk, given today's foundations:
 4. **PWA, offline reads** (§10.5) — self-contained
 5. **Analytics** (§10.6) — needs a privacy design first
 6. **PostgreSQL** (§10.1) — infrastructure change
-7. **Redis** (§10.2) — the shared-counter and cache half is done; the
-   multi-instance half (Socket.IO adapter, distributed lock) still waits for a
-   second instance
+7. **Redis** (§10.2) — the shared-counter and cache half is done, and the
+   multi-instance half turned out to be shorter than it looked: the scheduler
+   leases, the Socket.IO adapter and the limiter keys were all resolved without
+   Redis, leaving only a shared store for the volume limiters
 8. **Multi-district tenancy** (§10.7) — dedicated design phase, `2.0.0`
 
 This is a default ordering, not a commitment. A district requirement can

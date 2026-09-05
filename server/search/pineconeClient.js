@@ -137,6 +137,129 @@ async function pineconeFetch(url, { method = 'POST', body, contentType = 'applic
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * The read-path breaker
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Stops an outage from costing every search its full timeout.
+ *
+ * ── The problem ──
+ *
+ * `SEARCH_TIMEOUT_MS` is 1200 ms, and a search that cannot reach Pinecone waits
+ * all of it before falling back to the lexical query — which is a complete
+ * answer that was available immediately. So the failure mode of "the vendor is
+ * unreachable" is not a broken Discover; it is a Discover that works and feels
+ * broken, on every request, for as long as the outage lasts. Under load it is
+ * worse than slow: a thousand requests each holding a socket for 1.2 seconds is
+ * a thousand sockets.
+ *
+ * One timeout per cooldown window rather than one per request. The same shape
+ * `redis/redisClient.js` uses, and for the same reason.
+ *
+ * ── What counts as a failure ──
+ *
+ * Only the answers that mean "this vendor is not answering right now":
+ * timeouts, network errors, 5xx and 429. A 400 does not count — that is a
+ * malformed filter or a bad query, it is this application's fault, and opening
+ * the breaker on it would suppress every OTHER search because one of them was
+ * wrong.
+ *
+ * ── Half-open, so recovery needs no timer ──
+ *
+ * After the cooldown the next call is allowed through as a probe. Success
+ * closes the breaker; failure re-opens it for another cooldown. Nothing polls,
+ * nothing schedules, and a process that is not searching does not discover the
+ * recovery it does not need.
+ *
+ * ── Indexing is deliberately NOT guarded ──
+ *
+ * `upsertRecords` and `deleteRecords` are called by the drain worker, which
+ * runs every fifteen seconds, keeps its queue in the database and retries with
+ * a capped attempt count. Nobody is waiting on them. Short-circuiting them
+ * would only delay the recovery they are already arranged to survive.
+ */
+const BREAKER_FAILURES = Number(process.env.PINECONE_BREAKER_FAILURES ?? 3);
+const BREAKER_COOLDOWN_MS = Number(process.env.PINECONE_BREAKER_COOLDOWN_MS ?? 30_000);
+
+const breaker = { failures: 0, openedAt: 0, probing: false, opens: 0, shortCircuited: 0 };
+
+/** Is this failure the vendor being unavailable, rather than us being wrong? */
+function isOutage(reason, status) {
+  if (reason === 'timeout') return true;
+  if (typeof reason === 'string' && reason.startsWith('network_')) return true;
+  return Number(status) === 429 || Number(status) >= 500;
+}
+
+/** `null` when the call may proceed, or the refusal to return instead. */
+function breakerVerdict() {
+  if (!breaker.openedAt) return null;
+  const elapsed = Date.now() - breaker.openedAt;
+  if (elapsed < BREAKER_COOLDOWN_MS) {
+    breaker.shortCircuited += 1;
+    return { ok: false, reason: 'circuit_open' };
+  }
+  /* Half-open: one probe at a time, so a burst arriving exactly at the end of
+     the cooldown does not become the thundering herd the breaker prevented. */
+  if (breaker.probing) {
+    breaker.shortCircuited += 1;
+    return { ok: false, reason: 'circuit_open' };
+  }
+  breaker.probing = true;
+  return null;
+}
+
+function breakerRecord(res) {
+  if (res?.ok) {
+    breaker.failures = 0;
+    breaker.openedAt = 0;
+    breaker.probing = false;
+    return;
+  }
+  if (!isOutage(res?.reason, res?.status)) {
+    /* Not the vendor's fault. A probe that fails this way neither closes nor
+       re-opens the breaker; it simply releases the probe slot. */
+    breaker.probing = false;
+    return;
+  }
+  breaker.failures += 1;
+  breaker.probing = false;
+  if (breaker.failures >= BREAKER_FAILURES && !breaker.openedAt) {
+    breaker.openedAt = Date.now();
+    breaker.opens += 1;
+  } else if (breaker.openedAt) {
+    breaker.openedAt = Date.now();
+  }
+}
+
+/** Runs a read-path call under the breaker. */
+async function guarded(fn) {
+  const refusal = breakerVerdict();
+  if (refusal) return refusal;
+  const res = await fn();
+  breakerRecord(res);
+  return res;
+}
+
+/** Breaker state for the operator status panel. */
+export function pineconeBreakerState() {
+  return {
+    open: Boolean(breaker.openedAt) && Date.now() - breaker.openedAt < BREAKER_COOLDOWN_MS,
+    failures: breaker.failures,
+    opens: breaker.opens,
+    shortCircuited: breaker.shortCircuited,
+    cooldownMs: BREAKER_COOLDOWN_MS,
+  };
+}
+
+export function __resetPineconeBreaker() {
+  breaker.failures = 0;
+  breaker.openedAt = 0;
+  breaker.probing = false;
+  breaker.opens = 0;
+  breaker.shortCircuited = 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Control plane
  * ──────────────────────────────────────────────────────────────────────────── */
 
@@ -286,10 +409,10 @@ export async function searchRecords({ text, topK, filter = null, fields = ['_id'
   const query = { inputs: { text }, top_k: topK };
   if (filter && Object.keys(filter).length) query.filter = filter;
 
-  const res = await pineconeFetch(
+  const res = await guarded(() => pineconeFetch(
     `${base}/records/namespaces/${encodeURIComponent(cfg.namespace)}/search`,
     { body: JSON.stringify({ query, fields }), timeoutMs: SEARCH_TIMEOUT_MS },
-  );
+  ));
   if (!res.ok) return { ...res, hits: [] };
 
   usage.searches++;
@@ -335,10 +458,10 @@ export async function searchByRecordId({ recordId, topK, filter = null, fields =
   const query = { id: recordId, top_k: topK };
   if (filter && Object.keys(filter).length) query.filter = filter;
 
-  const res = await pineconeFetch(
+  const res = await guarded(() => pineconeFetch(
     `${base}/records/namespaces/${encodeURIComponent(cfg.namespace)}/search`,
     { body: JSON.stringify({ query, fields }), timeoutMs: SEARCH_TIMEOUT_MS },
-  );
+  ));
   if (!res.ok) return { ...res, hits: [] };
 
   usage.searches++;
@@ -393,7 +516,7 @@ export async function rerank({ query, documents, topN, rankField = 'text' }) {
   if (!cfg.enabled) return { ok: false, reason: 'disabled' };
   if (!Array.isArray(documents) || documents.length === 0) return { ok: true, results: [] };
 
-  const res = await pineconeFetch(`${PINECONE_CONTROL_HOST}/rerank`, {
+  const res = await guarded(() => pineconeFetch(`${PINECONE_CONTROL_HOST}/rerank`, {
     body: JSON.stringify({
       model: RERANK_MODEL,
       query,
@@ -403,7 +526,7 @@ export async function rerank({ query, documents, topN, rankField = 'text' }) {
       return_documents: false,
     }),
     timeoutMs: SEARCH_TIMEOUT_MS,
-  });
+  }));
   if (!res.ok) return res;
 
   const data = Array.isArray(res.body?.data) ? res.body.data : [];

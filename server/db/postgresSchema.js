@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 69 tables, 104 indexes, 20 triggers
+ * Contents: 70 tables, 107 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -163,6 +163,16 @@ CREATE TABLE IF NOT EXISTS revoked_sessions (
       user_id TEXT NOT NULL,
       revoked_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
+    );
+
+CREATE TABLE IF NOT EXISTS scheduler_leases (
+      -- The sweep's stable name, e.g. 'notification-sweep'. One row per sweep,
+      -- so "who holds it" has exactly one answer and no tie-break is needed.
+      name        TEXT PRIMARY KEY,
+      owner       TEXT NOT NULL,
+      acquired_at TEXT NOT NULL,
+      renewed_at  TEXT NOT NULL,
+      expires_at  TEXT NOT NULL
     );
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -608,7 +618,13 @@ CREATE TABLE IF NOT EXISTS events (
       status TEXT CHECK(status IN ('open', 'closed', 'completed', 'cancelled')) DEFAULT 'open',
       auto_approve INTEGER DEFAULT 0,
       selection_summary TEXT,
-      created_at TEXT NOT NULL, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
+      created_at TEXT NOT NULL,
+      /* MIN(start_datetime) over this event's slots, maintained by
+         server/eventSummary.js at every slot mutation and rebuildable from the
+         slots at any time. Stored because the browse list's default sort is on
+         it, and a sort key computed per row cannot be indexed — see that
+         module's header for why this is the one derived value kept here. */
+      first_slot_start TEXT, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
       FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
@@ -1137,6 +1153,12 @@ CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_events_audience
       ON events(audience, organization_id);
 
+CREATE INDEX IF NOT EXISTS idx_events_browse_order
+        ON events(first_slot_start, id, status);
+
+CREATE INDEX IF NOT EXISTS idx_events_first_slot_start
+        ON events(status, first_slot_start, id);
+
 CREATE INDEX IF NOT EXISTS idx_events_organization ON events(organization_id);
 
 CREATE INDEX IF NOT EXISTS idx_events_organizer ON events(organizer_id);
@@ -1259,6 +1281,8 @@ CREATE INDEX IF NOT EXISTS idx_resend_events_recent
       ON resend_webhook_events(received_at);
 
 CREATE INDEX IF NOT EXISTS idx_revoked_sessions_expiry ON revoked_sessions(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_leases_expiry ON scheduler_leases(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_security_audit_logs_type
       ON security_audit_logs(event_type, created_at DESC);
@@ -1521,7 +1545,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 64;
+export const LATEST_MIGRATION_VERSION = 67;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

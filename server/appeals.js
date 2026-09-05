@@ -125,6 +125,41 @@ export const NEVER_OVERRIDABLE = Object.freeze(['self', 'suspension_issuer', 'su
  * Returns an array of string reasons, empty when the actor is eligible.
  */
 export async function disqualifiers(db, actorId, appeal) {
+  return applyConflictRules(actorId, appeal, await factsForOne(db, actorId, appeal));
+}
+
+/**
+ * The statuses that make a report between two people a live conflict.
+ *
+ * A closed or dismissed report is history; an open one is an active dispute, and
+ * a moderator should not be judging the appeal of somebody they are currently in
+ * one with.
+ */
+const LIVE_REPORT_STATUSES_FOR_CONFLICT = ['open', 'reviewing', 'escalated'];
+
+/**
+ * The nine rules, applied to facts somebody else has already fetched.
+ *
+ * ── Why the rules were separated from the loading ──
+ *
+ * There are now two ways to answer this question — one appeal at a time, and a
+ * whole queue page at once (`disqualifiersForMany`). Writing the rules twice
+ * would mean a fairness rule could be corrected in one place and silently left
+ * wrong in the other, and the wrong one is the moderation queue: the screen
+ * where somebody decides whether a suspended student gets their account back.
+ *
+ * So the rules live here exactly once and both loaders feed them.
+ * `appeals.batchedConflicts.test.js` asserts the two paths agree on the same
+ * data, which is the assertion that keeps them from drifting.
+ *
+ * `facts` carries, for this one appeal:
+ *   liveSuspendedBy — `users.suspended_by` for the appellant, or null
+ *   auditedSuspender — whether the audit trail records the actor suspending them
+ *   report          — the row behind `appeal.report_id`, or null
+ *   crossReport     — a live report in either direction between actor and appellant
+ *   reopener        — whether the actor reopened this appeal
+ */
+function applyConflictRules(actorId, appeal, facts) {
   const found = [];
   const add = (r) => { if (!found.includes(r)) found.push(r); };
 
@@ -138,52 +173,182 @@ export async function disqualifiers(db, actorId, appeal) {
 
   // 3. The same question against the LIVE column, which catches a re-suspension
   //    issued after this appeal was filed.
-  const live = await db.prepare('SELECT suspended_by FROM users WHERE id = ?').get(appeal.user_id);
-  if (live?.suspended_by && live.suspended_by === actorId) add('suspension_issuer');
+  if (facts.liveSuspendedBy && facts.liveSuspendedBy === actorId) add('suspension_issuer');
 
   // 4. The audit trail's own answer to "who suspended this person", which is the
   //    only one that survives an unsuspend.
-  const audited = await db.prepare(`
-    SELECT 1 AS hit FROM admin_audit_logs
-     WHERE target_user_id = ? AND admin_id = ? AND action = 'ACCOUNT_SUSPENDED'
-     LIMIT 1
-  `).get(appeal.user_id, actorId);
-  if (audited) add('suspension_auditor');
+  if (facts.auditedSuspender) add('suspension_auditor');
 
   // 5-7. Involvement in the report this appeal is attached to.
-  if (appeal.report_id) {
-    const rep = await db.prepare(
-      'SELECT reporter_id, resolved_by, assigned_to, target_author_id FROM reports WHERE id = ?'
-    ).get(appeal.report_id);
-    if (rep) {
-      if (rep.resolved_by === actorId || rep.assigned_to === actorId) add('report_handler');
-      if (rep.reporter_id === actorId) add('reporter');
-      // The reviewer is the person the appellant complained about.
-      if (rep.reporter_id === appeal.user_id && rep.target_author_id === actorId) add('report_subject');
-    }
+  if (appeal.report_id && facts.report) {
+    const rep = facts.report;
+    if (rep.resolved_by === actorId || rep.assigned_to === actorId) add('report_handler');
+    if (rep.reporter_id === actorId) add('reporter');
+    // The reviewer is the person the appellant complained about.
+    if (rep.reporter_id === appeal.user_id && rep.target_author_id === actorId) add('report_subject');
   }
 
   // 8. A live report in either direction between the reviewer and the appellant.
-  const crossed = await db.prepare(`
-    SELECT 1 AS hit FROM reports
-     WHERE status IN ('open', 'reviewing', 'escalated')
-       AND ((reporter_id = ? AND target_author_id = ?) OR (reporter_id = ? AND target_author_id = ?))
-     LIMIT 1
-  `).get(actorId, appeal.user_id, appeal.user_id, actorId);
-  if (crossed) add('cross_report');
+  if (facts.crossReport) add('cross_report');
 
   // 9. Whoever reopened this appeal does not then get to decide it. On a
   //    two-person team that means reopening costs you the decision, which is the
   //    right incentive: reopen is otherwise the lever for relitigating an
   //    outcome you disliked.
+  if (facts.reopener) add('reopener');
+
+  return found;
+}
+
+/** The five lookups for a single appeal. Five round trips, and that is fine for one. */
+async function factsForOne(db, actorId, appeal) {
+  const live = await db.prepare('SELECT suspended_by FROM users WHERE id = ?').get(appeal.user_id);
+
+  const audited = await db.prepare(`
+    SELECT 1 AS hit FROM admin_audit_logs
+     WHERE target_user_id = ? AND admin_id = ? AND action = 'ACCOUNT_SUSPENDED'
+     LIMIT 1
+  `).get(appeal.user_id, actorId);
+
+  const report = appeal.report_id
+    ? await db.prepare(
+      'SELECT reporter_id, resolved_by, assigned_to, target_author_id FROM reports WHERE id = ?'
+    ).get(appeal.report_id)
+    : null;
+
+  const statusMarks = LIVE_REPORT_STATUSES_FOR_CONFLICT.map(() => '?').join(',');
+  const crossed = await db.prepare(`
+    SELECT 1 AS hit FROM reports
+     WHERE status IN (${statusMarks})
+       AND ((reporter_id = ? AND target_author_id = ?) OR (reporter_id = ? AND target_author_id = ?))
+     LIMIT 1
+  `).get(...LIVE_REPORT_STATUSES_FOR_CONFLICT, actorId, appeal.user_id, appeal.user_id, actorId);
+
   const reopened = await db.prepare(`
     SELECT 1 AS hit FROM appeal_events
      WHERE appeal_id = ? AND action = 'reopened' AND actor_id = ?
      LIMIT 1
   `).get(appeal.id, actorId);
-  if (reopened) add('reopener');
 
-  return found;
+  return {
+    liveSuspendedBy: live?.suspended_by ?? null,
+    auditedSuspender: Boolean(audited),
+    report: report ?? null,
+    crossReport: Boolean(crossed),
+    reopener: Boolean(reopened),
+  };
+}
+
+/**
+ * The same answer for a whole page of appeals, in five queries instead of five
+ * per appeal.
+ *
+ * ── What this replaces ──
+ *
+ * The moderation queue called `disqualifiers()` in a loop, and before that
+ * re-read each appeal row it already held. At fifty appeals that was around
+ * three hundred statements, issued in series — on `node:sqlite` that cost
+ * nothing, and on PostgreSQL it is three hundred network round trips to render
+ * one screen.
+ *
+ * Returns a `Map` from appeal id to the reason array, so the caller reads it the
+ * same way it read the per-appeal answer.
+ *
+ * The rules are NOT reimplemented here — this function only fetches. Every
+ * decision goes through `applyConflictRules` above, the same one
+ * `disqualifiers()` uses.
+ */
+export async function disqualifiersForMany(db, actorId, appeals) {
+  const out = new Map();
+  if (!appeals.length) return out;
+
+  const marks = (n) => Array.from({ length: n }, () => '?').join(',');
+
+  const appellantIds = [...new Set(appeals.map(a => a.user_id).filter(Boolean))];
+  const reportIds = [...new Set(appeals.map(a => a.report_id).filter(Boolean))];
+  const appealIds = appeals.map(a => a.id);
+
+  // 3. Live `suspended_by`, per appellant.
+  const liveByUser = new Map();
+  if (appellantIds.length) {
+    for (const r of await db.prepare(
+      `SELECT id, suspended_by FROM users WHERE id IN (${marks(appellantIds.length)})`
+    ).all(...appellantIds)) {
+      liveByUser.set(r.id, r.suspended_by ?? null);
+    }
+  }
+
+  // 4. Which appellants this actor is recorded as having suspended.
+  const auditedUsers = new Set();
+  if (appellantIds.length) {
+    for (const r of await db.prepare(`
+      SELECT DISTINCT target_user_id FROM admin_audit_logs
+       WHERE target_user_id IN (${marks(appellantIds.length)})
+         AND admin_id = ? AND action = 'ACCOUNT_SUSPENDED'
+    `).all(...appellantIds, actorId)) {
+      auditedUsers.add(r.target_user_id);
+    }
+  }
+
+  // 5-7. The reports behind the page's appeals.
+  const reportById = new Map();
+  if (reportIds.length) {
+    for (const r of await db.prepare(`
+      SELECT id, reporter_id, resolved_by, assigned_to, target_author_id
+        FROM reports WHERE id IN (${marks(reportIds.length)})
+    `).all(...reportIds)) {
+      reportById.set(r.id, r);
+    }
+  }
+
+  /**
+   * 8. Live reports in either direction between the actor and any appellant.
+   *
+   * Both directions in one statement, then matched per appellant below. The
+   * pair test is reproduced exactly: a row counts only if it is
+   * actor→appellant or appellant→actor, so widening the query does not widen
+   * the rule.
+   */
+  const crossedUsers = new Set();
+  if (appellantIds.length) {
+    const statusMarks = marks(LIVE_REPORT_STATUSES_FOR_CONFLICT.length);
+    const idMarks = marks(appellantIds.length);
+    const rows = await db.prepare(`
+      SELECT reporter_id, target_author_id FROM reports
+       WHERE status IN (${statusMarks})
+         AND ((reporter_id = ? AND target_author_id IN (${idMarks}))
+           OR (target_author_id = ? AND reporter_id IN (${idMarks})))
+    `).all(
+      ...LIVE_REPORT_STATUSES_FOR_CONFLICT,
+      actorId, ...appellantIds,
+      actorId, ...appellantIds,
+    );
+    for (const r of rows) {
+      if (r.reporter_id === actorId) crossedUsers.add(r.target_author_id);
+      if (r.target_author_id === actorId) crossedUsers.add(r.reporter_id);
+    }
+  }
+
+  // 9. Which of these appeals this actor reopened.
+  const reopenedAppeals = new Set();
+  for (const r of await db.prepare(`
+    SELECT DISTINCT appeal_id FROM appeal_events
+     WHERE appeal_id IN (${marks(appealIds.length)}) AND action = 'reopened' AND actor_id = ?
+  `).all(...appealIds, actorId)) {
+    reopenedAppeals.add(r.appeal_id);
+  }
+
+  for (const appeal of appeals) {
+    out.set(appeal.id, applyConflictRules(actorId, appeal, {
+      liveSuspendedBy: liveByUser.get(appeal.user_id) ?? null,
+      auditedSuspender: auditedUsers.has(appeal.user_id),
+      report: appeal.report_id ? (reportById.get(appeal.report_id) ?? null) : null,
+      crossReport: crossedUsers.has(appeal.user_id),
+      reopener: reopenedAppeals.has(appeal.id),
+    }));
+  }
+
+  return out;
 }
 
 /** True when every conflict found is one a super administrator may override. */

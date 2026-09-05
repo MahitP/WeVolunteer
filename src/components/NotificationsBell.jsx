@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { timeAgo } from '../utils/helpers';
 import { notificationMeta, groupNotifications } from '../utils/notifications';
-import { subscribeSocket } from '../services/socket';
+import { subscribeSocket, getSocket } from '../services/socket';
 
 /**
  * Premium quick-glance Notification Center. Answers "anything new?" in one click.
@@ -45,10 +45,59 @@ export default function NotificationsBell({
     }
   };
 
+  /**
+   * Poll only while the realtime channel is DOWN.
+   *
+   * ── Why this used to poll unconditionally ──
+   *
+   * The socket already pushes `notification.created` and `notification.read`,
+   * and the effect below applies both to local state — so the sixty-second poll
+   * was re-fetching thirty notifications to learn what the socket had already
+   * delivered. Every signed-in tab did it forever: three hundred students with
+   * the app open is five requests a second of pure duplication, and each one is
+   * a paginated query plus an unread count.
+   *
+   * The poll is still the right fallback when there is no socket — a blocked
+   * WebSocket upgrade, a proxy that drops idle connections, a phone that slept —
+   * so it is kept for exactly that case rather than removed.
+   *
+   * ── The reconnect fetch is a fix, not an optimisation ──
+   *
+   * Anything that happened while the socket was down was previously picked up by
+   * whichever poll came next, so a reconnect could sit up to a minute behind. It
+   * now resyncs immediately on reconnect, which is both faster and more correct
+   * than the timer it replaces.
+   */
   useEffect(() => {
     load();
-    const id = setInterval(load, 60000);
-    return () => clearInterval(id);
+
+    let timer = null;
+    const startPolling = () => {
+      if (timer) return;
+      timer = setInterval(load, 60000);
+    };
+    const stopPolling = () => {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+    };
+
+    const onConnect = () => { stopPolling(); load(); };
+    const onDisconnect = () => { startPolling(); };
+
+    window.addEventListener('wev:socket_connect', onConnect);
+    window.addEventListener('wev:socket_disconnect', onDisconnect);
+
+    /* The socket may already be up (a remount) or may never arrive (signed out,
+       or the upgrade is blocked), so the initial state decides rather than an
+       assumption that a connect event is still coming. */
+    if (!getSocket()?.connected) startPolling();
+
+    return () => {
+      stopPolling();
+      window.removeEventListener('wev:socket_connect', onConnect);
+      window.removeEventListener('wev:socket_disconnect', onDisconnect);
+    };
   }, [refreshKey]);
 
   useEffect(() => {

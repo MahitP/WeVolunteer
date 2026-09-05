@@ -68,7 +68,10 @@ beforeEach(async () => {
   handlers.clear();
   vi.resetModules();
   socketMod = await import('./socket.js');
-  socketMod.connectSocket();
+  /* Awaited because `connectSocket` is async now: `socket.io-client` is loaded
+     on demand so it stays out of the eager bundle a signed-out visitor pays
+     for. The mock above is still what the dynamic import resolves to. */
+  await socketMod.connectSocket();
 });
 
 describe('subscribeSocket unwraps the realtime envelope', () => {

@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { explainTlsFailure } from './db/postgresConnection.js';
 import { resolveEngine, harnessOverride, postgresConfig, SQLITE, POSTGRES, POSTGRES_READY } from './db/engine.js';
 
 /**
@@ -132,8 +134,22 @@ describe('the PostgreSQL connection settings', () => {
     expect(() => postgresConfig({})).toThrow(/VITE_/);
   });
 
-  it('defaults the pool to 10', () => {
-    expect(postgresConfig({ DATABASE_URL: URL }).max).toBe(10);
+  it('defaults the pool to 25', () => {
+    /**
+     * Raised from 10 on a measurement, not a preference.
+     *
+     * The old number was reasoned from database cores, which is the right model
+     * for CPU-bound queries and the wrong one over a network — a pooled client
+     * there spends most of its life waiting on a round trip. At a 3ms round trip
+     * and 20 concurrent requests, `bin/load-test.mjs --pool-max` measured 127
+     * req/s at 10 and 487 req/s at 25, with p95 dropping from 481ms to 73ms; the
+     * curve is flat past 25. `db/engine.js` carries the full sweep.
+     *
+     * Pinned because it is per process and the provider's ceiling is finite:
+     * Supabase's entry sizes allow 200 Supavisor clients, so 25 leaves room for
+     * eight instances and a raise needs that arithmetic redone.
+     */
+    expect(postgresConfig({ DATABASE_URL: URL }).max).toBe(25);
   });
 
   it('refuses an out-of-range or non-numeric pool size', () => {
@@ -243,5 +259,111 @@ describe('TLS certificate verification', () => {
       DATABASE_SSL_CA: 'deploy/certs/supabase-root-2021.crt',
     });
     expect(ssl).toBeUndefined();
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The TLS trust anchor
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The configuration the application shipped with, and what it did.
+ *
+ * A remote `DATABASE_URL` with TLS on and no `DATABASE_SSL_CA` builds
+ * `ssl: { rejectUnauthorized: true }` with nothing to verify against. Supabase
+ * presents a self-signed root that is not in Node's trust store, so the
+ * connection fails — from inside a pool callback during
+ * `completeDatabaseInit()`, as `SELF_SIGNED_CERT_IN_CHAIN`, with a stack trace
+ * through four files and no mention of a setting.
+ *
+ * Found on the first real production boot.
+ */
+describe('the database TLS certificate authority', () => {
+  const REMOTE = { DATABASE_ENGINE: 'postgres', DATABASE_URL: 'postgres://u:p@aws-0-us-east-2.pooler.supabase.com:5432/postgres' };
+
+  /**
+   * NOT refused at configuration time. A provider whose certificate comes from
+   * a public authority verifies against Node's own store and needs no CA at
+   * all, so refusing here would break that deployment to help Supabase's. The
+   * explanation belongs to the error, which is the only thing that knows which
+   * case it is — see `explainTlsFailure`.
+   */
+  it('does not refuse a remote database that supplies no CA', () => {
+    const cfg = postgresConfig({ ...REMOTE });
+    expect(cfg.ssl.rejectUnauthorized, 'verification must stay on').toBe(true);
+    expect(cfg.ssl.ca).toBeUndefined();
+  });
+
+  it('turns a bare OpenSSL trust failure into something actionable', () => {
+    const raw = Object.assign(new Error('self-signed certificate in certificate chain'),
+      { code: 'SELF_SIGNED_CERT_IN_CHAIN' });
+    const explained = explainTlsFailure(raw);
+
+    expect(explained).not.toBe(raw);
+    expect(explained.message).toMatch(/DATABASE_SSL_CA=deploy\/certs\/supabase-root-2021\.crt/);
+    expect(explained.message, 'the operator should not have to guess the symptom')
+      .toMatch(/SELF_SIGNED_CERT_IN_CHAIN/);
+    expect(explained.cause, 'the original must survive for a stack trace').toBe(raw);
+  });
+
+  it.each([
+    'DEPTH_ZERO_SELF_SIGNED_CERT',
+    'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+    'CERT_UNTRUSTED',
+  ])('explains %s too', (code) => {
+    expect(explainTlsFailure(Object.assign(new Error('x'), { code })).message)
+      .toMatch(/DATABASE_SSL_CA/);
+  });
+
+  it('leaves every other error exactly as it was', () => {
+    for (const code of ['ECONNREFUSED', '28P01', 'ENOTFOUND', undefined]) {
+      const raw = Object.assign(new Error('unrelated'), { code });
+      expect(explainTlsFailure(raw), `${code} must pass through`).toBe(raw);
+    }
+  });
+
+  it('accepts the shipped certificate by a path relative to the repository', () => {
+    const cfg = postgresConfig({ ...REMOTE, DATABASE_SSL_CA: 'deploy/certs/supabase-root-2021.crt' });
+    expect(cfg.ssl.rejectUnauthorized, 'verification must stay on').toBe(true);
+    expect(cfg.ssl.ca).toMatch(/BEGIN CERTIFICATE/);
+  });
+
+  /**
+   * The same string resolves under systemd (`WorkingDirectory=/srv/wevolunteer`)
+   * and not under `npm start --prefix server`, where the cwd is `server/`.
+   * Resolving against the repository makes one written path mean one thing.
+   */
+  it('resolves that path from any working directory', () => {
+    const cwd = process.cwd();
+    try {
+      process.chdir('server');
+      const cfg = postgresConfig({ ...REMOTE, DATABASE_SSL_CA: 'deploy/certs/supabase-root-2021.crt' });
+      expect(cfg.ssl.ca).toMatch(/BEGIN CERTIFICATE/);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('accepts the certificate inline, for platforms that only offer variables', () => {
+    const pem = readFileSync('deploy/certs/supabase-root-2021.crt', 'utf8');
+    const cfg = postgresConfig({ ...REMOTE, DATABASE_SSL_CA: pem });
+    expect(cfg.ssl.ca).toBe(pem);
+  });
+
+  it('says which file it could not find rather than throwing ENOENT', () => {
+    expect(() => postgresConfig({ ...REMOTE, DATABASE_SSL_CA: 'deploy/certs/not-a-real-file.crt' }))
+      .toThrow(/DATABASE_SSL_CA points at a file that does not exist/);
+  });
+
+  it('leaves a local database alone, where TLS is off by default', () => {
+    const cfg = postgresConfig({ DATABASE_ENGINE: 'postgres', DATABASE_URL: 'postgres://u:p@localhost:5432/wv' });
+    expect(cfg.ssl).toBeUndefined();
+  });
+
+  /** The hatch still works outside production, and still turns verification off. */
+  it('does not demand a CA when verification is deliberately disabled', () => {
+    const cfg = postgresConfig({ ...REMOTE, DATABASE_SSL_INSECURE: 'true' });
+    expect(cfg.ssl.rejectUnauthorized).toBe(false);
   });
 });

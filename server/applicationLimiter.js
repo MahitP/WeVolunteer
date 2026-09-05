@@ -51,6 +51,7 @@ import { DEMO_MODE } from './config.js';
    which `moduleCycles.test.js` refuses, and which fails at boot rather than
    warning. Same function, forward-only import. */
 import { limitHandler } from './rateLimitResponse.js';
+import { createRedisLimitStore } from './redis/limitStore.js';
 
 /**
  * `APPLICATION_RATE_LIMIT` exists so a test can drive the limiter to its
@@ -60,6 +61,7 @@ import { limitHandler } from './rateLimitResponse.js';
 export const APPLICATION_LIMIT = Number(process.env.APPLICATION_RATE_LIMIT) || (DEMO_MODE ? 1000 : 30);
 
 export const applicationLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'application' }),
   windowMs: 15 * 60 * 1000,
   limit: APPLICATION_LIMIT,
   standardHeaders: 'draft-7',

@@ -33,6 +33,7 @@ import {
   pineconeEnabled, pineconeConfig, SEARCH_TOP_K, RERANK_MONTHLY_BUDGET, MIN_SEMANTIC_SCORE,
 } from './pineconeConfig.js';
 import { eventIdFromVectorId, vectorIdFor, TEXT_FIELD } from './eventDocument.js';
+import { candidateKey, withCandidateCache } from './candidateCache.js';
 import { logEvent } from './../telemetry.js';
 import { withSpan } from '../observability/spans.js';
 
@@ -147,45 +148,69 @@ async function semanticCandidatesInner(query, filters, { topK }) {
     return { ok: false, ids: [], reason: 'disabled', durationMs: 0 };
   }
 
-  const res = await searchRecords({
-    text: String(query).trim(),
-    topK,
-    filter: buildPineconeFilter(filters),
-    /* Ids only. The record's text comes back only when a rerank is going to
-       need it, because every field returned is response size we pay for and
-       then discard — the row is read from the database regardless. */
-    fields: ['_id'],
-  });
-
-  const durationMs = Date.now() - started;
-
-  /* One telemetry record per search, through the existing façade. No query text:
-     a search box on a school platform is free text typed by a minor, and
-     ENGINEERING_GUIDE §6.10's bar for what may leave this application does not
-     make an exception for it being interesting. Only the shape of what
-     happened. */
-  logEvent(res.ok ? 'info' : 'warn', 'pinecone.search', {
-    operation: 'discover',
-    durationMs,
-    count: res.hits?.length ?? 0,
-    outcome: res.ok ? 'ok' : 'failed',
-    reason: res.ok ? undefined : res.reason,
-  });
-
-  if (!res.ok) return { ok: false, ids: [], reason: res.reason, durationMs };
+  const cfg = pineconeConfig();
+  const text = String(query).trim();
+  const filter = buildPineconeFilter(filters);
 
   /**
-   * Weak candidates are discarded, and this is load-bearing.
+   * Everything that changes the answer goes into the key, and nothing else.
    *
-   * A vector index has no "no results" — it returns the K nearest records
-   * whatever the distance. Since a candidate id satisfies the read path's text
-   * predicate on its own, an unfiltered list turned a search for something the
-   * corpus does not contain into a listing of the whole corpus. See
-   * `MIN_SEMANTIC_SCORE` for the measurement behind the floor.
+   * The index and namespace are in it because a deployment pointed at a
+   * different corpus must not read this one's memory of it — the same reason
+   * `INDEX_VERSION` exists. `topK` is in it because a larger K is a superset,
+   * not the same answer. The viewer is deliberately NOT in it: the answer does
+   * not depend on who is asking, and the database is what applies who is
+   * asking. See `candidateCache.js`.
    */
-  const strong = res.hits.filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE);
-  const ids = strong.map((h) => eventIdFromVectorId(h.id)).filter(Boolean);
-  return { ok: true, ids, durationMs, considered: res.hits.length };
+  const key = candidateKey({
+    op: 'discover', index: cfg.indexName, namespace: cfg.namespace, text, filter, topK,
+  });
+
+  const result = await withCandidateCache(key, async () => {
+    const res = await searchRecords({
+      text,
+      topK,
+      filter,
+      /* Ids only. The record's text comes back only when a rerank is going to
+         need it, because every field returned is response size we pay for and
+         then discard — the row is read from the database regardless. */
+      fields: ['_id'],
+    });
+
+    /* One telemetry record per VENDOR search, through the existing façade. No
+       query text: a search box on a school platform is free text typed by a
+       minor, and ENGINEERING_GUIDE §6.10's bar for what may leave this
+       application does not make an exception for it being interesting. Only
+       the shape of what happened. */
+    logEvent(res.ok ? 'info' : 'warn', 'pinecone.search', {
+      operation: 'discover',
+      durationMs: Date.now() - started,
+      count: res.hits?.length ?? 0,
+      outcome: res.ok ? 'ok' : 'failed',
+      reason: res.ok ? undefined : res.reason,
+    });
+
+    if (!res.ok) return { ok: false, ids: [], reason: res.reason };
+
+    /**
+     * Weak candidates are discarded, and this is load-bearing.
+     *
+     * A vector index has no "no results" — it returns the K nearest records
+     * whatever the distance. Since a candidate id satisfies the read path's
+     * text predicate on its own, an unfiltered list turned a search for
+     * something the corpus does not contain into a listing of the whole
+     * corpus. See `MIN_SEMANTIC_SCORE` for the measurement behind the floor.
+     *
+     * Applied BEFORE the answer is cached, so what is remembered is the
+     * finished candidate list rather than the vendor's raw response.
+     */
+    const strong = res.hits.filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE);
+    return { ok: true, ids: strong.map((h) => eventIdFromVectorId(h.id)).filter(Boolean), considered: res.hits.length };
+  });
+
+  /* The duration a CALLER experienced, which on a cache hit is not the duration
+     the vendor took when the entry was made. */
+  return { ...result, durationMs: Date.now() - started };
 }
 
 /**
@@ -245,31 +270,45 @@ export async function similarEventCandidates(eventId, filters = {}, { topK = 12 
   }
   if (!eventId) return { ok: false, ids: [], reason: 'no_event', durationMs: 0 };
 
-  const res = await searchByRecordId({
-    recordId: vectorIdFor(eventId),
-    /* One extra, because the source event occupies a slot in its own results. */
-    topK: topK + 1,
-    filter: buildPineconeFilter(filters),
+  const cfg = pineconeConfig();
+  const filter = buildPineconeFilter(filters);
+
+  /* Cached on the same terms as a text search, and for a stronger reason: "more
+     like this" is a component on an event page, so every visitor to a popular
+     event asks the identical question. */
+  const key = candidateKey({
+    op: 'similar', index: cfg.indexName, namespace: cfg.namespace, eventId, filter, topK,
   });
 
-  const durationMs = Date.now() - started;
-  logEvent(res.ok ? 'info' : 'warn', 'pinecone.search', {
-    operation: 'similar',
-    durationMs,
-    count: res.hits?.length ?? 0,
-    outcome: res.ok ? 'ok' : 'failed',
-    reason: res.ok ? undefined : res.reason,
+  const result = await withCandidateCache(key, async () => {
+    const res = await searchByRecordId({
+      recordId: vectorIdFor(eventId),
+      /* One extra, because the source event occupies a slot in its own results. */
+      topK: topK + 1,
+      filter,
+    });
+
+    logEvent(res.ok ? 'info' : 'warn', 'pinecone.search', {
+      operation: 'similar',
+      durationMs: Date.now() - started,
+      count: res.hits?.length ?? 0,
+      outcome: res.ok ? 'ok' : 'failed',
+      reason: res.ok ? undefined : res.reason,
+    });
+
+    if (!res.ok) return { ok: false, ids: [], reason: res.reason };
+
+    return {
+      ok: true,
+      ids: res.hits
+        .filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE)
+        .map((h) => eventIdFromVectorId(h.id))
+        .filter((id) => id && id !== eventId)
+        .slice(0, topK),
+    };
   });
 
-  if (!res.ok) return { ok: false, ids: [], reason: res.reason, durationMs };
-
-  const ids = res.hits
-    .filter((h) => Number.isFinite(h.score) && h.score >= MIN_SEMANTIC_SCORE)
-    .map((h) => eventIdFromVectorId(h.id))
-    .filter((id) => id && id !== eventId)
-    .slice(0, topK);
-
-  return { ok: true, ids, durationMs };
+  return { ...result, durationMs: Date.now() - started };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

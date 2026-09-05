@@ -85,6 +85,22 @@ describe('the sign-in limiter under shared NAT', () => {
    * `trust proxy` is off, which is the property the spoofing case asserts.
    */
   beforeEach(async () => {
+    /**
+     * The SHARED failure counters as well as the middleware stores.
+     *
+     * `authRoutes.js` keeps two `createSharedCounter`s — one per account, one
+     * per address — and they are the authoritative half of this throttle: the
+     * `express-rate-limit` stores below are the per-device fast path in front of
+     * them. Resetting only the stores left the address counter accumulating
+     * across cases, so case 2 started six failures into a ceiling of ten and
+     * three tests failed on state case 1 had created.
+     *
+     * Both halves are reset here, so each case starts from a genuinely clean
+     * throttle — which is what this hook has always claimed to do.
+     */
+    const { __resetLoginThrottle } = await import('./routes/authRoutes.js');
+    __resetLoginThrottle();
+
     const { loginLimiter, loginIpCeilingLimiter } = await import('./app.js');
     const { createHash } = await import('crypto');
     const h = (v) => createHash('sha256').update(v).digest('hex').slice(0, 32);

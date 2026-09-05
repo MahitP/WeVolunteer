@@ -394,3 +394,109 @@ describe('WEV_A11Y_HARNESS cannot be enabled in production', () => {
     expect(r.stdout, r.stderr).toBe('true');
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Demo mode over a database that is somewhere else
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The gap the guard above leaves, and the one that actually bites.
+ *
+ * `IS_PRODUCTION && DEMO_MODE` keys on `NODE_ENV`, which a developer's laptop
+ * does not set. `npm run dev` sets `DEMO_MODE=true` and reads the same `.env`
+ * the server does — so the moment that file holds a real `DATABASE_URL`, the
+ * command somebody types from muscle memory provisions a remote database and
+ * seeds accounts whose shared password is published in the README, one of them
+ * an administrator that demo mode exempts from the 2FA policy.
+ *
+ * Every case below runs WITHOUT `NODE_ENV=production`, because that is the
+ * whole point: the existing refusal cannot fire, and this one must.
+ *
+ * No database is reachable in any of them. It does not need to be — the guard
+ * sits above `initDatabase()`, and a `pg.Pool` does not connect until something
+ * queries it. That ordering is itself an assertion: if the guard ever moved
+ * below the first write, these cases would hang or fail instead of passing.
+ */
+describe('DEMO_MODE is refused when the database is not on this machine', () => {
+  const DEV = {
+    JWT_SECRET: STRONG_JWT,
+    TFA_ENCRYPTION_KEY: STRONG_TFA,
+    APP_URL: 'http://localhost:5173',
+    WEV_DB_PATH: `/tmp/wev-remote-guard-${process.pid}.db`,
+  };
+
+  /**
+   * A boot that is EXPECTED to survive has to be stopped.
+   *
+   * The refusal cases exit on their own, which is the whole assertion. The
+   * negative cases — the ones proving a local database and plain SQLite are
+   * left alone — reach `listen()` and stay there, so `spawnSync` would wait for
+   * a server that never returns. They are given a short deadline and killed,
+   * and the assertion is made against whatever the boot printed before that.
+   *
+   * `API_PORT` is pinned high and out of the way: the default is 5050, and a
+   * developer with the app already running would otherwise see these fail on
+   * EADDRINUSE rather than on anything they mean.
+   */
+  const bootServer = (env, { waitMs = 30_000 } = {}) => {
+    const root = process.cwd().replace(/\\/g, '/');
+    const r = spawnSync(process.execPath, [`${root}/server/server.js`], {
+      env: { API_PORT: '45991', ...DEV, ...env },
+      encoding: 'utf8',
+      timeout: waitMs,
+      killSignal: 'SIGKILL',
+    });
+    return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+  };
+
+  const REMOTE = 'postgresql://postgres.abcdefghijklmnop:irrelevant@aws-0-us-east-2.pooler.supabase.com:5432/postgres';
+
+  it('refuses, and exits non-zero, with no NODE_ENV=production in sight', () => {
+    const r = bootServer({ DEMO_MODE: 'true', DATABASE_ENGINE: 'postgres', DATABASE_URL: REMOTE });
+
+    expect(r.out).toMatch(/FATAL: DEMO_MODE is set and the database is not on this machine/);
+    expect(r.status, 'a refusal that exits 0 is not a refusal').toBe(1);
+  });
+
+  it('names the database it refused to seed, so the message is actionable', () => {
+    const r = bootServer({ DEMO_MODE: 'true', DATABASE_ENGINE: 'postgres', DATABASE_URL: REMOTE });
+    expect(r.out).toMatch(/aws-0-us-east-2\.pooler\.supabase\.com:5432\/postgres/);
+  });
+
+  it('never reaches the seeding banner', () => {
+    /* The banner `db.js` prints as it creates the published-password accounts.
+       Its absence is the evidence that no such login was stood up. */
+    const r = bootServer({ DEMO_MODE: 'true', DATABASE_ENGINE: 'postgres', DATABASE_URL: REMOTE });
+    expect(r.out).not.toMatch(/seeding demo accounts/i);
+  });
+
+  it('does not print the password it was given', () => {
+    const r = bootServer({
+      DEMO_MODE: 'true',
+      DATABASE_ENGINE: 'postgres',
+      DATABASE_URL: 'postgresql://postgres.abc:sup3rs3cr3t-do-not-log@db.example.pooler.supabase.com:5432/postgres',
+    });
+    expect(r.out).not.toContain('sup3rs3cr3t-do-not-log');
+  });
+
+  it('leaves a LOCAL postgres alone, because that is the development loop', () => {
+    const r = bootServer({ ...{}, 
+      DEMO_MODE: 'true',
+      DATABASE_ENGINE: 'postgres',
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/wv_dev',
+    });
+    /* It may well fail for other reasons — nothing is listening — but it must
+       not fail for THIS one. */
+    expect(r.out).not.toMatch(/DEMO_MODE is set and the database is not on this machine/);
+  }, 60_000);
+
+  it('leaves SQLite alone even when a DATABASE_URL is lying around', () => {
+    const r = bootServer({ DEMO_MODE: 'true', DATABASE_URL: REMOTE }, { waitMs: 12_000 });
+    expect(r.out).not.toMatch(/DEMO_MODE is set and the database is not on this machine/);
+  }, 60_000);
+
+  it('says so when DATABASE_URL is set but nothing will use it', () => {
+    const r = bootServer({ DATABASE_URL: REMOTE }, { waitMs: 12_000 });
+    expect(r.out).toMatch(/DATABASE_URL is set but DATABASE_ENGINE is not "postgres"/);
+  }, 60_000);
+});

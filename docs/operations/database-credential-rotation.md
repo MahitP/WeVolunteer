@@ -82,6 +82,21 @@ From a machine that has the old one, with the new service already running:
 
 ```bash
 psql "postgres://postgres:<OLD>@db.<ref>.supabase.co:5432/postgres" -c 'select 1'
+
+> **If that psql cannot connect at all**, check the address family before the
+> password. `db.<ref>.supabase.co` publishes an **AAAA record and no A record**
+> — the direct endpoint is IPv6-only unless the project buys the IPv4 add-on
+> (verified by DNS and against Supabase's connection documentation,
+> 2026-09-02). From an IPv4-only host, use the session-mode pooler instead,
+> which is IPv4 and keeps a stable session:
+>
+> ```bash
+> psql "postgres://postgres.<ref>:<OLD>@aws-<n>-<region>.pooler.supabase.com:5432/postgres" -c 'select 1'
+> ```
+>
+> A wrong password and an unreachable address fail differently, and mistaking
+> the second for the first during a rotation is how a rotation becomes an
+> outage.
 ```
 
 Expect `password authentication failed`. If it succeeds, the reset did not take
