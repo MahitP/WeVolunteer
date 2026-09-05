@@ -260,7 +260,32 @@ Add the zone, move nameservers, enable DNSSEC. Set SSL/TLS to **Full (strict)** 
 | mail records | TXT/CNAME | from Resend | **DNS-only** |
 
 ### 3. Supabase
-Create the production project. Run the baseline schema. Confirm `deploy/certs/supabase-root-2021.crt` is still the current root for your region — a rotated root fails closed, correctly, at the worst moment.
+
+Create the production project. Confirm `deploy/certs/supabase-root-2021.crt` is still the current root for your region — a rotated root fails closed, correctly, at the worst moment.
+
+> **Do NOT run `supabase/migrations/*_baseline_schema.sql`.**
+>
+> An earlier draft of this document said to, and that was wrong. That file is a
+> historical artefact of the SQLite migration, generated from `pilot.db` and
+> translated into idiomatic PostgreSQL types. It disagrees with the schema the
+> application actually uses on **150 columns** — ~130 timestamps (`TEXT` vs
+> `TIMESTAMPTZ`) and ~20 booleans (`INTEGER 0/1` vs `BOOLEAN`) — because the
+> application's types are deliberately SQLite-compatible so one codebase serves
+> both engines.
+>
+> Running it does not merely differ, it breaks the platform.
+> `CREATE TABLE IF NOT EXISTS` cannot repair an existing table, so the wrong
+> types survive and the application fails on
+> `operator does not exist: boolean = integer` — or, worse, credits every
+> attending volunteer **zero hours**, because `pg` returns `BOOLEAN` as
+> JavaScript `true` and the hours ledger credits on `present === 1`.
+
+**Leave the database empty.** The application creates its own schema on first
+boot, via `completeDatabaseInit()`. It is idempotent, so restarts are no-ops.
+
+`assertSchemaSourceCompatible()` refuses to boot against a database created from
+the baseline, naming the cause and the fix — so this is guarded in code, not only
+here.
 
 ### 4. Environment file
 
