@@ -331,6 +331,60 @@ Point `deploy/wevolunteer-backup.service` at `bin/backup-postgres.sh`, then **ru
 
 ---
 
+## Deployment checklist — strict dependency order
+
+Each step is marked **HUMAN** (needs an account, console or shell), **CLAUDE**
+(repository work, already done or doable here), or **BOTH**.
+
+Do not reorder. Several steps exist only to catch a failure before it becomes
+expensive — 17 and 30 in particular.
+
+| # | Step | Who | Notes |
+|---|---|---|---|
+| 1 | Create Oracle tenancy | HUMAN | If it becomes Pay-As-You-Go, set a **$1 budget alert** immediately |
+| 2 | Create Always Free Ampere A1 VM, Ubuntu 24.04 | HUMAN | **1 OCPU / 6 GB** — smaller resists idle reclamation better |
+| 3 | Configure VCN / security list | HUMAN | 443 from **Cloudflare ranges only**; 22 from your IP only |
+| 4 | Configure SSH access | HUMAN | Key-only; disable password auth |
+| 5 | Install Node 24, Nginx, `postgresql-client-17` | HUMAN | Client major **must match** the Supabase server major |
+| 6 | Create directories and service user | HUMAN | `/srv/wevolunteer`, `/var/lib/wevolunteer{,/uploads,/exports}`, user `wev` |
+| 7 | Create Supabase project | HUMAN | **Leave the database empty** — do not run the baseline migration |
+| 8 | Create Upstash Redis database | HUMAN | Note the 500K commands/month ceiling |
+| 9 | Create Resend account, verify sending subdomain | HUMAN | `mail.wevolunteers.org`; DKIM/SPF/DMARC as issued |
+| 10 | Create R2 bucket + scoped credentials | HUMAN | Object read/write on one bucket; nothing wider |
+| 11 | Generate the backup keypair **off the server** | HUMAN | Upload only the certificate; keep the private key elsewhere |
+| 12 | Write `/etc/wevolunteer/wevolunteer.env` (0600, owned by `wev`) | HUMAN | Template in §4 above |
+| 13 | Obtain the production DB fingerprint | BOTH | `node bin/db-fingerprint.mjs`, then set it in every **other** environment |
+| 14 | Deploy the application code and `npm ci --omit=dev` | HUMAN | ARM verified: all native deps ship linux-arm64 prebuilds |
+| 15 | `npm run build` | BOTH | Produces `dist/`, which Nginx serves |
+| 16 | Install systemd unit; `daemon-reload` | HUMAN | `deploy/wevolunteer.service` |
+| 17 | Install Nginx config and run **`nginx -t`** | HUMAN | Never skip — a syntax error takes the site down on reload |
+| 18 | Install Cloudflare Origin cert + `cloudflare-real-ip.conf` | HUMAN | Without real-IP restoration every rate limiter shares one bucket |
+| 19 | Configure Cloudflare DNS + **Full (strict)** | HUMAN | Never Flexible — it carries the `secure` cookie over plaintext |
+| 20 | `systemctl enable --now wevolunteer` | HUMAN | First boot creates the schema; watch for the legal-hash and lock lines |
+| 21 | Verify `/live` returns 200 | BOTH | Liveness — no dependencies |
+| 22 | Verify `/ready` returns 200 | BOTH | Readiness — database gating, dependencies reported only |
+| 23 | Verify `/health` returns 200 | BOTH | Unchanged contract; the Better Stack monitor depends on it |
+| 24 | Verify frontend loads and deep links refresh | BOTH | `/dashboard`, `/certificates`, `/owner` — SPA fallback |
+| 25 | Verify API, authentication, 2FA | BOTH | Real login flow, not a direct URL |
+| 26 | Verify Socket.IO connects through Cloudflare | BOTH | Free plan closes idle proxied sockets ~100s |
+| 27 | Send a real transactional email | HUMAN | Check spam; a new domain lands there first |
+| 28 | Run `bin/backup-postgres.sh` and confirm the R2 object | BOTH | First real off-site copy |
+| 29 | **Reboot the VM** | HUMAN | The only way to prove systemd persistence |
+| 30 | Run the restore drill against the real backup | BOTH | `bin/verify-restore-postgres.sh` — **the launch gate** |
+| 31 | Run `node server/verifyHours.js` against production | BOTH | Proves ledger parity on the real database |
+| 32 | Configure Better Stack monitors; confirm one alert reaches a human | HUMAN | Unpause only once the domain resolves |
+| 33 | Production browser workflows: student, organizer, admin, owner | BOTH | Navigate through the UI, not by URL |
+| 34 | Final security check: anonymous 401, student 403, owner 200, IDOR | BOTH | |
+| 35 | **Only then** begin the pilot | HUMAN | Stagger onboarding — Resend allows 100 emails/day |
+
+### The three steps most often skipped, and what they cost
+
+- **17 (`nginx -t`)** — a config typo takes the whole site down at reload, including the page that would tell you why.
+- **29 (reboot)** — the only proof that the service actually comes back. A unit that starts by hand and not at boot looks identical until the first unplanned restart.
+- **30 (restore drill)** — a backup that has never been restored is a hypothesis. Everything in this document is arranged so this step is possible; it is the one that makes the rest true.
+
+---
+
 ## Still open
 
 | Item | Status |
@@ -341,4 +395,37 @@ Point `deploy/wevolunteer-backup.service` at `bin/backup-postgres.sh`, then **ru
 | Browser workflows against production | **Not run** — nothing deployed |
 | Restore drill against real production data | **Not run** — no production database |
 | Resend 100/day behaviour at the cap | **Not tested** — queue vs. drop unverified |
-| Owner Center + certificates | **Not touched** — a concurrent worktree owns those files |
+| Owner Center + certificates | **Done on another branch, NOT merged** — see below |
+
+### Owner Center, certificates and the dark-mode a11y work
+
+That work is complete on `claude/owner-center-certificate-upgrade-7eef59`: 8
+commits, clean tree, **8 commits ahead of `main` and not merged**. It covers
+`OwnerCenter.jsx` (+ 668 lines of tests), `CertificateView` /
+`CertificateDocument` / `CertificateShareDialog`, the certificate double-`h1`,
+the dark-mode primary-button contrast failure, the `box-shadow` focus-ring
+cascade bug, and a telemetry IP-redaction gap.
+
+It was reviewed here and deliberately **not** duplicated. It touches 69 files
+including `src/index.css` (+639 lines), which this branch avoided entirely to
+keep the two mergeable.
+
+**Both branches must be merged before launch.** Neither is in `main`. Merging
+only this one ships a deployment without the Owner Center and with the dark-mode
+contrast failures still present.
+
+### One a11y finding this branch did not fix
+
+`src/components/location/LocationDisplay.jsx` is a `<div onClick>` that opens
+directions with no keyboard path — a WCAG 2.1.1 failure. It is **dead code**:
+exported from the barrel, rendered nowhere, and `DirectionsButton` exists
+alongside it. Left in place rather than deleted, because deleting a component
+another branch may adopt is not this branch's call. It should be removed or
+given a real `<button>` before anything starts using it.
+
+The other candidates were checked and are **not** defects: modal overlays
+(`Modal.jsx`, `EventModal`, `WellyView`) are click-outside conveniences with
+Escape handled by `useModal`; `LocationThumbnail` duplicates an action that
+`EventCard` already exposes through a real `<button>`; and `DatePicker` is
+already a full `role="grid"` implementation with a focus trap and roving
+tabindex — that hit was prose inside a comment.
