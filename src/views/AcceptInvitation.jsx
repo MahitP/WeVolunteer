@@ -134,7 +134,28 @@ export default function AcceptInvitation() {
      the same reason — the page must not become a way to tell the two apart. */
   if (!token) {
     return (
-      <div className="auth">
+      /**
+       * `data-error-kind="404"` — for the accessibility sweep, not for styling.
+       *
+       * `a11y/harness/routes.mjs` derives its route list from the route table,
+       * so this page is swept automatically. But `concreteFor` substitutes only
+       * `:param` SEGMENTS, and what this page needs is a QUERY STRING — so the
+       * sweep visits `/accept-invitation` bare, lands on this panel, and would
+       * report it as coverage of the acceptance screen. That is the exact
+       * failure `/verify/:code` was fixed for: worse than skipping a route,
+       * because it produces numbers that look like coverage.
+       *
+       * `walk.mjs` treats a `data-error-kind` of `404` as "the path or its
+       * fixture did not resolve, so what was measured is not the page this
+       * route names" and reports the route UNMEASURED. Which is the truth here:
+       * without a token this is not the acceptance screen. The marker is the
+       * same one `CertificateView` uses, for the same reason.
+       *
+       * The honest fix is query-string fixtures in the harness, so the decision
+       * branch is measured rather than merely admitted to be unmeasured. That
+       * is harness work and is written up as a remaining gap.
+       */
+      <div className="auth" data-error-kind="404">
         <main className="auth-form auth-form-narrow auth-centered stack-md">
           <span className="auth-icon auth-icon-danger"><ShieldAlert size={24} /></span>
           <h1 className="auth-title" tabIndex={-1} ref={headingRef}>

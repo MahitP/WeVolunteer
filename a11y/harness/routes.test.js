@@ -97,3 +97,40 @@ describe('the accessibility route inventory', () => {
     expect(ROUTES.filter(r => r.path.includes('*'))).toEqual([]);
   });
 });
+
+/**
+ * ── The QUERY map must not go stale ──
+ *
+ * `QUERY` supplies the query string a route needs before it renders the page it
+ * names — `/accept-invitation` takes its token there rather than in a path
+ * segment, so `FIXTURES` could not cover it and the sweep was landing on the
+ * "incomplete link" branch.
+ *
+ * A hand-maintained map keyed by path is exactly the thing that rots: rename
+ * the route and the entry silently stops applying, which returns the sweep to
+ * measuring the wrong panel with nothing going red. So every key has to be a
+ * path the route table actually declares.
+ */
+describe('the QUERY map', () => {
+  it('names only routes that exist', async () => {
+    const { QUERY, ROUTES } = await import('./routes.mjs');
+    const declared = new Set(ROUTES.map(r => r.path));
+    const stale = Object.keys(QUERY).filter(p => !declared.has(p));
+    expect(
+      stale,
+      'these QUERY entries name no declared route, so they apply to nothing — '
+      + 'the route was renamed or removed and the sweep is back to visiting it bare'
+    ).toEqual([]);
+  });
+
+  it('is actually applied by concreteFor', async () => {
+    const { QUERY, concreteFor } = await import('./routes.mjs');
+    const entries = Object.entries(QUERY);
+    /* Vacuity guard: an emptied map would pass the case above by iterating
+       nothing, and this file would stop protecting the thing it is for. */
+    expect(entries.length).toBeGreaterThan(0);
+    for (const [routePath, query] of entries) {
+      expect(concreteFor(routePath), routePath).toContain(query);
+    }
+  });
+});

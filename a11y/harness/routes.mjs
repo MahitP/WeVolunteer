@@ -95,12 +95,52 @@ export const FIXTURES = {
  * found nothing falls back to the typed placeholder instead of navigating to
  * `/verify/null`.
  */
+/**
+ * Query strings a route needs before it renders the page it names.
+ *
+ * ── Why this exists, and why FIXTURES could not cover it ──
+ *
+ * `FIXTURES` fills `:param` SEGMENTS. `/accept-invitation` has none: the
+ * administrator-invitation token arrives in the QUERY, because that is the URL
+ * `sendAdminInvitationEmail` has always built. So the sweep visited the path
+ * bare, the page rendered its "this invitation link is incomplete" branch, and
+ * the walk would have reported that panel as coverage of the acceptance screen
+ * — the same false-coverage failure `/verify/:code` was fixed for, and worse
+ * than a skip because it produces numbers that look like coverage.
+ *
+ * The view now marks that branch with `data-error-kind="404"`, so `walk.mjs`
+ * reports the route UNMEASURED rather than lying about it. This map is the half
+ * that makes it measured instead of merely honest.
+ *
+ * ── Why a literal token is correct here, unlike a certificate code ──
+ *
+ * `code` cannot be written down: `generateCode` draws from
+ * `crypto.randomBytes`, so every reseed mints a different one and the literal
+ * that used to sit in FIXTURES had never resolved. An invitation token is
+ * different — not because it is predictable, but because
+ * `AcceptInvitation` does not VALIDATE it before rendering. The token is only
+ * sent when somebody presses the button, deliberately: it is single-use, and a
+ * mail prefetcher or a URL scanner must not be able to burn it. So any
+ * non-empty value renders the real decision screen, which is the page that
+ * needs measuring.
+ *
+ * That is a property of the view, so it is stated here rather than assumed:
+ * `AcceptInvitation.test.jsx` pins it with "never accepts on mount, however
+ * valid the token looks".
+ */
+export const QUERY = {
+  '/accept-invitation': '?token=a11y-sweep-token-not-redeemed',
+};
+
 export function concreteFor(routePath, overrides = {}) {
-  return routePath.replace(/:([A-Za-z]+)/g, (whole, name) => {
+  const filled = routePath.replace(/:([A-Za-z]+)/g, (whole, name) => {
     const live = overrides[name];
     if (live) return String(live);
     return name in FIXTURES ? FIXTURES[name] : whole;
   });
+  /* Appended AFTER substitution, so a route could carry both a parameter and a
+     query without the query being scanned for `:name`. */
+  return filled + (QUERY[routePath] ?? '');
 }
 
 const SRC = fs.readFileSync(path.join(ROOT, 'src/routes/index.jsx'), 'utf8');

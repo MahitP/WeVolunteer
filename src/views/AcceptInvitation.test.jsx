@@ -185,11 +185,23 @@ describe('AcceptInvitation', () => {
 
   it('answers a link with no token the same way it answers a bad one', () => {
     signedIn();
-    show('');
+    const { container } = show('');
 
     expect(screen.getByRole('heading', { name: /This invitation link is incomplete/i }))
       .toBeInTheDocument();
     expect(api.acceptAdminInvitation).not.toHaveBeenCalled();
+
+    /**
+     * And it tells the accessibility sweep it is not the real page.
+     *
+     * `a11y/harness/routes.mjs` derives routes from the route table but
+     * `concreteFor` fills only `:param` segments, not query strings — so the
+     * sweep visits this path bare and would report THIS panel as coverage of
+     * the acceptance screen. `walk.mjs` reads `data-error-kind="404"` as
+     * "unmeasured", which is the honest answer. Same marker `CertificateView`
+     * uses, and the same failure `/verify/:code` was fixed for.
+     */
+    expect(container.querySelector('[data-error-kind="404"]')).toBeTruthy();
   });
 
   it('moves focus to the heading whenever the page changes what it says', async () => {
