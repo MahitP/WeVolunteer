@@ -68,6 +68,7 @@ const draw = (props = {}) => render(
     <AppNotices
       onAccepted={props.onAccepted ?? vi.fn()}
       onSignOut={props.onSignOut ?? vi.fn()}
+      {...(props.locationRelevant === undefined ? {} : { locationRelevant: props.locationRelevant })}
     />
   </MemoryRouter>
 );
@@ -333,5 +334,78 @@ describe('when there is nothing to say', () => {
     resolve({ updates: [] });
     await settled();
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+/**
+ * ── The location offer is the only tier that depends on WHERE the reader is ──
+ *
+ * It was mounted at the shell level, so "See how far away opportunities are"
+ * rendered above every page. Measured in a browser it was the largest element
+ * above the fold on the ADMIN hub, and it appears the same way on Messages,
+ * Settings and Notifications — pages where accepting it changes nothing a
+ * reader can see.
+ *
+ * The cost is not clutter. This is the same slot the legal change notices use,
+ * and the location offer COMES BACK — `dismissPrompt` remembers for the tab,
+ * not for ever. An offer that recurs where it cannot pay off teaches a reader
+ * to dismiss the strip without reading it, and the next thing in that strip
+ * might be "the Terms have changed".
+ *
+ * So the bottom tier gets a condition and the two above it must not.
+ */
+describe('the location offer is scoped to where location is used', () => {
+  beforeEach(() => {
+    api.fetchLegalUpdates.mockResolvedValue({ updates: [] });
+  });
+
+  it('is offered where location does something', async () => {
+    locationCtx.showPrompt = true;
+    draw({ locationRelevant: true });
+    await settled();
+    expect(await screen.findByRole('button', { name: /use my location/i })).toBeInTheDocument();
+  });
+
+  it('is withheld where it would change nothing visible', async () => {
+    locationCtx.showPrompt = true;
+    draw({ locationRelevant: false });
+    await settled();
+    expect(screen.queryByRole('button', { name: /use my location/i })).toBeNull();
+  });
+
+  it('renders no node at all when the offer is the only thing withheld', async () => {
+    /* The property the whole component exists to hold: nothing to say means no
+       element, so no wrapper can keep a margin behind it. Withholding the offer
+       must reach that same state rather than leaving an empty strip. */
+    locationCtx.showPrompt = true;
+    const { container } = draw({ locationRelevant: false });
+    await settled();
+    expect(container.querySelector('.app-notices')).toBeNull();
+  });
+
+  it('still shows a legal change where location is irrelevant', async () => {
+    /* The half that must not regress. A document somebody is held to is news
+       wherever they are standing, so the two legal tiers stay unconditional. */
+    api.fetchLegalUpdates.mockResolvedValue({ updates: [NOTICE] });
+    locationCtx.showPrompt = true;
+    draw({ locationRelevant: false });
+    await settled();
+    expect(await screen.findByText(/Privacy Policy/i)).toBeInTheDocument();
+  });
+
+  it('still blocks on a mandatory change where location is irrelevant', async () => {
+    api.fetchLegalUpdates.mockResolvedValue({ updates: [REQUIRED] });
+    locationCtx.showPrompt = true;
+    draw({ locationRelevant: false });
+    /* An `alertdialog`, not a `dialog` — it is a question the reader has to
+       answer before they can use the product, which is what that role means. */
+    expect(await screen.findByRole('button', { name: /Accept and continue/i })).toBeInTheDocument();
+  });
+
+  it('defaults to offering it, so a forgotten prop cannot hide it everywhere', async () => {
+    locationCtx.showPrompt = true;
+    draw();
+    await settled();
+    expect(await screen.findByRole('button', { name: /use my location/i })).toBeInTheDocument();
   });
 });

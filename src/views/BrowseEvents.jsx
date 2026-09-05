@@ -652,9 +652,34 @@ export default function BrowseEvents({
                 It was the header action on the Find people page, and deleting
                 that page without it would have left creating a club reachable
                 from nowhere at all. */}
+            {/**
+              * "Your organizations", not "Organizations".
+              *
+              * This button said "Organizations" while the scope control forty
+              * pixels below it also says "Organizations" — one navigates to the
+              * clubs you run or belong to, the other filters these search
+              * results to clubs. Two destinations, one word, adjacent.
+              *
+              * That is the fault this page was already corrected for once: the
+              * rail entry became "Discover" because "Opportunities" was
+              * "simultaneously the name of the whole destination and of one of
+              * the four scope tabs inside it". The same reasoning had not been
+              * applied to the other instance of it on the same screen.
+              *
+              * "Your organizations" rather than "My clubs", and that is a
+              * terminology decision rather than a preference. "Organization" is
+              * this product's canonical noun — 614 occurrences across the
+              * user-facing views, the page heading, and every PAGE_META entry —
+              * while "club" appears only as plain-English gloss inside
+              * supporting prose ("A club or group posting opportunities").
+              * Introducing "clubs" as a LABEL would create a second name for
+              * the canonical concept, which is the problem, not the fix. The
+              * possessive is what disambiguates, and it matches the page it
+              * opens, which groups by "You manage" and "You belong to".
+              */}
             {canSeeOrganizations && (
               <Link to="/organizations" className="btn btn-secondary">
-                <Building2 size={16} aria-hidden="true" /> Organizations
+                <Building2 size={16} aria-hidden="true" /> Your organizations
               </Link>
             )}
             {canCreate && (

@@ -25,6 +25,25 @@ import { api } from '../../utils/api';
  *
  * The order is fixed and explicit now: Google, Microsoft, Apple, always, with
  * each one either usable or shown as unavailable.
+ *
+ * ── What changed, and what deliberately did not ──
+ *
+ * A provider that is NOT BUILT is no longer rendered on a sign-in screen. Apple
+ * was a disabled button reading "Apple — coming soon" above the two options
+ * that work, so a first-time visitor counted four ways in and found two of them
+ * were decoration, one of them promising a date the product has not committed
+ * to. Several cases below therefore expect TWO buttons where they used to
+ * expect three; that is the change, not a regression.
+ *
+ * A provider that IS built but is not configured here is STILL rendered, and
+ * that is the half that must not move. It is the AADSTS900144 signal: a
+ * Microsoft button one environment variable from working has to say so, both to
+ * a school that was told to use its school account and to the operator, who
+ * sees this same screen and has no other indication their deployment is
+ * incomplete. The component keys that decision on `implemented` rather than on
+ * the `state` label, because `/api/oauth/providers` is public and a cached
+ * bundle can outlive a deploy — the state-absent case at the bottom of this
+ * file is what proves it.
  */
 
 const labelsInOrder = () =>
@@ -56,32 +75,35 @@ const ALL_CONFIGURED = [
 ];
 
 describe('provider order', () => {
-  it('renders Google, Microsoft, Apple in that order when only Google is configured', async () => {
+  it('renders Google then Microsoft when only Google is configured', async () => {
     mockProviders(GOOGLE_ONLY);
     render(<ProviderButtons onSelect={() => {}} />);
-    await waitFor(() => expect(labelsInOrder()).toHaveLength(3));
-    expect(labelsInOrder().map(t => t.split(/\s+/)[2] || t)).toBeTruthy();
+    /* Two, not three: Apple is not built, so it is not offered. Microsoft is
+       built and unconfigured, so it is — that is the reported bug's fix. */
+    await waitFor(() => expect(labelsInOrder()).toHaveLength(2));
     const order = labelsInOrder().map(t =>
       /google/i.test(t) ? 'google' : /microsoft/i.test(t) ? 'microsoft' : /apple/i.test(t) ? 'apple' : '?');
-    expect(order).toEqual(['google', 'microsoft', 'apple']);
+    expect(order).toEqual(['google', 'microsoft']);
   });
 
-  it('keeps the same order when every provider is configured', async () => {
+  it('keeps the same order when every buildable provider is configured', async () => {
     mockProviders(ALL_CONFIGURED);
     render(<ProviderButtons onSelect={() => {}} />);
-    await waitFor(() => expect(labelsInOrder()).toHaveLength(3));
+    /* ALL_CONFIGURED still marks Apple `implemented: false` — it is not built
+       on any deployment — so the row is the two that exist, in order. */
+    await waitFor(() => expect(labelsInOrder()).toHaveLength(2));
     const order = labelsInOrder().map(t =>
       /google/i.test(t) ? 'google' : /microsoft/i.test(t) ? 'microsoft' : 'apple');
-    expect(order).toEqual(['google', 'microsoft', 'apple']);
+    expect(order).toEqual(['google', 'microsoft']);
   });
 
   it('does not reorder when the server happens to send a different order', async () => {
     mockProviders([GOOGLE_ONLY[2], GOOGLE_ONLY[1], GOOGLE_ONLY[0]]);
     render(<ProviderButtons onSelect={() => {}} />);
-    await waitFor(() => expect(labelsInOrder()).toHaveLength(3));
+    await waitFor(() => expect(labelsInOrder()).toHaveLength(2));
     const order = labelsInOrder().map(t =>
       /google/i.test(t) ? 'google' : /microsoft/i.test(t) ? 'microsoft' : 'apple');
-    expect(order).toEqual(['google', 'microsoft', 'apple']);
+    expect(order).toEqual(['google', 'microsoft']);
   });
 });
 
@@ -90,7 +112,7 @@ describe('unconfigured providers', () => {
   it('shows Microsoft rather than hiding it when it is not configured', async () => {
     mockProviders(GOOGLE_ONLY);
     render(<ProviderButtons onSelect={() => {}} />);
-    await waitFor(() => expect(labelsInOrder()).toHaveLength(3));
+    await waitFor(() => expect(labelsInOrder()).toHaveLength(2));
     expect(stateOf('microsoft')).not.toBeNull();
   });
 
@@ -113,13 +135,21 @@ describe('unconfigured providers', () => {
     expect(ms.text).not.toMatch(/coming soon/i);
   });
 
-  it('keeps "coming soon" for Apple, which genuinely is not built', async () => {
+  /**
+   * ── Apple is not offered at all, which replaced "Apple — coming soon" ──
+   *
+   * This case used to assert the label. A disabled button promising a date the
+   * product has not committed to is a roadmap control in the most-viewed screen
+   * in the application, and unlike a misconfigured provider it carries no signal
+   * for anybody: there is nothing a school can do about it and nothing an
+   * operator can configure. So the row is now the providers that exist.
+   */
+  it('does not offer Apple at all, because nothing is built behind it', async () => {
     mockProviders(GOOGLE_ONLY);
     render(<ProviderButtons onSelect={() => {}} />);
-    await waitFor(() => expect(stateOf('apple')).not.toBeNull());
-    const apple = stateOf('apple');
-    expect(apple.disabled).toBe(true);
-    expect(apple.text).toMatch(/coming soon/i);
+    await waitFor(() => expect(stateOf('google')).not.toBeNull());
+    expect(stateOf('apple')).toBeNull();
+    expect(labelsInOrder().join(' ')).not.toMatch(/coming soon/i);
   });
 
   /**

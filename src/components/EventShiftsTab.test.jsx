@@ -263,10 +263,25 @@ describe('the shift row before an application exists', () => {
     expect(screen.queryByRole('button', { name: /^Select(ed)?$/ })).toBeNull();
   });
 
-  it('says "You\'re confirmed" and offers Release once accepted', () => {
+  /**
+   * ── "Can't make it", which replaced "Release" ──
+   *
+   * Giving up a CONFIRMED place had two names in two places: "Release" here and
+   * "Can't make it" on the volunteer dashboard, for the same act through the
+   * same endpoint. The dashboard's won because it is what the student is
+   * communicating rather than what the seat model does about it — "Release" is
+   * domain language borrowed from the capacity code.
+   *
+   * The pending case above still says "Withdraw", and that is a distinction
+   * worth keeping: taking back an application nobody has answered is not the
+   * same act as dropping a place somebody was counting on.
+   */
+  it('says "You\'re confirmed" and offers "Can\'t make it" once accepted', () => {
     render(<EventShiftsTab event={withShifts} {...withMine('accepted')} />);
     expect(screen.getByText("You're confirmed")).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Release$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Can't make it$/ })).toBeInTheDocument();
+    /* The old word is gone from the student's view of a confirmed shift. */
+    expect(screen.queryByRole('button', { name: /^Release$/ })).toBeNull();
   });
 
   /**

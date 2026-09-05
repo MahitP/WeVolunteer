@@ -21,7 +21,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { navItemsFor, navSectionsFor, tabForPath, RAIL_TAB, PAGE_META } from './App';
 import { APP_ROUTES } from './routes';
@@ -87,9 +87,48 @@ describe('the account menu offers Profile, and does not offer editing', () => {
 
   beforeEach(() => renderMenu());
 
-  it('lists exactly Profile, Notifications, Settings and Sign Out', () => {
+  /**
+   * ── "My hours" joined this menu, and the list stays EXACT ──
+   *
+   * A student's volunteering record lives across five destinations — `/hours`,
+   * `/certificates`, `/portfolio`, `/profile/badges` and `/profile` — and none
+   * of them was in the rail or in this menu. They are reachable only from
+   * buttons on the dashboard and the profile, so a student who had navigated
+   * away had to find their way back to the dashboard before they could answer
+   * "where is my volunteering history". This menu is the one control on screen
+   * at every width, and it is where every other product keeps what is yours.
+   *
+   * The assertion stays `toEqual` rather than becoming a `toContain`. Exactness
+   * is the point of this case: the menu is small on purpose, and the way it
+   * stops being small is one reasonable addition at a time.
+   */
+  it('lists exactly Profile, My hours, Notifications, Settings and Sign Out', () => {
     fireEvent.click(document.querySelector('.userchip'));
     const items = screen.getAllByRole('menuitem').map(b => b.textContent.trim());
+    expect(items).toEqual(['Profile', 'My hours', 'Notifications', 'Settings', 'Sign Out']);
+  });
+
+  /**
+   * And it is gated on the capability the destination itself requires.
+   *
+   * `/hours` is `portfolio.write`, held by students and the owner and NOT by
+   * organizers, administrators or partners. An unconditional entry would offer
+   * three roles a page that answers 403 — a menu item that appears and then
+   * refuses is worse than an absent one.
+   */
+  it('withholds My hours from a role that cannot open it', () => {
+    cleanup();
+    render(
+      <MemoryRouter>
+        <ProfileMenu
+          user={{ name: 'Morgan', username: 'morgan', role: 'organizer', avatar: '🦉' }}
+          onSignOut={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(document.querySelector('.userchip'));
+    const items = screen.getAllByRole('menuitem').map(b => b.textContent.trim());
+    expect(items).not.toContain('My hours');
     expect(items).toEqual(['Profile', 'Notifications', 'Settings', 'Sign Out']);
   });
 

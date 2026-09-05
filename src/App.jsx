@@ -447,6 +447,46 @@ for (const entry of NAV) {
  * titled "Moderation Center" with the wrong rail item highlighted: silent, and
  * invisible to every existing test.
  */
+/**
+ * Which areas of the product actually DO anything with a shared location.
+ *
+ * ── Why the location offer needed a condition at all ──
+ *
+ * `AppNotices` mounts the location opt-in at the shell level, so
+ * "See how far away opportunities are — share your location to sort by distance
+ * and filter to what is nearby" rendered above every page. Measured in a
+ * browser it was the largest element above the fold on the ADMIN hub, and it
+ * appears the same way on Messages, Settings and Notifications — pages where
+ * accepting it changes nothing a reader can see.
+ *
+ * That is worse than clutter, because it is the same slot the LEGAL change
+ * notices use. `AppNotices` puts the location offer last in its priority ladder
+ * precisely because it is an offer rather than news, and it comes back — the
+ * dismissal is remembered for the tab, not for ever. An offer that recurs on
+ * pages where it cannot pay off is how a reader learns to dismiss that strip
+ * without reading it, which is exactly what must not happen to a notice saying
+ * the Terms have changed.
+ *
+ * ── Keyed by TAB, not by path ──
+ *
+ * A literal list of paths would need `/discover` and `/events` (its redirect)
+ * spelled separately, and `/` means a different dashboard per persona. `tabForPath`
+ * is already the canonical answer to "which area is this", so the condition is
+ * expressed in the same vocabulary and inherits every path that maps into it.
+ *
+ * The three that qualify, and why each earns it:
+ *
+ *   dashboard  every persona's dashboard shows a next shift with travel time
+ *              and weather for its location.
+ *   browse     Discover sorts by distance and filters to what is nearby — the
+ *              thing the offer's own copy promises.
+ *   calendar   shifts laid out against where they are.
+ *
+ * Deliberately NOT `welly`: the assistant answers distance questions, but it
+ * asks for location itself, in the conversation, at the moment it needs it.
+ */
+export const LOCATION_AWARE_TABS = new Set(['dashboard', 'browse', 'calendar']);
+
 export function tabForPath(pathname) {
   if (pathname.startsWith('/events/new')) return 'create';
   /* `/discover` is the canonical Discover page and `/events` is its compatibility
@@ -1792,6 +1832,12 @@ function AppShell({ toasts, addToast, removeToast }) {
             key={currentUser.id}
             onAccepted={refreshAll}
             onSignOut={handleLogout}
+            /* The lowest tier of the notice ladder is an OFFER, and an offer
+               belongs only where accepting it does something. See
+               LOCATION_AWARE_TABS. The legal tiers above it are unconditional
+               and must stay that way — a document somebody is held to is news
+               wherever they are standing. */
+            locationRelevant={LOCATION_AWARE_TABS.has(activeTab)}
           />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering

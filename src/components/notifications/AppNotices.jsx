@@ -55,7 +55,7 @@ import './NoticeBanner.css';
  * shape that makes the notice slot feel like a place things pile up instead of
  * a place the app tells you one thing.
  */
-export default function AppNotices({ onAccepted, onSignOut }) {
+export default function AppNotices({ onAccepted, onSignOut, locationRelevant = true }) {
   const locationCtx = useLocationContext();
 
   const [notices, setNotices] = useState([]);
@@ -131,7 +131,28 @@ export default function AppNotices({ onAccepted, onSignOut }) {
     );
   }
 
-  const showLocation = Boolean(locationCtx?.showPrompt);
+  /**
+   * `locationRelevant` gates the LOWEST tier only.
+   *
+   * The ladder is unchanged and the two legal tiers above are deliberately
+   * unconditional: a document somebody is held to is news wherever they are
+   * standing. This one is an offer, and it was being made on every page in the
+   * product — including the administrative hub, where it was the largest thing
+   * above the fold, and Messages and Settings, where accepting it changes
+   * nothing visible.
+   *
+   * An offer that recurs where it cannot pay off is how a reader learns to
+   * dismiss this strip without reading it — and it is the same strip the legal
+   * notices use, which is the actual cost. The shell decides relevance from
+   * `LOCATION_AWARE_TABS` in App.jsx, in the same tab vocabulary `tabForPath`
+   * already speaks, so the condition inherits every path that maps into those
+   * areas rather than restating a list of routes.
+   *
+   * Defaults to `true` so a caller that does not pass it keeps the old
+   * behaviour: this must never become a flag that silently hides the offer
+   * everywhere because somebody forgot a prop.
+   */
+  const showLocation = locationRelevant && Boolean(locationCtx?.showPrompt);
   const showLegal = notices.length > 0;
 
   /* The whole point: no notice, no node, no margin. */

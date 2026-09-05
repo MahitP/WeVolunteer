@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserRound, Settings, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
+import { UserRound, Settings, Bell, LogOut, ChevronsUpDown, Clock } from 'lucide-react';
+import { can } from '../../authz';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -145,6 +146,42 @@ export default function ProfileMenu({ user, onSignOut }) {
             <UserRound size={15} /> Profile
           </button>
           
+          {/**
+            * ── "My hours", and why it belongs in this menu ──
+            *
+            * A student's volunteering record is spread across five destinations
+            * — `/hours`, `/certificates`, `/portfolio`, `/profile/badges` and
+            * `/profile` — and every one of them has a documented reason to
+            * exist. None of them was in the navigation rail or in this menu.
+            * They are reachable only from buttons on the dashboard and the
+            * profile, so "where do I go to see my volunteering history?" had no
+            * durable answer: a student who had scrolled away from the dashboard
+            * had to find their way back to it first.
+            *
+            * This menu is where every other product keeps the things that are
+            * YOURS, and it is the one control that is on screen at every width
+            * — the avatar menu on the desktop rail, and the header of the `⋯`
+            * sheet on a phone. `/hours` is the right one of the five to promote
+            * because it is the whole record, WeVolunteer and self-reported
+            * together, and the other four are linked from it or from the
+            * profile beside it.
+            *
+            * Deliberately NOT added to the rail. The primary tier is capped at
+            * six on purpose (App.navGroups.test.jsx pins it) because the mobile
+            * bar draws every primary entry, and this is a place people go to
+            * read rather than the next step in a task.
+            *
+            * Gated on `portfolio.write`, which is the capability `/hours`
+            * itself requires — held by students and by the owner, and not by
+            * organizers, admins or partners. An unconditional entry would offer
+            * three roles a page that answers 403.
+            */}
+          {can(user, 'portfolio.write') && (
+            <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/hours')}>
+              <Clock size={15} /> My hours
+            </button>
+          )}
+
           <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/settings?section=notifications')}>
             <Bell size={15} /> Notifications
           </button>

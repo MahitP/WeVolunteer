@@ -262,7 +262,7 @@ export default function EventModal({
   const handleRelease = async (app, slotName) => {
     const confirmed = app.status === 'accepted';
     const message = confirmed
-      ? `Release your spot for "${slotName}"?\n\n${event.organizerName} will be notified and the spot reopens for someone else.`
+      ? `Give up your spot for "${slotName}"?\n\n${event.organizerName} will be notified and the spot reopens for someone else.`
       : `Withdraw your application for "${slotName}"?`;
     if (!window.confirm(message)) return;
     setSubmitting(true);
