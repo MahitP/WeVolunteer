@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, symlinkSync, cpSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { createHash } from 'crypto';
+import { databaseFingerprint } from './db/productionDatabaseGuard.js';
 
 /** Same reasoning as `tooling.dbPath.test.js`: these spawn real `node` processes. */
 vi.setConfig({ testTimeout: 20000 });
@@ -312,6 +312,9 @@ describe('privileged CLI database resolution', () => {
    */
   describe('an explicit database path outranks a .env engine', () => {
     const SENTINEL = 'db.SENTINEL-MUST-NOT-BE-REACHED.supabase.co';
+    /* The exact string the harness writes into `.env`, so the fingerprint
+       cases can be derived from it rather than reconstructing it. */
+    const DOTENV_URL = `postgres://postgres:x@${SENTINEL}:5432/postgres`;
 
     /** A repository copy whose `.env` points at PostgreSQL. */
     function repoWithPostgresDotEnv() {
@@ -336,7 +339,7 @@ describe('privileged CLI database resolution', () => {
          import rather than on the behaviour under test. */
       cpSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
       writeFileSync(path.join(dir, '.env'),
-        `DATABASE_ENGINE=postgres\nDATABASE_URL=postgres://postgres:x@${SENTINEL}:5432/postgres\n`);
+        `DATABASE_ENGINE=postgres\nDATABASE_URL=${DOTENV_URL}\n`);
       return dir;
     }
 
@@ -417,11 +420,12 @@ describe('privileged CLI database resolution', () => {
     it('refuses the production database from a non-production process', () => {
       const dir = repoWithPostgresDotEnv();
       try {
-        /* The fingerprint of the sentinel `.env` names, computed the way the
-           guard computes it rather than pasted, so the two cannot drift. */
-        const fingerprint = createHash('sha256')
-          .update(`${SENTINEL.toLowerCase()}:5432/postgres`)
-          .digest('hex').slice(0, 32);
+        /* Derived by calling the guard's OWN fingerprint function on the same
+           URL `.env` carries, rather than re-hashing here. A restated hash is a
+           second copy of the rule: this test was written with one and broke the
+           moment the fingerprint started covering the username, reporting "the
+           guard did not fire" when the guard was fine. */
+        const fingerprint = databaseFingerprint(DOTENV_URL);
 
         const out = runIn(dir, { WEV_PRODUCTION_DB_FINGERPRINT: fingerprint });
 
@@ -445,12 +449,8 @@ describe('privileged CLI database resolution', () => {
     it('still lets a production process through to its own database', () => {
       const dir = repoWithPostgresDotEnv();
       try {
-        const fingerprint = createHash('sha256')
-          .update(`${SENTINEL.toLowerCase()}:5432/postgres`)
-          .digest('hex').slice(0, 32);
-
         const out = runIn(dir, {
-          WEV_PRODUCTION_DB_FINGERPRINT: fingerprint,
+          WEV_PRODUCTION_DB_FINGERPRINT: databaseFingerprint(DOTENV_URL),
           NODE_ENV: 'production',
         });
 

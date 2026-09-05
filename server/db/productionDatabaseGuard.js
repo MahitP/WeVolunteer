@@ -33,9 +33,43 @@
  *      silently disable the guard — which is precisely when a guard failing
  *      open would be least noticed.
  *
- * Host and database only also means the guard still fires through the shapes
- * that defeat string comparison: a different password, `?sslmode=require`
- * appended, or the connection-pooler port swapped for the direct one.
+ * The hashed material is `user@host:port/database`. The PASSWORD is excluded
+ * and the username is not, and each half of that is deliberate:
+ *
+ *   • Excluding the password is what makes rotation safe. A guard that stopped
+ *     matching when the password changed would fail open at exactly the moment
+ *     nobody is watching for it.
+ *   • Including the username is what makes the fingerprint identify a DATABASE
+ *     rather than a route to one. On a managed provider the hostname is often
+ *     shared: every Supabase project in a region is reached through the same
+ *     `aws-0-<region>.pooler.supabase.com`, with the default database name
+ *     `postgres`, and the project is identified by the pooler USERNAME
+ *     (`postgres.<project-ref>`). Hashing host and database alone therefore
+ *     produced one fingerprint for every project in a region — so a legitimate
+ *     staging database fingerprinted identically to production and would have
+ *     been refused, which is the "cries wolf" outcome the opt-in design below
+ *     exists to avoid.
+ *
+ * ── One database, several spellings: the list is the answer ──
+ *
+ * An earlier version of this comment claimed the guard "still fires through
+ * the shapes that defeat string comparison … the connection-pooler port
+ * swapped for the direct one." That was FALSE, and believing it was worse than
+ * not having the guard. Host and port are both inside the hash, so every
+ * endpoint for one database fingerprints differently:
+ *
+ *     aws-0-us-east-2.pooler.supabase.com:5432   session pooler
+ *     aws-0-us-east-2.pooler.supabase.com:6543   transaction pooler
+ *     db.<project-ref>.supabase.co:5432          direct connection
+ *
+ * `docs/operations/database-credential-rotation.md` tells an operator to use
+ * the direct endpoint, so the one URL a person is most likely to be holding in
+ * a shell was the one the guard passed silently.
+ *
+ * A single fingerprint cannot express "this database, however you reached it",
+ * so `WEV_PRODUCTION_DB_FINGERPRINT` accepts a COMMA-SEPARATED list and a match
+ * against any entry is a match. Add every endpoint the deployment can be
+ * reached through; `bin/db-fingerprint.mjs` prints one per URL.
  *
  * ── Fails closed, but only when it has been told what to close against ──
  *
@@ -74,7 +108,7 @@ export function deploymentEnvironment(env = process.env) {
  */
 export function databaseFingerprint(connectionString) {
   if (!connectionString) return null;
-  let host, port, database;
+  let user, host, port, database;
   try {
     const u = new URL(connectionString);
     host = u.hostname.toLowerCase();
@@ -82,12 +116,23 @@ export function databaseFingerprint(connectionString) {
        `host/db` and once as `host:5432/db` fingerprints differently, and the
        guard would pass for one of them. */
     port = u.port || '5432';
-    database = decodeURIComponent(u.pathname.replace(/^\//, ''));
+    user = decodeURIComponent(u.username || '');
+    /**
+     * An absent path means the DEFAULT database, not "no database".
+     *
+     * `pg` resolves a path-less connection string to a database named after the
+     * user (node_modules/pg/lib/connection-parameters.js), and on Supabase the
+     * direct-connection user is `postgres` — whose default database is also
+     * `postgres`. So `postgres://postgres:pw@db.<ref>.supabase.co:5432` reaches
+     * the production database, and returning null here made the guard inert for
+     * it: a fail-open on the shortest URL somebody could type.
+     */
+    database = decodeURIComponent(u.pathname.replace(/^\//, '')) || user;
   } catch {
     return null;
   }
   if (!host || !database) return null;
-  return createHash('sha256').update(`${host}:${port}/${database}`).digest('hex').slice(0, 32);
+  return createHash('sha256').update(`${user}@${host}:${port}/${database}`).digest('hex').slice(0, 32);
 }
 
 /** Human-facing helper: what to put in WEV_PRODUCTION_DB_FINGERPRINT. */
@@ -106,15 +151,19 @@ export function describeFingerprint(connectionString) {
  * visible to everyone with repository access.
  */
 export function assertNotProductionDatabase(env = process.env, connectionString = env.DATABASE_URL) {
-  const expected = env.WEV_PRODUCTION_DB_FINGERPRINT;
-  if (!expected) return { checked: false, reason: 'no fingerprint configured' };
+  /* A comma-separated LIST — one database, several endpoints. Trimmed because
+     a systemd `EnvironmentFile` does not always strip trailing whitespace, and
+     a fingerprint that silently never matches is a guard that is not there. */
+  const expected = String(env.WEV_PRODUCTION_DB_FINGERPRINT || '')
+    .split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
+  if (expected.length === 0) return { checked: false, reason: 'no fingerprint configured' };
 
   const actual = databaseFingerprint(connectionString);
   if (!actual) return { checked: false, reason: 'connection string not fingerprintable' };
 
   const environment = deploymentEnvironment(env);
   const isProduction = environment === 'production';
-  const matches = actual === expected;
+  const matches = expected.includes(actual);
 
   if (matches && !isProduction) {
     throw new Error(
@@ -145,7 +194,7 @@ export function assertNotProductionDatabase(env = process.env, connectionString 
       checked: true,
       warning:
         'WARNING: NODE_ENV/VERCEL_ENV says production, but DATABASE_URL does not match\n'
-        + `  WEV_PRODUCTION_DB_FINGERPRINT (expected ${expected}, got ${actual}).\n`
+        + `  WEV_PRODUCTION_DB_FINGERPRINT (expected one of ${expected.join(', ')}, got ${actual}).\n`
         + '  Either this deployment is pointed at the wrong database, or the\n'
         + '  fingerprint is stale after a planned move.'
     };

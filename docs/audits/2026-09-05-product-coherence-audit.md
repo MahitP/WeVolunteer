@@ -163,7 +163,7 @@ and a live Supabase `DATABASE_URL` with credentials. `npm test` fails 7 tests in
 connect. The failure output prints:
 
 ```
-Database: aws-0-us-east-2.pooler.supabase.com:5432/postgres (postgres, 64 migrations applied)
+Database: <production-host>:5432/postgres (postgres, 64 migrations applied)
 ```
 
 Verified identical on a clean tree (`git stash`), so this pre-dates this audit
