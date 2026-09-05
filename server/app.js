@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { csrfGuard } from './csrfGuard.js';
 import { createRedisLimitStore } from './redis/limitStore.js';
 import { shareTokenLimiter } from './organizationLimiters.js';
 import cookieParser from 'cookie-parser';
@@ -519,6 +520,21 @@ app.use(express.json({ limit: '100kb' }));
 // Populates req.cookies for authenticateToken. Mounted before the routers and
 // before the rate limiters so every downstream handler sees the same shape.
 app.use(cookieParser());
+
+/**
+ * CSRF defence in depth, immediately after cookie-parser and before any router.
+ *
+ * Scoped to `/api` because that is the whole state-changing surface; the static
+ * bundle below is public files served to anyone. Placed here so it runs before
+ * the rate limiters — a refused cross-site write should not first consume a
+ * legitimate user's limiter budget, since the attacker chooses the volume.
+ *
+ * This does NOT replace the Origin allowlist above or `sameSite: 'lax'`. It
+ * closes the case neither can: a SIBLING SUBDOMAIN is same-site, so Lax still
+ * attaches the cookie, and the Origin check would admit it the moment someone
+ * added the marketing hostname to CORS_ORIGINS. See csrfGuard.js.
+ */
+app.use('/api', csrfGuard);
 
 /**
  * Which limiters keep a SHARED counter, and which stay in process memory.
@@ -1265,16 +1281,29 @@ async function probeWritable() {
   return ok;
 }
 
+/**
+ * Can the database be read at all?
+ *
+ * Extracted rather than repeated in `/health` and `/ready` for two reasons.
+ * The obvious one is that two copies of a liveness probe drift. The other is
+ * that `db.accessSurface.test.js` ratchets the number of call sites reaching
+ * the database through the global handle, downward, on purpose — every one of
+ * them has to keep working when a transaction owns a pooled client. A second
+ * endpoint asking the same question is not a reason to spend another.
+ */
+async function probeReadable() {
+  try {
+    await db.prepare('SELECT 1').get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Health check is registered BEFORE the production SPA catch-all below, so it
 // always returns its JSON — a load balancer must never receive index.html here.
 app.get('/health', async (req, res) => {
-  let readable = false;
-  try {
-    await db.prepare('SELECT 1').get();
-    readable = true;
-  } catch {
-    readable = false;
-  }
+  const readable = await probeReadable();
 
   if (!readable) {
     // 503 rather than 500: this is "not available right now", which is what a load
@@ -1300,6 +1329,83 @@ app.get('/health', async (req, res) => {
   }
 
   res.json({ status: 'ok', database: 'connected', writable: true, version: VERSION });
+});
+
+/**
+ * Liveness. "Is this process running?" — and nothing else.
+ *
+ * Deliberately touches no dependency, so it can only fail by the process being
+ * gone, wedged, or unable to accept a connection. That is precisely the
+ * question a process supervisor asks, and the answer must not change because
+ * the database is briefly unreachable: a liveness probe wired to a dependency
+ * makes systemd restart a perfectly healthy application every time Supabase
+ * has a bad thirty seconds, turning a recoverable blip into a restart loop.
+ *
+ * ── Why /health was NOT repurposed as this ──
+ *
+ * The obvious split is `/health` = liveness, `/ready` = readiness, and that is
+ * the wrong move HERE for one specific reason: a Better Stack uptime monitor
+ * already points at `/health`, and `/health` currently goes red when the
+ * database is unreachable. Redefining it to a check that cannot fail for that
+ * reason would silently convert the one alert that catches a database outage
+ * into an alert that catches nothing — and nothing about the change would be
+ * visible on the dashboard. The monitor would stay green through the outage it
+ * exists to report.
+ *
+ * So `/health` keeps its meaning and its contract, `/ready` states the same
+ * thing more fully, and liveness gets its own new path where nothing was
+ * relying on the old answer.
+ */
+app.get('/live', (req, res) => {
+  res.json({ status: 'ok', version: VERSION });
+});
+
+/**
+ * Readiness. "Can this instance serve requests correctly right now?"
+ *
+ * Gates on the database only. Everything else is REPORTED and never gates,
+ * which is the whole design decision worth writing down: Redis degrades the
+ * rate limiters to per-process counters and Pinecone degrades Welly's search,
+ * but a volunteer can still find an opportunity, apply to it, be accepted, be
+ * marked present and have their hours credited with both of them down. An
+ * outage in either must therefore not make this endpoint say the application
+ * cannot serve traffic, because something acts on that answer — a monitor
+ * pages someone, and a supervisor may take the instance out of service.
+ *
+ * The rule, stated once: a dependency gates readiness only if the core service
+ * record — apply, accept, attend, credit — cannot be maintained without it.
+ * The database is the only thing here that meets that bar.
+ */
+app.get('/ready', async (req, res) => {
+  const readable = await probeReadable();
+  const writable = readable ? await probeWritable() : false;
+
+  /* Optional dependencies, read defensively. A status helper that threw would
+     otherwise be able to fail the readiness check it is only supposed to
+     annotate — the exact coupling this endpoint is designed to avoid. */
+  const dependencies = {};
+  try {
+    const { redisStatus } = await import('./redis/status.js');
+    const r = redisStatus();
+    dependencies.redis = { configured: r.configured, reason: r.reason ?? null };
+  } catch { dependencies.redis = { configured: false, reason: 'status unavailable' }; }
+
+  try {
+    const { pineconeStatus } = await import('./search/pineconeConfig.js');
+    const p = pineconeStatus();
+    dependencies.pinecone = { configured: Boolean(p?.configured ?? p?.enabled) };
+  } catch { dependencies.pinecone = { configured: false }; }
+
+  const ready = readable && writable;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ok' : 'error',
+    database: readable ? (writable ? 'connected' : 'read-only') : 'disconnected',
+    writable,
+    /* Named so nobody reads this as a failure list. These are informational and
+       an operator should be able to tell that from the payload alone. */
+    dependenciesNonGating: dependencies,
+    version: VERSION
+  });
 });
 
 app.use('/api', (req, res) => {

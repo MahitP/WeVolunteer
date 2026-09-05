@@ -36,6 +36,13 @@ jobs:
     - name: Build Application
       run: npm run build
 
+    # After the build, because it scans the build OUTPUT. The pre-commit hook
+    # scans what is committed, which cannot catch a secret that is correctly
+    # kept out of the repo and then inlined by Vite because it was named
+    # VITE_SOMETHING.
+    - name: Scan the bundle for secrets
+      run: npm run scan:bundle
+
     - name: Run Tests
       run: npm test
 

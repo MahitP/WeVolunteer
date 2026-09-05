@@ -1561,6 +1561,14 @@ export async function applyPostgresSchema(db) {
   const { seedPostgresBaseline, postgresIsFresh, runPostgresMigrations } =
     await import('../migrations/index.js');
 
+  /* Refuse a database created by a different schema source before touching it.
+     Lives in its own module rather than inline HERE because this file is
+     generated: an inline guard would be silently deleted by the next
+     regeneration, which is exactly the kind of quiet loss it exists to catch.
+     See server/db/schemaSourceGuard.js. */
+  const { assertSchemaSourceCompatible } = await import('./schemaSourceGuard.js');
+  await assertSchemaSourceCompatible(db);
+
   const fresh = await postgresIsFresh(db);
 
   await db.exec(POSTGRES_SCHEMA);

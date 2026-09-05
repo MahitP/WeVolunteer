@@ -40,7 +40,36 @@ const router = express.Router();
  * written to and the directory served cannot drift apart again.
  */
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
-export const UPLOADS_ROOT = path.join(PUBLIC_DIR, 'uploads');
+
+/**
+ * Where uploaded images live, and why this needs an override on a real host.
+ *
+ * The default — `<checkout>/public/uploads` — is right for development and for
+ * the test suite, and is what everything above this comment is about. It is
+ * WRONG for the hardened service unit, and silently so:
+ *
+ *     ProtectSystem=strict        makes /srv read-only
+ *     ReadWritePaths=/var/lib/wevolunteer   is the only writable path
+ *
+ * and the checkout lives at `/srv/wevolunteer`. So on the deployed host this
+ * directory is inside a read-only mount. The `mkdirSync` below runs at IMPORT
+ * time, which means the failure is not a broken upload — it is the server
+ * refusing to boot, with an EROFS stack trace pointing at a line about avatars.
+ * If the directory happens to exist already (created by a deploy step running
+ * as root), the boot succeeds and every upload fails instead.
+ *
+ * `WEV_UPLOADS_DIR` moves it, exactly as `WEV_EXPORT_DIR` moves the export
+ * archives, and for the same reason. The deployment sets it to
+ * `/var/lib/wevolunteer/uploads`, which is already writable and already backed
+ * up alongside the database.
+ *
+ * The default is deliberately unchanged: altering it would move where a
+ * developer's avatars land and where Vite's publicDir looks for them, which is
+ * the drift the long comment above this exists to prevent.
+ */
+export const UPLOADS_ROOT = process.env.WEV_UPLOADS_DIR
+  ? path.resolve(process.env.WEV_UPLOADS_DIR)
+  : path.join(PUBLIC_DIR, 'uploads');
 const UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
 
 /**
@@ -51,8 +80,38 @@ const UPLOADS_DIR = path.join(UPLOADS_ROOT, 'avatars');
  * written by hand.
  */
 export { UPLOADS_DIR as AVATAR_UPLOADS_DIR };
+/**
+ * Created at import time, and allowed to fail the boot — but not silently.
+ *
+ * A bare `mkdirSync` here dies with `EROFS: read-only file system` and a stack
+ * naming this file, which tells an operator that avatars are broken and nothing
+ * about why the whole process refused to start. On the hardened unit that is
+ * the single most likely first-boot failure, so it explains itself instead.
+ */
 if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  } catch (err) {
+    if (err.code === 'EROFS' || err.code === 'EACCES' || err.code === 'EPERM') {
+      /* Names WEV_UPLOADS_DIR before interpolating anything: the variable an
+         operator can act on belongs at the front of a boot failure, not after a
+         path they cannot change. It also keeps the first token after "FATAL:"
+         the actual environment variable, which is what
+         envExample.completeness.test.js reads to check this is documented. */
+      throw new Error(
+        `FATAL: WEV_UPLOADS_DIR — cannot create the uploads directory.\n\n`
+        + `  path:  ${UPLOADS_DIR}\n`
+        + `  errno: ${err.code}\n\n`
+        + '  On the deployed host the checkout is inside a read-only mount:\n'
+        + '  the service unit sets ProtectSystem=strict and grants write access\n'
+        + '  only to ReadWritePaths. Point uploads at a writable directory:\n\n'
+        + '    WEV_UPLOADS_DIR=/var/lib/wevolunteer/uploads\n\n'
+        + '  and make sure that path is covered by ReadWritePaths= in\n'
+        + '  deploy/wevolunteer.service and owned by the service user.'
+      );
+    }
+    throw err;
+  }
 }
 
 /** 5 MB. Named once so the limit and the message it produces cannot drift. */
