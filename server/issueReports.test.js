@@ -134,12 +134,33 @@ describe('filing a report', () => {
     expect(row.context).not.toMatch(/hunter2|abc\.def\.ghi|1111/);
   });
 
-  it('does not leak internal routing to the client', async () => {
-    /* Which mailbox a category reaches is an internal decision. */
-    const cats = await srv.call('GET', '/api/issues/categories', undefined, student);
-    expect(cats.status).toBe(200);
-    expect(cats.body.categories.length).toBeGreaterThan(5);
-    expect(JSON.stringify(cats.body)).not.toMatch(/replyTo|@wevolunteers\.org/);
+  /**
+   * ── The endpoint this case covered is gone ──
+   *
+   * `GET /api/issues/categories` asserted that `replyTo` — which mailbox each
+   * category reaches — never left the server. It is deleted: the client imports
+   * `ISSUE_CATEGORIES` from `server/issueReports.js` directly, so the form and
+   * the validator are the same frozen array at build time and there is no
+   * response to leak from.
+   *
+   * The property is still worth pinning, one level lower, because the import is
+   * now the thing that could leak it: `src/issueReports.js` re-exports this
+   * module INTO THE BROWSER BUNDLE, so a `replyTo` reaching the client is now a
+   * build-time fact rather than a response body.
+   */
+  it('keeps reply-to routing out of what the client can import', async () => {
+    const client = await import('../src/issueReports.js');
+    /* The vocabulary the form needs is there... */
+    expect(client.ISSUE_CATEGORIES.length).toBeGreaterThan(5);
+    /* ...and every entry the client can see carries only value and label. The
+       server's own array keeps `replyTo`; that is what must not cross. */
+    for (const entry of client.ISSUE_CATEGORIES) {
+      expect(Object.keys(entry).sort(), JSON.stringify(entry)).toEqual(['label', 'value']);
+    }
+    /* And the mailbox map is not reachable from the client mirror at all — the
+       property that makes the above true rather than a projection over an array
+       that still carries it into the chunk. */
+    expect(client.REPLY_TO_BY_CATEGORY).toBeUndefined();
   });
 });
 

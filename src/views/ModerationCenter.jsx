@@ -216,7 +216,35 @@ const PERSONAS = [
   { id: 'student', label: 'Student', blurb: 'Browse, apply, log hours' },
   { id: 'organizer', label: 'Organizer', blurb: 'Post events, pick volunteers' },
   { id: 'admin', label: 'Administrator', blurb: 'Reports, appeals, approvals' },
-  { id: 'partner', label: 'Partner', blurb: 'Read-only participation view' },
+  /**
+   * ── Partner is NOT offered, because there is nothing to preview ──
+   *
+   * It was here, described as a "Read-only participation view". No such view
+   * exists. `partner` is a LATENT role: `ROLE.PARTNER` is defined and
+   * `server/authz.js` gives it four capabilities, but nothing in the product
+   * assigns it — there is no signup path, no administrative action and no CLI
+   * that can produce a partner account, so no account holds it and none can be
+   * created.
+   *
+   * What an owner actually got by selecting it was `analytics.public`,
+   * `event.view`, `geocode.use` and `persona.preview.exit`: a rail of Discover
+   * and nothing else, no Dashboard entry (`partner` is deliberately absent from
+   * `DASHBOARD_NAV`), and `/` reading "Partner accounts do not have a dashboard
+   * yet". `authz.js` says the same thing about the capability itself —
+   * `analytics.public` "stays registered and still reads nothing: it is the name
+   * for figures chosen FOR an outside reader, and that surface has not been
+   * designed."
+   *
+   * So the product was honest in its comments and in the page a partner lands
+   * on, and dishonest in exactly one place: this list, which promised a view by
+   * name. Removing the entry is the honest half of that; the capabilities and
+   * the role stay untouched, ready for the surface when it is designed.
+   *
+   * The SERVER's `PREVIEWABLE` in `server/routes/personaRoutes.js` is
+   * deliberately not narrowed to match. It is derived from `ROLES` so that a
+   * role added to the kernel becomes previewable without a second list going
+   * stale, and that property is worth more than symmetry with a menu.
+   */
 ];
 
 export default function ModerationCenter({ currentUser, onPreviewStarted }) {

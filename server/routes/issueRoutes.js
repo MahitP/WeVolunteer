@@ -56,12 +56,26 @@ const issueLimiter = rateLimit({
   }),
 });
 
-/** The categories, so the form cannot drift from what the server accepts. */
-router.get('/api/issues/categories', authenticateToken, (req, res) => {
-  /* `replyTo` is deliberately NOT sent. It is an internal routing decision, and
-     publishing it would tell every reader which mailbox each category reaches. */
-  res.json({ categories: ISSUE_CATEGORIES.map(({ value, label }) => ({ value, label })) });
-});
+/**
+ * ── `GET /api/issues/categories` was here, and is deleted ──
+ *
+ * It existed "so the form cannot drift from what the server accepts", which is
+ * the right goal reached the weaker way. `src/issueReports.js` re-exports
+ * `ISSUE_CATEGORIES` from this module directly, so the dropdown and the
+ * validator are the same frozen array at BUILD time — a guarantee a request
+ * cannot improve on. The endpoint had no caller anywhere in the client, and its
+ * only remaining effect was to be a second way to learn the same vocabulary.
+ *
+ * Deleted rather than kept for compatibility: it is not named in
+ * `docs/spec/appendix-api-contracts.md`, nothing outside this repository is
+ * documented as calling it, and an authenticated endpoint that answers a
+ * question already answered at build time is a route somebody has to keep
+ * classifying in `authz.completeness.test.js` for ever.
+ *
+ * `server/badgeCriteria.js` records the same decision from the other side: it
+ * cites this endpoint as the reason the badge criteria vocabulary is shared by
+ * import rather than published.
+ */
 
 /**
  * POST /api/issues — file a report.

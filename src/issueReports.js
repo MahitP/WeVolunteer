@@ -17,3 +17,11 @@ export {
   MAX_DESCRIPTION,
   validateIssue,
 } from '../server/issueReports.js';
+
+/**
+ * `replyTo` is deliberately NOT among these, and it is no longer here to omit:
+ * it moved out of `ISSUE_CATEGORIES` into `REPLY_TO_BY_CATEGORY`, which this
+ * file does not re-export. See the note on that map — the mailbox keys were
+ * being compiled into the bundle every visitor downloads, which made the
+ * deleted `GET /api/issues/categories`'s stripping of them decorative.
+ */

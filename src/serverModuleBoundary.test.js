@@ -189,10 +189,28 @@ describe('the module that broke', () => {
     ).toBe(false);
   });
 
-  it('still carries the routing key, so categories cannot lose their mailbox', () => {
+  it('still carries the routing key, so categories cannot lose their mailbox', async () => {
     /* The address moved to the route; the KEY has to stay here, or a category
-       added later has nowhere declared to send its replies. */
+       added later has nowhere declared to send its replies.
+       It is no longer a `replyTo` FIELD on each category — it moved into
+       `REPLY_TO_BY_CATEGORY`, because as a field it was being compiled into the
+       browser bundle, which made the deleted `/api/issues/categories`
+       endpoint's stripping of it decorative. */
     expect(shared).toMatch(/replyToKeyFor/);
-    expect(shared).toMatch(/replyTo: 'security'/);
+    expect(shared).toMatch(/REPLY_TO_BY_CATEGORY/);
+
+    /* Asserted against the modules rather than the source text, which is what
+       makes this cover a category ADDED later: every value in the vocabulary
+       must have a declared mailbox, so a new one cannot quietly fall through to
+       the `'support'` default. */
+    const { ISSUE_CATEGORY_VALUES, REPLY_TO_BY_CATEGORY } =
+      await import('../server/issueReports.js');
+    expect(ISSUE_CATEGORY_VALUES.length).toBeGreaterThan(5);
+    for (const value of ISSUE_CATEGORY_VALUES) {
+      expect(REPLY_TO_BY_CATEGORY[value], `${value} has no declared mailbox`).toBeTruthy();
+    }
+    /* And the sensitive ones still reach their own mailboxes rather than support. */
+    expect(REPLY_TO_BY_CATEGORY.security).toBe('security');
+    expect(REPLY_TO_BY_CATEGORY.privacy).toBe('privacy');
   });
 });

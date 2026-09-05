@@ -45,18 +45,20 @@ import crypto from 'node:crypto';
  * as an engineering triage taxonomy. "Something isn't working" is what somebody
  * types; "Bug" is what we would call it afterwards.
  *
- * `replyTo` is which departmental mailbox a reply belongs in. It is here rather
+ * `replyTo` is which departmental mailbox a reply belongs in. It lives in
+ * REPLY_TO_BY_CATEGORY below rather
  * than at the send site so that adding a category cannot silently route
- * somewhere wrong — a category with no `replyTo` fails the completeness test.
+ * somewhere wrong — a category missing from that map fails the completeness
+ * test.
  */
 export const ISSUE_CATEGORIES = Object.freeze([
-  { value: 'bug', label: "Something isn't working", replyTo: 'support' },
-  { value: 'account', label: 'Account or sign-in problem', replyTo: 'support' },
-  { value: 'event', label: 'Problem with an opportunity', replyTo: 'support' },
-  { value: 'organization', label: 'Problem with an organization', replyTo: 'support' },
-  { value: 'profile', label: 'Problem with my profile', replyTo: 'support' },
-  { value: 'accessibility', label: 'Accessibility problem', replyTo: 'support' },
-  { value: 'information', label: 'Incorrect or out-of-date information', replyTo: 'support' },
+  { value: 'bug', label: "Something isn't working" },
+  { value: 'account', label: 'Account or sign-in problem' },
+  { value: 'event', label: 'Problem with an opportunity' },
+  { value: 'organization', label: 'Problem with an organization' },
+  { value: 'profile', label: 'Problem with my profile' },
+  { value: 'accessibility', label: 'Accessibility problem' },
+  { value: 'information', label: 'Incorrect or out-of-date information' },
   /**
    * Deliberately routed to `admin@` and NOT into the moderation queue.
    *
@@ -66,12 +68,56 @@ export const ISSUE_CATEGORIES = Object.freeze([
    * an enforcement address is a better landing place than a support inbox — but
    * the page also says where the proper control is.
    */
-  { value: 'conduct', label: 'Inappropriate content or behaviour', replyTo: 'admin' },
-  { value: 'privacy', label: 'Privacy concern', replyTo: 'privacy' },
-  { value: 'security', label: 'Security concern', replyTo: 'security' },
-  { value: 'legal', label: 'Legal or policy question', replyTo: 'legal' },
-  { value: 'other', label: 'Something else', replyTo: 'support' },
+  { value: 'conduct', label: 'Inappropriate content or behaviour' },
+  { value: 'privacy', label: 'Privacy concern' },
+  { value: 'security', label: 'Security concern' },
+  { value: 'legal', label: 'Legal or policy question' },
+  { value: 'other', label: 'Something else' },
 ]);
+
+/**
+ * Which mailbox KEY each category's replies belong in.
+ *
+ * ── Why this is a separate map and not a field on the array above ──
+ *
+ * It WAS a `replyTo` field on each entry, and the deleted
+ * `GET /api/issues/categories` stripped it before answering, with the reason
+ * stated plainly: "It is an internal routing decision, and publishing it would
+ * tell every reader which mailbox each category reaches."
+ *
+ * That protection was illusory. `src/issueReports.js` re-exports this module
+ * INTO THE BROWSER BUNDLE, so every one of those keys — `security`, `privacy`,
+ * `legal`, `admin` — was compiled into the JavaScript every visitor downloads.
+ * Verified by grepping the built chunk, where the whole array appeared with its
+ * `replyTo` fields intact. The endpoint was guarding a door beside an open
+ * window, and a first attempt at fixing this by projecting the array in the
+ * client mirror did not help either: the source array is still imported to
+ * project FROM, so it stays in the chunk.
+ *
+ * Keys rather than addresses, so the exposure was small — `issueRoutes.js`
+ * resolves them against `emailIdentity.js`, the import that must never reach
+ * the browser. It was also pointless: nothing in the client reads the field.
+ * Moving it out of the array is what makes the original intent true, because
+ * the array the client imports no longer contains it.
+ *
+ * One list still decides the vocabulary: this map is keyed BY that list, and
+ * the completeness case in `issueReports.test.js` fails if the two disagree, so
+ * a new category cannot quietly acquire the default mailbox.
+ */
+export const REPLY_TO_BY_CATEGORY = Object.freeze({
+  bug: 'support',
+  account: 'support',
+  event: 'support',
+  organization: 'support',
+  profile: 'support',
+  accessibility: 'support',
+  information: 'support',
+  conduct: 'admin',
+  privacy: 'privacy',
+  security: 'security',
+  legal: 'legal',
+  other: 'support',
+});
 
 export const ISSUE_CATEGORY_VALUES = Object.freeze(ISSUE_CATEGORIES.map(c => c.value));
 
@@ -89,8 +135,7 @@ export const MAX_DESCRIPTION = 4000;
  * browser bundle. See the header.
  */
 export function replyToKeyFor(category) {
-  const found = ISSUE_CATEGORIES.find(c => c.value === category);
-  return found?.replyTo || 'support';
+  return REPLY_TO_BY_CATEGORY[category] || 'support';
 }
 
 /** True when this category's contents deserve the narrower audience. */
