@@ -1549,6 +1549,30 @@ export const api = {
   revokeAdminInvitation: async (id) =>
     apiFetch(`/api/admin/invitations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  /**
+   * Redeem an administrator invitation.
+   *
+   * ── This had no caller at all until the acceptance screen existed ──
+   *
+   * `POST /api/auth/accept-invitation` has been finished, tested and audited
+   * since the invitation feature landed: hashed tokens, a seven-day expiry, one
+   * transaction for the promotion and its audit row, and every failure mode
+   * collapsed to a single answer so the endpoint cannot be used to probe for a
+   * live invitation. Nothing in the client ever called it, and the email sends
+   * people to `/accept-invitation`, which was not a declared route — so the
+   * whole flow ended on "Page not found" and the only way to become an
+   * administrator was a hand-written request.
+   *
+   * The token is sent in the BODY, not the URL, which is the shape the endpoint
+   * already expects. That matters beyond convention: a bearer value in a query
+   * string is written to access logs and to `Referer` on any outbound link from
+   * the page that carried it.
+   */
+  acceptAdminInvitation: async (token) => apiFetch('/api/auth/accept-invitation', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  }),
+
   listMyAppeals: async () => apiFetch('/api/appeals/mine'),
 
   /* `organizationId` is only meaningful for an `organization_ban` appeal; the

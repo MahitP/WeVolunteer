@@ -72,6 +72,7 @@ const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'))
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
 const WellyView = React.lazy(() => import('../views/WellyView'));
+const AcceptInvitation = React.lazy(() => import('../views/AcceptInvitation'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -576,6 +577,37 @@ export const PUBLIC_ROUTES = [
    * enforcement while enforcing nothing.
    */
   { path: '/organizations/:key', element: <OrganizationPublic />, shellWhenSignedIn: true },
+  /**
+   * Redeeming an administrator invitation.
+   *
+   * ── This path was live in production email and declared nowhere ──
+   *
+   * `sendAdminInvitationEmail` in server/email.js has always linked to
+   * `${APP_URL}/accept-invitation?token=…`. The path appeared in none of the
+   * three tables, so it fell through to the unknown-URL takeover and answered
+   * "Page not found" — for every administrator invitation this platform has
+   * ever sent. The invite-creation UI, the hashed single-use token, the
+   * seven-day expiry and the promote-and-audit transaction were all finished
+   * and tested; only the screen between them was missing, and nothing could see
+   * that: `internalLinks.test.js` scans `src/` for `href=`/`to=` attributes,
+   * and this link is a template literal assembled on the server.
+   *
+   * PUBLIC rather than an APP route, for the reason `/appeal/:token` is: an
+   * invitation is sent to an ADDRESS, so the session state of the browser that
+   * opens it is unknown, and a signed-out reader has to get a page that
+   * explains what to do rather than the signed-out catch-all's 404. Gating it
+   * on a capability would also be a lock on the key — the same argument
+   * `/organizer-agreement` records in APP_ROUTES above, and sharper here,
+   * because accepting is the act that GRANTS the administrative capabilities.
+   *
+   * The token stays in the QUERY rather than becoming a path segment, because
+   * that is the URL the email already sends and those links are in mailboxes
+   * now. The view reads it with `useSearchParams` and POSTs it in a request
+   * body; nothing interpolates it into a path. `clientRoutes.js` allows the
+   * literal `/accept-invitation`, and the query string is dropped before the
+   * pattern is matched — so an error report from this page can carry no token.
+   */
+  { path: '/accept-invitation', element: <AcceptInvitation /> },
 ];
 
 /**

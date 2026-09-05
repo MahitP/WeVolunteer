@@ -51,6 +51,21 @@ const IS_ACTUALLY_THE_DASHBOARD = new Set(['/']);
 const OUTSIDE_THE_SHELL = new Set([
   '/login', '/signup', '/welcome', '/about', '/privacy',
   '/appeal', '/reset-password', '/oauth/callback', '/verify',
+  /**
+   * The administrator-invitation acceptance screen.
+   *
+   * Exempt for the reason `/verify` and `/appeal` are, and NOT for the reason
+   * `/legal` wrongly was: it carries no `shellWhenSignedIn`, so `isPublicPath`
+   * answers true in BOTH session states and App.jsx serves it standalone
+   * before the session branches. It therefore never reaches `PAGE_META` and has
+   * no shell title to get wrong — it sets its own tab title with
+   * `useDocumentTitle` and owns its own `h1`.
+   *
+   * The distinction the `/legal` note above draws is the one to check before
+   * adding anything else here: a route that DOES reach `PAGE_META` and is
+   * described wrongly is the defect this file exists to catch, not an exemption.
+   */
+  '/accept-invitation',
 ]);
 
 /**

@@ -1125,13 +1125,33 @@ export function getInAppContent(event, payload) {
         body: payload.body || 'Something about your account needs your attention.',
         link: payload.link || '/settings'
       };
+    /**
+     * ── The link was `/admin`, which is not a route ──
+     *
+     * There is no `/admin` page. The administrative destinations are
+     * `/admin/moderation` (the hub), `/admin/appeals`, `/admin/roster`,
+     * `/admin/audit-logs`, `/admin/legal` and `/admin/impact`; the bare prefix
+     * has never been declared in any of the three route tables. So the very
+     * first thing a newly promoted administrator pressed — the notification
+     * telling them they now hold the role — answered "Page not found".
+     *
+     * `/admin/moderation` is the hub that indexes every administrative area, so
+     * it is the right landing place for "you now have access to these": it is
+     * the one destination that explains what the new role can reach rather than
+     * dropping them into one arbitrary corner of it.
+     *
+     * Nothing caught this because `internalLinks.test.js` scanned `src/` for
+     * `href=`/`to=` attributes only. `serverLinks.test.js` now covers the
+     * `link:` field on every notification in this file, which is what makes the
+     * fix hold.
+     */
     case 'ADMIN_PROMOTED':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'You are now a platform administrator',
         body: payload.reason ? `Reason: ${payload.reason}` : 'Your account has been granted administrative access.',
-        link: '/admin'
+        link: '/admin/moderation'
       };
     case 'ADMIN_REVOKED':
       return {

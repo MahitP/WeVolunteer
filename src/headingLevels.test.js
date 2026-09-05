@@ -69,6 +69,10 @@ const STANDALONE = new Set([
   'views/ResetPassword.jsx',
   'views/OAuthCallback.jsx',
   'views/Appeal.jsx',
+  /* The administrator-invitation acceptance screen. In PUBLIC_ROUTES, which
+     App.jsx serves before the session branches, so there is no shell heading
+     above it to duplicate. */
+  'views/AcceptInvitation.jsx',
   'components/account/SuspendedWall.jsx',
   'components/account/VerifyEmailWall.jsx',
   'components/auth/TwoFactorRequiredWall.jsx',

@@ -142,6 +142,14 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/about',
   '/appeal/:token',
   '/appeals/new',
+  /* Redeeming an administrator invitation. A LITERAL path with no parameter, so
+     it can carry nothing about anybody — and the token the email puts in the
+     query string is dropped before matching, exactly as `/reset-password`'s is.
+     Allowed rather than excluded because a crash HERE is one that strands
+     somebody halfway through being granted administrative access, which is a
+     failure nobody would otherwise hear about: the reader is not yet an
+     administrator and has nowhere to report it. */
+  '/accept-invitation',
 
   /* ── v1.3, the member directory ──────────────────────────────────────────
    *

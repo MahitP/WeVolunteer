@@ -37,7 +37,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -137,6 +137,48 @@ export const AREAS = [
     icon: TrendingUp,
     title: 'Platform Impact',
     blurb: 'Programme-wide figures: hours, volunteers, events and how participation has moved over time.',
+  },
+  /**
+   * The Legal Center editor — the one administrative area that was missing.
+   *
+   * ── Why it was absent, and why absence was the wrong answer ──
+   *
+   * `/admin/legal` predates this hub. When the six administrative pages came
+   * off the navigation rail they were all moved HERE, and
+   * `App.navGroups.test.jsx` asserts that each of the six is still offered —
+   * but it reads a list of the pages that MOVED, and this page never moved
+   * because it was never on the rail. So the guard that exists to prove nothing
+   * became unreachable could not see the one page nothing led to.
+   *
+   * The route's own comment says the `/admin/` prefix "puts it where the other
+   * owner-only pages already are". That was true of the path and false of the
+   * product: the only way in was Settings → Help → "Edit Legal Center", so an
+   * owner asking "where do I administer this platform" found seven areas on
+   * this page and the eighth filed under Help, beside About Us. This page's own
+   * heading claims to list "the administrative areas this account can open",
+   * and that claim was not true while this tile was missing.
+   *
+   * The Settings entry STAYS. It is not a duplicate to be consolidated away:
+   * Settings is where somebody goes to change how the product behaves for
+   * them, and the Legal Center is genuinely reachable from there as the
+   * owner's version of "the documents that govern this". Two doors into one
+   * room is normal; no door from the room that indexes every other room is
+   * not.
+   *
+   * `legal.edit` is SUPER_ONLY, so this tile is invisible to every
+   * administrator and cannot be reached by a capability grant —
+   * `userCapabilities.js` refuses to store one naming it. Hiding the tile is
+   * UX; `server/routes/legalAdminRoutes.js` is the boundary, and publishing
+   * additionally re-proves identity through `legal.publish`.
+   */
+  {
+    id: 'legal',
+    to: '/admin/legal',
+    cap: 'legal.edit',
+    icon: FileSignature,
+    title: 'Legal Center',
+    blurb: 'The documents everyone on this platform is held to. Editing is owner-only, and '
+      + 'publishing a new version asks you to prove it is you.',
   },
 ];
 
