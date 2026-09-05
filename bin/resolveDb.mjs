@@ -218,6 +218,36 @@ export async function openPrivilegedDb(command) {
       process.exit(1);
     }
 
+    /**
+     * The production-database guard, applied to the privileged path too.
+     *
+     * `server/db/engine.js` calls this before it builds a pool, and this module
+     * deliberately does NOT import engine.js — see the note at the top: that
+     * module throws on an unrunnable engine at import time, which is a rule
+     * about serving traffic and must not stop an operator repairing a database.
+     *
+     * The consequence was that the guard covered the server and skipped the six
+     * scripts that can grant ownership, promote an administrator, suspend an
+     * account and clear a second factor. That is the wrong way round: these run
+     * with the most privilege and the least supervision, and the incident this
+     * file records twice over is a privileged script writing to a database
+     * nobody meant.
+     *
+     * Safe to import here because `productionDatabaseGuard.js` imports nothing
+     * but `node:crypto` — no `db`, no config, nothing that can throw on load.
+     * `assertNotProductionDatabase` is inert until
+     * `WEV_PRODUCTION_DB_FINGERPRINT` is set, so this changes nothing for a
+     * deployment that has not opted in.
+     */
+    const { assertNotProductionDatabase } = await import('../server/db/productionDatabaseGuard.js');
+    try {
+      const guard = assertNotProductionDatabase(process.env, connectionString);
+      if (guard.warning) console.warn(guard.warning);
+    } catch (err) {
+      console.error(err.message);
+      process.exit(1);
+    }
+
     const { PostgresDatabase } = await import('../server/db/postgresConnection.js');
     const { translatePlaceholders } = await import('../server/db/sqlPlaceholders.js');
 

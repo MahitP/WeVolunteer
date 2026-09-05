@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, symlinkSync, cpSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import { createHash } from 'crypto';
 
 /** Same reasoning as `tooling.dbPath.test.js`: these spawn real `node` processes. */
 vi.setConfig({ testTimeout: 20000 });
@@ -386,6 +387,77 @@ describe('privileged CLI database resolution', () => {
       const dir = repoWithPostgresDotEnv();
       try {
         expect(runIn(dir, {})).toContain(SENTINEL);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    /**
+     * ── And the production-database guard covers this path too ──
+     *
+     * The test directly above is the reason this one has to exist. `.env` IS how
+     * some deployments are configured, and the emergency tooling must keep
+     * working for them — `bin/reset-2fa.mjs` is the only way to clear a locked
+     * out administrator's second factor, so a rule that refused a `.env`
+     * connection string outright would make a lost authenticator unrecoverable.
+     * Precedence therefore cannot be the mechanism.
+     *
+     * `assertNotProductionDatabase` is. It asks a different question — not
+     * "where did this value come from" but "is this deployment allowed to touch
+     * THAT database" — and it answers from a fingerprint of `host:port/database`
+     * that carries no credentials and is safe to commit. So an operator on the
+     * production host proceeds, and `vitest` (NODE_ENV=test, hence
+     * `deploymentEnvironment() === 'development'`) is refused.
+     *
+     * This is asserted against the CLI rather than only against
+     * `postgresConfig`, because `bin/resolveDb.mjs` deliberately does not import
+     * `server/db/engine.js` and therefore did not inherit the guard the server
+     * got. These six scripts hold the most privilege in the repository.
+     */
+    it('refuses the production database from a non-production process', () => {
+      const dir = repoWithPostgresDotEnv();
+      try {
+        /* The fingerprint of the sentinel `.env` names, computed the way the
+           guard computes it rather than pasted, so the two cannot drift. */
+        const fingerprint = createHash('sha256')
+          .update(`${SENTINEL.toLowerCase()}:5432/postgres`)
+          .digest('hex').slice(0, 32);
+
+        const out = runIn(dir, { WEV_PRODUCTION_DB_FINGERPRINT: fingerprint });
+
+        expect(out, 'the guard did not fire').toMatch(/PRODUCTION database/);
+        /* The point of the whole exercise: no connection was attempted. The
+           guard runs before PostgresDatabase is constructed, so the host is
+           never dialled — and the message must not print the URL either. */
+        expect(out).not.toContain('postgres://');
+        expect(out).not.toContain('Database: ');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    /**
+     * The guard must not become a reason the tooling stops working in an
+     * emergency. A process that says it IS production proceeds, and gets as far
+     * as trying to reach the host — which is a connection failure here, because
+     * the sentinel does not resolve, and that is the correct outcome.
+     */
+    it('still lets a production process through to its own database', () => {
+      const dir = repoWithPostgresDotEnv();
+      try {
+        const fingerprint = createHash('sha256')
+          .update(`${SENTINEL.toLowerCase()}:5432/postgres`)
+          .digest('hex').slice(0, 32);
+
+        const out = runIn(dir, {
+          WEV_PRODUCTION_DB_FINGERPRINT: fingerprint,
+          NODE_ENV: 'production',
+        });
+
+        expect(out, 'the guard refused a production process').not.toMatch(/PRODUCTION database/);
+        /* It reached the connection attempt: the host is announced, then the
+           lookup fails because the sentinel is unresolvable. */
+        expect(out).toContain(SENTINEL);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
