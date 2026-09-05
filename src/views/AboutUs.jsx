@@ -4,6 +4,7 @@ import { Compass, ClipboardList, Users, HeartHandshake, Crown } from 'lucide-rea
 import { APP_NAME, SUPPORT_EMAIL, DOCUMENT_SIGNATORY_TITLE } from '../config';
 import { api } from '../utils/api';
 import { avatarColorValue } from '../utils/avatarColors';
+import useDocumentTitle from '../hooks/useDocumentTitle';
 
 /**
  * About Us — what WeVolunteer is for.
@@ -144,6 +145,13 @@ const COMMITMENTS = [
 ];
 
 export default function AboutUs() {
+  /* `/about` is public and renders standalone, but App.jsx's title effect runs
+     above its early returns and `tabForPath` has no `/about` branch, so this
+     page's tab said "Dashboard · WeVolunteer" for a signed-in reader. Measured
+     live: h1 "About WeVolunteer", tab "Dashboard". Same defect as `/verify`;
+     see the note in CertificateVerification.jsx. */
+  useDocumentTitle('About');
+
   return (
     /* `main`, not a bare div, and `aria-labelledby` pointing at the h1 —
        the same shape LegalCenter uses. `/about` is a PUBLIC route, so it renders

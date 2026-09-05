@@ -21,6 +21,7 @@
  * already uses — the other signed-out, token-addressed page in this product.
  */
 import React, { useState, useEffect, useRef } from 'react';
+import useDocumentTitle from '../hooks/useDocumentTitle';
 import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, ShieldOff, CheckCircle2 } from 'lucide-react';
 import { api } from '../utils/api';
@@ -52,6 +53,17 @@ export default function Appeal() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+
+  /* Above the early returns below, and for the reason recorded in
+     CertificateVerification.jsx: `/appeal/:token` renders standalone, App.jsx
+     titles it from `tabForPath` anyway, and there is no `/appeal` branch — so
+     somebody contesting a decision taken about them was in a tab that said
+     "Dashboard · WeVolunteer". Measured live on an expired token. */
+  useDocumentTitle(
+    error ? 'Appeal link no longer works'
+      : submitted ? 'Your appeal'
+        : 'Appeal a decision',
+  );
 
   // Focus moves to the heading whenever the page changes meaning. Without it a
   // screen-reader user hears nothing at the exact moments this page swaps its

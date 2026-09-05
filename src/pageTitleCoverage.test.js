@@ -185,3 +185,95 @@ describe('the table is actually applied', () => {
     expect(APP_SRC).toMatch(/\$\{documentTitle\} · \$\{APP_NAME\}/);
   });
 });
+
+/**
+ * The gap every case above left open: a PUBLIC route, opened by somebody who is
+ * SIGNED IN.
+ *
+ * The suite's `OUTSIDE_THE_SHELL` exemption rests on "no topbar, no rail, so no
+ * title to get wrong". That is true of the topbar heading. It is NOT true of the
+ * browser tab, and the difference is worth stating precisely, because it is the
+ * reason three of these shipped at once:
+ *
+ * `App.jsx` sets `document.title` from `tabForPath` in an effect placed
+ * deliberately ABOVE its early returns — including the public-route return —
+ * so that the hook order cannot vary between renders. The effect therefore runs
+ * for a standalone public page too, and `tabForPath` ends `return 'dashboard'`.
+ * A signed-out reader is unaffected (`pageMetaFor` with no account yields the
+ * bare product name), which is exactly why this stayed invisible: every one of
+ * these pages is correct in the session most people test them in.
+ *
+ * Measured live on 2026-09-06, signed in, against the merged tree:
+ *
+ * | path                     | `<h1>`                          | browser tab               |
+ * |--------------------------|---------------------------------|---------------------------|
+ * | `/verify/WEV-UENF-2DM9`  | Verified Certificate            | Dashboard · WeVolunteer   |
+ * | `/about`                 | About WeVolunteer               | Dashboard · WeVolunteer   |
+ * | `/appeal/:token`         | This link does not work any more| Dashboard · WeVolunteer   |
+ *
+ * `/verify` is the worst of the three by some distance. It is the page students
+ * are told to hand to an admissions office, so it is the tab most likely to be
+ * open in a stranger's browser next to several others — and a WCAG 2.4.2 (Page
+ * Titled, Level A) failure on the one page whose whole job is to be trusted by
+ * an outsider. `/appeal` is the second worst for a different reason: somebody
+ * contesting a decision made about them was told they were on a dashboard.
+ *
+ * Two ways to be correct, and this accepts either, because which one is right
+ * depends on whether the title is a property of the ROUTE or of the ANSWER:
+ *
+ *   1. a `tabForPath` branch, when the path alone names the page; or
+ *   2. `useDocumentTitle` inside the view, when it does not — `/verify` is a
+ *      search box, a verdict, or a rate-limit notice at the same URL.
+ *
+ * Asserted from source rather than by rendering for the reason the block above
+ * gives: the question is whether the assignment exists at all.
+ */
+describe('public routes name their own tab for a signed-in reader', () => {
+  const PUBLIC_BLOCK = ROUTES_SRC.slice(
+    ROUTES_SRC.indexOf('export const PUBLIC_ROUTES = ['),
+    ROUTES_SRC.indexOf('export function isPublicPath'),
+  );
+
+  /* `shellWhenSignedIn` routes get the shell, the topbar and a `tabForPath`
+     branch checked by the cases above; they are a different shape and are not
+     what this describes. A `<Navigate>` element renders for one frame on its way
+     somewhere else and has no page to title, which is the `/directory`
+     precedent `tabForPath` already records. */
+  const STANDALONE = [...PUBLIC_BLOCK.matchAll(
+    /\{\s*path:\s*'([^']+)'\s*,\s*element:\s*<(\w+)[^>]*\/>\s*(,\s*shellWhenSignedIn:\s*true)?\s*\}/g,
+  )]
+    .map(([, path, component, shell]) => ({ path, component, shell: Boolean(shell) }))
+    .filter(r => !r.shell && r.component !== 'Navigate');
+
+  it('finds the public routes, so this cannot pass by finding none', () => {
+    /* The vacuity guard, for the same reason the suite already has one: these
+       are regexes over source, and a formatting change would silently empty
+       them while every `it.each` below reported success. */
+    expect(STANDALONE.length).toBeGreaterThan(3);
+    expect(STANDALONE.map(r => r.path)).toContain('/verify/:code');
+    expect(STANDALONE.map(r => r.path)).toContain('/about');
+  });
+
+  it.each(STANDALONE)('$path ($component) is not titled "Dashboard"', (route) => {
+    /* `route.path`, not a destructured `path` — this file imports node's `path`
+       module, and destructuring here shadows it exactly where the view's source
+       file has to be resolved. */
+    const probe = route.path.replace(/\/:[^/]+/g, '') || '/';
+    if (tabForPath(probe) !== 'dashboard') return;
+
+    /* No route-level branch, so the view must name its own tab. */
+    const source = fs.readFileSync(
+      path.join(process.cwd(), 'src/views', `${route.component}.jsx`),
+      'utf8',
+    );
+
+    expect(
+      /useDocumentTitle\s*\(/.test(source),
+      `${route.path} has no branch in tabForPath, so App.jsx titles it "Dashboard `
+      + `· WeVolunteer" for a signed-in reader, and ${route.component}.jsx does not `
+      + 'call useDocumentTitle to correct it. Give it a tabForPath branch if the '
+      + 'path names the page, or call useDocumentTitle if the title depends on '
+      + 'what the page found.',
+    ).toBe(true);
+  });
+});

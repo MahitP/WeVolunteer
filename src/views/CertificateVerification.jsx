@@ -5,6 +5,7 @@ import { ShieldCheck, ShieldAlert, Loader2, Calendar, Search } from 'lucide-reac
 import { formatDay, formatHours } from '../utils/helpers';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import BrandMark from '../components/common/BrandMark';
+import useDocumentTitle from '../hooks/useDocumentTitle';
 
 /**
  * Shape of a certificate code, for rejecting obvious nonsense without a round
@@ -94,6 +95,41 @@ export default function CertificateVerification() {
   const [status, setStatus] = useState(code ? 'loading' : 'entry');
   const [certData, setCertData] = useState(null);
   const [attempt, setAttempt] = useState(0);
+
+  /**
+   * This page names its own browser tab.
+   *
+   * `/verify` and `/verify/:code` are public and carry no `shellWhenSignedIn`,
+   * so they render standalone — but `App.jsx`'s title effect sits ABOVE its
+   * early returns and runs anyway, and `tabForPath` has no `/verify` branch, so
+   * it fell through to `return 'dashboard'`. Every certificate a college opened
+   * was in a tab that said "Dashboard · WeVolunteer". Measured live on
+   * `/verify/WEV-UENF-2DM9`, which rendered a correct verified certificate under
+   * the dashboard's name.
+   *
+   * That is the fifth instance of the defect `tabForPath` records four times,
+   * and the worst-placed one: this is the page the platform tells students to
+   * hand to an admissions office, so it is the tab most likely to be sitting in
+   * a stranger's background while they compare it against something else, and a
+   * WCAG 2.4.2 (Page Titled, Level A) failure on the one page whose entire job
+   * is to be trusted by an outsider.
+   *
+   * Fixed HERE rather than with a `tabForPath` branch because the title depends
+   * on the ANSWER, not the route: the same path is a search box, a verdict, or
+   * neither. That is the distinction `useDocumentTitle` exists for, and the
+   * Legal Center's documents are the precedent.
+   *
+   * `ratelimited` and `error` deliberately fall back to the neutral name. The
+   * body of this page is careful never to present "we could not check" as a
+   * verdict on the certificate, and a tab reading "Certificate not verified"
+   * would undo that in the one place the reader glances at without reading.
+   */
+  useDocumentTitle(
+    status === 'valid' ? 'Verified certificate'
+      : status === 'invalid' ? 'Certificate not verified'
+        : status === 'loading' ? 'Checking a certificate'
+          : 'Check a certificate',
+  );
 
   useEffect(() => {
     let cancelled = false;
