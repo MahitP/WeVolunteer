@@ -2,7 +2,7 @@
 
 **Researched and implemented 2026-09-05.** Everything marked *Verified* was executed in this repository. Everything marked *Human action* requires an account, DNS, or a provisioned host and has **not** been done.
 
-This document describes what exists in the repository today. It is not a proposal.
+This document describes the **merged release candidate** — `claude/release-candidate`, built from `main` with both feature branches merged in. It is not a proposal, and it is not a description of either branch alone.
 
 ---
 
@@ -182,7 +182,7 @@ Against a real 65-table schema with seeded data, not a fixture:
 | Backup with an incompatible client | exit 1, no partial file left behind |
 | Encrypt → decrypt round-trip | byte-identical, plaintext removed |
 | Upload to an S3-compatible endpoint | archive + manifest, correctly prefixed |
-| **Restore from the off-site copy after deleting all local backups** | **65 tables, 87 validated FKs, 166 indexes, counts matching the manifest exactly** |
+| **Restore from the off-site copy after deleting all local backups** | **69 tables, 96 validated FKs, 185 indexes, counts matching the manifest exactly** |
 
 And the guards were mutation-tested, because a check that cannot fail is not a check:
 
@@ -385,47 +385,67 @@ expensive — 17 and 30 in particular.
 
 ---
 
+## What the release candidate contains
+
+`claude/release-candidate` is `main` with both feature branches merged:
+
+| Source | Brings |
+|---|---|
+| `main` (15 commits newer than either branch) | the improved production-database fingerprint guard, roster-export authorization fix, bundle mailbox-key fix, badge administration, message search |
+| `claude/wevolunteer-production-architecture-89e97f` | PostgreSQL backup + restore, R2 off-site upload, schema-source guard, CSRF guard, `/live` + `/ready`, `WEV_UPLOADS_DIR`, Nginx config, bundle secret scanner |
+| `claude/owner-center-certificate-upgrade-7eef59` | Owner Center, CertificateView / CertificateDocument / CertificateShareDialog, certificate double-`h1` fix, dark-mode contrast fix, focus-ring cascade fix, telemetry IP redaction |
+
+**Nothing was discarded.** Where `main` and the architecture branch both carried
+a production-database guard, `main`'s version was kept: it hashes the username
+alongside host and database, which the earlier version did not, and without it
+every Supabase project in a region fingerprints identically — they share a
+pooler hostname and the `postgres` database name.
+
+---
+
 ## Still open
 
-| Item | Status |
+Grouped by what each item actually needs, so nothing here reads as a code defect.
+
+### Requires Oracle infrastructure
+| Item | Why it cannot be done here |
 |---|---|
-| `nginx -t` validation | **Not run** — nginx unavailable here |
-| Live R2 upload | **Not run** — no credentials; proven against a local S3-compatible endpoint and AWS's published SigV4 vector |
-| Reboot / systemd persistence | **Not run** — no VM |
-| Browser workflows against production | **Not run** — nothing deployed |
-| Restore drill against real production data | **Not run** — no production database |
-| Resend 100/day behaviour at the cap | **Not tested** — queue vs. drop unverified |
-| Owner Center + certificates | **Done on another branch, NOT merged** — see below |
+| `nginx -t` validation | nginx is not installed in this environment |
+| Reboot / systemd persistence | no VM exists |
+| Idle-reclamation behaviour over a 7-day window | needs a running instance |
 
-### Owner Center, certificates and the dark-mode a11y work
+### Requires Supabase
+| Item | Why |
+|---|---|
+| Restore drill against real production data | no production database exists |
+| First-boot schema creation on the real project | the guard is proven locally against three databases; the real one has not been created |
 
-That work is complete on `claude/owner-center-certificate-upgrade-7eef59`: 8
-commits, clean tree, **8 commits ahead of `main` and not merged**. It covers
-`OwnerCenter.jsx` (+ 668 lines of tests), `CertificateView` /
-`CertificateDocument` / `CertificateShareDialog`, the certificate double-`h1`,
-the dark-mode primary-button contrast failure, the `box-shadow` focus-ring
-cascade bug, and a telemetry IP-redaction gap.
+### Requires Cloudflare / R2
+| Item | Why |
+|---|---|
+| Live R2 upload | no credentials. Proven against a local S3-compatible endpoint and AWS's published SigV4 derivation vector |
+| Full (strict) TLS and real-IP restoration | needs the zone and the origin certificate |
 
-It was reviewed here and deliberately **not** duplicated. It touches 69 files
-including `src/index.css` (+639 lines), which this branch avoided entirely to
-keep the two mergeable.
+### Requires Resend
+| Item | Why |
+|---|---|
+| Behaviour at the 100/day cap | untested — whether it queues or drops is unverified, and it lands on password resets |
+| Deliverability of a new sending subdomain | needs DNS |
 
-**Both branches must be merged before launch.** Neither is in `main`. Merging
-only this one ships a deployment without the Owner Center and with the dark-mode
-contrast failures still present.
+### Repository verified — no further work
+Backup and restore including every failure path, the schema-source guard, the
+production-database guard, CSRF including the sibling-subdomain case, `/live`
+and `/ready`, `WEV_UPLOADS_DIR` against a real read-only directory, the bundle
+secret scanner with six planted controls, Owner Center authorization, and the
+full test matrix below.
 
-### One a11y finding this branch did not fix
+### One a11y note
+`LocationDisplay.jsx` — a keyboard-inaccessible `<div onClick>` — was confirmed
+still unreferenced after the merge and has been **removed** along with its barrel
+export. Its stylesheet stays; five other components import it.
 
-`src/components/location/LocationDisplay.jsx` is a `<div onClick>` that opens
-directions with no keyboard path — a WCAG 2.1.1 failure. It is **dead code**:
-exported from the barrel, rendered nowhere, and `DirectionsButton` exists
-alongside it. Left in place rather than deleted, because deleting a component
-another branch may adopt is not this branch's call. It should be removed or
-given a real `<button>` before anything starts using it.
-
-The other candidates were checked and are **not** defects: modal overlays
-(`Modal.jsx`, `EventModal`, `WellyView`) are click-outside conveniences with
-Escape handled by `useModal`; `LocationThumbnail` duplicates an action that
-`EventCard` already exposes through a real `<button>`; and `DatePicker` is
-already a full `role="grid"` implementation with a focus trap and roving
-tabindex — that hit was prose inside a comment.
+The candidates checked and found **not** to be defects, recorded so the next
+audit does not re-litigate them: modal overlays have Escape via `useModal`;
+`LocationThumbnail` duplicates an action `EventCard` already exposes through a
+real `<button>`; and `DatePicker` is a full `role="grid"` with a focus trap and
+roving tabindex.
