@@ -226,3 +226,91 @@ describe('postgresConfig integration', () => {
     expect(postgresConfig({ ...base, VERCEL_ENV: 'production' }).connectionString).toBe(PROD);
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * The environment × database matrix, as one table
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The cases above test the mechanism. This tests the POLICY — every combination
+ * of "what does this process think it is" against "which database is it holding",
+ * in one place, so the answer to "what happens if staging points at production"
+ * is a row rather than an inference from three separate tests.
+ *
+ * Written as a table because the interesting property is the shape of the whole
+ * grid: exactly one quadrant is fatal, exactly one is a warning, and the rest
+ * are silence. A change that made a second quadrant fatal, or the fatal one
+ * quiet, would be invisible in any single case.
+ */
+describe('the environment x database matrix', () => {
+  const PRODUCTION_DB = 'postgres://postgres.abc:pw@aws-0-us-east-2.pooler.supabase.com:5432/postgres';
+  const OTHER_DB = 'postgres://postgres:pw@localhost:5432/wv_dev';
+  const FINGERPRINT = databaseFingerprint(PRODUCTION_DB);
+
+  /** `fatal` throws, `warns` returns a warning, `quiet` does neither. */
+  const CASES = [
+    ['development', OTHER_DB, 'quiet', 'the everyday development loop'],
+    ['development', PRODUCTION_DB, 'fatal', 'a laptop holding real students records'],
+    ['test', OTHER_DB, 'quiet', 'the test suite against its own database'],
+    ['test', PRODUCTION_DB, 'fatal', 'a test run that would seed and truncate production'],
+    ['staging', OTHER_DB, 'quiet', 'staging against its own database'],
+    ['staging', PRODUCTION_DB, 'fatal', 'staging pointed at production'],
+    ['production', PRODUCTION_DB, 'quiet', 'the deployment as intended'],
+    ['production', OTHER_DB, 'warns', 'production pointed elsewhere — a failed cutover, or a stale fingerprint'],
+  ];
+
+  it.each(CASES)('NODE_ENV=%s against %#: %s', (nodeEnv, url, expected) => {
+    const env = { NODE_ENV: nodeEnv, WEV_PRODUCTION_DB_FINGERPRINT: FINGERPRINT };
+    if (expected === 'fatal') {
+      expect(() => assertNotProductionDatabase(env, url)).toThrow(/PRODUCTION database/);
+      return;
+    }
+    const result = assertNotProductionDatabase(env, url);
+    if (expected === 'warns') {
+      expect(result.warning, 'production on the wrong database must not be silent').toBeTruthy();
+    } else {
+      expect(result.warning, 'this combination must not warn').toBeFalsy();
+    }
+  });
+
+  /**
+   * `NODE_ENV=test` deserves its own line because it is the one that would do
+   * the most damage fastest: the suites truncate tables between files.
+   */
+  it('names the environment it refused, so the message is not generic', () => {
+    let message = '';
+    try {
+      assertNotProductionDatabase(
+        { NODE_ENV: 'test', WEV_PRODUCTION_DB_FINGERPRINT: FINGERPRINT }, PRODUCTION_DB,
+      );
+    } catch (err) { message = err.message; }
+    expect(message).toMatch(/this is a development deployment/);
+    expect(message, 'the fingerprint is not a secret and is what the operator must compare')
+      .toContain(FINGERPRINT);
+  });
+
+  it('never puts the password in the refusal', () => {
+    let message = '';
+    try {
+      assertNotProductionDatabase(
+        { NODE_ENV: 'development', WEV_PRODUCTION_DB_FINGERPRINT: FINGERPRINT },
+        'postgres://postgres.abc:sup3r-s3cret-value@aws-0-us-east-2.pooler.supabase.com:5432/postgres',
+      );
+    } catch (err) { message = err.message; }
+    expect(message).toBeTruthy();
+    expect(message).not.toContain('sup3r-s3cret-value');
+  });
+
+  /**
+   * Fail-OPEN when unconfigured, and that is deliberate rather than an
+   * oversight: a deployment that has never set the fingerprint has told the
+   * guard nothing about which database is production, and inventing an answer
+   * would refuse every boot on every developer machine in the repository.
+   * The mechanism is opt-in; what it must never do is claim to have checked.
+   */
+  it('reports that it did not check, rather than passing silently, when unconfigured', () => {
+    const result = assertNotProductionDatabase({ NODE_ENV: 'development' }, PRODUCTION_DB);
+    expect(result.checked).toBe(false);
+    expect(result.reason).toMatch(/no fingerprint configured/);
+  });
+});

@@ -164,13 +164,31 @@ export default {
         CREATE INDEX IF NOT EXISTS idx_events_first_slot_start
           ON events(status, first_slot_start, id)
       `).run();
-      /* The order-leading twin — see the SQLite half for the query plans.
-         `INCLUDE` on PostgreSQL, so `status` is stored for the filter without
-         entering the b-tree key. SQLite has no INCLUDE and takes it as a
-         trailing key column, which is equivalent for this access pattern. */
+      /**
+       * The order-leading twin — see the SQLite half for the query plans.
+       *
+       * ── Why `status` is a trailing KEY column and not an `INCLUDE` ──
+       *
+       * This was `(first_slot_start, id) INCLUDE (status)`, which is the
+       * marginally better PostgreSQL spelling: `status` is only ever a filter
+       * here, so storing it as a payload keeps it out of the b-tree key while
+       * still allowing an index-only scan.
+       *
+       * It made the two provisioning paths disagree. A FRESH database gets its
+       * indexes from the generated DDL, which is translated from SQLite — and
+       * SQLite has no `INCLUDE`, so it writes the three-key form. An UPGRADED
+       * database ran this migration and got the `INCLUDE` form. Same name, two
+       * different indexes, decided by how the database happened to be created.
+       *
+       * `migrations.convergence.test.js` compares the two paths by index
+       * DEFINITION and fails on exactly this. Converging on the three-key form
+       * costs a slightly wider b-tree and nothing else: for this query
+       * `status` is a filter either way and the scan stays index-only either
+       * way. One schema is worth more than one index page.
+       */
       await db.prepare(`
         CREATE INDEX IF NOT EXISTS idx_events_browse_order
-          ON events(first_slot_start, id) INCLUDE (status)
+          ON events(first_slot_start, id, status)
       `).run();
       await db.prepare(`
         UPDATE events
