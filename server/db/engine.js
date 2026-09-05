@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { assertNotProductionDatabase } from './productionDatabaseGuard.js';
 
 /**
  * Which database engine this process uses.
@@ -182,6 +183,18 @@ export function postgresConfig(env = process.env) {
    * managed provider meters direct connections besides. If a pooler sits in
    * front, the client-side pool competes with it rather than adding throughput.
    */
+  /**
+   * Refuse a preview or development process pointed at the production database.
+   *
+   * Here rather than in `config.js` because this is the one place the
+   * application resolves a PostgreSQL connection string — a check anywhere else
+   * would be a second place that has to be kept in step with this one. It runs
+   * before the pool is sized or TLS is resolved, so a caught mistake costs no
+   * connection attempt. See productionDatabaseGuard.js.
+   */
+  const guard = assertNotProductionDatabase(env, connectionString);
+  if (guard.warning) console.warn(guard.warning);
+
   const max = Number(env.DATABASE_POOL_MAX ?? 10);
   if (!Number.isInteger(max) || max < 1 || max > 100) {
     throw new Error(`FATAL: DATABASE_POOL_MAX="${env.DATABASE_POOL_MAX}" must be an integer between 1 and 100.`);
