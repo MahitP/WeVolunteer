@@ -19,7 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { denialDetail, FEATURE_NAMES } from './denialDetail';
 import { APP_ROUTES } from '../../routes/index.jsx';
-import { ALL_CAPABILITIES } from '../../authz';
+import { ALL_CAPABILITIES, SUPER_ONLY } from '../../authz';
 
 describe('denialDetail', () => {
   it('is null when there is no matched route to describe', () => {
@@ -130,5 +130,42 @@ describe('denialDetail', () => {
         + 'plain-language name in denialDetail.js.',
       ).toBeTruthy();
     }
+  });
+});
+
+/**
+ * A refusal must not send the reader to somebody who cannot help.
+ *
+ * SUPER_ONLY is checked before per-user grants are consulted, and
+ * `userCapabilities.js` refuses to STORE a grant naming one — so "a WeVolunteer
+ * administrator can grant it" is not merely unhelpful for these capabilities, it
+ * is false in a way that costs two people their time: the reader asks, the
+ * administrator tries, and the grant is rejected with nothing explaining why.
+ *
+ * The list this used to be checked against was hand-written and went stale the
+ * moment SUPER_ONLY grew. Measured live on 2026-09-06 against the merged tree:
+ * an administrator with 2FA satisfied, refused at `/owner`, was told an
+ * administrator could grant it. `owner.console` had been SUPER_ONLY since the
+ * Owner Center shipped.
+ */
+describe('capabilities no grant can reach', () => {
+  it('has some to check, so this cannot pass by finding none', () => {
+    expect(SUPER_ONLY.length).toBeGreaterThan(3);
+    expect(SUPER_ONLY).toContain('owner.console');
+  });
+
+  it.each(SUPER_ONLY)('%s does not promise a grant that would be refused', (cap) => {
+    const { remedy } = denialDetail({ requiredCap: cap });
+
+    expect(
+      remedy,
+      `${cap} is SUPER_ONLY, so no grant can reach it — but its refusal tells `
+      + 'the reader an administrator can grant it. Derive UNREACHABLE_BY_GRANT '
+      + 'from SUPER_ONLY rather than restating it.',
+    ).not.toMatch(/can grant it/);
+
+    /* And it must still say something, rather than going silent on the reader
+       who is owed the most explanation. */
+    expect(remedy).toBeTruthy();
   });
 });

@@ -33,6 +33,27 @@
  * comes before the retry advice in every serious body.
  */
 
+/**
+ * ── Why every 403 body is split into `body` and `offer` ──
+ *
+ * Each theme's 403 copy ended with the same promise in its own vocabulary: an
+ * administrator can pin you up / wave you through / change what your badge
+ * covers. That is true of most refusals and false of the ones that matter most.
+ *
+ * A SUPER_ONLY capability cannot be granted at all — `can()` refuses it before
+ * per-user grants are consulted, and `userCapabilities.js` will not store a
+ * grant naming one. `denialDetail` says so correctly underneath, which produced
+ * two adjacent sentences that contradicted each other. Measured live on
+ * 2026-09-06, refused at `/owner` as an administrator:
+ *
+ *   "…a WeVolunteer administrator can pin you up."
+ *   "This one is reserved for the platform owner and cannot be granted."
+ *
+ * Splitting the offer out of the prose lets the renderer drop it in exactly the
+ * case where it is untrue, without any theme having to know what a capability
+ * is. `body` remains a complete sentence on its own, so a theme that never
+ * carries an `offer` is not a broken theme.
+ */
 export const COPY = Object.freeze({
   /* ── The Bulletin Board ── physical, hallway-level, sheets and pins. */
   board: Object.freeze({
@@ -44,7 +65,8 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Wrong pin',
       title: 'That sheet is pinned up for someone else',
-      body: 'This part of the board is limited to certain accounts. If you should be on it, a WeVolunteer administrator can pin you up.',
+      body: 'This part of the board is limited to certain accounts.',
+      offer: 'If you should be on it, a WeVolunteer administrator can pin you up.',
     },
     500: {
       eyebrow: 'Our side',
@@ -78,7 +100,8 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Checkpoint',
       title: 'There’s a steward on this corridor',
-      body: 'This route is open to certain accounts only. A WeVolunteer administrator can wave you through if you should be past here.',
+      body: 'This route is open to certain accounts only.',
+      offer: 'A WeVolunteer administrator can wave you through if you should be past here.',
     },
     expired: {
       eyebrow: 'Signed out',
@@ -97,7 +120,8 @@ export const COPY = Object.freeze({
     403: {
       eyebrow: 'Badge check',
       title: 'Your badge doesn’t open this one',
-      body: 'This area is limited to certain accounts. If that looks wrong, a WeVolunteer administrator can change what your badge covers.',
+      body: 'This area is limited to certain accounts.',
+      offer: 'If that looks wrong, a WeVolunteer administrator can change what your badge covers.',
     },
     expired: {
       eyebrow: 'Checked out',

@@ -123,3 +123,44 @@ describe('copyFor', () => {
     }
   });
 });
+
+/**
+ * The offer of an administrator's help is separable from the situation.
+ *
+ * Every theme's 403 body used to end with that offer baked into the prose, so
+ * there was no way to withhold it for a capability no grant can reach — and
+ * `denialDetail` says so in the very next sentence. The two contradicted each
+ * other on screen; see the note above COPY.
+ *
+ * These cases pin the shape that makes the fix possible, because the natural
+ * thing for the next person writing a theme is to write one flowing sentence.
+ */
+describe('403 copy separates the situation from the offer of help', () => {
+  const themesWith403 = Object.entries(COPY).filter(([, kinds]) => kinds['403']);
+
+  it('has some to check, so this cannot pass by finding none', () => {
+    expect(themesWith403.length).toBeGreaterThan(0);
+  });
+
+  it.each(themesWith403)('%s keeps the offer in its own field', (themeId, kinds) => {
+    const { body, offer } = kinds['403'];
+
+    expect(
+      offer,
+      `${themeId}'s 403 has no \`offer\`. The sentence promising an administrator `
+      + 'can help must be its own field so it can be withheld for a SUPER_ONLY '
+      + 'capability, which no grant can reach.',
+    ).toBeTruthy();
+
+    /* The body has to stand alone, because that is all the reader gets when the
+       offer is withheld. */
+    expect(body.trim()).toMatch(/[.!?]$/);
+
+    expect(
+      body,
+      `${themeId}'s 403 body still promises administrator help. Move that `
+      + 'sentence into `offer`.',
+    ).not.toMatch(/administrator/i);
+  });
+});
+

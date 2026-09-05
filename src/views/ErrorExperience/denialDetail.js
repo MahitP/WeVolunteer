@@ -32,6 +32,8 @@
  * other direction — that every name declared in `src/` is a real capability.
  */
 
+import { SUPER_ONLY } from '../../authz';
+
 /**
  * Plain-language names for the capabilities that gate a route.
  *
@@ -102,11 +104,30 @@ export const FEATURE_NAMES = Object.freeze({
  * refusal, and cannot do anything about it. Sending somebody to a person who is
  * powerless is worse than saying nothing.
  *
- * `error.read` is SUPER_ONLY — `can()` refuses it before it consults per-user
- * grants — so no capability grant can reach it and saying an administrator could
- * help would be false.
+ * A SUPER_ONLY capability is unreachable by grant: `can()` refuses it before it
+ * consults per-user grants, and `userCapabilities.js` refuses to STORE a grant
+ * naming one. Telling that reader an administrator can help is false, and it is
+ * the expensive kind of false — they go and ask, and the administrator tries,
+ * and the grant is refused with nothing to explain why.
+ *
+ * ── Why this is derived rather than listed ──
+ *
+ * It was a hand-written `new Set(['error.read', 'error.write'])`, correct on the
+ * day it was written. SUPER_ONLY has since grown `owner.console`,
+ * `analytics.platform`, `impersonation.start`, `admin.create` and `audit.read`,
+ * and the Set did not, so every one of those refusals promised a grant that
+ * `userCapabilities.js` would have rejected. Measured live on 2026-09-06: an
+ * administrator with 2FA satisfied, refused at `/owner`, was told "A WeVolunteer
+ * administrator can grant it."
+ *
+ * That is the same defect as advertising a role nothing can hold, and the same
+ * remedy applies — derive the answer from the authorization table instead of
+ * restating it, so a capability added to SUPER_ONLY tomorrow is covered the day
+ * it is added rather than the day somebody remembers this file. `src/authz.js`
+ * already re-exports SUPER_ONLY from the server module for exactly this reason,
+ * so this adds no second copy and no new import of server code into the bundle.
  */
-const UNREACHABLE_BY_GRANT = new Set(['error.read', 'error.write']);
+const UNREACHABLE_BY_GRANT = new Set(SUPER_ONLY);
 
 /**
  * The factual half of a refusal, or null when there is nothing honest to add.
@@ -114,7 +135,10 @@ const UNREACHABLE_BY_GRANT = new Set(['error.read', 'error.write']);
  * @param {{ requiredCap?: string, requiresVerified?: boolean }} [route]
  *   The route `deniedRoute()` matched. Absent for a refusal that did not come from
  *   the route table — the router's own backstop, or a forced render in the gallery.
- * @returns {{ feature: string|null, reason: string, remedy: string|null }|null}
+ * @returns {{ feature: string|null, reason: string, remedy: string|null,
+ *   grantable: boolean }|null} `grantable` is false when no capability grant can
+ *   reach this route, which is what lets the themed copy above drop its offer of
+ *   an administrator's help rather than contradict the remedy below it.
  */
 export function denialDetail(route) {
   if (!route) return null;
@@ -136,6 +160,9 @@ export function denialDetail(route) {
       reason: 'Your organizer account has not been approved yet.',
       remedy: 'An administrator reviews new organizer requests, usually within a '
         + 'day. Nothing else is needed from you.',
+      /* An administrator genuinely does resolve this one — it is an approval
+         queue, not a capability grant — so the themed offer above stays. */
+      grantable: true,
     };
   }
 
@@ -143,6 +170,7 @@ export function denialDetail(route) {
 
   return {
     feature,
+    grantable: !UNREACHABLE_BY_GRANT.has(route.requiredCap),
     reason: feature
       ? `This account does not have permission for ${feature}.`
       : 'This account does not have permission for this area.',
