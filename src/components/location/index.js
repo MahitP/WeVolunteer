@@ -1,5 +1,4 @@
 export { default as LocationPicker } from './LocationPicker';
-export { default as LocationDisplay } from './LocationDisplay';
 export { default as LocationThumbnail } from './LocationThumbnail';
 export { default as MapPreview } from './MapPreview';
 export { default as DirectionsButton } from './DirectionsButton';

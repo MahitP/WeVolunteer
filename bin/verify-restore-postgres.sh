@@ -155,7 +155,7 @@ log "verified: every table the platform cannot be reconstructed without is prese
 read -r R_USERS R_HOURS R_CERTS R_LEDGER <<EOF
 $(psql -tAX -F' ' -d "$SCRATCH_URL" -c "
   SELECT (SELECT COUNT(*) FROM users),
-         (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present),
+         (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present = 1),
          (SELECT COUNT(*) FROM certificates),
          (SELECT COUNT(*) FROM hours_ledger);")
 EOF

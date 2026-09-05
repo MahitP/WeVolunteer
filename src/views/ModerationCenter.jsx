@@ -202,6 +202,7 @@ export const AREAS = [
     title: 'Legal Center',
     blurb: 'The documents everyone on this platform is held to. Editing is owner-only, and '
       + 'publishing a new version asks you to prove it is you.',
+  },
   /**
    * The Owner Center, and the reason it is the last tile.
    *
@@ -225,7 +226,6 @@ export const AREAS = [
     title: 'Owner Center',
     blurb: 'Whether the platform is healthy: uptime, incidents, errors, analytics, '
       + 'and the infrastructure it runs on — with links out to each service.',
-
   },
 ];
 

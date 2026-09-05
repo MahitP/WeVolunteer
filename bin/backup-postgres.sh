@@ -120,11 +120,18 @@ MANIFEST="$DEST/wevolunteer-$STAMP.manifest.json"
 # turns "the restore produced a database" into "the restore produced THIS
 # database". A dump that silently lost rows passes a structural check and fails
 # this one.
+# `present = 1`, not `WHERE present`. The APPLICATION schema
+# (server/db/postgresSchema.js) declares it INTEGER CHECK(present IN (0,1)),
+# deliberately, so one codebase serves SQLite and PostgreSQL. Only the
+# historical baseline in supabase/migrations declares it BOOLEAN — and a
+# database built from that one is refused at boot. Writing `WHERE present`
+# here worked against the baseline and failed against production with
+# "argument of WHERE must be type boolean, not type integer".
 log "recording invariants from the live database"
 read -r USERS HOURS CERTS LEDGER <<EOF
 $(psql -tAX -F' ' -d "$DATABASE_URL" -c "
   SELECT (SELECT COUNT(*) FROM users),
-         (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present),
+         (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present = 1),
          (SELECT COUNT(*) FROM certificates),
          (SELECT COUNT(*) FROM hours_ledger);" 2>/dev/null || echo "ERR ERR ERR ERR")
 EOF
