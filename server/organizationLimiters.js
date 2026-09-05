@@ -107,7 +107,7 @@ export const ORG_JOIN_RATE_LIMIT = Number(process.env.ORG_JOIN_RATE_LIMIT)
 
 const hashedUserKey = (req, res) => {
   const id = req.user?.id ?? req.principal?.userId;
-  if (!id) return ipKeyGenerator(req, res);
+  if (!id) return ipKeyGenerator(req.ip);
   return createHash('sha256').update(id).digest('hex');
 };
 

@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import { csrfGuard } from './csrfGuard.js';
 import { createRedisLimitStore } from './redis/limitStore.js';
 import { shareTokenLimiter } from './organizationLimiters.js';
@@ -12,7 +13,7 @@ import path from 'path';
 import { readFileSync } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, A11Y_HARNESS } from './config.js';
+import { DEMO_MODE, IS_PRODUCTION, ALLOWED_ORIGINS, COOKIE_NAME, A11Y_HARNESS, JWT_SECRET } from './config.js';
 import { db } from './db.js';
 import { recordError, hashUserId } from './errorReporter.js';
 import { logHttpRequest } from './telemetry.js';
@@ -694,7 +695,7 @@ function loginKeyGenerator(req, res) {
   const identifier = typeof raw === 'string' && raw.trim()
     ? createHash('sha256').update(raw.trim().toLowerCase()).digest('hex').slice(0, 32)
     : null;
-  const ip = ipKeyGenerator(req, res);
+  const ip = ipKeyGenerator(req.ip);
   return identifier ? `login:${ip}:${identifier}` : `login:${ip}`;
 }
 
@@ -747,9 +748,78 @@ export const loginIpCeilingLimiter = rateLimit({
    device is the highest-volume limiter in the application, and metering it
    through Upstash would cost more of the monthly allowance than every other
    limiter combined. It is a volume control, not a credential control. */
+/**
+ * The blanket API limiter's key: the SESSION when there is one, the address
+ * otherwise.
+ *
+ * ── The lockout this replaces ──
+ *
+ * `apiLimiter` covers every `/api` request and had no key generator, so
+ * `express-rate-limit` keyed it on `req.ip`: 600 requests per fifteen minutes
+ * for a whole school's shared egress address. A signed-in session makes several
+ * requests per screen, so a few dozen students browsing at lunchtime exhausted
+ * the building's budget and the next person to open the app got a 429 on a
+ * request that was neither abusive nor theirs to pay for.
+ *
+ * That is the pilot's own topology: one building, one NAT address, a few
+ * hundred students. This is also the THIRD time the same failure has been found
+ * here — `loginLimiter` was re-keyed onto ip+account after ten students
+ * mistyping once locked out a building, and `mailLimiter` onto the target
+ * address after a campus shared five verification emails. `apiLimiter` is the
+ * broadest limiter in the application and was the one left on a bare address.
+ *
+ * ── Why this loosens nothing ──
+ *
+ * The per-bucket number is unchanged. An anonymous caller is still bounded by
+ * address at exactly the same rate; one account is still bounded at exactly the
+ * same rate. The only behaviour that changes is that one person's browsing no
+ * longer spends another person's allowance. Nothing gains budget; a building
+ * stops losing it.
+ *
+ * ── Why the token is VERIFIED and not merely read ──
+ *
+ * Keying on an unverified cookie would let an attacker mint a fresh value per
+ * request and never share a bucket with themselves — an unlimited budget, which
+ * is worse than the defect being fixed. So the signature is checked, and
+ * anything that fails falls back to the address. That costs one HMAC on a path
+ * about to do considerably more work than that, and it is the same verification
+ * `authenticateToken` performs a few middlewares later.
+ *
+ * The subject is hashed for the reason `loginKeyGenerator` gives: a limiter key
+ * lives in memory and can surface in diagnostics, and these keys would otherwise
+ * be a list of who was using the application.
+ *
+ * A preauth token is deliberately NOT treated as a session. It is issued
+ * mid-sign-in, before the second factor, and `authenticateToken` refuses it as a
+ * full session; letting it name a bucket here would give the half-authenticated
+ * state an identity the rest of the application does not grant it.
+ *
+ * Ported from claude/wevolunteer-perf-scaling-ad3613 (12adb5a). The rest of that
+ * branch is deliberately not here — see docs/operations/branch-reconciliation.md.
+ */
+export function apiLimiterKey(req, res) {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (token) {
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      if (payload?.id && !payload.preauth) {
+        return `api:u:${createHash('sha256').update(String(payload.id)).digest('hex').slice(0, 32)}`;
+      }
+    } catch {
+      /* Expired, forged, or signed with a rotated secret. Treated as anonymous,
+         which is both correct and the safe direction: it keys on the address. */
+    }
+  }
+  return `api:ip:${ipKeyGenerator(req.ip)}`;
+}
+
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: DEMO_MODE ? 10000 : 600,
+  /* `API_RATE_LIMIT` follows the convention the other limiters already use
+     (`LOGIN_RATE_LIMIT`, `LOGIN_IP_CEILING`, `MAIL_RATE_LIMIT`,
+     `REAUTH_RATE_LIMIT`): a deployment that knows its own population can say so. */
+  limit: Number(process.env.API_RATE_LIMIT) || (DEMO_MODE ? 10000 : 600),
+  keyGenerator: apiLimiterKey,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   /**
@@ -833,7 +903,7 @@ function mailKeyGenerator(req, res) {
   // Genuinely anonymous and address-less: per-IP, so the endpoint is never
   // unlimited. ipKeyGenerator handles IPv6 normalisation, which a bare req.ip does
   // not.
-  return `ip:${ipKeyGenerator(req, res)}`;
+  return `ip:${ipKeyGenerator(req.ip)}`;
 }
 
 export const mailLimiter = rateLimit({
