@@ -70,6 +70,9 @@ import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
+import organizationMembershipPolicy from './062_organization_membership_policy.js';
+import organizationPublicIdentity from './063_organization_public_identity.js';
+import resyncGuardianScopeHash from './064_resync_guardian_scope_hash.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -405,7 +408,40 @@ export const MIGRATIONS = [
    * and order-independent beyond that.
    */
   leaderboardCandidates,
-  resyncUnacceptedLegalHashesAgain
+  resyncUnacceptedLegalHashesAgain,
+  /**
+   * 062 — how somebody joins an organization, and the link that lets them.
+   *
+   * Two defaulted columns on `organizations` plus two new tables with foreign
+   * keys to it and to `users`, so it must run after both exist and after 001,
+   * which rebuilds `users`. Nothing else depends on its order, and it is
+   * additive on both engines.
+   */
+  organizationMembershipPolicy,
+  /**
+   * 063 — the club's public identity, its named invitation links, direct
+   * invitations, and the sentence a student may send with a request.
+   *
+   * MUST run after 062, which created the two tables it alters and the one it
+   * rebuilds. The rebuild is `organization_share_links`, moving its primary key
+   * off `organization_id` so a club can have more than one link; nothing
+   * references that table, so §8.3's child-row guards do not apply, and the copy
+   * is row-counted regardless.
+   */
+  organizationPublicIdentity,
+
+  /**
+   * Clears the one published Privacy Policy row nobody has accepted, so the
+   * boot does not refuse the re-scoped guardian bullet.
+   *
+   * Order does not matter against the organization migrations — it touches
+   * `legal_documents` and nothing else — but it MUST run before
+   * `syncLegalDocuments`, which the boot sequence guarantees by running the
+   * migration runner first. Third of its kind after 054 and 061; each one
+   * reconciles the edit its own commit made, which is what keeps the pair
+   * auditable.
+   */
+  resyncGuardianScopeHash
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

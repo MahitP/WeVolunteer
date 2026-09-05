@@ -35,10 +35,25 @@ export default function ConfirmDialog({
   destructive = false,
   busy = false,
   onConfirm,
-  onCancel
+  onCancel,
+  /**
+   * Extra class for the OVERLAY, passed straight through to `Modal`.
+   *
+   * Exists because a confirmation can open on top of another dialog — a manager
+   * pressing Regenerate inside the share dialog is the case — and the second
+   * overlay then needs its own stacking level or it paints behind the first.
+   * `.modal-overlay-stacked` already existed for exactly this and had no way to
+   * be reached from here. Every other caller ignores it and is unchanged.
+   */
+  overlayClassName = ''
 }) {
   return (
-    <Modal onClose={busy ? () => {} : onCancel} label={title} className="modal-confirm">
+    <Modal
+      onClose={busy ? () => {} : onCancel}
+      label={title}
+      className="modal-confirm"
+      overlayClassName={overlayClassName}
+    >
       <div className="confirm-body stack-md">
         <div className="confirm-head">
           {destructive && (

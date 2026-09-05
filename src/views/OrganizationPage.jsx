@@ -1,42 +1,76 @@
 /**
- * One organization: what it is, who is in it, and what it is running.
+ * One organization: what it is, whether you can join it, and what it is running.
  *
- * Deliberately modest. This is a club page, not a social network — no wall, no
- * posts, no following. Everything on it answers one of three questions a
- * student actually has: what is this, should I join, and what can I sign up
- * for?
+ * ── The information architecture, and why it is one architecture ──
  *
- * The member roster renders the same summary shape as directory search, which
- * comes from the same server-side serializer. An organization page listing its
- * members must not become the route by which somebody reads a field a profile
- * would have withheld.
+ * Five readers arrive here — a signed-out visitor with a link, a student who is
+ * not a member, a member, somebody whose request is waiting, and a manager — and
+ * they are NOT five pages. The skeleton is the same for all of them:
+ *
+ *     the plate        who this club is, and the one thing you can do about it
+ *     the record       what you personally have done for it
+ *     opportunities    what you could sign up for
+ *     the noticeboard  what the club has said
+ *     members          who is in it
+ *     manage           the controls, visibly set apart
+ *
+ * What changes is which of those has content, and the plate's single action. The
+ * server decides the action (`viewer.affordance`) and which sections the reader
+ * is entitled to; this file renders that and computes no policy of its own.
+ *
+ * ── What was here before ──
+ *
+ * Five stacked cards in source order, a 22-pixel avatar beside an `h2`, and the
+ * primary action as one of four ternaries inside the header row — with Leave, the
+ * most destructive thing a member can do, in the position a newcomer's Join
+ * occupies. The plate replaces the identity block and Leave moves into the
+ * actions menu; the sections below are the same ones, given a hierarchy.
+ *
+ * The member roster renders the same summary shape as directory search, from the
+ * same server-side serializer, and the server now sends it only to members,
+ * managers and moderators — a club's list of children is not something every
+ * account holder gets to read.
  */
-import { useState, useEffect, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Building2, Users, CalendarDays, UserRound, LogIn, LogOut, Settings2, Clock, UserMinus, FileText, Award, UserPlus2, UserMinus2, Ban, /* `Scale` for an appeal — the same glyph the platform-wide appeal surfaces
-     use — and `ShieldCheck` for lifting a ban, which is a protective act rather
-     than a destructive one. Both from lucide, which is the app's only icon set. */
-  Scale } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import {
+  Building2, Users, CalendarDays, UserRound, LogOut, Settings2, Clock, UserMinus,
+  FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2, MailOpen, Check,
+} from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import '../utils/avatarColors';
-import OrgAvatar from '../components/common/OrgAvatar';
 import RemoveMemberDialog from '../components/organizations/RemoveMemberDialog';
 import AppealInbox from '../components/organizations/AppealInbox';
 import BannedMembers from '../components/organizations/BannedMembers';
+import OrganizationMasthead from '../components/organizations/OrganizationMasthead';
+import JoinAction from '../components/organizations/JoinAction';
+import ShareOrganizationDialog from '../components/organizations/ShareOrganizationDialog';
+import JoinRequestInbox from '../components/organizations/JoinRequestInbox';
+import InvitationManager from '../components/organizations/InvitationManager';
+import RequestToJoinDialog from '../components/organizations/RequestToJoinDialog';
+import '../components/organizations/OrganizationExperience.css';
+import { joinPolicySentence, JOIN_POLICY_COPY } from '../organizationPolicy';
+import { inviteTokenFor, clearPendingInvite } from '../utils/pendingInvite';
 import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
+import { organizationPath, organizationSubPath } from '../utils/organizationUrl';
 
 export default function OrganizationPage({ addToast, currentUser }) {
   const { key } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -51,7 +85,48 @@ export default function OrganizationPage({ addToast, currentUser }) {
 
   useEffect(() => load(), [load]);
 
+  /**
+   * Move to the canonical address once the club is known.
+   *
+   * `/organizations/:key` still resolves an id and a bare handle, because
+   * notification rows, audit entries and links people saved were written before
+   * `@handle` existed and must keep working. But the address a reader ends up
+   * looking at — the one in the location bar, the one they copy, the one that
+   * works when they send it to somebody with no account — should be the
+   * canonical one.
+   *
+   * `replace`, so the non-canonical URL does not sit in the history behind
+   * them: pressing Back would otherwise land on the same page and redirect
+   * again, which is a trap rather than a navigation.
+   */
+  const canonical = data?.organization?.slug ? organizationPath(data.organization) : null;
+  useEffect(() => {
+    if (!canonical) return;
+    if (decodeURIComponent(location.pathname) !== decodeURIComponent(canonical)) {
+      navigate(canonical, { replace: true });
+    }
+  }, [canonical, location.pathname, navigate]);
+
   const [removing, setRemoving] = useState(null);
+
+  /**
+   * The invitation token this tab is holding for this club, if any.
+   *
+   * The server never sees it on a GET — a query parameter would put a live link
+   * into browser history and into every proxy log — so a reader who arrived
+   * through a link is told `invite_required` and this is what turns that back
+   * into a Join. Safe because it grants nothing: the token travels with the
+   * press and the server refuses it if it has since been replaced, at which
+   * point the page reloads into the honest state.
+   *
+   * Keyed on the SLUG the server returned rather than on the route parameter,
+   * because `/organizations/:key` accepts an id too and a token stored against
+   * the slug must not be offered up for a different club.
+   */
+  const inviteToken = useMemo(
+    () => (data?.organization?.slug ? inviteTokenFor(data.organization.slug) : null),
+    [data?.organization?.slug],
+  );
 
   /**
    * Is this roster row the person reading it?
@@ -59,11 +134,8 @@ export default function OrganizationPage({ addToast, currentUser }) {
    * The menu is hidden on your own row. Every action in it is either something
    * the server refuses for yourself — banning yourself is a 409, because it
    * would lock you out of an organization only you can unlock — or something
-   * this page already offers better elsewhere: leaving is the `Leave` button in
-   * the header, which names the consequence and confirms it.
-   *
-   * Offering "Remove Sarah Jenkins" on Sarah's own row was a second, worse door
-   * to the same action, next to a third that the server would reject.
+   * this page already offers better elsewhere: leaving is in the plate's actions
+   * menu, which names the consequence and confirms it.
    */
   const isSelf = (m) => m.id === currentUser?.id;
 
@@ -164,11 +236,37 @@ export default function OrganizationPage({ addToast, currentUser }) {
     }
   };
 
-  const membership = async (join) => {
+  /**
+   * Joining, with the invitation token when this tab is holding one.
+   *
+   * The token is cleared once it has done its work, so a tab does not carry a
+   * spent invitation around for the rest of a session — and so a later visit to
+   * the same club renders the state the server actually reports rather than an
+   * optimistic Join.
+   */
+  const join = async () => {
     setBusy(true);
     try {
-      await (join ? api.joinOrganization(key) : api.leaveOrganization(key));
-      addToast?.(join ? `You joined ${data.organization.name}.` : `You left ${data.organization.name}.`, 'success');
+      await api.joinOrganizationWithInvite(key, inviteToken ?? undefined);
+      addToast?.(`You joined ${data.organization.name}.`, 'success');
+      clearPendingInvite();
+      load();
+    } catch (err) {
+      addToast?.(err.message, 'error');
+      /* Reload on failure too. The likely refusal is a token that has been
+         replaced since the link was shared, and the page must stop offering a
+         Join that cannot work. */
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const leave = async () => {
+    setBusy(true);
+    try {
+      await api.leaveOrganization(key);
+      addToast?.(`You left ${data.organization.name}.`, 'success');
       load();
     } catch (err) {
       addToast?.(err.message, 'error');
@@ -178,16 +276,87 @@ export default function OrganizationPage({ addToast, currentUser }) {
     }
   };
 
-  if (loading) return <LoadingSkeleton heights={[150, 90, 220]} className="stack-lg" />;
+  /**
+   * Declining an invitation.
+   *
+   * No confirmation dialog. Declining removes nothing the reader had — they
+   * were not a member — and the club's door is still open: they can join with a
+   * link, or send a request if the club takes them. The toast says so, because
+   * "you cannot be invited again" is the one consequence that is not obvious.
+   */
+  const declineInvitation = async () => {
+    setBusy(true);
+    try {
+      await api.declineOrganizationInvitation(key);
+      addToast?.(
+        `You declined the invitation to ${data.organization.name}. `
+        + 'You can still join with an invitation link if you change your mind.',
+        'info',
+      );
+      load();
+    } catch (err) {
+      addToast?.(err.message, 'error');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestToJoin = async (message) => {
+    setBusy(true);
+    try {
+      const res = await api.requestToJoinOrganization(key, message);
+      setRequesting(false);
+      addToast?.(
+        res.created
+          ? `Your request to join ${data.organization.name} was sent.`
+          : 'Your request is already waiting for a manager.',
+        'success',
+      );
+      load();
+    } catch (err) {
+      addToast?.(err.message, 'error');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withdrawRequest = async () => {
+    setBusy(true);
+    try {
+      await api.withdrawOrganizationJoinRequest(key);
+      addToast?.('Your request was taken back.', 'info');
+      load();
+    } catch (err) {
+      addToast?.(err.message, 'error');
+    } finally {
+      setBusy(false);
+      setWithdrawing(false);
+    }
+  };
+
+  if (loading) return <LoadingSkeleton heights={[190, 120, 220]} className="stack-lg" />;
 
   if (error === 'not_found') {
     return (
       <div className="page">
+        {/**
+          * `headingLevel={2}`, because this empty state is the whole page.
+          *
+          * The shell renders the `h1`; an empty state's default `h3` then skips
+          * a level, and somebody navigating by heading — which is how a screen
+          * reader user skims — is told a level exists that does not.
+          * `a11y/sweep.aria.spec.js` logged exactly that on this route:
+          * `h1 "Organization" -> h3 "No organization here"`. Everywhere the
+          * default is right, an empty state sits under a card's own `h2`.
+          */}
         <EmptyState
+          headingLevel={2}
           icon={Building2}
           title="No organization here"
           message="That organization does not exist, or its link has changed since it was shared."
-          action={<Link className="btn btn-secondary" to="/directory">Browse organizations</Link>}
+          action={<Link className="btn btn-secondary" to="/organizations">Browse organizations</Link>}
         />
       </div>
     );
@@ -195,7 +364,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
   if (error || !data) {
     return (
       <div className="page">
-        <EmptyState icon={Building2} title="Could not load this organization" message={error}
+        <EmptyState headingLevel={2} icon={Building2} title="Could not load this organization" message={error}
           action={<button type="button" className="btn btn-secondary" onClick={load}>Try again</button>} />
       </div>
     );
@@ -204,95 +373,233 @@ export default function OrganizationPage({ addToast, currentUser }) {
   const { organization: org, members, events, viewer, totals } = data;
   const upcoming = events.filter(e => e.startsAt && new Date(e.startsAt) >= new Date());
   const past = events.filter(e => !e.startsAt || new Date(e.startsAt) < new Date());
+  /**
+   * The affordance the reader actually has, which is the server's answer plus
+   * the one thing the server cannot know.
+   *
+   * The token is never sent to a GET — a query parameter would put a live link
+   * into browser history and into every proxy log — so a reader who arrived
+   * through a link is told `invite_required`. Turning that back into `join` HERE,
+   * once, is what keeps the button and the sentence under it telling the same
+   * story: computing it inside `JoinAction` alone left the control saying Join
+   * while the line beneath it said to go and ask somebody for a link.
+   *
+   * Optimism is free because it grants nothing: the token travels with the press
+   * and the server refuses it if it has since been replaced, at which point the
+   * page reloads into the honest state.
+   */
+  const reported = viewer.affordance ?? (viewer.isMember ? 'member' : 'join');
+  const affordance = reported === 'invite_required' && inviteToken ? 'join' : reported;
+  /**
+   * A direct invitation, which the server DOES decide.
+   *
+   * `viewer.invitation` is a row naming this reader, so unlike the share token
+   * there is nothing to keep out of a URL and nothing for the client to
+   * present — which is why `viewer.affordance` already reads `join` when one
+   * exists. This is only for the banner that explains WHY the club is suddenly
+   * joinable and offers the other answer.
+   */
+  const invitation = viewer.invitation ?? null;
+  /**
+   * Is the invitation banner on screen?
+   *
+   * Derived ONCE, because two places depend on it and they have to agree: the
+   * banner renders on it, and the plate suppresses its own control on it. They
+   * were written as two conditions — `invitation && !viewer.isMember` for the
+   * banner and `!invitation` for the plate — and the pair produced a state with
+   * no control at all: a member still carrying an invitation row got neither
+   * the banner nor the plate's control.
+   *
+   * The server does not send `viewer.invitation` to a member, so that state is
+   * unreachable through it today. It was reachable in a test in one line, which
+   * is the whole argument for deriving this rather than repeating it.
+   */
+  const showingInvitation = Boolean(invitation) && !viewer.isMember;
+
+  /**
+   * The two secondary actions that are NOT buttons.
+   *
+   * Both are rare and both undo something: Leave ends a membership, and Withdraw
+   * takes back a request somebody deliberately sent. Neither belongs beside the
+   * primary action — Leave used to occupy the position a newcomer's Join
+   * occupies, which made the loudest control on a member's page the one that
+   * ends their membership.
+   *
+   * Share and Settings stay visible, because both are things a manager came here
+   * to do rather than things they might undo.
+   */
+  const plateMenu = [];
+  if (affordance === 'pending') {
+    plateMenu.push({
+      id: 'withdraw',
+      icon: Undo2,
+      label: 'Take back my request',
+      onSelect: () => setWithdrawing(true),
+    });
+  }
+  if (viewer.isMember) {
+    plateMenu.push({
+      id: 'leave',
+      icon: LogOut,
+      label: `Leave ${org.name}`,
+      destructive: true,
+      onSelect: () => setLeaving(true),
+    });
+  }
 
   return (
     <div className="page stack-lg">
-      <section className="card card-pad">
-        <div className="row-between org-header-top">
-          <div className="row org-identity">
-            {/* Upload, then emoji, then the building glyph — the same order
-                `users` resolves an avatar in, so the two never disagree about
-                which picture wins. `alt=""` because the name is right beside
-                it: announcing the logo would be reading the name twice. */}
-            {/* The same component every other surface uses. This page used to
-                carry the only correct copy of the fallback chain, which is how
-                the others drifted. */}
-            <OrgAvatar organization={org} size={22} className="avatar-lg org-avatar" />
-            <div className="stack-xs">
-              <h2 className="page-title">{org.name}</h2>
-              <p className="muted org-meta">
-                <Users size={13} aria-hidden="true" /> {org.memberCount} {org.memberCount === 1 ? 'member' : 'members'}
-                {org.eventCount > 0 && <> · <CalendarDays size={13} aria-hidden="true" /> {org.eventCount} {org.eventCount === 1 ? 'event' : 'events'}</>}
-              </p>
-            </div>
+      {/**
+        * You have been invited.
+        *
+        * Above the plate, because it is the reason this page looks the way it
+        * does to this reader: an invitation-only club showing a Join button
+        * makes no sense until you know somebody asked you.
+        *
+        * The note is rendered as TEXT — `{invitation.message}` in JSX, which
+        * React escapes — and never as markup. Who sent it is deliberately
+        * absent: the club invites, not the individual member who pressed the
+        * button, and naming them would make declining an answer to a classmate
+        * rather than to a club.
+        *
+        * ── This banner is the ONLY place the decision is offered ──
+        *
+        * The plate suppresses its own control while this is up; the note on
+        * `JoinAction`'s call site carries the measurement that decided it. In
+        * short: an invited reader used to get three tab stops and two primary
+        * buttons for one choice, with Decline between the two Accepts and
+        * nothing saying they were the same act.
+        */}
+      {showingInvitation && (
+        <section className="org-invitation" aria-labelledby="org-invitation-heading">
+          <div className="org-invitation-body stack-sm">
+            <h2 id="org-invitation-heading" className="org-invitation-title">
+              <MailOpen size={17} aria-hidden="true" /> You have been invited to join {org.name}
+            </h2>
+            {invitation.message && (
+              <blockquote className="org-invitation-note">{invitation.message}</blockquote>
+            )}
+            <p className="muted small">
+              {/* Always a date: `inviteUser` sets a fortnight's TTL on every
+                  invitation, so the "no expiry" branch that used to be here was
+                  unreachable — and a false promise one nullable column away
+                  from being shown. */}
+              This invitation is open until {formatDay(invitation.expiresAt)}.
+            </p>
+            {/**
+              * What declining costs, BEFORE the press.
+              *
+              * A decline is final for the club: `inviteUser` refuses for ever
+              * afterwards, so this organization can never invite this person
+              * again. That was only said in the toast — after the fact — beside
+              * a ghost button a thirteen-year-old can mis-tap next to Accept.
+              *
+              * A sentence rather than a confirmation dialog: the act is not
+              * destructive to anything the reader has, and the door is still
+              * open to them by link or by request. What they need is to know
+              * that the asking stops.
+              */}
+            <p className="muted small">
+              If you decline, {org.name} cannot invite you again — you would need one of its
+              invitation links to join later.
+            </p>
           </div>
-          <div className="row org-actions">
+          <div className="row row-wrap org-invitation-actions">
+            {/* `btn-lg`, because this is now the page's primary action for this
+                reader — the plate does not draw a second one. */}
+            <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={join}>
+              <Check size={16} aria-hidden="true" /> Accept and join {org.name}
+            </button>
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={declineInvitation}>
+              Decline
+            </button>
+          </div>
+        </section>
+      )}
+
+      <OrganizationMasthead
+        organization={org}
+        charterLead={org.createdAt ? `Since ${new Date(org.createdAt).getFullYear()}` : null}
+        action={
+          <div className="row row-wrap org-plate-controls">
+            {/**
+              * Suppressed while the invitation banner is up, because the banner
+              * owns that decision.
+              *
+              * ── The defect this replaced ──
+              *
+              * An invited reader had THREE tab stops for one choice: "Accept"
+              * (primary) and "Decline" (ghost) in the banner, then "Join
+              * <club>" (primary again) in the plate. Two primary buttons doing
+              * the same thing, with the negative option between them — and
+              * nothing said the third was the first. Measured in a browser: a
+              * screen-reader user heard "Accept, button", "Decline, button",
+              * "Join Community Garden Crew, button" and had no way to tell that
+              * the third was the same act as the first.
+              *
+              * ── Why the banner won rather than the plate ──
+              *
+              * Accept and Decline are one decision and belong together. Moving
+              * Accept to the plate would split the pair across two regions,
+              * leaving a reader who hears "Decline" with no positive
+              * counterpart nearby — worse than the duplication. And Decline
+              * cannot go into the plate's actions menu: making "no" harder to
+              * reach than "yes" is a pressure a thirteen-year-old should not be
+              * under.
+              *
+              * The plate keeps its identity and its note ("You have an
+              * invitation, so you can join now"), which is the state; the
+              * banner, immediately above it, is the action. Once the invitation
+              * is answered the banner goes and the plate resumes drawing the
+              * control for whatever state follows.
+              *
+              * Safe to key on `invitation` alone: `joinAffordance` checks
+              * membership, bans, archived clubs and pending requests BEFORE it
+              * looks at an invitation, so whenever one is present the affordance
+              * is `join` and there is no other state being hidden.
+              */}
+            {!showingInvitation && (
+              <JoinAction
+                affordance={affordance}
+                organization={org}
+                request={viewer.joinRequest}
+                ban={viewer.ban}
+                busy={busy}
+                onJoin={join}
+                onRequest={() => setRequesting(true)}
+              />
+            )}
+
+            {/* Share sits beside the primary action rather than in the menu:
+                handing the club's address to somebody is the second most common
+                thing anybody does here, and `viewer.canInvite` is the server's
+                answer about whether this reader may. */}
+            {viewer.canInvite && (
+              <button type="button" className="btn btn-secondary" onClick={() => setSharing(true)}>
+                <Share2 size={16} aria-hidden="true" /> Share
+              </button>
+            )}
+
+            {/* Visible rather than in the menu: a manager arriving to change who
+                can join should not have to open something to find where. It is
+                also the one control on this row that a member never sees, which
+                is what makes the separation legible. */}
             {viewer.canManage && (
-              <Link className="btn btn-secondary" to={`/organizations/${org.slug}/edit`}>
-                <Settings2 size={16} aria-hidden="true" /> Manage
+              <Link className="btn btn-secondary" to={organizationSubPath(org, 'edit')}>
+                <Settings2 size={16} aria-hidden="true" /> Settings
               </Link>
             )}
-            {/**
-              * Four states, and only one of them is a Join button.
-              *
-              * A banned student used to be shown the ordinary Join control. The
-              * server refused it — that is where a ban is enforced and it has
-              * not moved — so the button was not a hole, it was a lie: it
-              * offered an action and produced an error. What replaces it says
-              * what is actually true and what can actually be done about it.
-              *
-              * `viewer.ban` is absent for everybody who is not banned, so this
-              * cannot be tripped by a missing field.
-              */}
-            {viewer.ban ? (
-              viewer.ban.appeal?.pending ? (
-                /* Already appealed. Disabled rather than hidden: "I sent that"
-                   is the thing somebody comes back to the page to check, and a
-                   control that vanishes answers nothing. Not a route to a
-                   second appeal — the appeals route refuses duplicates, so
-                   offering one would only produce a rejection. */
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled
-                  title={`Appeal sent ${formatDay(viewer.ban.appeal.submittedAt)}`}
-                >
-                  <Clock size={16} aria-hidden="true" /> Appeal sent
-                </button>
-              ) : (
-                <Link
-                  className="btn btn-danger"
-                  to={`/appeals/new?subject=organization_ban&organization=${encodeURIComponent(org.id)}`}
-                >
-                  <Scale size={16} aria-hidden="true" /> Appeal
-                </Link>
-              )
-            ) : viewer.isMember ? (
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setLeaving(true)}>
-                <LogOut size={16} aria-hidden="true" /> Leave
-              </button>
-            ) : (
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => membership(true)}>
-                <LogIn size={16} aria-hidden="true" /> Join
-              </button>
+
+            {plateMenu.length > 0 && (
+              <ActionsMenu label={`More actions for ${org.name}`} items={plateMenu} disabled={busy} />
             )}
           </div>
-        </div>
-
-        {org.description && <p className="org-description">{org.description}</p>}
-
-        {org.tags?.length > 0 && (
-          <ul className="chips">
-            {org.tags.map(tag => <li key={tag} className="chip">{tag}</li>)}
-          </ul>
-        )}
-
-        <p className="muted org-founder">
-          Started by {org.createdBy.id
-            ? <Link to={`/users/id/${org.createdBy.id}`}>{org.createdBy.name}</Link>
-            : org.createdBy.name}
-        </p>
-
+        }
+        note={joinPolicySentence(affordance, {
+          policy: viewer.joinPolicy ?? org.joinPolicy,
+          organizationName: org.name,
+        })}
+      >
         {/**
           * Why the button says what it says.
           *
@@ -312,160 +619,127 @@ export default function OrganizationPage({ addToast, currentUser }) {
               : <p className="muted small">You cannot rejoin while this is in place. If you think it is wrong, you can appeal.</p>}
           </div>
         )}
-
-        {!viewer.isMember && !viewer.ban && (
-          <p className="muted org-joinnote">
-            Members are told when this organization posts a new opportunity.
-          </p>
-        )}
-      </section>
+      </OrganizationMasthead>
 
       {/**
-        * Hours, scoped to this organization.
+        * Two columns on a wide screen, one on a narrow one.
         *
-        * It sits directly under the identity card because it is the thing a
-        * member came to this page to find out — "how much have I done for NHS"
-        * — and above Opportunities because a record of what you have done is
-        * the context for deciding what to do next.
-        *
-        * No new navigation entry anywhere. The organization already had a page;
-        * the number belongs on it.
+        * The left column is what the club is DOING — opportunities, then its
+        * noticeboard, then who is in it. The right rail is what the reader's own
+        * relationship with it is: their hours, and the founding detail. That
+        * split is why the page reads differently for a member and a stranger
+        * without being a different page: for a stranger the rail is one card and
+        * the left column is the whole story.
         */}
-      <OrganizationService org={org} viewer={viewer} totals={totals} />
+      <div className="org-columns">
+        <div className="org-column-main stack-lg">
+          <section className="card" aria-labelledby="org-opportunities-heading">
+            <div className="card-head"><h2 id="org-opportunities-heading">Opportunities</h2></div>
+            <div className="card-body">
+              {upcoming.length === 0 && past.length === 0 ? (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="No events yet"
+                  message={
+                    viewer.canPost
+                      ? 'Post an opportunity and it will appear here for everybody who can see this organization.'
+                      : 'When this organization posts an opportunity, it will appear here.'
+                  }
+                />
+              ) : (
+                <>
+                  {upcoming.length > 0 && <EventList title="Coming up" events={upcoming} />}
+                  {past.length > 0 && <EventList title="Past" events={past} muted />}
+                </>
+              )}
+            </div>
+          </section>
 
-      <section className="card">
-        <div className="card-head"><h2>Opportunities</h2></div>
-        <div className="card-body">
-          {upcoming.length === 0 && past.length === 0 ? (
-            <EmptyState
-              icon={CalendarDays}
-              title="No events yet"
-              message="When this organization posts an opportunity, it will appear here."
-            />
-          ) : (
-            <>
-              {upcoming.length > 0 && <EventList title="Coming up" events={upcoming} />}
-              {past.length > 0 && <EventList title="Past" events={past} muted />}
-            </>
-          )}
+          {/* `canPost`, not `canManage` — a Student Organizer posts and a manager
+              posts, and the server is the one that decides which is which. */}
+          <OrganizationAnnouncements
+            orgKey={key}
+            canManage={viewer?.canPost === true}
+            isMember={viewer?.isMember === true}
+            repliesEnabled={org.allowReplies !== false}
+            addToast={addToast}
+          />
+
+          <MemberRoster
+            org={org}
+            members={members}
+            viewer={viewer}
+            busy={busy}
+            isSelf={isSelf}
+            memberActions={memberActions}
+          />
         </div>
-      </section>
 
-      {/* `canPost`, not `canManage` — a Student Organizer posts and a manager
-          posts, and the server is the one that decides which is which. Passing
-          `canManage` here would show the composer to exactly the people who no
-          longer need to be the only ones with it. */}
-      <OrganizationAnnouncements
-        orgKey={key}
-        canManage={viewer?.canPost === true}
-        isMember={viewer?.isMember === true}
-        repliesEnabled={org.allowReplies !== false}
-        addToast={addToast}
-      />
+        <aside className="org-column-rail stack-lg">
+          <OrganizationService org={org} viewer={viewer} totals={totals} />
+          <AboutOrganization org={org} policy={viewer.joinPolicy ?? org.joinPolicy} />
+        </aside>
+      </div>
 
-      <section className="card">
-        <div className="card-head"><h2>Members</h2></div>
-        <div className="card-body">
-          {members.length === 0 ? (
-            <p className="muted">No members yet.</p>
-          ) : (
-            <ul className="list org-members">
-              {members.map(m => (
-                <li key={m.id} className="list-row">
-                  <Link
-                    to={m.username ? `/users/@${m.username}` : `/users/id/${m.id}`}
-                    className="card-link row org-member"
-                  >
-                    <span className="avatar" aria-hidden="true">
-                      {m.profilePictureUrl
-                        ? <img src={m.profilePictureUrl} alt="" className="avatar-img" />
-                        : (m.avatar || <UserRound size={16} />)}
-                    </span>
-                    <span className="stack-xs org-member-body">
-                      <span>{m.name}</span>
-                      {m.username && <span className="muted org-member-handle">@{m.username}</span>}
-                    </span>
-                    {/* Which of the three ranks, said plainly. An ordinary
-                        member gets no tag: "Member" on every row but two is
-                        noise, and the absence already says it. */}
-                    {m.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
-                    {m.memberRole === 'student_organizer' && (
-                      <span className="tag">Student organizer</span>
-                    )}
-                    {/**
-                      * Hours, for managers only — the server omits the field
-                      * entirely for anybody else, so this cannot render for a
-                      * member however the roster is reached.
-                      *
-                      * Hours WITH THIS ORGANIZATION, never the platform-wide
-                      * total: what a student does for another club is not this
-                      * one's business, and the query is scoped so there is no
-                      * figure here that could be it.
-                      */}
-                    {typeof m.hours === 'number' && (
-                      <span className="tnum muted org-member-hours">
-                        {formatHours(m.hours)}
-                      </span>
-                    )}
-                  </Link>
-                  {/**
-                    * One control, and a menu behind it.
-                    *
-                    * ── What was here before ──
-                    *
-                    * Two icon buttons sat side by side: a `UserCog` that toggled
-                    * student organizer, and a `UserMinus` that opened the removal
-                    * dialog. The cog reads as "manage this person" — a settings
-                    * glyph next to somebody's name means "open their options" to
-                    * almost everybody — but it was a switch, and pressing it
-                    * promoted or demoted them immediately with no confirmation
-                    * and no statement of what had happened.
-                    *
-                    * That is the worst kind of control: it looks like it opens
-                    * something and instead it does something, and what it does is
-                    * change a person's standing in their club.
-                    *
-                    * ── Why a menu fixes it rather than a better tooltip ──
-                    *
-                    * The problem is not that the icon was under-labelled; it is
-                    * that a row of unlabelled glyphs makes the reader guess which
-                    * of several similar-looking actions each one is. A menu names
-                    * every action in words, in one place, and the promote item
-                    * carries the CURRENT role in its label — so "Make Sam a
-                    * student organizer" and "Remove Sam as a student organizer"
-                    * are different sentences rather than the same button in a
-                    * different state.
-                    *
-                    * Removal and banning are separate items for the same reason.
-                    * They were one dialog with a mode chosen inside it, which
-                    * meant a manager had to open the destructive dialog before
-                    * discovering which destructive thing it offered.
-                    */}
-                  {viewer.canManage && !isSelf(m) && (
-                    <ActionsMenu
-                      icon={Settings2}
-                      label={`Manage ${m.name}`}
-                      disabled={busy}
-                      items={memberActions(m)}
-                    />
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
-
-      {/* The bottom of the management area, below the roster — the rarest thing
-          a manager does, and the one with the most text. It renders nothing at
-          all when there is nothing to review. */}
-      {/* The moderation area. Banned members first — the shorter card, and the
-          one whose emptiness is a real answer — then the appeals against those
-          bans, which is the rarest thing a manager does. */}
+      {/**
+        * The management area, set apart rather than mixed in.
+        *
+        * Its own heading and its own surface, below everything a member reads, so
+        * a manager can tell at a glance which controls act on other people. The
+        * request inbox comes first — it is the only one that somebody is waiting
+        * on — then the bans, then the appeals against them, which is the rarest
+        * thing a manager does.
+        */}
       {viewer?.canManage && (
-        <BannedMembers orgKey={key} organizationName={org.name} addToast={addToast} />
+        <section className="org-manage" aria-labelledby="org-manage-heading">
+          <div className="org-manage-head">
+            <h2 id="org-manage-heading">Manage {org.name}</h2>
+            <p className="muted small">
+              Only managers of this organization see this section.
+            </p>
+          </div>
+
+          <div className="stack-lg">
+            {/* Invitations first: sending one is something a manager came here
+                to do, and the queue below is something they answer. */}
+            <InvitationManager
+              orgKey={key}
+              organizationName={org.name}
+              addToast={addToast}
+              onChanged={load}
+            />
+            <JoinRequestInbox
+              orgKey={key}
+              organizationName={org.name}
+              policy={viewer.joinPolicy ?? org.joinPolicy}
+              addToast={addToast}
+              onDecided={load}
+            />
+            <BannedMembers orgKey={key} organizationName={org.name} addToast={addToast} />
+            <AppealInbox orgKey={key} addToast={addToast} />
+          </div>
+        </section>
       )}
-      {viewer?.canManage && <AppealInbox orgKey={key} addToast={addToast} />}
+
+      {sharing && (
+        <ShareOrganizationDialog
+          orgKey={key}
+          organization={org}
+          policy={viewer.joinPolicy ?? org.joinPolicy}
+          addToast={addToast}
+          onClose={() => setSharing(false)}
+          onChanged={load}
+        />
+      )}
+
+      {requesting && (
+        <RequestToJoinDialog
+          organization={org}
+          busy={busy}
+          onSubmit={message => requestToJoin(message)}
+          onClose={() => setRequesting(false)}
+        />
+      )}
 
       {removing && (
         <RemoveMemberDialog
@@ -484,14 +758,200 @@ export default function OrganizationPage({ addToast, currentUser }) {
           confirmLabel="Leave"
           destructive
           busy={busy}
-          onConfirm={() => membership(false)}
+          onConfirm={leave}
           onCancel={() => setLeaving(false)}
         >
-          You will stop being told about this organization&rsquo;s new opportunities. Nothing you have
-          already signed up for changes, and your hours are untouched. You can rejoin at any time.
+          {/* Real paragraphs: `.confirm-text` is a flex column, so a bare text
+              node becomes a row of its own and a sentence split across two of
+              them reads as two unrelated lines. */}
+          <p>
+            You will stop being told about this organization&rsquo;s new opportunities. Nothing
+            you have already signed up for changes, and your hours are untouched.
+          </p>
+          <p>
+            {(viewer.joinPolicy ?? org.joinPolicy) === 'invite'
+              ? 'This organization admits members by invitation, so you would need its link to come back.'
+              : (viewer.joinPolicy ?? org.joinPolicy) === 'request'
+                ? 'This organization approves its members, so you would need to ask again to come back.'
+                : 'You can rejoin at any time.'}
+          </p>
+        </ConfirmDialog>
+      )}
+
+      {withdrawing && (
+        <ConfirmDialog
+          title="Take back your request?"
+          confirmLabel="Take it back"
+          busy={busy}
+          onConfirm={withdrawRequest}
+          onCancel={() => setWithdrawing(false)}
+        >
+          <p>
+            A manager of {org.name} will no longer see your request. You can ask again
+            whenever you like.
+          </p>
         </ConfirmDialog>
       )}
     </div>
+  );
+}
+
+/**
+ * What this club is, beyond its name.
+ *
+ * A short card in the rail rather than a section in the main column, because it
+ * is reference rather than activity: somebody reads it once when deciding
+ * whether this is the right club, and never again.
+ *
+ * The founder's name is a deliberate disclosure — a club records who started it,
+ * and it survives that account being deleted through the snapshot — and it is
+ * NOT in the public projection an invitation link opens. Naming a person to an
+ * unauthenticated reader is a different thing from naming them to a member.
+ */
+function AboutOrganization({ org, policy }) {
+  return (
+    <section className="card" aria-labelledby="org-about-heading">
+      <div className="card-head"><h2 id="org-about-heading">About</h2></div>
+      <div className="card-body stack-sm">
+        <p className="muted small org-about-line">
+          <Users size={13} aria-hidden="true" />{' '}
+          Started by {org.createdBy.id
+            ? <Link to={`/users/id/${org.createdBy.id}`}>{org.createdBy.name}</Link>
+            : org.createdBy.name}
+          {org.createdAt && <> in {new Date(org.createdAt).getFullYear()}</>}
+        </p>
+
+        {/**
+          * How this club admits people, as a fact ABOUT the club.
+          *
+          * The plate's sentence says what the reader may do — for a member it
+          * says they will hear about new opportunities, which conveys nothing
+          * about the door. This is the other half, and a member is exactly the
+          * person who needs it: it is what tells them whether a friend can
+          * simply join or needs the link.
+          *
+          * The `allowReplies` line that used to sit here has gone: the
+          * announcements card two feet away already says the same thing, where
+          * it is about to matter.
+          */}
+        <p className="muted small org-about-line">
+          <DoorOpen size={13} aria-hidden="true" />{' '}
+          {JOIN_POLICY_COPY[policy]?.consequence ?? JOIN_POLICY_COPY.invite.consequence}
+        </p>
+
+        {org.status === 'archived' && (
+          <p className="tag">Archived</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Who is in the club.
+ *
+ * ── Why a non-member sees a count and not a list ──
+ *
+ * The server sends `members: []` to anybody who is not in the organization, so
+ * this cannot render a name it was not given. The card stays, saying how many
+ * there are, because a page that simply omitted the section would leave a reader
+ * unable to tell a club of forty from a club of nobody — which is precisely what
+ * they are trying to work out before pressing Join.
+ */
+function MemberRoster({ org, members, viewer, busy, isSelf, memberActions }) {
+  const hidden = members.length === 0 && org.memberCount > 0;
+
+  return (
+    <section className="card" aria-labelledby="org-members-heading">
+      <div className="card-head">
+        <h2 id="org-members-heading">Members</h2>
+        <span className="muted small tnum">{org.memberCount}</span>
+      </div>
+      <div className="card-body">
+        {hidden ? (
+          /* The COUNT is in the card head, where it is for every reader. Saying
+             it again as the title of the empty state was the same number twice
+             in one card, so the title says the rule and the head says the fact. */
+          <EmptyState
+            icon={Users}
+            title="The roster is private"
+            message="Who is in this organization is shown to its members. Join to see it."
+          />
+        ) : members.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="No members yet"
+            message="Whoever joins first will appear here."
+          />
+        ) : (
+          <ul className="list org-members">
+            {members.map(m => (
+              <li key={m.id} className="list-row">
+                <Link
+                  to={m.username ? `/users/@${m.username}` : `/users/id/${m.id}`}
+                  className="card-link row org-member"
+                >
+                  <span className="avatar" aria-hidden="true">
+                    {m.profilePictureUrl
+                      ? <img src={m.profilePictureUrl} alt="" className="avatar-img" />
+                      : (m.avatar || <UserRound size={16} />)}
+                  </span>
+                  <span className="stack-xs org-member-body">
+                    <span>{m.name}</span>
+                    {m.username && <span className="muted org-member-handle">@{m.username}</span>}
+                  </span>
+                  {/* Which of the three ranks, said plainly. An ordinary
+                      member gets no tag: "Member" on every row but two is
+                      noise, and the absence already says it. */}
+                  {m.memberRole === 'manager' && <span className="tag tag-brand">Manager</span>}
+                  {m.memberRole === 'student_organizer' && (
+                    <span className="tag">Student organizer</span>
+                  )}
+                  {/**
+                    * Hours, for managers only — the server omits the field
+                    * entirely for anybody else, so this cannot render for a
+                    * member however the roster is reached.
+                    *
+                    * Hours WITH THIS ORGANIZATION, never the platform-wide
+                    * total: what a student does for another club is not this
+                    * one's business, and the query is scoped so there is no
+                    * figure here that could be it.
+                    */}
+                  {typeof m.hours === 'number' && (
+                    <span className="tnum muted org-member-hours">
+                      {formatHours(m.hours)}
+                    </span>
+                  )}
+                </Link>
+                {/**
+                  * One control, and a menu behind it.
+                  *
+                  * A row of unlabelled glyphs makes the reader guess which of
+                  * several similar-looking actions each one is. A menu names
+                  * every action in words, and the promote item carries the
+                  * CURRENT role in its label — so "Make Sam a student organizer"
+                  * and "Remove Sam as a student organizer" are different
+                  * sentences rather than the same button in a different state.
+                  *
+                  * Removal and banning are separate items for the same reason:
+                  * they used to be one dialog with a mode chosen inside it, which
+                  * meant a manager had to open the destructive dialog before
+                  * discovering which destructive thing it offered.
+                  */}
+                {viewer.canManage && !isSelf(m) && (
+                  <ActionsMenu
+                    icon={Settings2}
+                    label={`Manage ${m.name}`}
+                    disabled={busy}
+                    items={memberActions(m)}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -523,14 +983,14 @@ function OrganizationService({ org, viewer, totals }) {
   return (
     <section className="card" aria-labelledby="org-service-heading">
       <div className="card-head">
-        <h2 id="org-service-heading">Your service with {org.name}</h2>
+        <h2 id="org-service-heading">Your service here</h2>
       </div>
       <div className="card-body">
         {history.length === 0 ? (
           <EmptyState
             icon={Clock}
             title="No hours yet"
-            message={`Hours you volunteer at ${org.name}'s events will be counted here once an organizer confirms you were there.`}
+            message={`Hours you volunteer at ${org.name}'s events are counted here once an organizer confirms you were there.`}
           />
         ) : (
           <>
@@ -581,14 +1041,10 @@ function OrganizationService({ org, viewer, totals }) {
                 * certificate list; each already knows how to render itself, and a
                 * second copy scoped to one club would be two things to keep in
                 * step about the same student's hours.
-                *
-                * They live at the foot of this block rather than in the
-                * navigation because that is where somebody already is when the
-                * question "what have I done for this club" occurs to them.
                 */}
               <Link className="btn btn-ghost btn-sm" to={`/portfolio?organization=${encodeURIComponent(org.slug)}`}>
                 <FileText size={15} aria-hidden="true" />
-                Transcript for {org.name}
+                Transcript
               </Link>
               <Link className="btn btn-ghost btn-sm" to={`/certificates?organization=${encodeURIComponent(org.slug)}`}>
                 <Award size={15} aria-hidden="true" />
@@ -598,9 +1054,17 @@ function OrganizationService({ org, viewer, totals }) {
           </>
         )}
 
-        {/* Managers get the collective figure. Members do not: with a small
-            roster a total plus your own number is somebody else's number. */}
-        {totals && (
+        {/**
+          * Managers get the collective figure. Members do not: with a small
+          * roster a total plus your own number is somebody else's number.
+          *
+          * And not when it is all zeros. "Altogether, 0 people have volunteered
+          * 0 hrs across 0 events" is a sentence that says nothing, and putting it
+          * on a brand-new club's page makes the club look like it failed at
+          * something rather than like it has not started yet. The empty state
+          * above already says there are no hours.
+          */}
+        {totals && totals.events > 0 && (
           <p className="muted small org-service-total">
             Altogether, {totals.volunteers} {totals.volunteers === 1 ? 'person has' : 'people have'}{' '}
             volunteered {formatHours(totals.hours)} across {totals.events}{' '}

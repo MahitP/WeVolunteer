@@ -29,6 +29,22 @@ vi.mock('react-router-dom', async () => ({
 const MEMBER = { id: 'user-m', name: 'Priya Patel', username: 'priya', memberRole: 'member' };
 const BOSS = { id: 'user-b', name: 'Jordan Whitfield', username: 'jordan', memberRole: 'manager' };
 
+/**
+ * The affordance the SERVER would compute for this viewer.
+ *
+ * The page renders `viewer.affordance` and derives nothing, so a fixture that
+ * handed it a ban while the affordance still said `join` would be testing a
+ * state the server cannot produce — and the assertions below would be measuring
+ * the fixture rather than the page. Derived here, in the one place, so each case
+ * can go on being about bans.
+ */
+const affordanceFor = (viewer) => {
+  if (viewer?.affordance) return viewer.affordance;
+  if (viewer?.ban) return 'banned';
+  if (viewer?.isMember) return 'member';
+  return 'join';
+};
+
 const payload = (viewer) => ({
   organization: {
     id: 'org-1', slug: 'chess-club', name: 'Chess Club', description: 'Play chess.',
@@ -39,7 +55,10 @@ const payload = (viewer) => ({
   events: [],
   viewer: {
     isMember: false, memberRole: null, canManage: false, canPost: false,
+    joinPolicy: 'open', canInvite: false, shareLink: null, pendingRequests: null,
     hours: 0, events: 0, history: [], ban: null, ...viewer,
+    /* After the spread: computed from what the case actually set. */
+    affordance: affordanceFor(viewer),
   },
   totals: null,
 });
@@ -65,20 +84,27 @@ beforeEach(() => {
   api.fetchOrganizationAnnouncements.mockResolvedValue({ announcements: [] });
   api.fetchOrganizationAppeals.mockResolvedValue({ appeals: [] });
   api.fetchOrganizationBans.mockResolvedValue({ bans: [] });
-  api.joinOrganization.mockResolvedValue({});
+  api.fetchOrganizationJoinRequests.mockResolvedValue({ requests: [], pendingRequests: 0 });
+  /* The manage band also mounts the invitation panel, which fetches on mount.
+     Left unmocked, the auto-mock returns `undefined`, `.then` throws inside a
+     passive effect and the WHOLE page unmounts — which reads as "the control is
+     correctly absent" on half of these assertions. Vacuous-pass by crash. */
+  api.fetchOrganizationInvitations.mockResolvedValue({ invitations: [] });
+  api.searchDirectory.mockResolvedValue({ users: [], organizations: [] });
+  api.joinOrganizationWithInvite.mockResolvedValue({});
   api.liftOrganizationBan.mockResolvedValue({});
 });
 
 describe('what a banned student sees instead of Join', () => {
   it('offers Join to somebody who is not banned', async () => {
     await show({ ban: null });
-    expect(screen.getByRole('button', { name: /^Join$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Join Chess Club$/ })).toBeInTheDocument();
   });
 
   it('takes the Join button away once they are banned', async () => {
     /* The defect this file exists for. */
     await show({ ban: { ...BAN, appeal: null } });
-    expect(screen.queryByRole('button', { name: /^Join$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Join Chess Club$/ })).not.toBeInTheDocument();
   });
 
   it('offers an appeal instead, as a link to the appeal form for this club', async () => {
@@ -109,7 +135,7 @@ describe('what a banned student sees instead of Join', () => {
 
   it('goes back to Join once the ban is lifted', async () => {
     await show({ ban: null, isMember: false });
-    expect(screen.getByRole('button', { name: /^Join$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Join Chess Club$/ })).toBeInTheDocument();
     expect(screen.queryByText(/You are banned/)).not.toBeInTheDocument();
   });
 

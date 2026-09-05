@@ -1,7 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useModal } from '../utils/useModal';
+
+/**
+ * The id `Modal` points `aria-describedby` at.
+ *
+ * Exported so a caller that builds its own head can opt in, and so the pair
+ * cannot drift into two different strings.
+ *
+ * Named `dialog-`, not `modal-`, on purpose: `noDanglingClasses.test.js`
+ * watches the `modal-` prefix for class names and read this id as one — a
+ * reasonable mistake for a scanner to make, and a reason not to give an id a
+ * name the stylesheet's own namespace uses.
+ */
+export const MODAL_DESCRIPTION_ID = 'dialog-description';
+
 
 /**
  * The single dialog shell used by every modal in the app.
@@ -86,6 +100,11 @@ export default function Modal({
    * Preferred over `label` where they exist: an `aria-label` is a second copy
    * of a heading that is already on screen, and the copy is the one that goes
    * stale. `label` stays for the dialogs whose name is not rendered anywhere.
+   *
+   * `describedBy` is for a dialog that builds its own head and therefore owns
+   * the id — the mandatory legal dialog puts an icon beside its heading, so it
+   * passes `children` to `ModalHead` rather than `title`. A dialog using the
+   * standard head does NOT need this: that path is detected below.
    */
   labelledBy = null,
   describedBy = null,
@@ -102,6 +121,25 @@ export default function Modal({
     mandatory ? undefined : onClose,
     { dismissible: !mandatory, initialFocus }
   );
+
+  /**
+   * Whether the STANDARD head is on screen with a description to point at.
+   *
+   * Named for the head rather than the attribute because `describedBy` above is
+   * a prop now: a dialog that builds its own head names its own id, and this
+   * detects the other path.
+   *
+   * `aria-describedby` naming an element that does not exist is worse than not
+   * setting it: some screen readers announce nothing for the name either. So it
+   * is set only when the head is on screen, which is detected rather than
+   * declared — a caller passing `<ModalHead description=…>` should not also
+   * have to remember a flag.
+   */
+  const [headDescribedBy, setHeadDescribedBy] = useState(undefined);
+  useEffect(() => {
+    const node = dialogRef.current?.querySelector(`#${MODAL_DESCRIPTION_ID}`);
+    setHeadDescribedBy(node ? MODAL_DESCRIPTION_ID : undefined);
+  }, [dialogRef, children]);
 
   /* Guarded for the server/test renderers that have no document — the component
      is imported by suites that never mount it. */
@@ -124,7 +162,10 @@ export default function Modal({
            `label` remains the fallback and every existing caller passes it. */
         aria-labelledby={labelledBy || undefined}
         aria-label={labelledBy ? undefined : label}
-        aria-describedby={describedBy || undefined}
+        /* An id the caller named wins over the one detected from the standard
+           head. Both end up undefined when there is neither, which is what
+           keeps `aria-describedby` off a dialog that has nothing to point at. */
+        aria-describedby={describedBy || headDescribedBy}
       >
         {children}
       </div>
@@ -137,18 +178,16 @@ export default function Modal({
 /**
  * Standard dialog header: title, optional description, and a close control.
  *
- * `titleId` / `descriptionId` are for a dialog that names itself through
- * `aria-labelledby` rather than `aria-label` — pass the same values to `Modal`.
  * Omitting `onClose` renders no close control, which is what a mandatory dialog
  * wants: an `X` that puts the same dialog straight back is worse than no `X`.
  */
-export function ModalHead({ title, description, onClose, children, titleId, descriptionId }) {
+export function ModalHead({ title, description, onClose, children }) {
   return (
     <div className="modal-head">
       {children || (
         <div>
-          <h2 id={titleId}>{title}</h2>
-          {description && <p className="lead" id={descriptionId}>{description}</p>}
+          <h2>{title}</h2>
+          {description && <p className="lead" id={MODAL_DESCRIPTION_ID}>{description}</p>}
         </div>
       )}
       {onClose && (

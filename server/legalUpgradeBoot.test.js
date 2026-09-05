@@ -3,6 +3,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { daysAhead } from './testing/dates.js';
+
+/* Computed, not written down: these were `2027-01-01` and `2027-02-01`, which
+   pass today and become past dates in four months — at which point
+   `parseEffectiveAt` refuses them. Found by the guard in `legalStore.test.js`,
+   which exists because the same bug had already cost 28 tests in the two
+   editor suites. Both stay comfortably inside `MAX_EFFECTIVE_DAYS_AHEAD`.
 
 /**
  * An EXISTING database can still boot the current registry.
@@ -254,7 +261,7 @@ describe('a catalogue row the registry no longer declares', () => {
         slug: 'privacy-policy',
         version: '1.0.1',
         body: '# Privacy Policy\n\nA revision published by the editor.',
-        effectiveAt: '2027-01-01',
+        effectiveAt: daysAhead(120),
         actorId: 'system-cli',
       }),
       'the next ordinary revision of the Privacy Policy is 1.0.1; a database '
@@ -317,7 +324,7 @@ describe('publishing a revision through the editor', () => {
       slug: target.slug,
       version: '1.1.0',
       body: '# Organizer Agreement\n\nA revision published through the editor.',
-      effectiveAt: '2027-02-01',
+      effectiveAt: daysAhead(150),
       userId: 'system-cli',
     });
 

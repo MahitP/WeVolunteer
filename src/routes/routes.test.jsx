@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { ROUTES, withProps } from './index.jsx';
+import { ROUTES, APP_ROUTES, SIGNED_OUT_ROUTES, PUBLIC_ROUTES, withProps } from './index.jsx';
 import { can } from '../authz.js';
 
 describe('route table', () => {
@@ -12,9 +12,52 @@ describe('route table', () => {
     }
   });
 
-  it('has no duplicate paths', () => {
-    const paths = ROUTES.map(r => r.path);
-    expect(new Set(paths).size).toBe(paths.length);
+  /**
+   * No duplicates WITHIN a table.
+   *
+   * It used to be across the concatenation, which was the same assertion while
+   * every path lived in exactly one table. `/organizations/:key` is now in two:
+   * `APP_ROUTES` serves it to a member as their club's page, `PUBLIC_ROUTES`
+   * serves it to a stranger as the club's public address, and App.jsx picks
+   * between them on the session — see `shellWhenSignedIn` and Guard 4 in
+   * `routeGating.guard.test.js`, which is what stops that split from becoming
+   * decorative.
+   *
+   * Per-table is the assertion that still catches the real mistake: two entries
+   * in ONE table with the same path, where the second is dead code the router
+   * will never reach.
+   */
+  it('has no duplicate paths within a table', () => {
+    for (const [name, table] of [
+      ['APP_ROUTES', APP_ROUTES],
+      ['SIGNED_OUT_ROUTES', SIGNED_OUT_ROUTES],
+      ['PUBLIC_ROUTES', PUBLIC_ROUTES],
+    ]) {
+      const paths = table.map(r => r.path);
+      const duplicated = paths.filter((path, i) => paths.indexOf(path) !== i);
+      expect(duplicated, `${name} declares the same path twice`).toEqual([]);
+    }
+  });
+
+  /**
+   * And a path in two tables is only ever the deliberate session split.
+   *
+   * Any other cross-table duplicate is a route that renders one thing for a
+   * signed-out reader and a different thing for a member with no flag saying
+   * so, which is exactly the confusion the flag exists to make visible.
+   */
+  it('shares a path across tables only where the split is declared', () => {
+    const publicPaths = new Set(PUBLIC_ROUTES.map(r => r.path));
+    const undeclared = APP_ROUTES
+      .filter(r => publicPaths.has(r.path))
+      .filter(r => !PUBLIC_ROUTES.find(p => p.path === r.path)?.shellWhenSignedIn)
+      .map(r => r.path);
+
+    expect(
+      undeclared,
+      'these paths are in both APP_ROUTES and PUBLIC_ROUTES without shellWhenSignedIn, '
+      + 'so the public one wins for every reader including members',
+    ).toEqual([]);
   });
 
   /* Both forms of the gate, so a route declared with `requiredCapAny` is not

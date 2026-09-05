@@ -11,10 +11,11 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * asserted against the running app by the sweep instead: a fixture that 404s
  * fails the route, which is the signal that a seed changed.
  *
- * The 12 parameterised routes these serve: /events/:id/edit, /checkin/:eventId,
+ * The 13 parameterised routes these serve: /events/:id/edit, /checkin/:eventId,
  * /users/id/:id, /users/:handle, /users/:handle/badges,
  * /users/:handle/certificates, /users/:handle/hours, /organizations/:key,
- * /organizations/:key/edit, /verify/:code, /legal/:slug, /appeal/:token.
+ * /organizations/:key/edit, /organizations/invite/:token, /verify/:code,
+ * /legal/:slug, /appeal/:token.
  *
  * A value that CANNOT be written down belongs in `fixtures.mjs`, which asks the
  * running application at walk time and whose answer `walk.mjs` merges over this
@@ -48,12 +49,35 @@ export const FIXTURES = {
      the route is reported unmeasured rather than silently audited. */
   code: 'no-live-certificate-code',
   slug: 'terms-of-service',
-  /* No fixture is possible for these two with the demo seed: `organizations` is
-     empty, and an appeal token is minted per decision and cannot be invented.
-     Named here so the reason is recorded rather than looking like an oversight —
-     walk.mjs reports them as unmeasured, which is the honest outcome. */
+  /**
+   * No fixture is possible for these with the demo seed.
+   *
+   * `organizations` is empty, an appeal token is minted per decision, and an
+   * organization invitation token is 32 random bytes stored per club — so all
+   * three would have to be invented. Named here so the reason is recorded
+   * rather than looking like an oversight; walk.mjs reports them as unmeasured,
+   * which is the honest outcome.
+   *
+   * `token` is shared by `/appeal/:token` and `/organizations/invite/:token`,
+   * and both are unresolvable for the same reason, so one placeholder is
+   * accurate for both — which is why it is not named after either.
+   *
+   * It stays a placeholder rather than becoming a real invitation link on
+   * purpose. `fixtures.mjs` is the right home for a value that has to be asked
+   * of the running application, and an organization key genuinely belongs there
+   * the day the demo seed gains a club — but an invitation token does not:
+   * resolving one would put a live bearer credential into the walk, which is
+   * the thing every other token in this codebase is arranged to avoid. The
+   * invitation page's own states are covered by
+   * `src/views/OrganizationInvite.test.jsx`.
+   *
+   * `/organizations/:key` IS now partly measured despite the placeholder,
+   * because that path is served to a signed-out reader as well and the
+   * placeholder lands on its "this page needs an account" state — which owns an
+   * `h1` precisely so the sweep has something to measure there.
+   */
   key: 'no-seeded-organization',
-  token: 'no-seeded-appeal-token'
+  token: 'no-seeded-token'
 };
 
 /**
