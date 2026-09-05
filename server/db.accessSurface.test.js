@@ -54,7 +54,25 @@ const SERVER = path.resolve(import.meta.dirname);
  * Recorded because it is the second time in this project a hand count and a
  * committed scan have disagreed, and the scan has been right both times.
  */
-const MAX_GLOBAL_IMPORT_FILES = 42;
+/**
+ * 42 → 44 with the Owner Center and the certificate viewer.
+ *
+ * Raised deliberately, with the reason this file asks for. Both additions are
+ * ROUTE modules — `routes/ownerRoutes.js` and `routes/certificateRoutes.js` —
+ * and a route module has no injection point: `app.js` mounts an exported
+ * `Router`, so there is nowhere to pass a handle in. Every one of the twenty
+ * route files already on this list is here for the same structural reason.
+ *
+ * What was avoided is the part that matters. Neither new file QUERIES the
+ * global: both hold it only to hand it on to modules that take a handle as a
+ * parameter — `serviceHealth.js` (written for this, `databaseHealth(db)` and
+ * `errorTrend(db)`), `hoursLedger.js` (`hoursLedgerStatus(db)`, moved out of
+ * `adminRoutes.js` in the same change) and `certificates.js`
+ * (`getCertificateForOwner(db, …)`). That is the shape the six pre-existing
+ * non-querying importers already have, and it is why the CALL-SITE ceiling
+ * below did not move: the queries went to modules the port can convert.
+ */
+const MAX_GLOBAL_IMPORT_FILES = 44;
 /**
  * 653 → 518 after the phase 7 transaction waves (9–16).
  *

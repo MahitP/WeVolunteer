@@ -14,8 +14,8 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
  * The 13 parameterised routes these serve: /events/:id/edit, /checkin/:eventId,
  * /users/id/:id, /users/:handle, /users/:handle/badges,
  * /users/:handle/certificates, /users/:handle/hours, /organizations/:key,
- * /organizations/:key/edit, /organizations/invite/:token, /verify/:code,
- * /legal/:slug, /appeal/:token.
+ * /organizations/:key/edit, /organizations/invite/:token, /certificates/:code,
+ * /verify/:code, /legal/:slug, /appeal/:token.
  *
  * A value that CANNOT be written down belongs in `fixtures.mjs`, which asks the
  * running application at walk time and whose answer `walk.mjs` merges over this
@@ -45,8 +45,10 @@ export const FIXTURES = {
      Certificate", which the sweep measured and reported as coverage of the
      public verification page. `fixtures.mjs` resolves the real one from
      `/api/certificates` at walk time; this placeholder is what stands if that
-     lookup finds nothing, and it renders a panel `walk.mjs` can recognise, so
-     the route is reported unmeasured rather than silently audited. */
+     lookup finds nothing, and BOTH routes it fills — `/certificates/:code`, the
+     student's own document, and `/verify/:code`, the public check — render a
+     panel `walk.mjs` can recognise, so they are reported unmeasured rather than
+     silently audited. */
   code: 'no-live-certificate-code',
   slug: 'terms-of-service',
   /**
@@ -79,6 +81,42 @@ export const FIXTURES = {
   key: 'no-seeded-organization',
   token: 'no-seeded-token'
 };
+
+/**
+ * Routes the role sweep cannot measure, and why — one entry, one reason.
+ *
+ * This is NOT a list of routes that are awkward. It is a list of routes whose
+ * page cannot be reached by the sweep's own definition of a visitor, so a
+ * "measurement" of them could only ever be a measurement of an error panel.
+ *
+ * `/certificates/:code` is the case that forced this to exist, and it is worth
+ * stating precisely, because the obvious diagnosis is wrong. It is not a fixture
+ * problem — `fixtures.mjs` resolves a real, current code, and `/verify/:code`
+ * is measured with that very same code on every run. It is an OWNERSHIP problem:
+ * `getCertificateForOwner` scopes every read to `user_id`, so a certificate can
+ * only be opened by the student who earned it. The sweep signs in as the first
+ * account of each role (`fetchRoles` deduplicates to one per role), which for
+ * students is `user-student-1`, and the seed's only attended event belongs to
+ * `user-student-2`. So the sweep is authenticated as somebody who is correctly
+ * refused, and the 404 it sees is the product working.
+ *
+ * No code fixes that, which is why this is recorded here rather than chased.
+ * The real page is audited by `a11y/workflows/certificate.spec.js`, which signs
+ * in as the holder and runs axe, the one-`h1` rule and the heading-level check
+ * against the document itself.
+ *
+ * `walk.mjs` keeps these in a separate bucket from the routes that surprised it,
+ * so the sweeps can go on asserting that NOTHING ELSE went unmeasured — and
+ * `sweep.aria.spec.js` asserts that every route named here really did turn up
+ * unmeasured, so an entry that stops being true has to be removed rather than
+ * quietly excusing a route that works.
+ */
+export const SWEEP_CANNOT_MEASURE = Object.freeze({
+  '/certificates/:code':
+    'owner-scoped: getCertificateForOwner reads by user_id, the seeded certificate '
+    + 'belongs to user-student-2, and the sweep signs in as user-student-1. Covered '
+    + 'by a11y/workflows/certificate.spec.js, which signs in as the holder.'
+});
 
 /**
  * A route path with its parameters filled in.
@@ -200,6 +238,10 @@ export const ROUTES = [...SRC.matchAll(/\{\s*path:\s*'([^']+)'/g)]
       concrete,
       parameterised,
       group,
+      /* The reason this route cannot be measured by the sweep, or undefined for
+         the forty-odd that can. Carried on the route rather than looked up at the
+         call site, so `walk.mjs` never has to know the list. */
+      sweepCannotMeasure: SWEEP_CANNOT_MEASURE[routePath],
       /* A signed-out route cannot be measured while authenticated: it redirects.
          A public route is reachable either way and is worth measuring signed out,
          because that is how a shared link is opened. */

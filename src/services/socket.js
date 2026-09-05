@@ -23,18 +23,25 @@ export function connectSocket() {
     randomizationFactor: 0.5,
   });
 
+  /* Behind import.meta.env.DEV, matching App.jsx. Vite inlines the constant and
+     drops the branch from the production bundle, so these do not print the
+     socket id into every user's console — which they did, on every connect and
+     every reconnect. Useful while developing, noise in production. */
   socketInstance.on('connect', () => {
-    console.log('[socket] Connected', socketInstance.id);
+    if (import.meta.env.DEV) console.log('[socket] Connected', socketInstance.id);
     window.dispatchEvent(new CustomEvent('wev:socket_connect'));
   });
 
+  /* No branch on `io server disconnect` here, deliberately.
+     socket.io reconnects on its own for every reason EXCEPT that one, where the
+     server hung up and the client is expected to reconnect manually. We do not:
+     the case that produces it is `session.invalidated`, and a socket whose
+     session was invalidated should stay down. Doing nothing is the behaviour —
+     this used to be an empty `if` holding the same reasoning, which reads as
+     unfinished work rather than as a decision. */
   socketInstance.on('disconnect', (reason) => {
-    console.log('[socket] Disconnected:', reason);
+    if (import.meta.env.DEV) console.log('[socket] Disconnected:', reason);
     window.dispatchEvent(new CustomEvent('wev:socket_disconnect'));
-    if (reason === 'io server disconnect') {
-      // the disconnection was initiated by the server, you need to reconnect manually
-      // but in our case, if it was 'session.invalidated', we want it to stay dead
-    }
   });
 
   socketInstance.on('session.invalidated', () => {

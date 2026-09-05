@@ -518,6 +518,12 @@ export function tabForPath(pathname) {
   /* Before `/hours`, which is a prefix of it. */
   if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/hours')) return 'loggedHours';
+  /* Before `/certificates`, which is a prefix of it: without this the viewer
+     would be titled "Certificates / One for each event you have completed",
+     which is the list's description of itself, on a page showing one document.
+     That is the defect `pageTitleCoverage.test.js` exists to catch, and it is
+     recorded three times above. */
+  if (/^\/certificates\/.+/.test(pathname)) return 'certificate';
   if (pathname.startsWith('/certificates')) return 'certificates';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/report-issue')) return 'reportIssue';
@@ -538,6 +544,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
   if (pathname.startsWith('/admin/moderation')) return 'moderation';
   if (pathname.startsWith('/admin/impact')) return 'adminImpact';
+  if (pathname.startsWith('/owner')) return 'owner';
   if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
@@ -598,6 +605,10 @@ export const RAIL_TAB = {
   portfolio: 'dashboard',
   loggedHours: 'dashboard',
   certificates: 'dashboard',
+  /* The viewer is reached from the certificates list, which is reached from the
+     dashboard — so it borrows the same highlight rather than leaving the rail
+     dark, which reads as having navigated out of the application. */
+  certificate: 'dashboard',
   reportIssue: 'dashboard',
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
@@ -702,6 +713,7 @@ export const PAGE_META = {
     profile: { title: 'Profile', sub: 'Your service record, milestones, and certificates' },
     loggedHours: { title: 'Logged hours', sub: 'Everything you have volunteered, confirmed and self-reported' },
     certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    certificate: { title: 'Certificate', sub: 'Download it, print it, or share the verification link' },
     reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering you did somewhere WeVolunteer does not run' },
     /* Reached from the search on Discover, and titled for what is on the
@@ -778,6 +790,11 @@ export const PAGE_META = {
     /* An owner holds '*', so both hour pages are reachable from this persona. */
     loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
     certificates: { title: 'Certificates', sub: 'One for each event you have completed' },
+    certificate: { title: 'Certificate', sub: 'Download it, print it, or share the verification link' },
+    /* `staff` only, like `audit`, `roster` and `legalEditor` above:
+       `owner.console` is SUPER_ONLY, so no other persona can open the page and
+       an entry under one would be a title nobody will ever see. */
+    owner: { title: 'Owner Center', sub: 'Whether WeVolunteer is healthy, and what needs attention' },
     reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     externalHours: { title: 'Log external hours', sub: 'Volunteering done outside WeVolunteer' }
   },
@@ -1638,7 +1655,11 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/users/:handle/badges': { currentUser },
     '/users/:handle/certificates': { currentUser },
     '/users/:handle/hours': { currentUser },
-    '/certificates': { currentUser, addToast },
+    '/certificates': {},
+    /* `currentUser` supplies the volunteer's name and grade for the document
+       itself, and `addToast` reports a failed download without taking the
+       reader off the page they were looking at. */
+    '/certificates/:code': { currentUser, addToast },
     /* No `location`: this scope's `location` is react-router's, and Welly reads
        coordinates from LocationContext itself. Passing it here is what made
        every "near me" search silently unlocated. */
@@ -1669,6 +1690,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/badges': {},
     '/admin/legal': { addToast },
     '/admin/impact': {},
+    '/owner': { addToast },
     '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }
   };
 
@@ -1868,7 +1890,6 @@ function AppShell({ toasts, addToast, removeToast }) {
                 onBack={() => setViewingProfileState(null)}
                 onEditProfile={() => setEditingProfile(true)}
                 onViewEvent={(id) => { setViewingProfileState(null); openEventById(id); }}
-                addToast={addToast}
               />
             )
           ) : (
@@ -1956,7 +1977,6 @@ function AppShell({ toasts, addToast, removeToast }) {
                     currentUser={currentUser}
                     onEditProfile={() => setEditingProfile(true)}
                     onViewEvent={openEventById}
-                    addToast={addToast}
                   />
                 ) : selfProfile === 'host' ? (
                   <OrganizerProfile

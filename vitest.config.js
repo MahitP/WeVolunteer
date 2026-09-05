@@ -71,7 +71,17 @@ export default defineConfig({
              behind. See server/testTempCleanup.js for why this is one global hook
              with an age threshold rather than 55 afterAll blocks. */
           globalSetup: ['./server/testTempCleanup.js'],
-          include: ['server/**/*.test.js', 'a11y/**/*.test.js'],
+          /**
+           * `bin/**` is here because the operator tooling had no tests at all,
+           * and it is the code that runs unattended with the most privilege:
+           * backups, restores, ownership grants, database resets. A defect in
+           * `server/` shows up as a failing request someone reports. A defect
+           * in `bin/` shows up as a backup that was never valid, discovered
+           * during the restore that needed it.
+           *
+           * `.mjs` as well as `.js` because that is what bin/ is written in.
+           */
+          include: ['server/**/*.test.js', 'a11y/**/*.test.js', 'bin/**/*.test.{js,mjs}'],
           exclude: EXCLUDE,
           environment: 'node',
           isolate: true,

@@ -1132,6 +1132,64 @@ export const api = {
   // ── Certificates ───────────────────────────────
   fetchCertificates: async () => apiFetch('/api/certificates'),
 
+  /**
+   * One certificate, by its verification code — the viewer's only read.
+   *
+   * The server scopes the lookup to the caller's own certificates and answers
+   * 404 for anybody else's, identically to a code that does not exist. So a
+   * 404 here means "not yours or not real" and the view says exactly that
+   * rather than guessing which.
+   */
+  fetchCertificate: async (code) => apiFetch(`/api/certificates/${encodeURIComponent(code)}`),
+
+  /**
+   * The certificate as a PDF, fetched as a blob rather than navigated to.
+   *
+   * ── Why not `window.location.href` or a plain link ──
+   *
+   * Two reasons, and the first is the whole point of the feature. A top-level
+   * navigation to a PDF is answered by the browser's own viewer on most
+   * desktops — which is the experience this work exists to replace — and the
+   * `Content-Disposition: attachment` header only mostly prevents that. Second,
+   * a navigation cannot report a failure: a 404 or a 500 replaces the page the
+   * reader was on with a JSON error, and they have lost their certificate to
+   * get an error message.
+   *
+   * Fetched here, the failure is an `ApiError` the view turns into a toast, and
+   * the reader stays where they were. `downloadExport` next door does the same
+   * thing for the same second reason.
+   */
+  downloadCertificatePdf: async (code) => {
+    const response = await fetch(`/api/certificates/${encodeURIComponent(code)}/pdf`, {
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      let data = null;
+      const body = await response.text().catch(() => '');
+      try { data = JSON.parse(body); } catch { /* not every refusal is JSON */ }
+      throw new ApiError(data?.error || messageForStatus(response.status), {
+        status: response.status,
+        data,
+      });
+    }
+
+    return response.blob();
+  },
+
+  // ── Owner Center ───────────────────────────────
+  /**
+   * Four reads, deliberately separate — see the header of
+   * `server/routes/ownerRoutes.js`. `fresh` bypasses the server-side cache and
+   * is what the refresh button sends; it never bypasses request deduplication
+   * or the stale fallback, so holding the button down cannot become a burst of
+   * third-party API calls.
+   */
+  fetchOwnerHealth: async () => apiFetch('/api/owner/health'),
+  fetchOwnerMonitoring: async (fresh = false) => apiFetch(`/api/owner/monitoring${fresh ? '?fresh=1' : ''}`),
+  fetchOwnerAnalytics: async (fresh = false) => apiFetch(`/api/owner/analytics${fresh ? '?fresh=1' : ''}`),
+  fetchOwnerInfrastructure: async (fresh = false) => apiFetch(`/api/owner/infrastructure${fresh ? '?fresh=1' : ''}`),
+
   /* Reporting a problem with the PLATFORM. Not the moderation report, which is
      about a person and lives on that person's own surfaces. */
   submitIssueReport: async (report) => apiFetch('/api/issues', {

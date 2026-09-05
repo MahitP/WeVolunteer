@@ -1,5 +1,13 @@
 # Pinecone: semantic Discover
 
+> **The Owner Center reads this too.** `/owner` shows index reachability, the
+> record count for this deployment's namespace, and how much of the rerank
+> budget the process has spent. It calls `describe_index_stats`, a control-plane
+> read that is not billed in read units and does not touch the 500-reranks-a-
+> month ceiling. There is no reindex button — that stays `npm run
+> pinecone:reindex`, which has a terminal to print progress into. See
+> [`owner-center.md`](owner-center.md).
+
 Two separate things that share a vendor, and the distinction matters as much as
 it does for Better Stack:
 

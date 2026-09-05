@@ -34,7 +34,7 @@ describe('no component hand-rolls a modal overlay', () => {
   /**
    * The property that actually matters: a dialog must have dialog behaviour.
    *
-   * Three components (EventModal, CertificateModal, ProfileEditModal) render
+   * Three components (EventModal, CertificateShareDialog, ProfileEditModal) render
    * their own `.modal-overlay` element but DO call `useModal` and DO set
    * `role="dialog"` and `aria-modal`, so they behave correctly — Escape, focus
    * containment, focus restore and scroll lock all work. Rewriting them to use

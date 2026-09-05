@@ -49,6 +49,12 @@ export async function forEachRoute(
   const redirected = [];
   /* Answered 200 on the right path, but showed an error instead of the page. */
   const unmeasured = [];
+  /* The same thing, for the routes `SWEEP_CANNOT_MEASURE` says cannot be
+     reached by this sweep's kind of visitor. Kept apart so the specs can go on
+     asserting that `unmeasured` is empty — an expected gap and a surprise are
+     different facts, and merging them would either hide the surprise or turn the
+     expected gap into a permanent red. */
+  const expectedUnmeasured = [];
   const visited = [];
 
   /**
@@ -226,10 +232,20 @@ export async function forEachRoute(
         () => document.querySelector('[data-error-kind]')?.getAttribute('data-error-kind') ?? null
       ).catch(() => null);
       if (errorKind === '404' && !route.path.startsWith('/errors')) {
-        unmeasured.push(
-          `${target} (${pass.role.key}) -> rendered a 404, so its path or `
-          + 'fixture does not resolve and the page under this route was never measured'
-        );
+        if (route.sweepCannotMeasure) {
+          /* Prefixed with the DECLARED path, not just the concrete one, so the
+             stale-exemption guard in sweep.aria.spec.js can match these against
+             `SWEEP_CANNOT_MEASURE`'s keys exactly rather than by guessing at a
+             shared prefix. */
+          expectedUnmeasured.push(
+            `${route.path} — ${target} (${pass.role.key}) -> ${route.sweepCannotMeasure}`
+          );
+        } else {
+          unmeasured.push(
+            `${target} (${pass.role.key}) -> rendered a 404, so its path or `
+            + 'fixture does not resolve and the page under this route was never measured'
+          );
+        }
         continue;
       }
 
@@ -239,7 +255,7 @@ export async function forEachRoute(
     await ctx.close();
   }
 
-  return { unreachable, redirected, unmeasured, visited };
+  return { unreachable, redirected, unmeasured, expectedUnmeasured, visited };
 }
 
 async function signedInPasses({ browser, request, baseURL }, roles) {

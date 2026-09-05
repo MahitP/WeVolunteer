@@ -49,7 +49,7 @@ export const reportLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   keyGenerator: (req, res) => {
-    if (!req.user?.id) return ipKeyGenerator(req, res);
+    if (!req.user?.id) return ipKeyGenerator(req.ip);
     return createHash('sha256').update(req.user.id).digest('hex');
   },
   handler: limitHandler('You have reached the maximum number of reports allowed in 24 hours.'),

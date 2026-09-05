@@ -9,14 +9,31 @@ Type=oneshot
 User=wev
 Group=wev
 
-# Paths must match the running service's WEV_DB_PATH. If you relocate the
-# database, change it here too — a backup job silently pointing at a path that
-# no longer exists is the classic way to discover you have no backups.
-Environment=WEV_DB_PATH=/var/lib/wevolunteer/wevolunteer.db
+# ── Which script runs, and why this line changed ───────────────────────────
+#
+# This unit ran `bin/backup.sh`, which is sqlite3-only. Production is
+# PostgreSQL, so the nightly job would have invoked a tool that cannot read the
+# database it is meant to protect — the exact failure the comment below warns
+# about, one engine further along, and invisible until a restore was needed.
+#
+# `bin/backup-postgres.sh` needs DATABASE_URL, which is a secret and therefore
+# comes from the same EnvironmentFile the application uses rather than being
+# written here. `EnvironmentFile=-` tolerates its absence so a SQLite host does
+# not fail to start the timer; the script itself refuses to run without a
+# connection string, which is the check that matters.
+EnvironmentFile=-/etc/wevolunteer/wevolunteer.env
+
 Environment=WEV_BACKUP_DIR=/var/backups/wevolunteer
 Environment=WEV_BACKUP_KEEP_DAYS=14
 
-ExecStart=/srv/wevolunteer/bin/backup.sh
+# pg_dump refuses to dump a server newer than itself and leaves a ZERO-BYTE
+# file behind. Supabase runs PostgreSQL 17; a distribution's default client is
+# often older. Set this to a client whose major matches the server — the script
+# compares the two before doing any work and names this variable if they differ.
+#   Debian/Ubuntu:  apt install postgresql-client-17
+Environment=WEV_PG_BIN=/usr/lib/postgresql/17/bin
+
+ExecStart=/srv/wevolunteer/bin/backup-postgres.sh
 
 # The script exits non-zero on a failed integrity check, so systemd records a
 # failed unit rather than a silent success.
@@ -59,8 +76,9 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/backups/wevolunteer
-# The database itself is only ever read by `.backup`, but SQLite needs to open
-# it read-write to take a consistent online copy.
+# Retained for the SQLite path and for the manifest/scratch files the PostgreSQL
+# script writes beside the database directory. pg_dump itself reaches the server
+# over the network and needs no local write access to the data.
 ReadWritePaths=/var/lib/wevolunteer
 
 StandardOutput=journal

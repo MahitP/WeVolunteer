@@ -167,9 +167,21 @@
   --brand-soft: var(--brand-soft-light);
   --brand-background: var(--brand-background-light);
   --brand-translucent-soft: rgba(15, 107, 69, 0.1);
-  --brand-panel-bg: var(--brand-primary);
+  --brand-panel-bg: var(--brand-surface);
   --brand-panel-border: transparent;
   --brand: var(--brand-primary);
+  /**
+   * The brand green when it is a SURFACE carrying `--ink-inv`, as distinct from
+   * `--brand`, which is the same colour used as ink, a border or an accent.
+   *
+   * Light mode does not need the split — `--brand` is `#0f6b45`, which is
+   * 6.54:1 against white — so these alias straight through and nothing here
+   * changes. The split exists for dark mode, where the two roles genuinely
+   * conflict: see the note beside the dark values.
+   */
+  --brand-surface: var(--brand);
+  --brand-surface-hover: var(--brand-hover);
+  --brand-surface-active: var(--brand-active);
   --brand-tint: var(--brand-soft);
   --brand-tint-2: var(--brand-background);
   --brand-ink: var(--green-800);
@@ -381,13 +393,19 @@
   --ink-3: var(--text-muted);
   --ink-inv: #ffffff;
   --ink-inv-2: rgba(255, 255, 255, 0.9);
-  /* 0.8, not 0.7. At 0.7 this composites to #b7d3c7 on `--brand-panel-bg`
-     (#0f6b45), which is 4.10:1 — under the 4.5:1 body-text requirement, on the
-     dashboard card that tells somebody when their next shift is. 0.8 gives
-     4.81:1 and is still visibly secondary to `--ink-inv`. Measured, not guessed:
-     alpha over a coloured surface is exactly where a muted token stops being
-     readable without anybody noticing. */
-  --ink-inv-3: rgba(255, 255, 255, 0.8);
+  /* 0.85 in dark mode, and the reason is a correction worth recording.
+
+     This token was 0.8, with a note reasoning about `--brand-panel-bg` at
+     #0f6b45 — but that is the LIGHT value. In dark mode `--brand-panel-bg`
+     resolved through `--brand-primary-dark`, so the surface was really #2fa873
+     and 0.8 composited to 2.46:1, not the 4.81:1 the note claimed. The
+     arithmetic was right and the colour it was performed against was wrong,
+     which is the failure a measured comment is supposed to prevent.
+
+     With `--brand-surface` now #19764e (see the brand tokens below), 0.85 gives
+     4.52:1 and stays visibly secondary to `--ink-inv`. Light mode keeps 0.8 on
+     #0f6b45, where the original 4.81:1 measurement does hold. */
+  --ink-inv-3: rgba(255, 255, 255, 0.85);
 
   --border: rgba(199, 208, 203, 0.13);
   --border-hover: rgba(199, 208, 203, 0.24);
@@ -400,9 +418,39 @@
   --brand-soft: var(--brand-soft-dark);
   --brand-background: var(--brand-background-dark);
   --brand-translucent-soft: rgba(47, 191, 131, 0.14);
-  --brand-panel-bg: var(--brand-primary);
+  --brand-panel-bg: var(--brand-surface);
   --brand-panel-border: transparent;
   --brand: var(--brand-primary);
+  /**
+   * Dark mode is where `--brand` as ink and `--brand` as surface stop agreeing.
+   *
+   * `--brand-primary-dark` (#2fa873) is chosen to be READABLE ON a dark page —
+   * it is right for a link, an icon or a chip, and a darker green there would
+   * disappear. Used as a SURFACE under white text it is 3.01:1, against the
+   * 4.5:1 body-text requirement. Every `.btn-primary` in the product was that,
+   * in all three states, and none of it was caught: the route sweep runs in
+   * light mode, where `--brand` is #0f6b45 and passes at 6.54:1.
+   *
+   *   base   #2fa873  3.01:1
+   *   hover  #7de2b8  1.56:1   ← the worst of the three, and invisible in review
+   *   active #21a36f  3.21:1
+   *
+   * So the surface roles get their own values, and `--brand` keeps the lighter
+   * green for the ink/accent job it was picked for. The values below are solved
+   * rather than eyeballed, against four constraints at once: white text >= 4.5:1
+   * (1.4.3), the button's edge >= 3:1 against BOTH the page (#0d100f) and a card
+   * (#171c19) (1.4.11), and hover/active staying visibly distinct from base.
+   *
+   *   base   #19764e  white 5.61:1   edge 3.41 / 3.08
+   *   hover  #1e8459  white 4.67:1   lighter than base, as dark-mode hover reads
+   *   active #15653f  white 7.08:1   darker, as a press reads
+   *
+   * No single green satisfies all four — the search returns empty — which is
+   * why this is a three-value split and not one darker token.
+   */
+  --brand-surface: #19764e;
+  --brand-surface-hover: #1e8459;
+  --brand-surface-active: #15653f;
   --brand-tint: var(--brand-soft);
   --brand-tint-2: var(--brand-background);
   --brand-ink: var(--green-dark-300);
@@ -964,11 +1012,29 @@ time { font-variant-numeric: tabular-nums; }
 .page-head h1, .page-head h2 { font-size: 1.5rem; }
 .page-head .lead { margin-top: var(--s1); }
 
-/* Section header with a hairline that fills remaining width */
+/**
+ * A section heading, a hairline that fills the remaining width, and any actions
+ * for that section.
+ *
+ * `flex-wrap` because a head can carry more than one action — Service history
+ * offers both "My certificates" and "My logged hours" — and without it two
+ * buttons plus a heading overflow their card on a phone instead of moving to a
+ * second line.
+ *
+ * Deliberately nothing else. An earlier revision also reordered the actions to
+ * sit after the `::after` rule, so that a wrapped head kept "heading — rule —
+ * actions" on its first line. It read better in the one narrow column that
+ * wraps, and it silently restyled every section head in the application — the
+ * count beside "Waiting on a reply", every tab's applicant tally, every settings
+ * panel — none of which asked to move. Wrapping alone fixes the overflow and
+ * changes nothing at the widths where a head already fits.
+ */
 .section-head {
   display: flex;
   align-items: center;
   gap: var(--s3);
+  flex-wrap: wrap;
+  row-gap: var(--s2);
   margin-bottom: var(--s4);
 }
 .section-head h2 { flex-shrink: 0; }
@@ -1011,13 +1077,16 @@ time { font-variant-numeric: tabular-nums; }
   cursor: not-allowed;
 }
 
+/* `--brand-surface`, not `--brand`: this is the brand green carrying white text,
+   which is a different contrast problem from the same green used as ink. In
+   light mode the two are the same value. See the tokens. */
 .btn-primary {
-  background: var(--brand);
+  background: var(--brand-surface);
   color: var(--ink-inv);
   box-shadow: var(--sh-1);
 }
-.btn-primary:not(:disabled):hover { background: var(--brand-hover); }
-.btn-primary:not(:disabled):active { background: var(--brand-active); }
+.btn-primary:not(:disabled):hover { background: var(--brand-surface-hover); }
+.btn-primary:not(:disabled):active { background: var(--brand-surface-active); }
 
 .btn-secondary {
   background: var(--surface-elevated);
@@ -1029,6 +1098,28 @@ time { font-variant-numeric: tabular-nums; }
   background: var(--surface-hover);
   border-color: var(--input-border-hover);
 }
+
+/**
+ * The focus ring, restated for buttons that paint their own shadow.
+ *
+ * `:focus-visible { box-shadow: var(--focus) }` near the top of this file is
+ * (0,1,0). So is `.btn-primary { box-shadow: var(--sh-1) }` — and it comes
+ * later, so on every raised button the resting shadow won and the focus ring
+ * was never painted. `:focus-visible` matched, the token resolved, and nothing
+ * appeared: a 2.4.7 failure on the primary and secondary buttons across the
+ * product, keyboard-only, in both themes.
+ *
+ * `focusIndicators.test.js` could not see it. That guard asserts no rule zeroes
+ * an outline and its replacement together, which is a different mistake; here
+ * every declaration is individually correct and the cascade eats the result —
+ * exactly the shape that file's own header warns about.
+ *
+ * `.btn:focus-visible` is (0,2,0), so it beats any single-class shadow whatever
+ * the source order, and it restates rather than replaces: the ring is still
+ * `--focus`, and the forced-colors block still puts a real outline back for
+ * High Contrast Mode.
+ */
+.btn:focus-visible { box-shadow: var(--focus); }
 
 .btn-ghost { background: transparent; color: var(--ink-2); }
 .btn-ghost:not(:disabled):hover { background: var(--surface-3); color: var(--ink); }
@@ -1919,6 +2010,24 @@ time { font-variant-numeric: tabular-nums; }
 }
 .list-row:last-child { border-bottom: none; }
 .list-row:hover { background: var(--surface-2); }
+
+/**
+ * A row that IS a link keeps a row's typography.
+ *
+ * Certificate rows became `<a>` when the viewer got its own address — which is
+ * right (middle-click, cmd-click and "open in new tab" all work on an anchor and
+ * none of them work on a button with an onClick) and had one visible cost: the
+ * global `a { color: var(--brand-ink) }` painted the event title link-green
+ * inside a row where every other title is `--ink`. Two rows side by side, one
+ * green and one not, reads as a difference in the DATA rather than in how the
+ * row happens to be implemented.
+ *
+ * `color: inherit` on the row rather than on `.person-name`, so any future
+ * anchor row inherits the fix. The underline is dropped for the same reason —
+ * the whole row is the target, and it already says so by lifting on hover.
+ */
+a.list-row { color: inherit; }
+a.list-row:hover { text-decoration: none; }
 
 .person {
   display: flex;
@@ -3421,7 +3530,10 @@ time { font-variant-numeric: tabular-nums; }
 .certificate-canvas { background: var(--surface-2); }
 
 .certificate-rule { border-top: 2px solid var(--cert-accent); width: 44px; margin: var(--s5) auto; }
-.certificate h1 {
+/* Class, not tag. The document's heading level depends on what supplies the
+   page's `h1` — the shell does, here — so the tag is a prop and the type scale
+   must not move with it. See CertificateDocument.jsx. */
+.certificate-title {
   font-family: var(--font-doc);
   font-weight: 400;
   font-size: 2rem;
@@ -3549,12 +3661,176 @@ time { font-variant-numeric: tabular-nums; }
  * it would draw a full-width line across the foot of the document and read as a
  * third signature rule.
  */
+/**
+ * The verification block: the code, where to check it, and the QR beside them.
+ *
+ * A centred flex ROW rather than a centred block, since the QR joined it. The
+ * two halves are laid out as a pair and centred together, so neither has to
+ * shrink to accommodate the other; `flex-wrap` stacks them on a narrow phone,
+ * where 96px of code plus a URL on one line is what pushes the paper wider than
+ * the screen.
+ */
 .certificate-verify {
   margin-top: var(--s8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s5);
+  flex-wrap: wrap;
   text-align: center;
+}
+.certificate-verify-text { min-width: 0; }
+/* The verification address. Same size and colour as `.certificate-sign-label`
+   and deliberately NOT the same rule: that one uppercases, which is right for a
+   capacity and wrong for a URL. */
+.certificate-verify-where {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--certificate-ink-3);
+  margin-top: var(--s2);
+  word-break: break-word;
 }
 .certificate-verify .certificate-code {
   display: inline-block;
+}
+/**
+ * The QR code's quiet zone, drawn rather than assumed.
+ *
+ * Literal white, not `--cert-bg`: the paper is warm cream, and a scanner reads
+ * contrast between the modules and their surround. The generated image already
+ * carries a one-module margin (see the `margin: 1` passed to `qrcode` in
+ * `certificateRoutes.js`); this is the printed border around that, which is what
+ * keeps the code readable when the certificate is photographed rather than
+ * scanned.
+ *
+ * `flex-shrink: 0` because a squeezed QR code is an unscannable one.
+ */
+.certificate-qr {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+  background: #ffffff;
+  padding: var(--s2);
+  border: 1px solid var(--cert-border);
+  border-radius: var(--r-sm);
+}
+
+/**
+ * The centred half of the document. Only this part is centred: the signature
+ * blocks below are a flex row whose captions sit left-aligned under each rule,
+ * which is how a signed document reads.
+ */
+.certificate-body { text-align: center; }
+
+/* The connecting lines of the document — "This certifies that", "volunteered
+   at". Was an inline style repeated at each site, which put a colour literal in
+   JSX and made it invisible to the theme guards. */
+.certificate-lede {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  color: var(--certificate-ink-2);
+  margin-top: var(--s5);
+}
+
+/* ── The certificate viewer (/certificates/:code) ─────────────────────────
+ *
+ * The page AROUND the paper. Every rule here is themed normally — it is
+ * application chrome, not the document — which is what lets the certificate
+ * stay a light sheet on a dark page rather than inverting with it.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+.certificate-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+/* `flex-shrink: 0` so Share and Download keep their labels when the title is
+   long; `flex-wrap` on the header above is what moves them to their own line
+   rather than squeezing them. */
+.certificate-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+/**
+ * The workspace the paper sits on.
+ *
+ * `overflow-x: auto` on the stage rather than on the page: a certificate has a
+ * minimum readable width, and when the viewport is narrower than that the
+ * document scrolls inside its own frame instead of taking the whole document
+ * sideways with it. A page that scrolls horizontally is the mobile defect this
+ * is written to avoid.
+ */
+.certificate-stage {
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: var(--s6);
+  overflow-x: auto;
+}
+
+.certificate-note {
+  align-items: flex-start;
+  gap: var(--s2);
+}
+
+/* ── Sharing a certificate ────────────────────────────────────────────── */
+
+.share-link-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s2);
+}
+/* `min-width: 0` because a flex item's automatic minimum is its content, and a
+   verification URL is one unbreakable string — without this the input pushes
+   the dialog wider than the phone it is on. */
+.share-link-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.share-channels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: var(--s2);
+  margin-top: var(--s2);
+  list-style: none;
+  padding: 0;
+}
+.share-channel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  /* 44px, matching the house rule for a control somebody taps on a phone. */
+  min-height: 44px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 500;
+  /* These read as buttons — a bordered box with a label — so an anchor's
+     underline fights the shape rather than reinforcing it. The border and the
+     hover state are what say "this is a target". */
+  text-decoration: none;
+}
+/* Pushed to the trailing edge and quietened: it marks that the link leaves the
+   app, which is true of all four, so it must not compete with the name that
+   tells them apart. */
+.share-channel-mark { color: var(--ink-3); flex-shrink: 0; }
+.share-channel:hover {
+  border-color: var(--rule-strong);
+  background: var(--surface-2);
+  text-decoration: none;
 }
 .certificate-code {
   font-family: var(--font-mono);
@@ -3896,6 +4172,19 @@ time { font-variant-numeric: tabular-nums; }
    */
 
   .certificate { padding: var(--s6); }
+  /* The stage's own padding goes on a phone: the paper's inset is what the
+     reader should see, not two frames inside each other. */
+  .certificate-stage { padding: var(--s3); }
+  /* The header's actions become a full-width row of their own rather than
+     squeezing beside a wrapped title. */
+  .certificate-actions { width: 100%; }
+  .certificate-actions > * { flex: 1; justify-content: center; }
+  /* The document's own type steps down with the paper, so a 27-character event
+     title does not need a horizontal scroll to read. */
+  .certificate-title { font-size: 1.5rem; }
+  .certificate-name { font-size: 1.375rem; }
+  .certificate-event { font-size: 1.125rem; }
+  .certificate-hours { font-size: 2rem; }
 }
 
 @media (max-width: 480px) {
@@ -13117,4 +13406,326 @@ a.btn {
  */
 .err-page {
   display: block;
+}
+
+/* ==========================================================================
+   Owner Center (/owner)
+   ==========================================================================
+
+   The operational cockpit. Everything here is ordinary application chrome and
+   is themed normally — unlike the certificate, which is a document and keeps a
+   fixed palette. Tones are scoped (`.owner-* .tone-ok`) rather than declared as
+   global `.tone-ok`, because `tone-*` already means different things on
+   `.cal-chip` (a filled chip) and `.notif-icon` (a tinted circle), and a third
+   global meaning would collide with both.
+   ========================================================================== */
+
+.owner-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+.owner-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+/* The headline verdict. A pill rather than plain text, because it is the one
+   thing on this page a reader should be able to find without reading. */
+.owner-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-full);
+  border: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.owner-verdict.tone-ok { background: var(--ok-tint); border-color: var(--ok-tint); color: var(--ok); }
+.owner-verdict.tone-warn { background: var(--warn-tint); border-color: var(--warn-tint); color: var(--warn); }
+.owner-verdict.tone-muted { background: var(--surface-2); color: var(--ink-3); }
+
+.owner-updated { margin-top: calc(-1 * var(--s3)); }
+
+/* ── The systems grid ─────────────────────────────────────────────────────
+ *
+ * `auto-fit` with a `minmax` basis rather than a fixed column count: the number
+ * of rows depends on which integrations are configured, so a hard-coded grid
+ * would leave a hole on a deployment running without Redis. */
+.owner-systems {
+  display: grid;
+  /* 17rem, not 15: at the smaller basis a three-word label ("Notification
+     queue") wrapped against a two-word state ("Not configured") and the cells in
+     a row ended at different heights for no reason a reader could see. */
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: var(--s2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.owner-system {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  font-size: 0.875rem;
+}
+.owner-system-icon { color: var(--ink-3); }
+.owner-system-label { font-weight: 600; color: var(--ink); min-width: 0; }
+.owner-system-state { font-weight: 600; font-size: 0.8125rem; white-space: nowrap; }
+/* The detail spans the whole row underneath, so a long reason wraps into the
+   card rather than squeezing the state word it explains. */
+.owner-system-detail {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+/**
+ * The status dot.
+ *
+ * Never the ONLY carrier of the status: every dot sits beside a word that says
+ * the same thing ("Operational", "Degraded", "Not configured"). Colour alone
+ * fails WCAG 1.4.1, and on a page whose entire job is to report state that is
+ * the one place it would matter most.
+ */
+.owner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ink-3);
+}
+.owner-dot.tone-ok { background: var(--ok); }
+.owner-dot.tone-warn { background: var(--warn); }
+.owner-dot.tone-danger { background: var(--danger); }
+.owner-dot.tone-muted { background: var(--ink-3); }
+
+.owner-system-state.tone-ok,
+.owner-list-state.tone-ok,
+.owner-inline-state.tone-ok,
+.owner-figure-trend.tone-ok,
+.owner-notice-title.tone-ok { color: var(--ok); }
+.owner-system-state.tone-warn,
+.owner-list-state.tone-warn,
+.owner-inline-state.tone-warn,
+.owner-figure-trend.tone-warn,
+.owner-notice-title.tone-warn { color: var(--warn); }
+.owner-system-state.tone-danger,
+.owner-list-state.tone-danger,
+.owner-inline-state.tone-danger,
+.owner-notice-title.tone-danger { color: var(--danger); }
+.owner-system-state.tone-muted,
+.owner-list-state.tone-muted,
+.owner-inline-state.tone-muted,
+.owner-figure-trend.tone-muted,
+.owner-notice-title.tone-muted { color: var(--ink-3); }
+
+/* ── Figures ─────────────────────────────────────────────────────────────── */
+
+.owner-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--s3);
+}
+.owner-figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.owner-figure-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.owner-figure-value {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.owner-figure-trend { font-size: 0.75rem; font-weight: 600; }
+.owner-figure-note { font-size: 0.75rem; color: var(--ink-3); }
+
+.owner-spark-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+.owner-spark { display: block; }
+
+/* ── Lists (monitors, incidents) ─────────────────────────────────────────── */
+
+.owner-subhead {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.owner-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.owner-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+/* `min-width: 0` because a flex item's automatic minimum is its content, and a
+   monitor URL is one unbreakable string — without it the row pushes the card
+   wider than the page. */
+.owner-list-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.owner-list-title { font-size: 0.875rem; font-weight: 600; color: var(--ink); }
+.owner-list-sub { font-size: 0.75rem; color: var(--ink-3); }
+.owner-list-state { font-size: 0.8125rem; font-weight: 600; white-space: nowrap; text-transform: capitalize; }
+
+.owner-telemetry { margin-top: var(--s2); }
+
+/* ── Feature usage bars ──────────────────────────────────────────────────── */
+
+.owner-usage {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.owner-usage-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(4rem, 2fr) auto;
+  align-items: center;
+  gap: var(--s3);
+  font-size: 0.8125rem;
+}
+.owner-usage-label { color: var(--ink-2); min-width: 0; }
+/* Quieter than the label it qualifies: it explains the zero beside it rather
+   than competing with the event's name. */
+.owner-usage-note { color: var(--ink-3); font-size: 0.75rem; }
+.owner-usage-track {
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.owner-usage-fill {
+  display: block;
+  height: 100%;
+  /* A real value stays visible however small its share is — see the note at the
+     call site. Rendered only when the total is above zero, so this floor cannot
+     turn "nobody used it" into a visible bar. */
+  min-width: 4px;
+  border-radius: var(--r-full);
+  background: var(--brand);
+}
+.owner-usage-value { color: var(--ink); font-weight: 600; text-align: right; }
+
+/* ── Infrastructure panels ───────────────────────────────────────────────── */
+
+.owner-infra {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: var(--s4);
+}
+.owner-infra-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  align-items: flex-start;
+  padding: var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.owner-inline-state { font-size: 0.9375rem; font-weight: 600; }
+
+.owner-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  width: 100%;
+  margin: 0;
+}
+.owner-meta > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  font-size: 0.8125rem;
+}
+.owner-meta dt { color: var(--ink-3); }
+.owner-meta dd { margin: 0; color: var(--ink); font-weight: 600; min-width: 0; }
+
+/* ── The not-configured / unavailable notice ─────────────────────────────── */
+
+.owner-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  padding: var(--s4);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.owner-notice-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.owner-link { align-self: flex-start; }
+
+/* "This is the last reading, and the service has gone quiet since." Warn rather
+   than danger: the figures beside it were true, they have simply stopped being
+   confirmed — which is a different thing from an outage and should not read as
+   one. */
+.owner-stale {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  font-size: 0.75rem;
+  color: var(--warn);
+}
+
+@media (max-width: 700px) {
+  /* The verdict and the refresh control take the full width rather than
+     wrapping into a ragged pair beside a two-line heading. */
+  .owner-head-actions { width: 100%; }
+  .owner-head-actions > * { flex: 1; justify-content: center; }
+  .owner-usage-row { grid-template-columns: 1fr auto; }
+  /* The bar is the least useful of the three on a phone: the label and the
+     number carry the information, and a 40px track carries none of it. */
+  .owner-usage-track { display: none; }
 }

@@ -487,6 +487,36 @@ export const CAPABILITIES = {
 export const SUPER_ONLY = [
   'error.read', 'error.write',
   'analytics.platform',
+  /**
+   * The Owner Center (`/owner`) — the operational cockpit that reads the
+   * third-party services this deployment runs on.
+   *
+   * ── Why a capability of its own rather than reusing one ──
+   *
+   * Every candidate already means something else, and reusing one would make a
+   * single name authorize two unrelated surfaces — the defect that forced
+   * `audit.read` to be split into `application.read_all` and
+   * `user.contact.read`. `analytics.platform` is the programme's own figures,
+   * counted from this database; `error.read` is the error dashboard's evidence.
+   * This is neither: it is monitor status, incident history, Redis health and
+   * vector-index health, read from Better Stack, Upstash, Pinecone and
+   * Amplitude with credentials that belong to the account that pays for them.
+   *
+   * ── Why SUPER_ONLY, and why ungrantable matters more than owner-only ──
+   *
+   * SUPER_ONLY is checked before per-user grants are consulted, and
+   * `userCapabilities.js` refuses to store a grant naming one. That is the
+   * point. "Let the person who watches the dashboards see the dashboards" is an
+   * extremely reasonable-sounding grant, and what it would actually hand over
+   * is the shape of this deployment's infrastructure — which services exist,
+   * which are degraded, how much of each free tier has been spent, and how many
+   * errors an hour the platform is producing. None of that is a secret the
+   * server ever discloses (no token reaches the browser: see
+   * server/integrations/), but it is an operational map of a service holding
+   * minors' records, and the account that gets it should be a role change
+   * somebody made deliberately rather than a grant somebody found convenient.
+   */
+  'owner.console',
   'impersonation.start',
   'admin.create',
   /**

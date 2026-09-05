@@ -122,8 +122,17 @@ function serverLinks() {
       for (const m of line.matchAll(/\blink:\s*['"](\/[^'"]*)['"]/g)) {
         links.push({ path: m[1], kind: 'notification link', ...at });
       }
-      /* Ternary arms — `payload.x ? `/a/${x}` : '/a'` — carry a literal too. */
-      for (const m of line.matchAll(/\?\s*`(\/[^`]*)`\s*:/g)) {
+      /* Ternary arms — `payload.x ? `/a/${x}` : '/a'` — carry a literal too.
+       *
+       * The first path segment must start LOWERCASE, exactly as the rule below
+       * already requires. Every route this application declares is lowercase,
+       * and the constraint is what stops the scan reading syntax that merely
+       * looks like a path: `server/pdfWriter.js` builds a PDF metadata
+       * dictionary out of ternaries whose arms are `/Title (…)`, `/Author (…)`
+       * and `/Subject (…)`. Those are PDF dictionary keys, not URLs, and
+       * reporting them as dead links sends somebody looking for a route that
+       * was never meant to exist. */
+      for (const m of line.matchAll(/\?\s*`(\/[a-z][^`]*)`\s*:/g)) {
         links.push({ path: normalise(m[1]), kind: 'notification link', ...at });
       }
       for (const m of line.matchAll(/:\s*['"](\/[a-z][^'"]*)['"]\s*$/g)) {

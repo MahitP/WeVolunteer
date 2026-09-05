@@ -532,16 +532,57 @@ export async function applyPostgresSchema(db) {
   const { seedPostgresBaseline, postgresIsFresh, runPostgresMigrations } =
     await import('../migrations/index.js');
 
+  /* Refuse a database created by a different schema source before touching it.
+     Lives in its own module rather than inline HERE because this file is
+     generated: an inline guard would be silently deleted by the next
+     regeneration, which is exactly the kind of quiet loss it exists to catch.
+     See server/db/schemaSourceGuard.js. */
+  const { assertSchemaSourceCompatible } = await import('./schemaSourceGuard.js');
+  await assertSchemaSourceCompatible(db);
+
   const fresh = await postgresIsFresh(db);
 
-  await db.exec(POSTGRES_SCHEMA);
-
-  /* SQLite-style \`?\` placeholders, not \`$1\`: every statement in this codebase
-     goes through \`translatePlaceholders\`, which rewrites \`?\` into PostgreSQL's
-     numbered form. Writing \`$1\` here bypasses the translator, which then reports
-     zero parameters and PostgreSQL answers "there is no parameter $1". */
-  if (fresh) await seedPostgresBaseline(db);
-  else await runPostgresMigrations(db);
+  /**
+   * On an EXISTING database the migrations run FIRST, and the order is the
+   * whole point.
+   *
+   * This DDL is generated from a fully-migrated SQLite database, so it contains
+   * the finished shape — including indexes over columns that older deployments
+   * do not have yet. \`CREATE TABLE IF NOT EXISTS events\` against a table that
+   * already exists is a no-op and does NOT add the column; the
+   * \`CREATE INDEX IF NOT EXISTS … (status, first_slot_start, id)\` two lines
+   * later is not a no-op, and fails with
+   * \`column "first_slot_start" does not exist\`.
+   *
+   * That is a boot failure for every deployment upgrading across a migration
+   * that adds a column and an index on it — found on the real Supabase
+   * database, which had been provisioned at migration 61 and refused to come up
+   * on 64. It fails loudly and rolls back the implicit transaction, which is the
+   * only forgiving thing about it.
+   *
+   * Walking the migrations first puts the database into the shape this DDL
+   * describes, after which every statement here is the no-op it was always meant
+   * to be. The DDL still runs afterwards, so it keeps its second job: repairing
+   * a database missing an object outright.
+   *
+   * A FRESH database keeps the original order, because there the DDL is not a
+   * repair net, it is the whole schema — and nothing can be migrated onto a
+   * database with no tables.
+   *
+   * SQLite-style \`?\` placeholders, not \`$1\`: every statement in this codebase
+   * goes through \`translatePlaceholders\`, which rewrites \`?\` into PostgreSQL's
+   * numbered form. Writing \`$1\` here bypasses the translator, which then reports
+   * zero parameters and PostgreSQL answers "there is no parameter $1".
+   *
+   * Ported from claude/wevolunteer-perf-scaling-ad3613 (50a25b0).
+   */
+  if (fresh) {
+    await db.exec(POSTGRES_SCHEMA);
+    await seedPostgresBaseline(db);
+  } else {
+    await runPostgresMigrations(db);
+    await db.exec(POSTGRES_SCHEMA);
+  }
 
   /**
    * The reserved \`system-cli\` actor, which the DDL above cannot carry.

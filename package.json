@@ -36,7 +36,8 @@
     "redis:validate": "node --env-file-if-exists=.env bin/upstash-redis.mjs validate",
     "a11y": "node bin/a11y-audit.mjs --yes",
     "a11y:local": "VITE_LOCAL_AI=true node bin/a11y-audit.mjs --yes --grep @local",
-    "a11y:report": "node bin/a11y-report.mjs"
+    "a11y:report": "node bin/a11y-report.mjs",
+    "scan:bundle": "node bin/scan-bundle-secrets.mjs"
   },
   "dependencies": {
     "@amplitude/unified": "^1.1.29",

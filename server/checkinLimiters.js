@@ -25,7 +25,7 @@ import { limitHandler } from './rateLimitResponse.js';
  */
 
 const hashedUserKey = (req, res) => {
-  if (!req.user?.id) return ipKeyGenerator(req, res);
+  if (!req.user?.id) return ipKeyGenerator(req.ip);
   return createHash('sha256').update(req.user.id).digest('hex');
 };
 

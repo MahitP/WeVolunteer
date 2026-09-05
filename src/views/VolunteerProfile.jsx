@@ -6,7 +6,6 @@ import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
-import CertificateModal from '../components/CertificateModal';
 import PreviewList from '../components/common/PreviewList';
 import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
@@ -19,13 +18,12 @@ import { Link } from 'react-router-dom';
  * about service completed or a next step the person can take.
  */
 export default function VolunteerProfile({
-  userId, currentUser, onBack, onEditProfile, onViewEvent, addToast
+  userId, currentUser, onBack, onEditProfile, onViewEvent
 }) {
   const [data, setData] = useState(null);
   const [certificates, setCertificates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [certificate, setCertificate] = useState(null);
 
   const isSelf = userId === currentUser?.id;
 
@@ -377,11 +375,13 @@ export default function VolunteerProfile({
                   moreHref="/certificates"
                   moreLabel={`Show all ${certificates.length} certificates`}
                   renderItem={(c) => (
-                    <button
+                    /* A link to the certificate's own page, not a dialog. See
+                       the note on the same row in `CertificatesPage.jsx`. */
+                    <Link
                       key={c.eventId}
+                      to={`/certificates/${encodeURIComponent(c.code)}`}
                       className="list-row"
                       style={{ width: '100%', textAlign: 'left' }}
-                      onClick={() => setCertificate(c)}
                     >
                       <span className="notif-icon tone-brand"><Award size={15} /></span>
                       <span className="truncate" style={{ flex: 1 }}>
@@ -391,7 +391,7 @@ export default function VolunteerProfile({
                         </span>
                       </span>
                       <span className="small dim nowrap">View</span>
-                    </button>
+                    </Link>
                   )}
                 />
               )}
@@ -399,15 +399,6 @@ export default function VolunteerProfile({
           )}
         </div>
       </div>
-
-      {certificate && (
-        <CertificateModal
-          certificate={certificate}
-          volunteer={volunteer}
-          onClose={() => setCertificate(null)}
-          addToast={addToast}
-        />
-      )}
     </div>
   );
 }
