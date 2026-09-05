@@ -860,7 +860,6 @@ describe('authorization hygiene', () => {
        * future whereabouts. A badge carries neither, and `BadgesList` renders
        * on that same profile page.
        */
-      'GET /api/badges': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'the badge DEFINITION catalogue (name, icon, criteria) — no personal data about anyone; a session is required only to keep it off the open internet, the same reason GET /api/leaderboard gives' },
 
       'GET /api/users/:userId/badges': { category: CATEGORY.INLINE_GATED, reason: 'can(directory.read) at the top, else 403 (badgeRoutes.js) — moved with GET /api/users/:id/profile, whose posture for this class of data it is explicitly matched to; no contact PII and no future whereabouts' },
       'POST /api/reports': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'any signed-in user may file a report against any event/comment; no capability distinction by design (abuse-reporting entry point)' },

@@ -44,16 +44,43 @@ const router = express.Router();
  * two lines up the response.
  */
 
-// GET all badges available in the system
-router.get('/api/badges', authenticateToken, async (req, res) => {
-  try {
-    const badges = await db.prepare('SELECT * FROM badges WHERE active = 1 ORDER BY category, criteria_value').all();
-    res.json({ badges });
-  } catch (err) {
-    console.error('Failed to get badges:', err);
-    res.status(500).json({ error: 'Failed to get badges' });
-  }
-});
+/**
+ * ── `GET /api/badges` was here, and is deleted ──
+ *
+ * It served the badge DEFINITION catalogue — every name, icon and criterion —
+ * to any signed-in caller. Nothing called it, before or after the branch
+ * integration: every badge surface in the product reads
+ * `GET /api/users/:userId/badges` instead, and the administration screen reads
+ * `GET /api/admin/badges`, which also returns inactive rows.
+ *
+ * ── Why deleting is the coherent answer rather than the lazy one ──
+ *
+ * The catalogue is what a "badges you could earn" screen would need, and the
+ * question of whether to build one is a real product decision. The evidence
+ * says this product has already answered it, consistently, everywhere: every
+ * badge surface — `BadgesList`, `/profile/badges`, a public profile — renders
+ * what somebody HAS earned. There is no unearned state, no progress bar and no
+ * "not yet" copy anywhere in the client. The profile area is a RECORD of what
+ * happened, not a checklist of what has not.
+ *
+ * A catalogue would also arrive badly. There are 27 definitions and most are
+ * hours tiers — 5, 10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500 — so an
+ * "earnable" screen is mostly a list of numbers a fifteen-year-old has not
+ * reached. The one goal this product does show, the Silver Award target on the
+ * dashboard, is a single district programme figure with hours-to-go, which is a
+ * different and better-judged thing.
+ *
+ * So the endpoint is not neutral: it is the one badge read that disagrees with
+ * how the rest of the feature is designed, and keeping a dead authenticated
+ * route means classifying it in `authz.completeness.test.js` for ever.
+ *
+ * ── If the decision goes the other way ──
+ *
+ * Restoring it is one revert. A "what could I earn" surface should be designed
+ * first — most likely as the NEXT badge with its progress rather than a wall of
+ * 27 — and the endpoint shaped to serve that, rather than reinstated as-is
+ * because it used to exist.
+ */
 
 /**
  * GET one person's earned badges.

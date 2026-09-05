@@ -58,11 +58,10 @@ describe('badge reads require a session', () => {
     }
   });
 
-  it('refuses an unauthenticated read of the badge catalogue', async () => {
-    const res = await srv.call('GET', '/api/badges');
-    expect(res.status).toBe(401);
-    expect(res.body?.badges).toBeUndefined();
-  });
+  /* The catalogue cases that were here are gone with `GET /api/badges`. It had
+     no caller in the product and disagreed with how every other badge surface
+     works — see the note in badgeRoutes.js. The per-user cases below are the
+     ones that were protecting personal data, and they stay. */
 
   it('refuses an unauthenticated read of one person\'s achievements', async () => {
     const res = await srv.call('GET', `/api/users/${STUDENT}/badges`);
@@ -72,12 +71,13 @@ describe('badge reads require a session', () => {
     expect(JSON.stringify(res.body ?? {})).not.toContain('earned_at');
   });
 
-  it('serves the catalogue to any signed-in caller', async () => {
+  it('answers 404 for the retired catalogue route', async () => {
+    /* Pinned rather than merely deleted: a route that comes back by accident —
+       a revert, a bad merge — should fail here rather than quietly start
+       serving the definition list to every session again. */
     const token = await srv.login('leo.chen@example.com');
     const res = await srv.call('GET', '/api/badges', undefined, token);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.badges)).toBe(true);
-    expect(res.body.badges.length).toBeGreaterThan(0);
+    expect(res.status).toBe(404);
   });
 
   it('serves a volunteer\'s achievements to a signed-in caller, matching the profile page it renders on', async () => {
