@@ -174,8 +174,8 @@ describe('Redis is never a source of truth', () => {
 
   it('the set of modules that touch Redis at all is the reviewed one', () => {
     /* Each is a deliberate decision recorded in docs/operations/upstash.md:
-       three limiter surfaces, two third-party caches, and a read-only status
-       panel. A new one should arrive with a note here rather than by accident —
+       three limiter surfaces, two third-party caches, and two read-only status
+       panels. A new one should arrive with a note here rather than by accident —
        this list is the review, not a formality.
 
        `organizationLimiters.js` is the third limiter surface. It qualifies under
@@ -185,7 +185,15 @@ describe('Redis is never a source of truth', () => {
        reasons about is not at risk, and neither counter is ever read as truth
        about anything. Nothing about organization membership is stored in Redis;
        the source of truth is `organization_members` and
-       `organization_join_requests`. */
+       `organization_join_requests`.
+
+       `integrations/upstash.js` is the Owner Center's read, added with the
+       Owner Center. It is read-only in the strongest sense available: it calls
+       `redisStatus()` (which owns the allowlist of what an operator may know)
+       and `redisPing()`, and nothing else. No key is named, no key is read, and
+       there is deliberately no destructive control anywhere on that page — the
+       one an operator would actually want, "clear the rate limits", would also
+       clear every credential-stuffing counter on a service used by children. */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
       .filter(f => /from\s+['"][^'"]*redis\/[a-zA-Z]+\.js['"]/.test(read(f)))
@@ -194,6 +202,7 @@ describe('Redis is never a source of truth', () => {
 
     expect(callers).toEqual([
       path.join('server', 'app.js'),                      // limiter stores
+      path.join('server', 'integrations', 'upstash.js'),  // Owner Center, read-only
       path.join('server', 'organizationLimiters.js'),     // invite + join throttles
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter

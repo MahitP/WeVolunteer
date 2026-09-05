@@ -55,6 +55,9 @@ import { signInAs } from './signIn.mjs';
  */
 const fixturesByBaseUrl = new Map();
 
+/** The same discipline for the richer lookup `resolveCertificate` serves. */
+const certificateByBaseUrl = new Map();
+
 export function resolveFixtures({ browser, request, baseURL }) {
   const cached = fixturesByBaseUrl.get(baseURL);
   if (cached) return cached;
@@ -70,18 +73,49 @@ export function resolveFixtures({ browser, request, baseURL }) {
 /** Exposed so a test can prove the caching rather than assume it. */
 export function resetFixtureCache() {
   fixturesByBaseUrl.clear();
+  /* Both, or a reset leaves the derived map empty and the source map warm —
+     which reads as "the cache does not work" in one direction and "it never
+     re-resolves" in the other. */
+  certificateByBaseUrl.clear();
 }
 
 async function loadFixtures({ browser, request, baseURL }) {
-  const code = await certificateCode({ browser, request, baseURL });
+  const certificate = await resolveCertificate({ browser, request, baseURL });
   /* An absent value is OMITTED rather than set to null, so the merge in
      `routes.mjs` falls back to the typed placeholder instead of producing
      `/verify/null`. */
-  return code ? { code } : {};
+  return certificate ? { code: certificate.code } : {};
 }
 
 /**
- * A certificate code that exists right now, or null.
+ * The certificate itself: its code, who holds it, and a signed-in session for
+ * them.
+ *
+ * `resolveFixtures` above needs only the code, because `/verify/:code` is
+ * public — anybody may check any code, which is the entire point of that page.
+ * `/certificates/:code` is the opposite: `getCertificateForOwner` scopes every
+ * read to `user_id`, so it can only be opened by the student who earned it, and
+ * a caller that wants to reach it needs the session as well as the code.
+ *
+ * Both come from here so there is ONE thing that knows how to find a
+ * certificate. `a11y/workflows/certificate.spec.js` used to carry its own copy
+ * of this search; two copies of a lookup this fiddly are one edit away from
+ * disagreeing, and a disagreement here looks like an accessibility finding.
+ */
+export function resolveCertificate({ browser, request, baseURL }) {
+  const cached = certificateByBaseUrl.get(baseURL);
+  if (cached) return cached;
+
+  const pending = certificateCode({ browser, request, baseURL }).catch((err) => {
+    certificateByBaseUrl.delete(baseURL);
+    throw err;
+  });
+  certificateByBaseUrl.set(baseURL, pending);
+  return pending;
+}
+
+/**
+ * A certificate that exists right now — `{ code, account, statePath }` — or null.
  *
  * ── Why every student, and not `fetchRoles` ──
  *
@@ -142,7 +176,7 @@ async function certificateCode({ browser, request, baseURL }) {
           `[a11y fixtures] /verify/:code resolved to ${found} (${account.id}) — `
           + 'the sweep measures a real certificate, not a not-found panel.'
         );
-        return found;
+        return { code: found, account, statePath };
       }
     } finally {
       await context.close();

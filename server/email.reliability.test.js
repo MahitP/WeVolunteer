@@ -25,6 +25,9 @@
  * limiter exists to stop (flooding one person's inbox) is per-ADDRESS, not per-IP.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 /**
  * A file-wide budget, measured rather than guessed — the same remedy and the same
@@ -50,6 +53,33 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 vi.setConfig({ testTimeout: 20000 });
 
 async function freshEmail({ failing = false } = {}) {
+  /**
+   * A database of its own, exactly as `freshApp` below already does.
+   *
+   * ── The defect this closes ──
+   *
+   * These cases are about the UN-QUEUED path: an SMTP failure with no outbox to
+   * fall back on, which must return `false` and record the flow. Without a
+   * `WEV_DB_PATH` of their own they inherited whichever database happened to be
+   * on disk — and `db.js` defaults to `server/wevolunteer.db`, which any
+   * developer who has run `npm run dev` has. That database HAS an outbox, so
+   * the send was queued, `sendVerificationEmail` returned `true`, and two cases
+   * failed.
+   *
+   * So the file passed on CI and failed on a working machine, for a reason
+   * nothing in it named. Reproduced against `fe0dae6` — the commit before the
+   * Owner Center work — to confirm it is the ambient database and not a change.
+   *
+   * The path is deliberately NOT initialised: `initDatabase()` is what creates
+   * the schema and it is called explicitly (see `freshApp`), so importing
+   * `db.js` here opens an empty file with no outbox table. That is precisely
+   * the condition these assertions describe, made deterministic instead of
+   * inherited.
+   */
+  process.env.WEV_DB_PATH = path.join(
+    mkdtempSync(path.join(tmpdir(), 'wev-mailhealth-')),
+    'mail.db',
+  );
   process.env.JWT_SECRET = 'x'.repeat(48);
   process.env.APP_URL = 'http://localhost:5173';
   delete process.env.NODE_ENV;

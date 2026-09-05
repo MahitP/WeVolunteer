@@ -197,6 +197,45 @@ const REDACTIONS = [
      `testServer.js` gives its scratch directories, appears in stack traces. */
   [/\bWEV-[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}\b/g, 'certificate code'],
   [/\b[0-9a-f]{24,}\b/gi, 'long hex run — a token, hash or id'],
+  /**
+   * A bare IPv4 literal, which every rule above walks straight past.
+   *
+   * Found by probing the telemetry path with realistic values during the final
+   * pre-launch pass: `logEvent`'s field allowlist drops `ip` outright, so the
+   * structured path was never the exposure. Free text was. A message like
+   * "signed in from 203.0.113.7" reached the wire intact, because an address is
+   * not a URL, not an email, not hex, and not a seven-digit run — it falls
+   * between every rule in this table.
+   *
+   * It matters here rather than in the abstract because an IP is personal data
+   * under GDPR/UK GDPR when it identifies a person, this is a service holding
+   * minors' records, and `error_reports` keeps a message for up to 180 days
+   * where an administrator reads it. The same message also leaves the process
+   * for Better Stack.
+   *
+   * Octets are bounded to 0-255 rather than `\d{1,3}` so the rule matches
+   * addresses and not any four dot-separated numbers. That keeps it off version
+   * strings with three parts (`1.2.0`, the value this process logs as
+   * `release`), ISO timestamps, stack positions (`/x.js:123:456`) and
+   * coordinate pairs — the same restraint the phone rule below documents. A
+   * genuine four-part version like `1.0.0.0` is also a syntactically valid
+   * address and will be redacted; that is the deliberate trade, and it is the
+   * safe direction to be wrong in.
+   *
+   * Word boundaries, so an address is caught with punctuation around it — in
+   * parentheses, at the end of a sentence, after a colon, inside a URL path.
+   * Private and loopback addresses are redacted too: `10.x`, `192.168.x` and
+   * `127.0.0.1` describe internal topology, and a rule with carve-outs is a
+   * rule somebody has to reason about before trusting it.
+   *
+   * IPv6 is deliberately NOT handled here. Every compact pattern for it also
+   * matches a clock — `15:30:00` is three colon-separated hex-legal groups —
+   * and a redactor that eats timestamps out of stack traces costs more than the
+   * case it closes. Closing it properly means a validating matcher rather than
+   * one more line in this table, and it is recorded as follow-up rather than
+   * smuggled in beside an IPv4 fix.
+   */
+  [/\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/g, 'IP address'],
   /* Written phone numbers, BEFORE the digit-run rule below and separate from
      it. That rule names a phone number as one of the things it catches, and it
      only ever caught unformatted ones: `5551234567` was redacted while

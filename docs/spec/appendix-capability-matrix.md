@@ -70,6 +70,7 @@ the registry is acceptable; a test that hardcodes this table is not (P-3).
 | 23 | `impersonation.start` | Begin a read-only impersonation session | **No** | No | Ownership |
 | 24 | `message.send` | Participate in a conversation | Yes | Yes | Write |
 | 25 | `organizer.approve` | Approve or deny a pending organizer | Yes | Yes | Moderation |
+| 25a | `owner.console` | Read the Owner Center (`/owner`): service health, uptime monitors, incidents, usage and infrastructure status | **No** | No | Read, privileged |
 | 26 | `portfolio.write` | Maintain one's own portfolio | Yes | Yes | Self |
 | 27 | `qr.present` | Present a check-in code | Yes | Yes | Self |
 | 28 | `report.evidence.read` | **Read preserved private message bodies** | Yes | Yes | Disclosure, highest |
@@ -82,11 +83,20 @@ the registry is acceptable; a test that hardcodes this table is not (P-3).
 | 35 | `user.suspend` | Suspend and reinstate accounts | Yes | Yes | Enforcement |
 | 36 | `user.warn` | Issue a formal warning | Yes | Yes | Enforcement |
 
+> **This table has drifted from the code, and the code is the registry.**
+> `server/authz.js` is the single source of truth; `ALL_CAPABILITIES` there
+> currently holds 53 names, and this table lists 37. The absent ones arrived with
+> the v1.3 directory and organizations work and were never added here. That is a
+> documentation debt, recorded rather than hidden: nothing enforces this table,
+> and a capability missing from it is still enforced everywhere it matters.
+> Read `server/authz.js` when the answer has to be right.
+
 ### A.3.1 Super-only capabilities
 
-Five. These MUST be declared explicitly even though the wildcard would satisfy them.
+Nine. These MUST be declared explicitly even though the wildcard would satisfy them.
 
-`admin.create`, `analytics.platform`, `error.read`, `error.write`, `impersonation.start`
+`admin.create`, `analytics.platform`, `audit.read`, `error.read`, `error.write`,
+`impersonation.start`, `legal.edit`, `owner.console`, `persona.preview`
 
 **RATIONALE for explicit declaration.** The kernel refuses any capability not named in the
 registry. Without an explicit super-only list, a typo would resolve **true** for the

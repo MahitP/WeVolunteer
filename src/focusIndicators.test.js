@@ -67,6 +67,61 @@ describe('focus indicators', () => {
     ).toEqual([]);
   });
 
+  /**
+   * A resting shadow must not out-rank the focus ring.
+   *
+   * The global rule is `:focus-visible { box-shadow: var(--focus) }` at (0,1,0).
+   * `.btn-primary { box-shadow: var(--sh-1) }` is ALSO (0,1,0) and comes ~60
+   * rules later, so it won on source order and the ring was never painted —
+   * on the primary and secondary buttons, every page, both themes, keyboard
+   * only. `:focus-visible` matched and the token resolved; the cascade ate the
+   * result.
+   *
+   * The test above cannot see this: nothing here zeroes an outline, and nothing
+   * sets `box-shadow: none`. Every declaration is individually correct. So this
+   * asserts the property that was actually violated — for any control that
+   * paints its own resting shadow, some rule of HIGHER specificity must put the
+   * focus ring back.
+   */
+  it('does not let a resting shadow outrank the focus ring', () => {
+    /* (a, b, c) — ids, classes/attrs/pseudo-classes, elements/pseudo-elements. */
+    const specificity = sel => {
+      let a = 0, b = 0, c = 0;
+      sel.replace(/::?[\w-]+(\([^)]*\))?|\.[\w-]+|#[\w-]+|\[[^\]]+\]|[\w-]+/g, m => {
+        if (m[0] === '#') a++;
+        else if (m[0] === '.' || m[0] === '[') b++;
+        else if (m[0] === ':') { if (m.startsWith('::')) c++; else b++; }
+        else c++;
+        return m;
+      });
+      return a * 100 + b * 10 + c;
+    };
+
+    const all = rules();
+    /* Rules that paint a resting (non-focus) shadow on a button. */
+    const resting = all.filter(r =>
+      !/:focus/.test(r.selector)
+      && /(^|,)\s*\.btn[\w-]*\s*$/.test(r.selector)
+      && paintsShadow(r.body));
+
+    /* The strongest rule that puts the ring back on a focused button. */
+    const restorers = all
+      .filter(r => /:focus-visible/.test(r.selector) && /box-shadow\s*:\s*var\(--focus\)/.test(r.body))
+      .filter(r => /^(:focus-visible|\.btn:focus-visible)$/.test(r.selector.trim()))
+      .map(r => specificity(r.selector.trim()));
+    const strongest = Math.max(0, ...restorers);
+
+    const beaten = resting
+      .filter(r => specificity(r.selector) >= strongest)
+      .map(r => r.selector);
+
+    expect(
+      beaten,
+      'these paint a resting box-shadow at a specificity the focus ring cannot beat, '
+      + `so a focused button shows no ring: ${beaten.join(', ')}`
+    ).toEqual([]);
+  });
+
   it('gives the message composer a focus indicator', () => {
     /* The textarea legitimately drops its own outline — the visible border is on
        the form around it — so the indicator has to be findable on the wrapper. */

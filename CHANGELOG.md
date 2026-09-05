@@ -301,6 +301,131 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disclosure, and no per-field allowlist can answer it. Non-members now get the
   count, which names nobody and is what actually answers "is this club real and
   how big is it".
+- **The Owner Center (`/owner`), an owner-only operations page.** One page that
+  answers "is WeVolunteer healthy, and what needs my attention?" without opening
+  four vendor dashboards: service health, the 24-hour error trend, uptime
+  monitors and incidents, usage figures, and Redis and vector-search status —
+  each with a link out to the tool it came from.
+
+  Behind `owner.console`, which is in `SUPER_ONLY`. That makes it owner-only
+  *and ungrantable*: the capability check runs before per-user grants and
+  `userCapabilities.js` refuses to store a grant naming one. An ordinary
+  administrator is refused, which is the row an "admins see the admin pages"
+  assumption gets wrong, so it is asserted per role rather than assumed.
+
+  **Nothing on it writes anything, anywhere.** No acknowledging an incident, no
+  pausing a monitor, no Redis administration. The one destructive control
+  anybody would actually want here — "clear the rate limits, I locked myself
+  out" — would also clear every credential-stuffing counter on a service used by
+  children.
+
+  **Every integration is optional and the page works without all of them.** The
+  half that matters most on a bad day — this process, this database, the error
+  trend, mail and queue health — is read locally and contacts nothing, so the
+  page answers on the day every vendor is unreachable. An unconfigured
+  integration renders as *Not configured* and names the variable that would
+  switch it on; a failed one says which of nine states it is in and still offers
+  the external link. **Nothing from the wire reaches the page**: no response
+  body, no URL, no upstream error text, because a 401 body has been observed to
+  echo back a credential prefix.
+
+  **No polling, ever.** Data is fetched on open and on the refresh button.
+  Amplitude prices queries against an hourly budget and Upstash against a
+  monthly command count, and a dashboard left open in a tab overnight is how a
+  free tier is spent by accident. Reads are cached per provider and deduplicated,
+  and a failed refresh serves the last good answer labelled stale rather than
+  emptying the card. Setup and the free-plan position of each integration:
+  `docs/operations/owner-center.md`.
+
+- **Certificates are reachable from the dashboard.** Every per-event certificate
+  was one avatar menu, one Profile, one scroll and one "Show all N" away — four
+  steps from the page a student lands on, for the artefact this product exists to
+  produce. Worse, the dashboard already carried a button labelled "Hours
+  certificate", which opens the *summary* document and has no verification code,
+  no QR and no download: a student looking for "my certificate" found the one
+  thing that is not it. **Service history** now offers **My certificates** beside
+  **My logged hours**, which is where the shifts those certificates are issued
+  for are already listed.
+
+- **A certificate viewer at `/certificates/:code`, and a real PDF to download.**
+  A certificate used to open in a modal, which meant it had no URL — nothing to
+  share, nothing to bookmark, and a back button that closed the page behind the
+  dialog rather than the dialog. It is now a page: the document on its own
+  workspace, a share dialog, and a download control offering a PDF or the
+  printer.
+
+  **The PDF is generated server-side and is a real file** (`server/pdfWriter.js`,
+  `server/certificatePdf.js`), with the QR code drawn as vector squares so it
+  stays sharp at any zoom and on any printer. Written by hand rather than with a
+  library, and the reasoning is recorded in that file: headless Chrome is a
+  170 MB dependency for one page of text, and a client-side screenshot
+  photographs the live DOM, so the artefact would inherit scroll position, hover
+  states and whichever fonts had loaded. The output is checked by opening it with
+  a real PDF parser and asserting the recipient's name is in it.
+
+  **Sharing hands out the public verification link and nothing else.** The
+  message names the achievement and never the person — no name, no school, no
+  grade — because it also lands in the sharing app's history and a group chat's
+  search index. `navigator.share` is used where the browser has it, since that is
+  where the applications people actually message in live; the per-platform links
+  are the desktop fallback, and copying falls back to the legacy path when the
+  clipboard API is refused on an insecure origin.
+
+  **Reading a certificate is scoped in the query, not in a comparison.**
+  Somebody else's code answers 404 identically to a code that does not exist —
+  the code is a bearer credential printed on paper, so a distinguishable refusal
+  would turn the route into an oracle for which codes are live.
+
+- **The Owner Center now says when it is not sure.** Four states were rendering
+  as something other than what they were, and each of them made the page more
+  confident than the data justified:
+
+  A **stale reading** — the last good value, served because a refresh failed —
+  rendered as an ordinary live card with nothing saying the figures had stopped
+  moving. That is the one way a status page can be actively misleading rather
+  than merely unhelpful, so it now carries a banner and the summary row reads
+  "Last known good" instead of "Operational". A **failed incidents read**
+  rendered nothing at all, and an absent section is indistinguishable from
+  "nothing has gone wrong"; it now says it could not be checked. A **transport
+  failure** printed its internal identifier ("Unreachable · circuit_open")
+  instead of words. And a **real but tiny usage bar** — 12 against 1,240 — drew a
+  sub-pixel sliver, which is what this card uses to mean "not read"; a nonzero
+  value now has a floor, while a genuine zero still draws nothing.
+
+  Ages are also measured server-clock to server-clock now. Comparing the
+  server's timestamp against the browser's silently folded in clock skew, so a
+  laptop an hour out would have called a ninety-second-old figure an hour old.
+
+- **`email.reliability.test.js` no longer depends on what is on disk.** Two cases
+  asserted the un-queued mail path but had no `WEV_DB_PATH` of their own, so they
+  inherited `server/wevolunteer.db` — which any developer who has run `npm run
+  dev` has, and which *has* an outbox. The send was queued, the return value flipped
+  to `true`, and the file failed on a working machine while passing on CI. It now
+  takes a temp database exactly as `freshApp` in the same file already did.
+  Confirmed against `fe0dae6` that this predates the Owner Center work.
+
+- **Four more Owner Center corrections, found by connecting the real accounts.**
+  Better Stack's Uptime API and Amplitude's Dashboard REST API both work on the
+  free plan — verified against the live accounts on 2026-09-03, which settles the
+  two questions neither vendor's pricing page answers. Connecting them surfaced
+  four things no stub would have:
+
+  Amplitude answers **HTTP 400 for an event type it has never recorded**, not a
+  200 with zeros. That was read as a failure, so three of the four tracked events
+  said "Unavailable" on a correctly working installation — the page's phrase for
+  "we could not ask", when the truth is that we asked and the answer is none.
+  They now read **0, marked "not recorded yet"**, which keeps never-seen,
+  zero-this-month and could-not-ask distinguishable.
+
+  An account with **zero monitors** reported "Operational · 0 up" — a green tick
+  for the absence of the check it claims to report. It now reads "No monitors".
+
+  A long-open incident read **"started 476 hours ago"**; relative times now step
+  up to days past two days.
+
+  And `fetchJson` now carries the numeric HTTP status on a failure, which is what
+  lets a provider tell two failures apart. The response *body* still never
+  travels — that boundary is unchanged.
 
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
@@ -633,6 +758,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silent and total: no in-app row and no email job for the one message whose
   absence reads as the club ignoring them. Coerced at the single place that
   writes the row, with a guard over the whole notification registry.
+- **A fleet where every monitor is paused read "Operational".** With zero
+  monitors the uptime card already said "No monitors" — the false-green fixed
+  last round — but *one paused monitor* took the other branch and reported
+  "Operational · 0 up": a green tick for a fleet in which nothing is being
+  checked. The two states are the same fact wearing different hats. It now reads
+  **"All paused — 1 monitor, none currently checking"**, muted rather than red,
+  because a monitor parked until a site goes live is a deliberate state and not
+  a fault. Found the moment the real account had exactly one monitor and it was
+  paused ahead of launch. A partially paused fleet now also says so
+  ("3 up, 1 paused") instead of quietly counting only the active ones.
+
+- **The certificate page had two `h1` elements, and no check could see it.**
+  The shell supplies every route's `h1`; `CertificateDocument` rendered a second.
+  `a11y/sweep.aria.spec.js` asserts exactly one per route and would have failed —
+  except it never reached this page. Certificate codes are `crypto.randomBytes`,
+  so the sweep's typed `:code` fixture resolves to nothing, and what it measured
+  and filed under `/certificates/:code` was the not-found panel. Three changes,
+  because one would only have hidden the next:
+
+  The document's heading is now an `h2` by default and takes `headingLevel` from
+  its caller, the way `EmptyState` already did. `headingLevels.test.js` no longer
+  exempts it — the exemption's stated reason, that print hides the shell so
+  demoting "would leave the printed document with no heading at all", was not
+  what demoting does; it leaves an `h2`. The type scale had to stop hanging off
+  the tag for that to be true, so `.certificate h1` became `.certificate-title`
+  in both its rules.
+
+  `CertificateView`'s not-found panel now carries `data-error-kind`, which is the
+  signal `walk.mjs` reads to tell a measured page from an error panel standing in
+  for one — so a route whose fixture does not resolve is reported as unmeasured
+  rather than claimed as a page the sweep never saw. That is now the backstop
+  rather than the outcome: the live fixture described in the next entry resolves
+  a real code for `:code`, so the sweep reaches this document too.
+
+  And `a11y/workflows/certificate.spec.js` closes the gap rather than only
+  labelling it: it asks the API for a code that exists, then runs axe, the
+  one-`h1` rule and a no-skipped-levels check against the real document. Reported
+  as a gap it would have been; this measures it.
+
+- **The certificate's empty state skipped from `h1` to `h3`.** It is the only
+  thing under the page heading, so `EmptyState`'s default level — right for the
+  twenty-eight callers that sit inside a section — announced a level that was not
+  there. Found by the sweep's own heading report, which had been printing it
+  next to the identical `/organizations/:key` case.
+
+- **A documentation claim that was not true.** An operations note asserted that
+  Better Stack **telemetry** had been restored and live-verified. It had not —
+  or the change did not survive: `BETTERSTACK_SOURCE_TOKEN` and
+  `BETTERSTACK_INGESTING_HOST` are absent from `.env`, and
+  `bin/betterstack-live-check.mjs` refuses up front rather than sending. The
+  note is corrected to record telemetry as **not configured**, which is the
+  honest state and a labelled one: the sink reports `not_configured`, logging
+  falls back to stdout, and nothing in the application depends on it. Worth a
+  changelog line rather than a quiet edit, because a runbook that overstates
+  which credentials are in place is the kind of error that is only discovered
+  during an incident. `.env` and the live check are the only authorities on
+  this; a note claiming otherwise is worth nothing next to either.
 
 - **The accessibility sweep was reporting a not-found panel as coverage of the
   public certificate verification page.** `/verify/:code` took its parameter
@@ -652,6 +834,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certificates makes the sweep report the route as unmeasured rather than
   quietly audit the wrong page again — and the fixture table now fails its guard
   if anybody types a code-shaped literal back into it.
+
+  `/certificates/:code` is the one route a live code does **not** rescue, and the
+  reason is ownership rather than fixtures: `getCertificateForOwner` reads by
+  `user_id`, the seeded certificate belongs to `user-student-2`, and the sweep
+  signs in as the first account of each role — `user-student-1`. The 404 it gets
+  is the product correctly refusing it, so no fixture can ever make that route
+  measurable by the role sweep. `routes.mjs` records it in
+  `SWEEP_CANNOT_MEASURE` with that reason, `walk.mjs` reports it as an expected
+  gap instead of a surprise, and `sweep.aria.spec.js` fails if the exemption ever
+  stops being earned — so an exemption cannot outlive the fact behind it. The
+  page itself is measured by `a11y/workflows/certificate.spec.js`, which signs in
+  as the holder and now shares the harness's one lookup rather than carrying a
+  second copy of it.
 - **A lower version number could compare as higher, permanently.** The version
   comparator was `(major - major) || (minor - minor) || (patch - patch)` over
   components produced by `Number()` with no bound on length. Both halves were

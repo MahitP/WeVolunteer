@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { forEachRoute } from './harness/walk.mjs';
+import { SWEEP_CANNOT_MEASURE } from './harness/routes.mjs';
 
 /**
  * The accessible structure the browser actually computes, per route.
@@ -18,7 +19,7 @@ test('the accessible structure of every route holds up', async ({ browser, reque
   const namelessControls = [];
 
   const titles = [];
-  const { unreachable, unmeasured } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
+  const { unreachable, unmeasured, expectedUnmeasured } = await forEachRoute({ browser, request, baseURL }, {}, async (page, route) => {
     /* 2.4.2 Page Titled — Level A, and the criterion App.jsx's own comment
        records having failed silently once: PAGE_META carried a title for every
        route and nothing wrote it to document.title, so the guard was testing the
@@ -127,6 +128,27 @@ test('the accessible structure of every route holds up', async ({ browser, reque
     unmeasured,
     'these routes answered 200 on the right path but rendered an error instead of '
     + `the page, so nothing about them was actually measured:\n${unmeasured.join('\n')}`
+  ).toEqual([]);
+
+  /**
+   * Guards the exception list, which is the half that rots.
+   *
+   * `SWEEP_CANNOT_MEASURE` buys `/certificates/:code` an exemption from the
+   * assertion above, and an exemption nobody rechecks is how a route stops being
+   * audited for good. So every entry must still be EARNING it: the route has to
+   * have actually turned up unmeasured on this walk. The day ownership changes,
+   * or the seed gives the swept student a certificate, this fails and the entry
+   * has to go — which is the outcome you want, because it means the route can be
+   * measured properly now.
+   */
+  console.log(`expected coverage gaps (${expectedUnmeasured.length}):\n${expectedUnmeasured.join('\n')}`);
+  const stale = Object.keys(SWEEP_CANNOT_MEASURE).filter(
+    routePath => !expectedUnmeasured.some(entry => entry.startsWith(`${routePath} —`))
+  );
+  expect(
+    stale,
+    'these routes are excused from the coverage assertion but were not actually '
+    + `unmeasured, so the exemption is stale and should be deleted:\n${stale.join('\n')}`
   ).toEqual([]);
 
   /* Every route's tab must be distinguishable, and none may be left as the bare

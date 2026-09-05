@@ -322,3 +322,50 @@ export async function getLedgerForUser(db, userId) {
     `SELECT ${seq} AS seq, * FROM hours_ledger WHERE user_id = ? ORDER BY created_at DESC, ${seq} DESC`
   ).all(userId);
 }
+
+/**
+ * Whether the append-only ledger still agrees with `attendance`, as a count.
+ *
+ * `attendance` is the source of truth for credited hours and the ledger is the
+ * history; a divergence means one of them is wrong about a student's service
+ * record. Boot logs a mismatch and carries on by design (taking the platform
+ * down over a reporting discrepancy would be worse), and `verifyHours.js` can
+ * be run by hand — but neither of those puts the answer in front of the person
+ * who would be asked to defend the numbers.
+ *
+ * ── Why this exists beside `verifyLedgerParity` ──
+ *
+ * They answer different questions at different costs. `verifyLedgerParity`
+ * returns the mismatched users themselves, which means loading every user's two
+ * totals into memory — right for the CLI, which is going to print them. This
+ * counts, in one query, so a status panel refreshed every minute stays flat as
+ * the ledger grows and never holds the roster in memory.
+ *
+ * Lived in `adminRoutes.js` until the Owner Center became its second reader.
+ * Moved here rather than copied: two spellings of "do the numbers agree" is two
+ * answers to it, and this is the file the question is about.
+ *
+ * Fails soft. A status panel that goes down during an incident is worse than
+ * one that admits partial ignorance, so a broken check reports `null` rather
+ * than throwing into the handler.
+ */
+export async function hoursLedgerStatus(db) {
+  try {
+    const row = await db.prepare(`
+      SELECT COUNT(*) AS mismatches FROM (
+        SELECT a.user_id
+        FROM attendance a
+        WHERE a.present = 1
+        GROUP BY a.user_id
+        HAVING COALESCE(SUM(a.hours_awarded), 0) <> COALESCE((
+          SELECT SUM(l.delta) FROM hours_ledger l WHERE l.user_id = a.user_id
+        ), 0)
+      )
+    `).get();
+
+    return { inParity: row.mismatches === 0, mismatchedUsers: row.mismatches };
+  } catch (err) {
+    console.error('[hours] Could not check hours ledger parity:', err);
+    return { inParity: null, mismatchedUsers: null, error: true };
+  }
+}

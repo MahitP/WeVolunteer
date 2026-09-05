@@ -53,6 +53,8 @@ import twoFactorRoutes from './routes/twoFactorRoutes.js';
 import directoryRoutes from './routes/directoryRoutes.js';
 import organizationRoutes from './routes/organizationRoutes.js';
 import externalHoursRoutes from './routes/externalHoursRoutes.js';
+import ownerRoutes from './routes/ownerRoutes.js';
+import certificateRoutes from './routes/certificateRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -1157,6 +1159,10 @@ app.use(personaRoutes);
 app.use(eventRoutes);
 app.use(applicationRoutes);
 app.use(attendanceRoutes);
+/* One certificate and its PDF. After `attendanceRoutes`, which owns the list
+   and the public verify endpoint; the paths cannot capture each other (see the
+   header there) but the order matches the way a reader would look for them. */
+app.use(certificateRoutes);
 app.use(adminRoutes);
 app.use(contentRoutes);
 app.use(geocodeRoutes);
@@ -1170,6 +1176,11 @@ app.use(legalRoutes);
    collide with `legalRoutes`' `/api/legal/...`, so the order of these two is
    free — they are adjacent because they are the same subject. */
 app.use(legalAdminRoutes);
+/* The Owner Center's reads. Its paths are `/api/owner/...`, which collide with
+   nothing, and every one of them is gated on `owner.console` — SUPER_ONLY, so no
+   per-user grant can reach them. Mounted next to the other administrative
+   routers because that is what it is. */
+app.use(ownerRoutes);
 app.use(impactRoutes);
 app.use(invitationRoutes);
 app.use(reportRoutes);

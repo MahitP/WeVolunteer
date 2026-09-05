@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck
+  FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck, Award
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
@@ -513,6 +513,30 @@ export default function VolunteerDashboard({
               */}
             <div className="section-head">
               <h2>Service history</h2>
+              {/**
+                * Certificates live beside the shifts they are issued for.
+                *
+                * ── Why the dashboard needed this at all ──
+                *
+                * Every per-event certificate was reachable only through the
+                * profile: avatar menu, Profile, scroll to the Certificates
+                * panel, "Show all N". Four steps from the page a student
+                * actually lands on, for the artefact this product exists to
+                * produce. Meanwhile the dashboard already carried a button
+                * saying "Hours certificate" — which opens the SUMMARY document
+                * and has no verification code, no QR and no download — so a
+                * student looking for "my certificate" found the one thing that
+                * is not it, and nothing pointing at the ones that are.
+                *
+                * Here rather than beside that button, deliberately: this section
+                * lists completed shifts, and the mental model of a per-event
+                * certificate is "one for each of these". Putting the two side by
+                * side in the hours card would have made two differently-named
+                * buttons for two different documents a pixel apart.
+                */}
+              <Link className="btn btn-secondary btn-sm section-action" to="/certificates">
+                <Award size={14} aria-hidden="true" /> My certificates
+              </Link>
               <Link className="btn btn-secondary btn-sm section-action" to="/hours">
                 <History size={14} aria-hidden="true" /> My logged hours
               </Link>
@@ -632,7 +656,7 @@ function CertificateModal({ user, shifts, onClose }) {
             <div style={{ textAlign: 'center' }}>
               <div className="certificate-org">{SCHOOL_NAME}</div>
               <div className="certificate-rule" />
-              <h1>Certificate of Community Service</h1>
+              <h1 className="certificate-title">Certificate of Community Service</h1>
               <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
               <div className="certificate-name">{user.name}</div>
               <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '46ch', margin: '0 auto' }}>
@@ -676,7 +700,7 @@ function CertificateModal({ user, shifts, onClose }) {
               * nothing anywhere that said who it was about or who stood behind
               * it. Printed, it reads as two blank signature lines.
               *
-              * `CertificateModal.jsx` has had the right shape all along — name
+              * `CertificateDocument.jsx` has had the right shape all along — name
               * in `.certificate-sign`, caption in `.certificate-sign-label` —
               * and this is now the same.
               */}

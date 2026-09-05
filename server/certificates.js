@@ -187,3 +187,72 @@ export async function backfillCertificates(db) {
 
   return { inserted };
 }
+
+/**
+ * One certificate and everything printed on it, for the volunteer who earned it.
+ *
+ * ── Why the scoping is in the query and not in the caller ──
+ *
+ * `WHERE code = ? AND user_id = ?` is one predicate that cannot be forgotten.
+ * The alternative — look up by code, then compare owners in the handler — is
+ * two steps, and the second one is the step somebody deletes while refactoring.
+ * A miss here is indistinguishable from a code that does not exist, which is
+ * deliberate: the code is a BEARER CREDENTIAL (see this file's header), so a
+ * response that confirmed a given code was live would be most of the way to
+ * confirming whose it is.
+ *
+ * ── Why it lives here rather than in the route ──
+ *
+ * `server/db.accessSurface.test.js` ratchets how much code reaches the database
+ * through the module-global handle, because a handle passed as a PARAMETER can
+ * be given a pooled client during the PostgreSQL port and an imported one
+ * cannot. Every function in this file already takes `db`; the route that calls
+ * this one holds the global only to hand it on.
+ *
+ * Returns `null` for: no such code, somebody else's code, an event that was
+ * called off, and a certificate whose attendance rows have gone. The caller
+ * answers all four identically.
+ */
+export async function getCertificateForOwner(db, code, userId) {
+  const cert = await db.prepare(
+    'SELECT * FROM certificates WHERE code = ? AND user_id = ?'
+  ).get(String(code || '').toUpperCase(), userId);
+  if (!cert) return null;
+
+  /**
+   * The same aggregate `GET /api/certificates` computes for the whole list,
+   * narrowed to one event — same joins, same `present = 1`, same exclusion of a
+   * cancelled event.
+   *
+   * Written out rather than shared with that handler because the two differ in
+   * exactly the way that matters (one groups over every event, one is scoped to
+   * a pair), and a shared query with a conditional predicate is how the scoping
+   * gets lost.
+   *
+   * The joined tables' keys are grouped too. PostgreSQL allows an ungrouped
+   * column only when it is functionally dependent on a grouped PRIMARY KEY, and
+   * that holds per table — the same correction the certificate list and the
+   * verify endpoint both carry.
+   */
+  const row = await db.prepare(`
+    SELECT e.id AS event_id, e.title, e.category, e.location, e.status,
+           u.name AS organizer_name, u.verified AS organizer_verified,
+           COALESCE(SUM(at.hours_awarded), 0) AS hours,
+           COUNT(*) AS shifts,
+           MIN(s.start_datetime) AS first_start,
+           MAX(s.end_datetime) AS last_end,
+           o.name AS organization_name, o.slug AS organization_slug
+      FROM attendance at
+      JOIN slots s ON at.slot_id = s.id
+      JOIN events e ON at.event_id = e.id
+      JOIN users u ON e.organizer_id = u.id
+      LEFT JOIN organizations o ON o.id = e.organization_id
+     WHERE at.user_id = ? AND at.event_id = ? AND at.present = 1 AND e.status <> 'cancelled'
+     GROUP BY e.id, u.id, o.id
+  `).get(userId, cert.event_id);
+  if (!row) return null;
+
+  const volunteer = await db.prepare('SELECT name, grade FROM users WHERE id = ?').get(userId);
+
+  return { cert, row, volunteer };
+}
