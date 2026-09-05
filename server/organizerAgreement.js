@@ -4,6 +4,7 @@ import { ORGANIZER_DOCUMENTS } from './legalDocuments.js';
 import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
 import { studentOrganizerWithholdingsFor } from './studentOrganizerAgreement.js';
+import { signupConsentWithholdingsFor } from './legalConsentGate.js';
 
 /**
  * The Organizer Agreement, and what an organizer cannot do until they accept it.
@@ -207,6 +208,18 @@ export async function withheldCapabilitiesFor(db, userRow) {
   return [
     ...await organizerAgreementWithholdings(db, userRow),
     ...await studentOrganizerWithholdingsFor(db, userRow),
+    /**
+     * The third arm: a signup document whose MAJOR version moved and has taken
+     * effect. See `legalConsentGate.js`.
+     *
+     * It is here rather than beside the modal that asks for the acceptance,
+     * because this function is documented as "the single answer to what is
+     * withheld from this person" and a fourth list unioned at a call site would
+     * be a fourth place to forget. It costs one indexed lookup on a table that
+     * is empty until an owner publishes through the Legal Center, and nothing
+     * per user until then.
+     */
+    ...await signupConsentWithholdingsFor(db, userRow),
   ];
 }
 

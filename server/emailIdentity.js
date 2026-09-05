@@ -147,6 +147,7 @@ const FLOW_CATEGORY = {
  */
 const EVENT_CATEGORY = {
   LEGAL_DOCUMENT_UPDATED: 'legal',
+  LEGAL_ACCEPTANCE_REQUIRED: 'legal',
 
   ACCOUNT_SUSPENDED: 'enforcement',
   ACCOUNT_WARNED: 'enforcement',

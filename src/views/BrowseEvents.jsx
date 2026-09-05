@@ -40,6 +40,7 @@ import DatePicker from '../components/common/DatePicker';
 import { DistinctionTag } from '../components/profile/Distinction';
 import OrgAvatar from '../components/common/OrgAvatar';
 import { CATEGORY_GROUPS } from '../eventCategories';
+import { organizationPath } from '../utils/organizationUrl';
 /**
  * The category filter is a grouped select, not a row of chips.
  *
@@ -857,7 +858,7 @@ export default function BrowseEvents({
             <ul className="list directory-list">
               {directory.organizations.map(org => (
                 <li key={org.id} className="list-row">
-                  <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
+                  <Link to={organizationPath(org)} className="card card-pad card-link directory-row">
                     <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>
@@ -887,7 +888,7 @@ export default function BrowseEvents({
             <ul className="list directory-list">
               {browsedOrgs.map(org => (
                 <li key={org.id} className="list-row">
-                  <Link to={`/organizations/${org.slug}`} className="card card-pad card-link directory-row">
+                  <Link to={organizationPath(org)} className="card card-pad card-link directory-row">
                     <OrgAvatar organization={org} className="directory-avatar" />
                     <span className="directory-body">
                       <span className="directory-name">{org.name}</span>

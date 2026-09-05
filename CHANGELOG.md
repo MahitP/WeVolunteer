@@ -21,11 +21,286 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Organizer Agreement** withholds fifteen capabilities from every organizer
 > until each accepts it again, because acceptance is matched on `(slug, version)`.
 > That is correct — the agreement is what those capabilities are granted against —
-> and the editor now warns before saving that particular document. Publishing any
-> of the other nine changes nothing for existing users; there is still no
-> re-consent flow for signup documents.
+> and the editor now warns before saving that particular document.
+>
+> Publishing a signup document is no longer inert either. A **MINOR** bump raises
+> a quiet banner and sends an email; a **MAJOR** bump on the Terms, the Privacy
+> Policy or the Community Guidelines asks every existing account to accept the new
+> version and withholds the participation capabilities until it does, from the
+> version's own effective date — and the editor now **refuses** to date one sooner
+> than the 30 days §13 promises, unless an owner gives a written reason that is
+> audited under its own action. See "A legal change now reaches the people it
+> binds" below.
 
 ### Added
+
+- **A legal change now reaches the people it binds, at the weight it deserves.**
+  §13 of the published Terms says, in the product's own words: *"A change that
+  leaves you worse off … gets a new major version and we ask you to accept it
+  again. A clarification gets a minor version and notice only."* Half of that was
+  implemented. Every change, however small, opened a modal over whatever somebody
+  was doing — the right weight for a change you have to act on and far too much
+  for a reworded sentence, and dismissing two of those is how a reader learns
+  that legal notices are something to click past. The half that mattered more was
+  missing entirely: **nothing asked a signup document's readers to accept a new
+  version**, so a major revision of the Terms produced a popup and no consent
+  record.
+
+  The two weights are now separated, and which one a change gets is decided by
+  the server, in one place, from the version number:
+
+  - **A clarification** (MINOR or PATCH) is a banner in the signed-in shell —
+    same slot, same treatment and the same close control as the location opt-in,
+    because two notices that look like they came from different products is
+    exactly what the shared `NoticeBanner` primitive now prevents. Dismissing it
+    records "seen" in `legal_change_notices`, which is deliberately not the
+    consent table.
+  - **A material change** (MAJOR, on a `scope: 'signup'` document) is a dialog
+    that cannot be dismissed, and the dialog is not the enforcement: the
+    participation capabilities are withheld server-side per request, by the same
+    mechanism the Organizer Agreement has always used, so editing the dialog out
+    of the bundle changes nothing about what the account may do. The withheld set
+    deliberately excludes reading, closing your own account, marking somebody
+    else's attendance, resolving reports and `legal.edit` — an owner who publishes
+    a major version by mistake keeps every power needed to fix it.
+  - **Never both**, for the same change. And the two onboarding agreements, which
+    have had their own re-acceptance screen since v1.0, are excluded from this
+    system entirely rather than given a second surface.
+
+  **The 30-day promise is now implementable, and implemented.** The same section
+  promises notice "at least 30 days before it takes effect", so a major revision
+  dated in the future is *announced* by the ordinary banner — naming the date and
+  saying an acceptance will be asked for — and becomes mandatory only when that
+  date arrives. Requiring the acceptance on publication would have made the
+  product break its own terms every time an owner used the editor correctly.
+
+  No migration. `legal_change_notices` (039) already keyed dismissals by
+  `(user, document, version)` and `legal_acceptances` already recorded consent;
+  the feature needed a rule, not a table.
+
+- **And they are told outside the app, too.** The in-app banner and the dialog
+  only reach somebody who is already looking at WeVolunteer, which is a poor way
+  to keep a promise about advance notice — and the ICO's guidance on the right to
+  be informed says the same in the general case: a change has to be communicated
+  actively, before the new processing begins, rather than by editing a page and
+  waiting to be visited.
+
+  `dispatchLegalChangeNotices` now runs inside the existing `runNotificationSweep`
+  (boot, then every fifteen minutes) and dispatches through the platform's own
+  `notificationService`, so a legal change produces a **notification-centre entry**
+  (kept 365 days at IMPORTANT, or CRITICAL for a material one) and an **email**
+  through the existing outbox — the same branded template, per-event sender
+  identity, escaping, retry, backoff, stale-job reclaim and queue-health surface
+  everything else uses. No new email framework, no new queue, no new table.
+
+  Two events, chosen by severity and mutually exclusive: `LEGAL_DOCUMENT_UPDATED`
+  says a clarification changed and there is nothing to do;
+  `LEGAL_ACCEPTANCE_REQUIRED` says a significant change is coming, names the date,
+  and says an acceptance will be asked for then. Both state plainly that nothing
+  has been recorded as accepted and that reading the document does not accept it.
+  Both are `MANDATORY_NOTICE_EVENTS`, so they survive an email opt-out — the
+  Privacy Policy already publishes that security email cannot be switched off, and
+  a preference cannot be a way to not be told the contract was rewritten. The
+  preferences panel now says which messages those are, which it never did.
+
+  **Exactly once, and provably.** `recordNotified` stopped being a log and became
+  a lease: a conditional insert that reports whether *this* call claimed the
+  notification, committed in the same transaction as the enqueue. Four concurrent
+  sweeps in four separate processes against one fresh change produce one message
+  (measured). A rolled-back enqueue leaves the lease open, so a retry still
+  delivers. And email is never an authority: `signupConsentWithholdingsFor` reads
+  acceptance rows and the effective date and never reads `notified_at`, so an
+  outage cannot release a capability and a delivery cannot satisfy a re-consent.
+
+- **The 30 days §13 promises are now enforced, not documented.** A MAJOR version of
+  a signup document dated sooner than thirty days out is refused, with the earliest
+  legal date in the message and both ways out named — use a MINOR version if the
+  change is really a clarification, or give a written reason if something obliges
+  it sooner. The date picker's floor moves with the version number, computed from a
+  day count the server sends so the browser and the refusal cannot drift.
+
+  The override is deliberate rather than a hole: never the default, a required
+  40–500 character reason, owner-only behind the editor's existing `legal.edit`
+  plus step-up gate, refused when there was no notice period to override, and
+  audited under its own action `LEGAL_NOTICE_PERIOD_OVERRIDDEN` so it can be found
+  by filtering rather than by reading prose. It changes which effective dates are
+  accepted and nothing else.
+
+- **Modal dialogs are bottom sheets on a phone again, which they were supposed to
+  be all along.** Two `@media (max-width: 700px)` blocks two thousand lines apart
+  both declared `.modal`: the first described a content-sized sheet with a rounded
+  top edge, the second re-declared it with `height: 100vh` and square corners. The
+  second won, so the first had not applied to anything for as long as both existed
+  — and every dialog in the product was a full-screen sheet, including the ones
+  containing a paragraph and two buttons, which rendered as a screenful of void
+  with the actions stranded at the bottom.
+
+  The `height` line is gone and the design lives in one place, measured in `dvh`
+  rather than `vh` for the reason this stylesheet already gives four other times.
+  Every dialog was checked for one that genuinely needs the full screen and none
+  does — the check-in scanner, the closest candidate, caps its own viewfinder at
+  `50dvh` — so no opt-in class was added for a case that does not exist.
+
+- **Several documents changing at once is one banner, not a pile.** It names one
+  document and counts the rest, and its `X` acknowledges all of them — a count
+  that comes back tomorrow having only dismissed one of three is worse than no
+  count. Mandatory acceptances are queued one at a time, each accepted on its
+  own: a single button recording agreement to two documents somebody may feel
+  differently about is a weaker record than two.
+- **An organization can be handed to somebody as a link, and can decide who gets
+  in.** Membership had exactly one mode — `POST …/membership` inserted a `member`
+  row for anybody who was not banned — and there was no way to share a club at
+  all: slugs are derived from the name and every organization route requires a
+  session, so an organizer could not put a club on a flyer, in a group chat, or
+  in an email to a parent.
+
+  A club now chooses one of three settings, and the settings screen names the
+  consequence rather than the value: **Anyone** (join straight away),
+  **Invitation only** (the club's link is what admits people), or **Request to
+  join** (a manager accepts or declines, from a queue on the organization page).
+  A second setting says who may pass the link on — managers and student
+  organizers, or any member — and it is enforced on the endpoint, not by hiding
+  a button.
+
+  **The link is an address, not a credential.** It opens an allowlisted public
+  projection of the club — name, mark, description, tags, member and event
+  counts, the join setting, and up to three upcoming opportunities by title and
+  date. No member, no founder, no event *location*, no hours, no organization id.
+  It grants no session and it never makes anybody a member by itself: the token
+  travels with the Join press and is re-resolved there, which is what makes
+  regenerating or switching a link off take effect on the next request rather
+  than whenever a page happens to reload. Nobody loses their membership when a
+  link is replaced, and both confirmations say so.
+
+  **An invitation-only club is still findable.** Discovering a club and being
+  allowed into it are different questions, so it stays in browse and in search
+  and a visitor without a link is told they need one — rather than the club
+  quietly disappearing, which is the behaviour a manager choosing that setting
+  most often assumes and would be worse for everybody.
+
+  Migration 062 adds the two settings to `organizations`, one row per club
+  holding its link, and a request table whose partial unique index *is* the "no
+  duplicate active requests" rule. Every existing club defaults to **Anyone**, so
+  nothing changes for anybody until a manager chooses otherwise.
+
+- **A club now has a readable public address, and it is deliberately not a way
+  in.** `/organizations/@robotics` — the club's handle with an `@`, the same
+  arrangement `/users/@alice` already uses. It is printable, guessable *by
+  design* (it is the club's name), and it carries **no joining authority
+  whatsoever**: a Join arriving with nothing but a handle is judged by the club's
+  join setting alone. The invitation link remains the credential. Confusing the
+  two would have made a club's front door a password anybody can read off a
+  poster.
+
+  A second setting decides who may open that page: **Anyone**, or **only
+  signed-in members of WeVolunteer**. It is a separate question from who may
+  *join*, and the two are kept separate because the useful combination is
+  precisely the one a single list cannot express — findable, with a door. An
+  unlisted club and a club that does not exist answer identically, because
+  handles are guessable and a distinguishable refusal would be a directory of
+  every club that chose not to be listed.
+
+  **Every club that already existed stays unlisted.** Nobody running one agreed
+  to publish it, so migration 063 backfills them and only clubs created from now
+  on are public by default. The setting lists what a public page actually shows
+  — name, description, logo, member *count*, and what is coming up — and what it
+  never shows: who is in it, and where an event is.
+
+- **Renaming a club no longer changes its web address.** It used to, and the
+  form said so. That was fine while the address was a private convenience and
+  wrong the moment it was the thing a club prints on a flyer — and it was already
+  breaking three things quietly: every historical notification for a renamed club
+  dead-linked, a rename between opening an invitation link and finishing signup
+  dropped the invitation, and bookmarked `?organization=` filters stopped
+  matching. The address is now edited on purpose or not at all, and there is a
+  field for it in the club's settings.
+
+  This also fixes a bug that had shipped: a club named "New" was created at
+  `/organizations/new`, which is the create form, so its page was permanently
+  unreachable and nothing reported it. Reserved segments are now derived from the
+  route table rather than typed out, so the list cannot go stale.
+
+- **A club can hold several named invitation links instead of one.** "General",
+  "Autumn open-day flyer", "Instagram bio", "Careers-fair booth" — each with its
+  own URL, its own life, and its own record of how many people joined through it.
+  With one link, retiring the flyer that had been on the corridor wall since
+  September also broke the Instagram bio; now revoking one leaves the rest alone.
+
+  **Expiry is optional and never imposed.** A link with no date keeps working
+  until somebody switches it off, which is what a printed flyer needs, and that
+  is the default. A manager who wants a link for one event booth can put a date
+  on it, and the form says what that will cost before they do. An expired or
+  revoked link refuses exactly the way a link that never existed does — it does
+  not quietly admit somebody a month later.
+
+  What a link records is a **count and a date**, incremented when somebody
+  *joins* through it. Not a view counter: that would be a write on every
+  anonymous request and inflatable by reloading. Nothing per-visitor is stored —
+  no row per use, no address, no referrer — so there is no per-student trail
+  through a club's recruitment, and the date is a date rather than a timestamp
+  because the hour a named child joined a club is a fact about that child's
+  evening.
+
+- **A manager can invite one named person, and there is no way to invite an
+  email address.** You search for somebody already on the platform, by name or
+  username, and they see it next time they open the club. The invitation carries
+  an optional note, lapses after a fortnight, and can be withdrawn.
+
+  **There is no token, anywhere.** An invitation names a user, and the only thing
+  that can accept it is a session belonging to that user — so it cannot be
+  forwarded, intercepted, or read off a screen and used. That is strictly
+  stronger than the hashed-token design administrator invitations use, and it
+  needs no verified-email check to get there because there is nothing to redeem.
+
+  Invitation by email address was considered and **refused**, for three reasons
+  in this order: it would be the platform's only write oracle over an address
+  field that directory search deliberately cannot even match on; the actor is a
+  club manager rather than a platform owner, so the administrator flow's design
+  cannot simply be copied down a trust level; and a club manager who can send
+  branded mail from the platform's domain to an arbitrary address is a phishing
+  capability aimed at a population of minors. Handing somebody an invitation
+  *link* already serves the recruiting case, with a human choosing how to send it.
+
+  Accepting an invitation goes through the ordinary Join, so the ban check, the
+  capability check and the transaction are the ones that already existed rather
+  than a second copy. Declining is the invited person's own answer and notifies
+  the club not at all — and it is final for the *inviter*: a member cannot ask
+  again after a no, which is what stops decline-invite-decline being a
+  harassment loop. The person who declined can still walk in through a link.
+
+- **A request to join can carry a line about why.** Optional, 300 characters,
+  shown only to the club's managers on the queue they already answer. A manager
+  deciding about a request previously had a name and an avatar to go on, which
+  for a school club is frequently a choice between two students with the same
+  first name. It is not a message: written once, not editable, not repliable, and
+  gone when the request is decided — a club's front door is not the place to
+  build a second messaging system without a Report button behind it.
+
+- **The organization page was rebuilt around the question it exists to answer.**
+  It was five stacked cards in source order with a 22-pixel avatar, and the most
+  destructive thing a member can do — Leave — sat in the position a newcomer's
+  Join occupies. There is now one masthead carrying the club's mark on a plate of
+  its own colour, its vital statistics in the utility face, and exactly one
+  primary action with one sentence underneath saying what pressing it will do.
+  Below it, what the club is *doing* on the left and the reader's own record on
+  the right, and a manager's controls in a visibly separate band with their own
+  heading. Leaving moved into the actions menu.
+
+  The same masthead serves the signed-out invitation page, so somebody arriving
+  with a link sees the club presented the way a member does. Pressing Join with
+  no account explains why an account is needed and comes back to the club
+  afterwards — carrying a slug the server produced, interpolated into a fixed
+  path, rather than a `returnTo` parameter that would have to be validated for
+  ever.
+
+- **A club's list of members is now shown to its members.** `GET
+  /api/organizations/:key` returned up to a hundred of them to every signed-in
+  account holding `directory.read` — a named roster of children in a club the
+  reader has nothing to do with. Every row went through the same strict
+  serializer as directory search, which is the wrong question: the *list* is the
+  disclosure, and no per-field allowlist can answer it. Non-members now get the
+  count, which names nobody and is what actually answers "is this club real and
+  how big is it".
 
 - **The leaderboard now returns a stable ranking.** It ordered by hours then
   shifts and stopped, which left every exact tie to the planner. That is not
@@ -159,6 +434,205 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registry constant.
 
 ### Fixed
+
+- **A creator could choose "Only people signed in" and get a club open to the
+  internet.** `POST /api/organizations` validated `visibility`, `joinPolicy` and
+  `invitePolicy` onto its payload and then called `createOrganization` without
+  them, so every new club took the column defaults. The visibility half was a
+  privacy failure reachable on the first try by an organizer doing exactly the
+  right thing: they ticked the private option, saved, and got a club whose page
+  a stranger could read — with the Share dialog then advertising the public
+  address to every member. The other half was quieter and just as wrong: a club
+  created "Invitation only" was joinable by anybody.
+
+- **A manager could take another club's web address and shadow it.** An
+  organization id is `org-` plus a UUID — exactly 40 characters, starts with a
+  letter, lowercase alphanumerics and single hyphens — which satisfied every
+  rule a handle had to satisfy, and the module's own comment claimed it could
+  not. Because a club was looked up with `slug = ? OR id = ?`, an organizer who
+  set their own handle to a victim's id shadowed that club on every id-addressed
+  path: the notification and audit links deliberately kept working landed the
+  victim's own members on the attacker's page, and on an open club their Join
+  press put them on a stranger's roster.
+
+  A handle equal to any club's id is now refused by asking the database — a
+  UUID pattern covers every id the product mints and none of the short readable
+  ones a seeded database uses, which is the shape that found the gap — and a
+  club is looked up by id *before* handle, so a name somebody typed can never
+  override an identifier the system assigned.
+
+- **Accepting a request to join was the one admission path with no ban check.**
+  Joining and requesting both re-read the ban at the moment of the act; the
+  manager's Accept did not, and banning does not retire a pending request — so a
+  queue could hold a row for somebody since banned, with nothing marking them,
+  and accepting re-admitted them with the ban still live. The check now runs
+  before the status is written, so a refusal leaves the request answerable
+  rather than committing an acceptance with no membership behind it.
+
+- **An invitation to a request-to-join club could never be accepted.** The
+  affordance returned "send a request" before it consulted whether the reader
+  held an invitation, so the invitee was told to queue up, their Accept press
+  was refused, and the invitation sat pending against the club's list until it
+  lapsed. A direct invitation now admits whatever the join setting says — which
+  is what an invitation means: the club has already made, about that person, the
+  decision a request exists to ask for.
+
+  A share **link** deliberately still does not. It is an address somebody passed
+  on and says nothing about who is holding it, so on a club that approves its
+  members it must not bypass the approval — the two are now separate inputs, and
+  both directions are asserted, because the first attempt at this fix widened
+  the link's authority by accident.
+
+- **Accepting a request left a pending invitation to the same person pending for
+  ever.** It counted against the club's outstanding list, blocked re-invitation
+  for a fortnight, was offered back to the new member on their own page, and
+  would have walked them into an invitation-only club again if they ever left.
+
+- **A club whose web address predates the address rules could not serve its
+  public page.** `slugify` could produce `hq`, `2024-team` or sixty characters,
+  and migration 063 does not rewrite existing addresses — rewriting them would
+  break links those clubs have already handed out. The public route was gating
+  on the stricter rules that govern what a manager may *choose*, so such a club
+  could turn its page on, watch the Share dialog offer the address with a Copy
+  button, and have every visitor answered "not found".
+
+- **Regenerating an expired link minted a replacement that was born expired.**
+  The replacement inherits the expiry on purpose — a link made for one event
+  booth must not become permanent by being regenerated — so the control silently
+  did nothing, which is the worst possible answer for one that promises the old
+  copies stop working and here is the new one.
+
+- **The share dialog told managers that invitation links are "not passwords".**
+  True of what the link does today and false of what it is: nothing rotates a
+  club's links when the join setting tightens, deliberately, because a link on a
+  printed flyer has to keep working. So a manager who followed that advice,
+  posted the link publicly, and later switched to Invitation only had a live
+  credential on a public feed and had never been told. Every policy's wording
+  now says the part that does not change, and the Invitation-only setting warns
+  that links already shared become a way in.
+
+- **The disclosure list for a public page was two fields out of date and read as
+  complete.** "It shows your name, description, logo … never who is in it, and
+  never where an event is" omitted the club's tags and its opportunity count.
+  That sentence is what a manager is entitled to rely on before publishing a
+  page about children, so it is now asserted field-for-field against the
+  projection: a field added to one and not the other fails the build.
+
+- **Two person rows had a 300-character paragraph as their accessible name.** The
+  note a student wrote with a request, and the note a manager wrote with an
+  invitation, were rendered *inside* the link to that person — so a screen
+  reader read the name, the handle, the date and the whole note as the name of a
+  navigation control, and clicking the note navigated away. It is the same
+  run-together-name defect this release fixed for the settings radios, in a
+  worse place.
+
+- **Every settings option's second-order note was announced to nobody.** With an
+  explicit `aria-describedby`, the browser discards every other text node in the
+  label — and the note was a sibling of the element named there, not inside it.
+  The two sentences that went unread were the warning that invitation-only clubs
+  remain findable, and the list of what a public page publishes about a club full
+  of children.
+
+- **A club's own note could not be read past its third line.** The queue clamps
+  a note to three lines to stay scannable, and there was no way to see the rest —
+  on the one piece of text a manager is being asked to decide on. It now expands
+  on hover and on keyboard focus.
+
+- **The invite search reported a failed lookup as "nobody matched that".** The
+  error was swallowed and the previous results were left in place, so a manager
+  on a flaky school network was told the student they were looking for does not
+  exist. Its two status messages were also created and destroyed with their own
+  text, which is precisely how a live region announces nothing at all.
+
+- **Both expiry pickers offered dates the server refuses** — yesterday, and the
+  year 2099 — with the refusal arriving as an error toast after a round trip.
+  For "Add an expiry" specifically, a mis-typed year was a link that died the
+  moment it was created.
+
+- **The share dialog's error state had no way out, and demoted the manager
+  reading it.** A failed load offered no retry — the only escape was to close
+  and reopen the dialog, with nothing saying that would help — and it reset the
+  manager's own permissions to false, so the footer holding the one useful
+  control disappeared along with the reason.
+
+- **The clipboard fallback put a URL into a toast that dismisses after five
+  seconds** and, being 64 unbroken characters, rendered wider than a phone
+  viewport allows. It now points at the field two lines above, which is
+  focusable and selects its whole value.
+
+- **A public page's failure states wore the wrong icon and the wrong offer.** A
+  padlock said "you are not allowed in" on a network error; a rate limit — which
+  a class opening one link from one school address will meet legitimately —
+  offered a Try again that re-fires and fails again; and both public pages
+  dropped their header and their centred column while loading, so a stranger's
+  first impression was two layout shifts.
+
+- **"Request to join" opened a dialog headed "Join".** A student asking to join
+  a club that approves its members was told they were joining it.
+
+- **A signed-out reader handed the bare address was told to open a different
+  link** — the one they had just opened — and offered only Log in, on the one
+  page whose entire purpose is turning a stranger into an account.
+
+- **A manager who mis-clicked their own row in the invite search** was told "You
+  are already in this organization" while trying to invite somebody else.
+
+- **The handle field named two of the four rules it enforces**, so "ab" and
+  "3d-printing" were typed happily and refused on save.
+
+- **Every radio button in the organization settings screen announced its label
+  and its whole explanation as one run-together word.** Each input was wrapped in
+  a `<label>` containing both the option's title and its sentence of consequence
+  with no whitespace between them, so the computed accessible name was literally
+  `AnyoneStudents can join this organization straight away.` A screen-reader user
+  heard that, per option, in every group. The title is now the name and the
+  sentence is the description, so the group is navigable by title — which is the
+  order a sighted reader takes them in anyway.
+
+- **A club named "New" was created with a permanently unreachable page.** Its
+  address derived to `/organizations/new`, which is the create form, and the
+  router matched the literal first. Same for "Invite". Nothing reported it: the
+  club existed, its page rendered something plausible, and the something was a
+  different screen. Reserved segments are now derived from the route table, and a
+  derived address that would collide is repaired before the collision loop rather
+  than after (`New` → `org-new`).
+
+- **The organization page's own links dropped the canonical address.** Eight call
+  sites built `/organizations/<slug>` by hand and one URL builder now does it, so
+  a link cannot silently omit the `@` — which does not break the page for a
+  signed-in reader and does refuse a signed-out one, making the omission
+  invisible exactly where it matters.
+
+- **Two public pages had no name in the browser tab.** The invitation page and
+  the new public page render outside the application shell, so the shell's
+  route-keyed titles could not name them and both tabs said only "WeVolunteer".
+  That is worst on precisely these pages: they are what somebody was *sent*, and
+  the tab they leave open while deciding whether to make an account.
+
+- **Twenty-eight legal-editor tests were failing on a calendar rollover, and
+  only four of them mentioned a date.** Both editor suites hardcoded
+  `effectiveAt: '2026-09-01'` — thirty times between them — and
+  `parseEffectiveAt` floors an effective date at yesterday-in-UTC, so every one
+  of them turned into an HTTP 400 on 2026-09-03 and stayed that way. The count
+  was not the expensive part: `validatePublication` checks the date *before* the
+  body sanitizer and before the step-up grant, so the date refusal preempted
+  what each case was actually about — thirteen link-injection tests reported
+  `expected 'effectiveAt' to be 'body'`, two grant tests reported
+  `expected 400 to be 409`, and a unique-constraint test reported a constraint
+  not firing against a row whose publish had been refused. Dates are now
+  computed from today (`server/testing/dates.js`), a guard in
+  `legalStore.test.js` fails the build on a relapse, and it immediately found the
+  same bug with a longer fuse in `legalUpgradeBoot.test.js` (`2027-01-01`, which
+  passes today and expires in four months).
+
+- **A student who appealed an organization ban and was turned down was never
+  told.** `_insertInApp` bound `link` straight into the INSERT, and four content
+  cases omit it deliberately — `ORGANIZATION_BAN_APPEAL_STANDS`'s own note says a
+  link back to a club somebody cannot rejoin "would be a taunt". Neither engine
+  binds `undefined`, and `dispatch` catches best-effort, so the failure was
+  silent and total: no in-app row and no email job for the one message whose
+  absence reads as the club ignoring them. Coerced at the single place that
+  writes the row, with a guard over the whole notification registry.
 
 - **The accessibility sweep was reporting a not-found panel as coverage of the
   public certificate verification page.** `/verify/:code` took its parameter

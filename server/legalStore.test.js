@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   parseVersion, compareVersions, validateBody, LegalValidationError, MAX_BODY_LENGTH,
   parseEffectiveAt,
@@ -444,5 +446,98 @@ describe('parseEffectiveAt', () => {
     }
     expect(() => on('2026-02-30')).toThrow(/not a real date/i);
     expect(() => on('2026-13-01')).toThrow(LegalValidationError);
+  });
+});
+
+/**
+ * No test may hand a WRITTEN-DOWN effective date to a publish.
+ *
+ * ── The failure this exists to prevent, which already happened ──
+ *
+ * `parseEffectiveAt` floors an effective date at yesterday-in-UTC. A literal
+ * date in a test is therefore valid for exactly two days and invalid for ever
+ * afterwards. `legalEditor.adversarial.test.js` and `routes.legalEditor.test.js`
+ * carried `effectiveAt: '2026-09-01'` thirty times between them, and on
+ * 2026-09-03 the calendar turned all thirty into HTTP 400s.
+ *
+ * The count is not the interesting part. `validatePublication` runs before the
+ * body sanitizer and before the step-up grant is checked, so the date refusal
+ * PREEMPTED everything those cases were about: thirteen link-injection tests
+ * reported `expected 'effectiveAt' to be 'body'`, two grant-mismatch tests
+ * reported `expected 400 to be 409`, and a unique-constraint test reported a
+ * constraint not firing — against a row whose publish had been refused, so there
+ * was nothing to collide with. Twenty-eight failures, and four of them mentioned
+ * a date. Anybody reading that output would have gone looking in the wrong
+ * dozen places first.
+ *
+ * ── Why a scan and not a convention ──
+ *
+ * The fix was to compute the dates from today. Nothing stops the next
+ * date-carrying test from writing a literal, and it would pass for two days —
+ * long enough to be reviewed, merged, and forgotten. This file owns the date
+ * rules, so it owns the guard.
+ *
+ * It earned its place immediately, twice. It found the same bug with a longer
+ * fuse in `legalUpgradeBoot.test.js` — `2027-01-01` and `2027-02-01`, which pass
+ * today and become past dates in four months — and it holds against the version
+ * of the two editor suites that was fixed in parallel on `main`, which uses its
+ * own local helpers rather than `server/testing/dates.js`. That is the point of
+ * asserting the property instead of the mechanism: two independent fixes, one
+ * guarantee, and neither has to know about the other.
+ *
+ * Two files are exempt, both because the real clock never reaches them: this
+ * one pins `now` explicitly (`NOW` above), and `legalConsentGate.test.js` tests
+ * a function that takes the date as an argument. Pinning the clock is the other
+ * correct way to test a date rule, and is why those literals are safe. Each
+ * exemption carries its reason in `EXEMPT` below.
+ * The registry in `legalDocuments.js` is not a test and is not scanned — its
+ * dates are a record of when published documents took effect, which is a fact
+ * about the past and does not move.
+ */
+describe('effective dates in tests are computed, not written down', () => {
+  const SERVER = path.resolve(import.meta.dirname);
+
+  /** Test files that legitimately hold a literal date, each with its reason. */
+  const EXEMPT = new Map([
+    /* Pins `now`, so its dates are relative to a fixed clock rather than to the
+       real one. That is the other correct pattern and this file uses it. */
+    ['legalStore.test.js', 'pins `now` explicitly'],
+    /* Stronger than pinning a clock: `noticeChannelFor(doc, seen, today)` takes
+       the date as an ARGUMENT and compares two strings, so no clock is reached
+       at all and its `TODAY` is a fixture like any other. Exempting the file
+       rather than the call is the same trade this list already makes above —
+       a future test here that does read the real clock would need its own
+       computed date, and the reason is written down so that is visible. */
+    ['legalConsentGate.test.js', 'passes `today` explicitly to a clock-free function'],
+  ]);
+
+  it('finds no literal effectiveAt in any server test', () => {
+    const offenders = [];
+    for (const name of readdirSync(SERVER)) {
+      if (!name.endsWith('.test.js') || EXEMPT.has(name)) continue;
+      const src = readFileSync(path.join(SERVER, name), 'utf8')
+        /* Comments stripped, because this file's own header quotes the literal
+           it is warning about — and so will the next one. */
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+      for (const m of src.matchAll(/effectiveAt:\s*'(\d{4}-\d{2}-\d{2})'/g)) {
+        offenders.push(`${name}: effectiveAt: '${m[1]}'`);
+      }
+    }
+
+    expect(
+      offenders,
+      'a written-down effective date is valid for two days and refused for ever '
+      + 'after — see the note above this test. Compute it instead:\n'
+      + "  const daysAhead = (n = 0) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);\n"
+      + 'or pin `now` if you are unit-testing the rule itself.',
+    ).toEqual([]);
+  });
+
+  it('scans the real directory, so it cannot pass by scanning nothing', () => {
+    const tests = readdirSync(SERVER).filter(n => n.endsWith('.test.js'));
+    expect(tests.length).toBeGreaterThan(50);
+    expect(tests).toContain('routes.legalEditor.test.js');
   });
 });

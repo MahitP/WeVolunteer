@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 66 tables, 97 indexes, 20 triggers
+ * Contents: 69 tables, 104 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -416,7 +416,7 @@ CREATE TABLE IF NOT EXISTS organizations (
                       CHECK(status IN ('active', 'archived')),
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
-      , avatar TEXT, image_url TEXT, image_uploaded_at TEXT, allow_replies INTEGER NOT NULL DEFAULT 1, avatar_color TEXT);
+      , avatar TEXT, image_url TEXT, image_uploaded_at TEXT, allow_replies INTEGER NOT NULL DEFAULT 1, avatar_color TEXT, join_policy TEXT NOT NULL DEFAULT 'open', invite_policy TEXT NOT NULL DEFAULT 'helpers', visibility TEXT NOT NULL DEFAULT 'unlisted');
 
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
       /* The SHA-256 digest, never the token itself — see migration 048 and
@@ -653,6 +653,41 @@ CREATE TABLE IF NOT EXISTS organization_bans (
       FOREIGN KEY (lifted_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
+CREATE TABLE IF NOT EXISTS organization_invitations (
+      id              TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      invited_user_id TEXT NOT NULL,
+      invited_by      TEXT,
+      /* The inviter's optional note, under the same length rule and the same
+         escaping as a join request's message. */
+      message         TEXT,
+      status          TEXT NOT NULL
+                        CHECK(status IN ('pending', 'accepted', 'declined', 'revoked', 'expired')),
+      created_at      TEXT NOT NULL,
+      /* NULL means it does not lapse. Unlike a share link, an invitation names
+         one person, so a stale one is clutter rather than a liability — and a
+         club that wants to clear its list revokes. */
+      expires_at      TEXT,
+      resolved_at     TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+CREATE TABLE IF NOT EXISTS organization_join_requests (
+      id              TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id         TEXT NOT NULL,
+      status          TEXT NOT NULL
+                        CHECK(status IN ('pending', 'accepted', 'rejected', 'withdrawn')),
+      created_at      TEXT NOT NULL,
+      decided_at      TEXT,
+      decided_by      TEXT, message TEXT,
+      FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
 CREATE TABLE IF NOT EXISTS "organization_members" (
       organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -669,6 +704,64 @@ CREATE TABLE IF NOT EXISTS "organization_members" (
       joined_at       TEXT NOT NULL,
       PRIMARY KEY (organization_id, user_id)
     );
+
+CREATE TABLE IF NOT EXISTS "organization_share_links" (
+        id              TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        token           TEXT NOT NULL UNIQUE,
+        /**
+         * What the club calls it — "School flyer", "Instagram", "Class of 2027".
+         *
+         * NOT NULL because a list of links distinguished only by their creation
+         * dates is a list nobody can act on: the whole reason for having more
+         * than one is knowing which is which. The route supplies "General" when
+         * a club does not care, which is also what every link carried over from
+         * 062 is called.
+         */
+        label           TEXT NOT NULL,
+        created_at      TEXT NOT NULL,
+        /* SET NULL rather than CASCADE: a manager graduating must not silently
+           take the club's links with them. */
+        created_by      TEXT,
+        /**
+         * NULL means never expires, and that is the default the product offers.
+         *
+         * A link on a printed flyer has to keep working, and an expiry nobody
+         * chose is the failure mode 062 rejected expiry outright to avoid. This
+         * makes it a decision instead: a club can put a date on a link when the
+         * link is genuinely temporary — an event booth, a single lesson — and the
+         * form warns before it does.
+         */
+        expires_at      TEXT,
+        /**
+         * NULL means live. Revoking sets it rather than deleting the row, so a
+         * manager can see that a link they handed out has been switched off
+         * rather than wondering where it went — the same argument
+         * organization_bans.lifted_at makes.
+         */
+        revoked_at      TEXT,
+        /**
+         * How many times this link admitted somebody, and roughly when.
+         *
+         * ── Why these two and nothing else ──
+         *
+         * A manager sharing three links needs to know which one is working; that
+         * is the entire question, and a count answers it. What is deliberately
+         * NOT recorded: who used it, their address, their device, or a row per
+         * use. This is an aggregate on the link, incremented in the same
+         * transaction as the membership — so there is no event log to leak, no
+         * per-student trail through a club's recruitment, and nothing for a
+         * third party to receive.
+         *
+         * last_used_at is a DATE, not a timestamp, for the same reason: "used
+         * this week" is what a manager acts on, and the hour somebody joined a
+         * club is a fact about that person's evening.
+         */
+        uses            INTEGER NOT NULL DEFAULT 0,
+        last_used_at    TEXT,
+        FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      );
 
 CREATE TABLE IF NOT EXISTS report_evidence (
       report_id            TEXT NOT NULL REFERENCES reports(id) ON DELETE RESTRICT,
@@ -1107,7 +1200,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_org_bans_active
 CREATE INDEX IF NOT EXISTS idx_org_bans_lookup
       ON organization_bans(user_id, organization_id);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_invitations_live
+      ON organization_invitations(organization_id, invited_user_id) WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_org_invitations_org
+      ON organization_invitations(organization_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_org_invitations_user
+      ON organization_invitations(invited_user_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_org_join_requests_live
+      ON organization_join_requests(organization_id, user_id) WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_org_join_requests_queue
+      ON organization_join_requests(organization_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_org_join_requests_user
+      ON organization_join_requests(user_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_org_share_links_org
+      ON organization_share_links(organization_id, revoked_at);
 
 CREATE INDEX IF NOT EXISTS idx_organizations_creator ON organizations(created_by);
 
@@ -1407,7 +1521,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 61;
+export const LATEST_MIGRATION_VERSION = 64;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

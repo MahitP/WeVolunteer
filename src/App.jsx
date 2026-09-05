@@ -12,8 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
-import LocationPrompt from './components/location/LocationPrompt';
-import LegalUpdateModal from './components/LegalUpdateModal';
+import AppNotices from './components/notifications/AppNotices';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -31,6 +30,8 @@ import {
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
+import { consumePendingRedirect } from './utils/pendingInvite';
+import { organizationPath } from './utils/organizationUrl';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
   X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
@@ -1165,9 +1166,31 @@ function AppShell({ toasts, addToast, removeToast }) {
     await signOut();
   };
 
+  /**
+   * Where somebody lands after signing in or signing up.
+   *
+   * ── The invitation hand-off ──
+   *
+   * Somebody who opened a club's invitation link with no account, pressed Join,
+   * and was sent here to make one is not trying to reach the dashboard. The club
+   * they came for is written to `sessionStorage` before they leave the invitation
+   * page and read back once, here.
+   *
+   * This is deliberately NOT a `returnTo`. What comes back is a SLUG that this
+   * application's own server produced, and it is interpolated into a fixed
+   * `/organizations/` prefix — so there is no input that can make this navigate
+   * anywhere else, and therefore nothing to validate and no open-redirect
+   * surface to get wrong. `consumePendingRedirect` marks it spent, so a later
+   * sign-in in the same tab lands on the dashboard like any other.
+   *
+   * A storage failure (a private window, blocked site data) simply returns null
+   * and the person lands on the dashboard. Losing the destination is the right
+   * way for that to fail; losing the sign-in would not be.
+   */
   const handleLoginSuccess = () => {
     refreshAll();
-    navigate('/');
+    const invite = consumePendingRedirect();
+    navigate(invite ? organizationPath(invite.slug) : '/');
   };
 
   const setViewingProfileState = (profile) => {
@@ -1302,7 +1325,10 @@ function AppShell({ toasts, addToast, removeToast }) {
      table, so adding a route to PUBLIC_ROUTES left it unreachable — it fell
      through to the signed-out catch-all and answered 404 while looking
      correctly declared. */
-  if (isPublicPath(currentPath)) {
+  /* `signedIn` matters: `/organizations/:key` is in both tables, and a reader
+     with a session must get the shell's organization page rather than the
+     standalone public one — see `shellWhenSignedIn` on that entry. */
+  if (isPublicPath(currentPath, { signedIn: Boolean(currentUser) })) {
     return (
       <React.Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -1741,17 +1767,32 @@ function AppShell({ toasts, addToast, removeToast }) {
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}
           <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
-          {/* Inside the signed-in shell, not in main.jsx with the provider: a
-              banner asking to use your location has no business on the sign-in
-              screen, and the browser would refuse the permission there anyway
-              because nobody has pressed anything yet. */}
-          <LocationPrompt />
-          {/* Inside the signed-in shell for the same reason as the banner
-              above: "which documents has THIS account not been shown" is only
-              answerable once there is an account, and the Terms promise notice
-              in the app rather than at the sign-in screen. Renders nothing when
-              there is nothing to say, which is almost always. */}
-          <LegalUpdateModal />
+          {/**
+            * The notice slot: the location opt-in, legal document changes, and
+            * the mandatory re-acceptance dialog, in that priority order.
+            *
+            * Inside the signed-in shell, not in main.jsx with the provider. A
+            * banner asking to use your location has no business on the sign-in
+            * screen — the browser would refuse the permission there anyway,
+            * because nobody has pressed anything yet — and "which documents has
+            * THIS account not been shown" is only answerable once there is an
+            * account. The Terms promise notice in the app, not at the sign-in
+            * screen.
+            *
+            * `key` on the user id, because everything it holds is about one
+            * account. Signing out and back in as somebody else must not leave
+            * the previous account's pending notices, or its dismissals, on
+            * screen. Same reason `NotificationsBell` above is keyed.
+            *
+            * Renders nothing at all when there is nothing to say, which is
+            * almost always — see the note in the component about why "nothing"
+            * has to mean no node rather than an empty one.
+            */}
+          <AppNotices
+            key={currentUser.id}
+            onAccepted={refreshAll}
+            onSignOut={handleLogout}
+          />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy

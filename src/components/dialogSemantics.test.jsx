@@ -189,3 +189,69 @@ describe('DataExportCard dialog semantics', () => {
     expect(hasBareTimes, 'close button has no accessible name').toBe(false);
   });
 });
+
+/**
+ * The dialog's accessible DESCRIPTION, which `Modal` now supplies.
+ *
+ * ── Why this needs a guard of its own ──
+ *
+ * `ModalHead`'s `description` used to be a bare `<p className="lead">` that a
+ * screen-reader user had to arrow to. That is fine for a subtitle and not fine
+ * when the sentence is load-bearing: the organization share dialog puts the one
+ * sentence distinguishing a credential (an invitation link) from an address (a
+ * public handle) there, and the dialog announced only "Share <club>, dialog".
+ *
+ * `Modal` now points `aria-describedby` at it. Forty-six components render
+ * through `Modal`, so the two failure modes are worth pinning rather than
+ * assuming:
+ *
+ *   1. **A dangling reference.** `aria-describedby` naming an element that does
+ *      not exist is worse than not setting it — some screen readers then
+ *      announce nothing for the NAME either. So it must be absent when the
+ *      dialog has no description, which is most of them.
+ *   2. **Drift between the id and the attribute.** Two string literals in one
+ *      file is the shape that goes stale, so both sides come from
+ *      `MODAL_DESCRIPTION_ID`.
+ */
+describe('the shared Modal description wiring', () => {
+  const modalSrc = readFileSync(path.join(process.cwd(), 'src/components/Modal.jsx'), 'utf8');
+
+  it('takes the id from one exported constant on both sides', () => {
+    expect(modalSrc).toMatch(/export const MODAL_DESCRIPTION_ID = '[a-z-]+'/);
+    /* The attribute reads a state value derived from the constant, and the head
+       stamps the same constant — never a second literal. */
+    expect(modalSrc).toMatch(/id=\{MODAL_DESCRIPTION_ID\}/);
+    expect(modalSrc).toMatch(/querySelector\(`#\$\{MODAL_DESCRIPTION_ID\}`\)/);
+
+    const literals = modalSrc.match(/'dialog-description'/g) ?? [];
+    expect(literals, 'the id should appear as a literal exactly once').toHaveLength(1);
+  });
+
+  /**
+   * Detected from the DOM rather than declared by the caller.
+   *
+   * A caller passing `<ModalHead description=…>` should not also have to
+   * remember a flag — and a flag is what would drift.
+   */
+  it('sets the attribute only when the described element is present', () => {
+    /* `undefined` is the initial state, and React omits an attribute whose
+       value is undefined — which is what makes "no description" mean "no
+       attribute" rather than "an attribute pointing at nothing". */
+    expect(modalSrc).toMatch(/useState\(undefined\)/);
+    /* `setHeadDescribedBy`, not `setDescribedBy`: `Modal` also takes an explicit
+       `describedBy` prop now, for a dialog that builds its own head and names
+       its own id. The detected value keeps the head's name so the two cannot be
+       confused for each other — this one is only ever the standard head. */
+    expect(modalSrc).toMatch(/setHeadDescribedBy\(node \? MODAL_DESCRIPTION_ID : undefined\)/);
+    /* And the explicit id wins where a caller gave one. */
+    expect(modalSrc).toMatch(/aria-describedby=\{describedBy \|\| headDescribedBy\}/);
+  });
+
+  /** And it is not named outside the `modal-` class namespace by accident. */
+  it('keeps the id out of the stylesheet class namespace', () => {
+    /* `noDanglingClasses.test.js` watches the `modal-` prefix for CLASS names
+       and read `modal-description` as one. An id should not borrow a namespace
+       the stylesheet owns. */
+    expect(modalSrc).not.toMatch(/MODAL_DESCRIPTION_ID = 'modal-/);
+  });
+});

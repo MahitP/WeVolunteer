@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { MapPin, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { organizationPath } from '../../utils/organizationUrl';
 
 /**
  * The authoritative half of an answer.
@@ -80,7 +81,7 @@ export default function AssistantCard({ card, onAction }) {
         <ul className="ai-card stack-xs" aria-label="Your organizations">
           {data.items.map(o => (
             <li key={o.slug}>
-              <Link to={`/organizations/${encodeURIComponent(o.slug)}`} className="strong">
+              <Link to={organizationPath(o)} className="strong">
                 {o.name}
               </Link>
             </li>

@@ -305,8 +305,22 @@ export const LEGAL_DOCUMENTS = [
        Upstash subprocessor entry on another branch, so the published body
        now carries both edits and hashes to neither branch's value. Computed
        from the merged file with `hashPolicyFile`, which is what
-       `legalContent.test.js` checks it against. */
-    contentHash: '6a186a1a3118b845ccb0bf39bb7ae444fb84108c341c057c15cb2f71ddbe2da0',
+       `legalContent.test.js` checks it against.
+
+       And re-pinned a third time for one bullet in the guardian section.
+       "We do not send a confirmation link to anybody, and nothing waits for an
+       approval" was scoped to guardian consent by its own "Specifically:"
+       lead-in and absolute when read alone — and the application does send
+       links (verification, password reset, organization invitations) and does
+       have approval workflows (event applications, and now organization
+       join requests). The bullet now says "we do not send A GUARDIAN a
+       confirmation link, and no part of your account waits for a guardian's
+       approval", which is the same commitment without the broader claim.
+       Pre-launch clarification of unpublished text, so 1.0 stands and
+       `effectiveAt` is unchanged: nothing was revised, the draft was corrected.
+       `legalContent.guardianScope.test.js` is what stops the absolute form
+       coming back. */
+    contentHash: '852d6369d484511f29aed6b7f72a4807ce327ced481b42200e2143c1b02f3b05',
     bundledWith: null,
   },
   {

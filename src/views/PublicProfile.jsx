@@ -38,6 +38,7 @@ import OrgAvatar from '../components/common/OrgAvatar';
 /* Extracted so the organization roster can use the same menu rather than a
    second copy that drifts out of step on accessibility. */
 import ActionsMenu from '../components/common/ActionsMenu';
+import { organizationPath } from '../utils/organizationUrl';
 
 /** "March 2025" — a joined date needs no day, and a day is more than is asked. */
 const monthYear = (iso) => (iso
@@ -499,7 +500,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
                   <li key={org.id} className="list-row">
                     {org.archived
                       ? <div className="row">{body}</div>
-                      : <Link to={`/organizations/${org.slug}`} className="card-link row">{body}</Link>}
+                      : <Link to={organizationPath(org)} className="card-link row">{body}</Link>}
                   </li>
                 );
               })}

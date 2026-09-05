@@ -61,6 +61,13 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
    */
   'LEGAL_DOCUMENT_UPDATED',
   /**
+   * And its material sibling, for the same reason and more strongly: this is
+   * the notice that a document the reader is held to has changed in a way that
+   * will require their agreement. A notification preference cannot be a way to
+   * arrive at a blocking dialog with no warning.
+   */
+  'LEGAL_ACCEPTANCE_REQUIRED',
+  /**
    * Being banned from an organization is a mandatory notice for the same reason
    * a suspension is: it is an enforcement decision recorded against the person,
    * it is what an appeal is heard against, and it is worthless if they do not
@@ -145,6 +152,30 @@ export const EVENT_CATEGORIES = {
   NEW_APPLICATION: 'APPLICATION',
   SPOT_RELEASED: 'APPLICATION',
   VOLUNTEER_RELEASED_SPOT: 'APPLICATION',
+  /**
+   * A student asking to join a club, filed under APPLICATION rather than
+   * ACCOUNT.
+   *
+   * It is the same shape as `NEW_APPLICATION`: somebody applied to a thing you
+   * run, and it is sitting in a queue waiting for you to decide it. A manager
+   * who has turned Applications on and Account off has said "tell me about
+   * things awaiting my decision", and this is one.
+   *
+   * The two OUTCOMES go the other way, under ACCOUNT, beside
+   * `ORGANIZATION_MEMBERSHIP_REMOVED` — from the student's side they are news
+   * about where they stand, not about an application queue.
+   */
+  ORGANIZATION_JOIN_REQUEST_RECEIVED: 'APPLICATION',
+  /**
+   * An invitation into a club.
+   *
+   * APPLICATION rather than ACCOUNT, alongside the join request it mirrors:
+   * both are "somebody is waiting for you to decide about a club", and a
+   * student who has turned Application notifications on has said that is what
+   * they want to hear about. ACCOUNT is for things that happened TO their
+   * account and cannot be declined.
+   */
+  ORGANIZATION_INVITATION_RECEIVED: 'APPLICATION',
 
   // EVENT
   /**
@@ -229,8 +260,11 @@ export const EVENT_CATEGORIES = {
    * beside maintenance notices.
    */
   LEGAL_DOCUMENT_UPDATED: 'ACCOUNT',
+  LEGAL_ACCEPTANCE_REQUIRED: 'ACCOUNT',
   /* Membership of a club is a relationship with the platform, not an event. */
   ORGANIZATION_MEMBERSHIP_REMOVED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_ACCEPTED: 'ACCOUNT',
+  ORGANIZATION_JOIN_REQUEST_REJECTED: 'ACCOUNT',
   ORGANIZATION_BANNED: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_STANDS: 'ACCOUNT',
   ORGANIZATION_BAN_APPEAL_REVERSED: 'ACCOUNT',
@@ -492,6 +526,24 @@ export function getInAppContent(event, payload) {
      * an indefinite suspension is still a real option and must not be described
      * as having an end.
      */
+    /**
+     * ── The two legal-change notices, and why there are exactly two ──
+     *
+     * §13 of the published Terms draws one line and this pair is it: "A change
+     * that leaves you worse off … gets a new major version and we ask you to
+     * accept it again. A clarification gets a minor version and notice only."
+     *
+     * `LEGAL_DOCUMENT_UPDATED` is the second sentence; `LEGAL_ACCEPTANCE_REQUIRED`
+     * is the first. `dispatchLegalChangeNotices` in `legalNotices.js` picks
+     * between them from the version number and sends EXACTLY ONE per person per
+     * document version — an ordinary "we updated something" mail followed by a
+     * "you must accept this" mail about the same change would teach the reader
+     * that the first kind means nothing.
+     *
+     * Neither may state or imply that the reader has accepted anything. Only
+     * `POST /api/legal/updates/accept` records that, and the wording here is
+     * chosen so that a reader who does nothing at all is described accurately.
+     */
     case 'LEGAL_DOCUMENT_UPDATED': {
       /**
        * The excerpt is a SAMPLE, and the copy says so.
@@ -507,6 +559,10 @@ export function getInAppContent(event, payload) {
       const others = payload.changeCount > 1
         ? `\n\nThat is one of ${payload.changeCount} changes.`
         : '';
+      /* Stated because it is what an acceptance record points at, and because a
+         reader comparing this mail to the page should be able to tell whether
+         they are looking at the same revision. */
+      const version = payload.version ? ` (version ${payload.version})` : '';
 
       return {
         kind,
@@ -516,11 +572,201 @@ export function getInAppContent(event, payload) {
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: `${payload.title} has been updated`,
         body:
-          `We have made changes to the ${payload.title}.${quoted}${others}\n\n`
-          + 'Please read the full document. If you do not agree with the changes, '
-          + 'you can close your account at any time.',
+          `We have updated the ${payload.title}${version}.${quoted}${others}\n\n`
+          + 'This was a clarification, so there is nothing you need to do and '
+          + 'nothing has been recorded as accepted on your behalf — this is a '
+          + 'notice that the document changed. Please read it when you have a '
+          + 'moment. If you do not agree with the changes, you can close your '
+          + 'account at any time.',
         link: `/legal/${payload.slug}`,
         ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    /**
+     * A material change: the reader will be asked to accept it.
+     *
+     * ── Why this is sent during the notice period rather than on the day ──
+     *
+     * The Terms promise notice "at least 30 days before it takes effect", and
+     * the ICO's guidance on the right to be informed says the same thing in the
+     * general case: a change to how personal data is used has to be
+     * communicated BEFORE the new processing begins, actively rather than by
+     * quietly editing a page. So the mail goes out when the revision is
+     * published, names the date, and says what will be asked for then.
+     *
+     * The effective date arriving is not a second email. It is the in-app
+     * dialog, which is unavoidable by construction — see
+     * `SIGNUP_CONSENT_GATED_CAPABILITIES`. A reminder mail on the day would be
+     * a second message about one change, which is the duplication this pair is
+     * designed to avoid.
+     *
+     * ── What it must not say ──
+     *
+     * Not "you have accepted", not "by continuing to use WeVolunteer you
+     * agree", and not "click here to accept". The link goes to the document.
+     * Acceptance happens in the application, behind a session, through a POST —
+     * never from a link in an email.
+     */
+    case 'LEGAL_ACCEPTANCE_REQUIRED': {
+      const quoted = payload.excerpt
+        ? `\n\n\u201c${payload.excerpt}\u201d`
+        : '';
+      const others = payload.changeCount > 1
+        ? `\n\nThat is one of ${payload.changeCount} changes.`
+        : '';
+      const version = payload.version ? ` (version ${payload.version})` : '';
+
+      /**
+       * Two tenses, because this notice is sent in both situations.
+       *
+       * Normally the revision is dated at least thirty days ahead and this is
+       * advance notice. It can also be in effect already — a change published
+       * under the notice-period override in the Legal Center, which requires an
+       * owner to give a written reason and is audited. The same message has to
+       * be truthful in both cases, so the sentence about WHEN is built from the
+       * date rather than assumed.
+       */
+      const when = payload.effectiveDateLabel;
+      const timing = payload.alreadyInEffect
+        ? 'This change is now in effect, so the next time you open WeVolunteer we '
+          + 'will ask you to review the new version and accept it.'
+        : when
+          ? `This change takes effect on ${when}. From that date, WeVolunteer will `
+            + 'ask you to review the new version and accept it before you carry on '
+            + 'volunteering, messaging or posting.'
+          : 'When this change takes effect, WeVolunteer will ask you to review the '
+            + 'new version and accept it before you carry on volunteering, messaging '
+            + 'or posting.';
+
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.CRITICAL,
+        title: `An important update to the ${payload.title}`,
+        body:
+          `We have made a significant change to the ${payload.title}${version} — one `
+          + `that a reasonable reader of the previous version would want to know `
+          + `about.${quoted}${others}\n\n${timing}\n\n`
+          + 'Nothing has been recorded as accepted on your behalf, and reading the '
+          + 'document does not accept it. You can read it now, and if you would '
+          + 'rather not agree you can close your account at any time.',
+        link: `/legal/${payload.slug}`,
+        ctaText: `Read the ${payload.title}`,
+      };
+    }
+
+    /**
+     * Somebody wants in, and a manager has to answer.
+     *
+     * ── Why the body names one person and nothing else ──
+     *
+     * This is dispatched to every manager, which means it is also enqueued as
+     * email, which means it leaves the building. `FRIEND_SIGNED_UP` makes the
+     * same argument and lands the same way: the recipient is being told that
+     * something needs their attention, and the detail lives behind the link,
+     * where the reader is authenticated and the disclosure is already governed.
+     *
+     * So: a name and a club. Not a grade, not a school, not an email address,
+     * and not a message. A request may now carry a short note (migration 063),
+     * but the note is not repeated here: it was written for the club's managers
+     * to read on the page, and copying it into a notification would also copy
+     * it into an email, which leaves the platform. What this says is that
+     * somebody is waiting; the page says who and why.
+     */
+    /**
+     * Every organization deep link below is the canonical `@handle` form.
+     *
+     * A notification row persists its `link`, so these strings outlive the
+     * request that wrote them — which is exactly why the handle stopped moving
+     * when a club is renamed. Before that change, a rename silently dead-linked
+     * every historical notification a club had ever sent; now the address in a
+     * row from last term still resolves. See `organizationHandles.js`.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_RECEIVED': {
+      const org = payload.organizationName || 'your organization';
+      const who = payload.actorName || 'Somebody';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `Someone asked to join ${org}`,
+        body: `${who} asked to join ${org}. It is waiting for a manager to accept or decline.`,
+        link: payload.organizationSlug
+          ? `/organizations/@${payload.organizationSlug}#requests`
+          : '/organizations',
+        ctaText: 'Review the request',
+      };
+    }
+
+    /**
+     * You have been invited.
+     *
+     * ── What this does NOT say ──
+     *
+     * **Who invited you.** The club invites, not the individual member who
+     * pressed the button. Naming them would make declining an answer to a
+     * classmate rather than to a club, which is precisely the pressure a
+     * thirteen-year-old should not be under.
+     *
+     * **The note, if there is one.** A notification body is copied into an
+     * email, which leaves the platform; a note written to one person stays on
+     * the page they open. The body says there is one, so nobody misses it.
+     *
+     * The invitation lapses, so the body says so without printing a date — the
+     * page shows the date, and a body that hardcoded one would be wrong the
+     * moment the row was read a fortnight later.
+     */
+    case 'ORGANIZATION_INVITATION_RECEIVED': {
+      const org = payload.organizationName || 'an organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You have been invited to join ${org}`,
+        body: `${org} invited you to join. Open it to accept or decline — `
+          + 'the invitation does not last for ever.',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
+      };
+    }
+
+    case 'ORGANIZATION_JOIN_REQUEST_ACCEPTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `You are now a member of ${org}`,
+        body:
+          `A manager accepted your request to join ${org}. `
+          + 'You will be told when it posts a new opportunity.',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
+        ctaText: `Go to ${org}`,
+      };
+    }
+
+    /**
+     * Declined — and carrying no reason, on purpose.
+     *
+     * The alternative is a free-text field in which a club manager writes a
+     * judgement about a named minor, which is then copied into an email that
+     * leaves the platform. A ban carries a reason because a ban is an
+     * enforcement decision with an appeal heard against it; declining a request
+     * is neither, and it is reversible by simply asking again.
+     *
+     * It says the door is not locked for that reason: without that sentence the
+     * message reads as permanent, which it is not — the partial unique index is
+     * scoped to `pending`, so a declined student may ask again.
+     */
+    case 'ORGANIZATION_JOIN_REQUEST_REJECTED': {
+      const org = payload.organizationName || 'the organization';
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.NORMAL,
+        title: `${org} did not accept your request`,
+        body:
+          `Your request to join ${org} was not accepted. `
+          + 'Nothing about your account, your hours or any other organization changes, '
+          + 'and you can ask again later.',
+        /* No CTA. The decision is made, and a button back to a club that has
+           just said no is not something to press. */
       };
     }
 
@@ -535,7 +781,7 @@ export function getInAppContent(event, payload) {
         body:
           `${actor} removed you from ${org}.${why}`
           + '\n\nYou can still join this organization again.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `View ${org}`,
       };
     }
@@ -609,7 +855,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has looked at your appeal and lifted the ban. `
           + 'You can join again whenever you like.' + why,
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : undefined,
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : undefined,
         ctaText: payload.organizationSlug ? `Go to ${org}` : undefined,
       };
     }
@@ -636,7 +882,7 @@ export function getInAppContent(event, payload) {
         body:
           `A manager of ${org} has lifted the ban. You can join again whenever `
           + 'you like.',
-        link: payload.organizationSlug ? `/organizations/${payload.organizationSlug}` : '/organizations',
+        link: payload.organizationSlug ? `/organizations/@${payload.organizationSlug}` : '/organizations',
         ctaText: `Go to ${org}`,
       };
     }

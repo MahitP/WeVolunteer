@@ -6,6 +6,7 @@ import { can } from '../authz';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrgAvatar from '../components/common/OrgAvatar';
+import { organizationPath, organizationSubPath } from '../utils/organizationUrl';
 
 /**
  * The organizations you belong to, and the ones you run.
@@ -104,7 +105,7 @@ function OrgGroup({ title, organizations, manageable = false }) {
         <ul className="list org-home-list">
           {organizations.map(org => (
             <li key={org.id} className="list-row">
-              <Link to={`/organizations/${org.slug}`} className="card-link row person">
+              <Link to={organizationPath(org)} className="card-link row person">
                 <OrgAvatar organization={org} size={20} />
                 <span className="stack-xs" style={{ minWidth: 0 }}>
                   <span className="person-name truncate">{org.name}</span>
@@ -120,7 +121,7 @@ function OrgGroup({ title, organizations, manageable = false }) {
                   anchor is invalid markup and a mis-tap navigates instead. */}
               {manageable && (
                 <Link
-                  to={`/organizations/${org.slug}/edit`}
+                  to={organizationSubPath(org, 'edit')}
                   className="btn btn-secondary btn-sm"
                   aria-label={`Manage ${org.name}`}
                 >

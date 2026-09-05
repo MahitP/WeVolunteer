@@ -55,12 +55,23 @@ export function __modalStackDepth() {
  *   • background page cannot scroll behind the overlay
  *
  * @param {() => void} onClose - called when the user dismisses the dialog
+ * @param {object} [options]
+ * @param {boolean} [options.dismissible=true] - false for a dialog that has no
+ *   "close": see the Escape note inside.
+ * @param {string} [options.initialFocus] - CSS selector, queried inside the
+ *   dialog, for where focus should land instead of the first control.
  * @returns {React.RefObject<HTMLElement>} ref to spread onto the dialog element
  */
-export function useModal(onClose) {
+export function useModal(onClose, { dismissible = true, initialFocus = null } = {}) {
   const ref = useRef(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  /* Through a ref for the same reason `onClose` is: the effect below runs once
+     with `[]` deps, so a value read straight from the closure would be the one
+     this dialog mounted with. That is true of `dismissible` in every current
+     caller, and a latent bug the first time it is not. */
+  const dismissibleRef = useRef(dismissible);
+  dismissibleRef.current = dismissible;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -79,10 +90,35 @@ export function useModal(onClose) {
       )].filter(el => el.offsetParent !== null);
     };
 
-    // Prefer the first real control over the close button, so keyboard users
-    // land on the content rather than on "dismiss".
+    /**
+     * Prefer the first real control over the close button, so keyboard users
+     * land on the content rather than on "dismiss".
+     *
+     * ── Unless the dialog names its own landing place ──
+     *
+     * "First control" is the right default and the wrong answer for a dialog
+     * whose first control is consequential. The legal re-acceptance dialog's
+     * footer reads Sign out · Read the document · Accept and continue, in that
+     * visual order, so the default armed SIGN OUT: a keyboard user who pressed
+     * Space on arrival — which is what people do — would be signed out by a
+     * dialog that had just told them they needed to read something.
+     *
+     * Focusing "Accept" instead is worse, because it arms agreeing to a
+     * document nobody has read yet. The APG's own guidance covers this case
+     * both ways: focus a static element at the start of the content
+     * (`tabindex="-1"`) so a screen reader begins at the beginning, and prefer
+     * the least destructive option for an irreversible action. A heading arms
+     * nothing at all.
+     *
+     * A selector rather than a ref, because `Modal` portals its children and
+     * the caller does not own the node this hook is attached to.
+     */
+    const named = initialFocus ? node?.querySelector(initialFocus) : null;
     const items = focusable();
-    const target = items.find(el => !el.classList.contains('modal-close')) || items[0] || node;
+    const target = named
+      || items.find(el => !el.classList.contains('modal-close'))
+      || items[0]
+      || node;
 
     /**
      * Falling back to the dialog itself has to actually work.
@@ -113,7 +149,33 @@ export function useModal(onClose) {
       // the Tab cycle belongs to it while it is covered.
       if (!isTopmost()) return;
 
+      /**
+       * Escape closes — unless there is nothing to close to.
+       *
+       * ── Why a dialog would ever refuse it ──
+       *
+       * The APG lists Escape as a required function of the modal dialog
+       * pattern, and it is right for every dialog in this application but one:
+       * the legal re-acceptance dialog, which exists because the account cannot
+       * continue using the product until it has answered. "Close" is not one of
+       * the answers. Wiring Escape to a close that immediately reopens would be
+       * worse than not wiring it — a key that appears to work and does not is
+       * how somebody concludes the page is broken.
+       *
+       * ── Why that is not a keyboard trap ──
+       *
+       * WCAG 2.1.2 asks that focus can be moved away using standard navigation,
+       * OR that the reader is advised of a method for doing so. Both ways out of
+       * that dialog — accepting, and signing out — are ordinary buttons in the
+       * tab cycle, named in the dialog's own text. The dialog is not a state
+       * somebody is stuck in; it is a question with two answers.
+       *
+       * Tab containment, focus placement, focus restore and the scroll lock all
+       * still apply. Only the dismissal is withheld, and only where dismissal
+       * is not a thing the dialog offers.
+       */
       if (e.key === 'Escape') {
+        if (!dismissibleRef.current) return;
         e.stopPropagation();
         closeRef.current?.();
         return;

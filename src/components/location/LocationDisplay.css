@@ -328,57 +328,13 @@
   align-items: stretch;
 }
 
-/* --------------------------------------------------------------------------
-   Location opt-in banner
+/* The location opt-in banner's rules used to live here.
    --------------------------------------------------------------------------
-   Sits above the page content in the signed-in shell. Quiet on purpose: this
-   asks for something, and a request styled like an alert reads as a demand.
-   -------------------------------------------------------------------------- */
-.location-prompt {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s3) var(--s4);
-  margin-bottom: var(--s5);
-  background: var(--surface-2);
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-}
+   They moved to `components/notifications/NoticeBanner.css` when the legal
+   change notice needed the same treatment. Nothing about the appearance
+   changed — the rules are the same declarations under neutral class names —
+   but the banner is shell chrome shared by two subsystems now rather than a
+   location component, and leaving the only copy of it in a location
+   stylesheet is how the second consumer ends up importing a location
+   stylesheet to draw a legal notice. */
 
-.location-prompt-icon {
-  display: inline-flex;
-  color: var(--brand);
-  flex-shrink: 0;
-}
-
-.location-prompt-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.location-prompt-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  flex-shrink: 0;
-}
-
-/* Below the shell breakpoint the banner stacks, so the two buttons do not
-   squeeze the copy into a two-word column. */
-@media (max-width: 700px) {
-  .location-prompt {
-    flex-wrap: wrap;
-  }
-  .location-prompt-body {
-    flex-basis: 100%;
-    order: 2;
-  }
-  .location-prompt-actions {
-    order: 3;
-    width: 100%;
-    justify-content: space-between;
-  }
-}
