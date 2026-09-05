@@ -112,7 +112,7 @@ export default function VolunteerDashboard({
 
   const handleWithdraw = async (app, title, confirmed) => {
     const message = confirmed
-      ? `Release your spot for "${title}"?\n\nThe organizer will be notified and your spot reopens for another volunteer.`
+      ? `Give up your spot for "${title}"?\n\nThe organizer will be notified and your spot reopens for another volunteer.`
       : `Withdraw your application for "${title}"?`;
     if (!window.confirm(message)) return;
     setWithdrawingId(app.id);
@@ -468,7 +468,7 @@ export default function VolunteerDashboard({
                       style={{ color: 'var(--danger)' }}
                       disabled={withdrawingId === app.id}
                       onClick={() => handleWithdraw(app, event.title, true)}
-                      title="Can't make it? Release your spot so someone else can take it"
+                      title="Give up your spot so someone else can take it"
                     >
                       Can't make it
                     </button>

@@ -17,3 +17,13 @@ export {
   MAX_DESCRIPTION,
   validateIssue,
 } from '../server/issueReports.js';
+
+/**
+ * Reply routing is deliberately not reachable from here. It lives in
+ * `server/issueRouting.js`, which nothing under `src/` imports, and that
+ * separation is the ONLY thing that keeps the mailbox keys out of the bundle:
+ * two earlier attempts — projecting this array, and moving the field to a map
+ * inside `server/issueReports.js` — both left the data in the built chunk,
+ * because Rollup preserves a top-level `Object.freeze({...})` as a side effect
+ * even when the binding is tree-shaken. See that file.
+ */

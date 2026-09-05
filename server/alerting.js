@@ -283,7 +283,12 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
         '',
         'The database holds every student\'s service record. Until this is fixed there is no',
         'copy of it anywhere else.',
-        appUrl ? `\n${appUrl}/admin` : '',
+        /* `/admin/moderation`, not `/admin`. The bare prefix is not a declared
+           route — it answered "Page not found" — and this is the email that
+           fires when the database holding every student's service record has no
+           backup, i.e. the worst possible moment for the one link in it to be
+           dead. */
+        appUrl ? `\n${appUrl}/admin/moderation` : '',
       ].join('\n'),
     });
 

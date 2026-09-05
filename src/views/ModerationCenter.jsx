@@ -37,7 +37,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -138,6 +138,68 @@ export const AREAS = [
     title: 'Platform Impact',
     blurb: 'Programme-wide figures: hours, volunteers, events and how participation has moved over time.',
   },
+  /**
+   * The Legal Center editor — the one administrative area that was missing.
+   *
+   * ── Why it was absent, and why absence was the wrong answer ──
+   *
+   * `/admin/legal` predates this hub. When the six administrative pages came
+   * off the navigation rail they were all moved HERE, and
+   * `App.navGroups.test.jsx` asserts that each of the six is still offered —
+   * but it reads a list of the pages that MOVED, and this page never moved
+   * because it was never on the rail. So the guard that exists to prove nothing
+   * became unreachable could not see the one page nothing led to.
+   *
+   * The route's own comment says the `/admin/` prefix "puts it where the other
+   * owner-only pages already are". That was true of the path and false of the
+   * product: the only way in was Settings → Help → "Edit Legal Center", so an
+   * owner asking "where do I administer this platform" found seven areas on
+   * this page and the eighth filed under Help, beside About Us. This page's own
+   * heading claims to list "the administrative areas this account can open",
+   * and that claim was not true while this tile was missing.
+   *
+   * The Settings entry STAYS. It is not a duplicate to be consolidated away:
+   * Settings is where somebody goes to change how the product behaves for
+   * them, and the Legal Center is genuinely reachable from there as the
+   * owner's version of "the documents that govern this". Two doors into one
+   * room is normal; no door from the room that indexes every other room is
+   * not.
+   *
+   * `legal.edit` is SUPER_ONLY, so this tile is invisible to every
+   * administrator and cannot be reached by a capability grant —
+   * `userCapabilities.js` refuses to store one naming it. Hiding the tile is
+   * UX; `server/routes/legalAdminRoutes.js` is the boundary, and publishing
+   * additionally re-proves identity through `legal.publish`.
+   */
+  /**
+   * Badges — the surface four finished endpoints never had.
+   *
+   * Listed BEFORE the Legal Center because it is programme administration like
+   * everything above it, and the Legal Center is the owner-only document
+   * surface that sits at the end.
+   *
+   * `event.moderate`, so an ordinary administrator sees it: defining what the
+   * platform recognises and correcting a wrong award are the job, not a
+   * privilege reserved for the owner.
+   */
+  {
+    id: 'badges',
+    to: '/admin/badges',
+    cap: 'event.moderate',
+    icon: Award,
+    title: 'Badges',
+    blurb: 'What the platform recognises, who holds what, and how to award or take one back. '
+      + 'Every change is recorded against your name.',
+  },
+  {
+    id: 'legal',
+    to: '/admin/legal',
+    cap: 'legal.edit',
+    icon: FileSignature,
+    title: 'Legal Center',
+    blurb: 'The documents everyone on this platform is held to. Editing is owner-only, and '
+      + 'publishing a new version asks you to prove it is you.',
+  },
 ];
 
 /**
@@ -154,7 +216,35 @@ const PERSONAS = [
   { id: 'student', label: 'Student', blurb: 'Browse, apply, log hours' },
   { id: 'organizer', label: 'Organizer', blurb: 'Post events, pick volunteers' },
   { id: 'admin', label: 'Administrator', blurb: 'Reports, appeals, approvals' },
-  { id: 'partner', label: 'Partner', blurb: 'Read-only participation view' },
+  /**
+   * ── Partner is NOT offered, because there is nothing to preview ──
+   *
+   * It was here, described as a "Read-only participation view". No such view
+   * exists. `partner` is a LATENT role: `ROLE.PARTNER` is defined and
+   * `server/authz.js` gives it four capabilities, but nothing in the product
+   * assigns it — there is no signup path, no administrative action and no CLI
+   * that can produce a partner account, so no account holds it and none can be
+   * created.
+   *
+   * What an owner actually got by selecting it was `analytics.public`,
+   * `event.view`, `geocode.use` and `persona.preview.exit`: a rail of Discover
+   * and nothing else, no Dashboard entry (`partner` is deliberately absent from
+   * `DASHBOARD_NAV`), and `/` reading "Partner accounts do not have a dashboard
+   * yet". `authz.js` says the same thing about the capability itself —
+   * `analytics.public` "stays registered and still reads nothing: it is the name
+   * for figures chosen FOR an outside reader, and that surface has not been
+   * designed."
+   *
+   * So the product was honest in its comments and in the page a partner lands
+   * on, and dishonest in exactly one place: this list, which promised a view by
+   * name. Removing the entry is the honest half of that; the capabilities and
+   * the role stay untouched, ready for the surface when it is designed.
+   *
+   * The SERVER's `PREVIEWABLE` in `server/routes/personaRoutes.js` is
+   * deliberately not narrowed to match. It is derived from `ROLES` so that a
+   * role added to the kernel becomes previewable without a second list going
+   * stale, and that property is worth more than symmetry with a menu.
+   */
 ];
 
 export default function ModerationCenter({ currentUser, onPreviewStarted }) {

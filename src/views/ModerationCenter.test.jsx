@@ -210,8 +210,19 @@ describe('the persona preview control', () => {
     const group = screen.getByRole('radiogroup', { name: /preview as another role/i });
     const radios = within(group).getAllByRole('radio');
 
-    expect(radios).toHaveLength(4);
-    /* Native radios, so arrow-key movement, "2 of 4" announcements and the
+    /**
+     * Three, not four. `partner` was removed from the list.
+     *
+     * It is a LATENT role: `ROLE.PARTNER` exists and `authz.js` gives it four
+     * capabilities, but nothing in the product assigns it — no signup path, no
+     * administrative action, no CLI — so no account holds it and none can be
+     * created. Previewing it produced a rail of Discover and a `/` reading
+     * "Partner accounts do not have a dashboard yet", while the entry described
+     * a "Read-only participation view". The product was honest everywhere
+     * except in the menu that named the thing.
+     */
+    expect(radios).toHaveLength(3);
+    /* Native radios, so arrow-key movement, "2 of 3" announcements and the
        platform focus ring all come free. A `<div role="radio">` reimplementation
        would satisfy `getAllByRole` and none of the behaviour. */
     for (const radio of radios) expect(radio.tagName).toBe('INPUT');
@@ -220,7 +231,8 @@ describe('the persona preview control', () => {
     expect(within(group).getByRole('radio', { name: /student/i })).toBeTruthy();
     expect(within(group).getByRole('radio', { name: /organizer/i })).toBeTruthy();
     expect(within(group).getByRole('radio', { name: /administrator/i })).toBeTruthy();
-    expect(within(group).getByRole('radio', { name: /partner/i })).toBeTruthy();
+    /* And the role with no surface is not advertised as having one. */
+    expect(within(group).queryByRole('radio', { name: /partner/i })).toBeNull();
   });
 
   it('never offers super_admin as a persona to preview', () => {
@@ -251,8 +263,11 @@ describe('the persona preview control', () => {
     expect(selected()).toHaveLength(1);
     expect(selected()[0].textContent).toMatch(/student/i);
 
-    fireEvent.click(screen.getByRole('radio', { name: /partner/i }));
+    /* Was `partner`, which is no longer offered — see the note above. Any other
+       option proves the same property: the selection moves, and exactly one
+       option carries the visible marker. */
+    fireEvent.click(screen.getByRole('radio', { name: /administrator/i }));
     expect(selected()).toHaveLength(1);
-    expect(selected()[0].textContent).toMatch(/partner/i);
+    expect(selected()[0].textContent).toMatch(/administrator/i);
   });
 });

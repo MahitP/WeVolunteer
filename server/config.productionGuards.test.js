@@ -425,12 +425,26 @@ describe('DEMO_MODE is refused when the database is not on this machine', () => 
     WEV_DB_PATH: `/tmp/wev-remote-guard-${process.pid}.db`,
   };
 
-  const bootServer = (env) => {
+  /**
+   * A boot that is EXPECTED to survive has to be stopped.
+   *
+   * The refusal cases exit on their own, which is the whole assertion. The
+   * negative cases — the ones proving a local database and plain SQLite are
+   * left alone — reach `listen()` and stay there, so `spawnSync` would wait for
+   * a server that never returns. They are given a short deadline and killed,
+   * and the assertion is made against whatever the boot printed before that.
+   *
+   * `API_PORT` is pinned high and out of the way: the default is 5050, and a
+   * developer with the app already running would otherwise see these fail on
+   * EADDRINUSE rather than on anything they mean.
+   */
+  const bootServer = (env, { waitMs = 30_000 } = {}) => {
     const root = process.cwd().replace(/\\/g, '/');
     const r = spawnSync(process.execPath, [`${root}/server/server.js`], {
-      env: { ...DEV, ...env },
+      env: { API_PORT: '45991', ...DEV, ...env },
       encoding: 'utf8',
-      timeout: 30_000,
+      timeout: waitMs,
+      killSignal: 'SIGKILL',
     });
     return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
   };
@@ -466,7 +480,7 @@ describe('DEMO_MODE is refused when the database is not on this machine', () => 
   });
 
   it('leaves a LOCAL postgres alone, because that is the development loop', () => {
-    const r = bootServer({
+    const r = bootServer({ ...{}, 
       DEMO_MODE: 'true',
       DATABASE_ENGINE: 'postgres',
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/wv_dev',
@@ -474,15 +488,15 @@ describe('DEMO_MODE is refused when the database is not on this machine', () => 
     /* It may well fail for other reasons — nothing is listening — but it must
        not fail for THIS one. */
     expect(r.out).not.toMatch(/DEMO_MODE is set and the database is not on this machine/);
-  });
+  }, 60_000);
 
   it('leaves SQLite alone even when a DATABASE_URL is lying around', () => {
-    const r = bootServer({ DEMO_MODE: 'true', DATABASE_URL: REMOTE });
+    const r = bootServer({ DEMO_MODE: 'true', DATABASE_URL: REMOTE }, { waitMs: 12_000 });
     expect(r.out).not.toMatch(/DEMO_MODE is set and the database is not on this machine/);
-  });
+  }, 60_000);
 
   it('says so when DATABASE_URL is set but nothing will use it', () => {
-    const r = bootServer({ DATABASE_URL: REMOTE });
+    const r = bootServer({ DATABASE_URL: REMOTE }, { waitMs: 12_000 });
     expect(r.out).toMatch(/DATABASE_URL is set but DATABASE_ENGINE is not "postgres"/);
-  });
+  }, 60_000);
 });

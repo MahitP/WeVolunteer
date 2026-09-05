@@ -9,7 +9,7 @@ import CheckInCodeModal from './CheckInCodeModal';
  * How long before a shift the downloaded calendar entry should sound an alarm.
  *
  * A fixed default rather than a picker in the row. That row already carries the
- * seat count, the status pill, this button and Release; a fifth control for a
+ * seat count, the status pill, this button and the release control; a fifth control for a
  * decision most people will not make is clutter — and the one place changing an
  * alert is genuinely easy is the calendar application it just landed in.
  *
@@ -230,7 +230,7 @@ export default function EventShiftsTab({
                               *
                               * This row carried four full-width controls — a
                               * status pill, "Add to Calendar", "Check in with
-                              * QR" and "Release" — and on a phone
+                              * QR" and the release control — and on a phone
                               * `.sheet-action .btn { width: 100% }` stacked all
                               * four into a column taller than the shift it
                               * belonged to. Multiply by a three-shift event and
@@ -239,7 +239,7 @@ export default function EventShiftsTab({
                               * Calendar and QR are recognisable as glyphs, are
                               * safe to press by accident, and are the two a
                               * volunteer reaches for repeatedly — they compress
-                              * well. Release does not: it gives up a place
+                              * well. Giving up a place does not: it gives up a place
                               * somebody else wanted, it is pressed once, and an
                               * unlabelled icon for a destructive action is how
                               * people lose their shift by mis-tapping. It stays
@@ -282,7 +282,24 @@ export default function EventShiftsTab({
                               <button className="btn btn-ghost btn-sm"
                                 disabled={submitting}
                                 onClick={() => onRelease(mine, slot.name)}>
-                                {mine.status === 'accepted' ? 'Release' : 'Withdraw'}
+                                {/* ── "Can't make it", not "Release" ──
+                                    Giving up a CONFIRMED place had two names in
+                                    two places: "Release" here and "Can't make
+                                    it" on the volunteer dashboard, for the same
+                                    act through the same endpoint. The
+                                    dashboard's is the one that survived, because
+                                    it is what the student is communicating
+                                    rather than what the seat model does about
+                                    it — "Release" is domain language borrowed
+                                    from the capacity code.
+
+                                    "Withdraw" stays for pending and waitlisted,
+                                    and that is a real distinction rather than a
+                                    leftover: taking back an application nobody
+                                    has answered yet is not the same act as
+                                    dropping a place somebody was counting on,
+                                    and each opens a different confirmation. */}
+                                {mine.status === 'accepted' ? "Can't make it" : 'Withdraw'}
                               </button>
                             )}
                           </div>
@@ -305,7 +322,7 @@ export default function EventShiftsTab({
                             * describing an act this control actually performs.
                             * The states that mean a real application — "Awaiting
                             * decision", "Waitlisted", "You're confirmed", each
-                            * with Withdraw or Release beside it — are rendered
+                            * with Withdraw or "Can't make it" beside it — are rendered
                             * from `mine` in the branch above, which comes from
                             * the server. So the two are no longer expressible in
                             * the same words, and a reload (which empties

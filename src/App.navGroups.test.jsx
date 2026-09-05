@@ -253,4 +253,77 @@ describe('navSectionsFor', () => {
   it("keeps the owner's primary tier to the six destinations", () => {
     expect(navSectionsFor(USER('super_admin')).primary).toHaveLength(6);
   });
+
+  /**
+   * Every administrative page is indexed by the hub — derived, not listed.
+   *
+   * ── Why `MOVED` above was not enough ──
+   *
+   * That list is the six pages that came OFF the rail, and asserting the hub
+   * still offers each of them is exactly right for what it was written to
+   * protect. It is also a hand-maintained list of history, so it can only ever
+   * check pages that once had a rail entry.
+   *
+   * `/admin/legal` never had one. It was added straight to `APP_ROUTES` under
+   * the `/admin/` prefix — its own comment says that prefix "puts it where the
+   * other owner-only pages already are" — and the only way in was Settings →
+   * Help. So the hub, whose heading claims to list "the administrative areas
+   * this account can open", omitted an administrative area this account can
+   * open, and no test could notice: it was not in `MOVED`, and `internalLinks`
+   * only checks that a link's target exists, never that a target has a link.
+   *
+   * This is derived from `APP_ROUTES` instead. Any route under `/admin/` has to
+   * be on the hub or explicitly excused below, so the next page filed under
+   * that prefix cannot be reachable by URL alone. `/admin/moderation` is the
+   * hub itself and is the one permanent exemption — a page does not index
+   * itself.
+   *
+   * Deliberately NOT extended to every administrative-looking path outside the
+   * prefix. `/impact` and `/errors` are administrative and are on the hub, and
+   * `MOVED` already pins both; a rule that tried to recognise them by
+   * capability would have to decide what "administrative" means, and that
+   * judgement belongs in the tile table rather than in a regex.
+   */
+  it('offers every /admin/ route on the hub', async () => {
+    const { AREAS } = await import('./views/ModerationCenter.jsx');
+    const { APP_ROUTES } = await import('./routes/index.jsx');
+
+    /* The hub itself. A page cannot be a tile on itself. */
+    const EXEMPT = new Set(['/admin/moderation']);
+
+    const indexed = new Set(AREAS.map(a => a.to));
+    const orphans = APP_ROUTES
+      .map(r => r.path)
+      .filter(p => p.startsWith('/admin/'))
+      .filter(p => !EXEMPT.has(p))
+      .filter(p => !indexed.has(p));
+
+    expect(
+      orphans,
+      'these administrative pages are reachable only by typing the URL. Add a '
+      + 'tile to AREAS in src/views/ModerationCenter.jsx, or add the path to '
+      + 'EXEMPT in this test with the reason it needs no tile.'
+    ).toEqual([]);
+  });
+
+  /**
+   * And the owner can actually open the Legal Center tile.
+   *
+   * The tile table is filtered by `can(user, area.cap)`, so a tile naming a
+   * capability nobody holds is as unreachable as a missing tile while looking
+   * present in the source — the same trap the `MOVED` reachability test above
+   * was written for. Read from the table rather than by naming the capability,
+   * so this follows the tile instead of pinning today's answer.
+   */
+  it('leaves the Legal Center tile openable by the owner and shut to admins', async () => {
+    const { AREAS } = await import('./views/ModerationCenter.jsx');
+    const { can } = await import('./authz');
+
+    const legal = AREAS.find(a => a.to === '/admin/legal');
+    expect(legal, 'the Legal Center tile has gone from the hub').toBeTruthy();
+    expect(can(USER('super_admin'), legal.cap)).toBe(true);
+    /* SUPER_ONLY, so an ordinary administrator must not see it. The editor
+       gates reading the editable text as well as writing it. */
+    expect(can(USER('admin'), legal.cap)).toBe(false);
+  });
 });

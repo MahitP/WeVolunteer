@@ -22,6 +22,25 @@ import { DatabaseSync } from 'node:sqlite';
  * can only ever be granted is not a status indicator, it is a trophy.
  */
 
+/**
+ * `db.js` opens its connection at IMPORT time, not on first use.
+ *
+ * This file imports it only to replace the `db` export with the in-memory
+ * schema below — but the import has already run `openConnection()` by then, and
+ * with `WEV_DB_PATH` unset that resolves to `server/wevolunteer.db`, a real file
+ * shared by every worker in the pool. Alone that is invisible. Under a full-suite
+ * run several workers open it at once and collide on the WAL/PRAGMA setup, which
+ * surfaces here as an intermittent `Error: database is locked` in a test that
+ * passes every time it is run on its own.
+ *
+ * Set before the dynamic import in `beforeAll`, and at module scope rather than
+ * inside it, so a later static import of anything reaching `db.js` cannot get in
+ * first. `:memory:` is a SQLite locator that `db.js` passes through unresolved —
+ * see the `isSqliteLocator` guard there — so nothing is written to disk and the
+ * connection is private to this worker.
+ */
+process.env.WEV_DB_PATH = ':memory:';
+
 let db;
 let badgeService;
 let reliability;

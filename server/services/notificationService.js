@@ -105,7 +105,30 @@ function buildNotification(userId, { kind, priority, title, body, link }, dedupe
     priority: priority || 'NORMAL',
     title,
     body: body || '',
-    link,
+    /**
+     * `?? null`, and it is not defensive tidying.
+     *
+     * A notification with nothing useful to press omits `link` entirely — four
+     * of them do, and each is deliberate: `ORGANIZATION_BAN_APPEAL_STANDS`'s own
+     * note says a link back to the organization somebody cannot rejoin "would be
+     * a taunt". `link` was then bound straight into the INSERT, and neither
+     * engine will bind `undefined` — SQLite raises "Provided value cannot be
+     * bound to SQLite parameter 7".
+     *
+     * The throw was caught by `dispatch`'s best-effort handler, so the failure
+     * was silent and total: the in-app row was never written and no email job
+     * was enqueued. A student who appealed an organization ban and was turned
+     * down was simply never told the outcome — the one notification whose
+     * absence looks like the club ignoring them.
+     *
+     * Coerced HERE rather than by adding `link: null` to each of the four,
+     * because the next content case with nothing to link to will omit it too.
+     * It matters more since the batch path landed: `buildNotification` is now
+     * the single row-builder for BOTH the per-recipient and the fan-out
+     * inserts, so one `undefined` would fail a whole batch rather than one
+     * notification.
+     */
+    link: link ?? null,
     read: 0,
     created_at: createdAt,
     dedupe_key: dedupeKey,

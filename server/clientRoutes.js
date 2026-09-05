@@ -103,6 +103,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/admin/appeals',
   '/admin/audit-logs',
   '/admin/roster',
+  /* Badge administration. A literal path with no parameter, and the person
+     whose badges are being changed is chosen inside the page rather than in the
+     URL — so a report from here names the screen and never which student. */
+  '/admin/badges',
   /* The Legal Center editor. A literal path with no parameter, and the document
      being edited is chosen inside the page rather than in the URL — so a report
      from here names the editor and never which policy was open. */
@@ -142,6 +146,14 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/about',
   '/appeal/:token',
   '/appeals/new',
+  /* Redeeming an administrator invitation. A LITERAL path with no parameter, so
+     it can carry nothing about anybody — and the token the email puts in the
+     query string is dropped before matching, exactly as `/reset-password`'s is.
+     Allowed rather than excluded because a crash HERE is one that strands
+     somebody halfway through being granted administrative access, which is a
+     failure nobody would otherwise hear about: the reader is not yet an
+     administrator and has nowhere to report it. */
+  '/accept-invitation',
 
   /* ── v1.3, the member directory ──────────────────────────────────────────
    *
@@ -175,6 +187,13 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/organizations/new',
   '/organizations/:key/edit',
   '/organizations/:key',
+  /* The invitation link. Allowed under the rule this whole file rests on: the
+     STORED value is the matched pattern, so the token cannot survive matching —
+     exactly the case `/verify/:code` and `/appeal/:token` already make for a
+     live bearer value. The path shape says only that somebody opened an
+     invitation, which names neither the club nor the reader. And a crash HERE is
+     one that costs a signup: it is read by people who have no account yet. */
+  '/organizations/invite/:token',
   '/hours/external',
   /* The same answer as `/hours`, twice over. A crash report from either carries
      the path and nothing else — no certificate, no organization, no dates, and

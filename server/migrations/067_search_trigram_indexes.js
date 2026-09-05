@@ -9,7 +9,7 @@
  * b-tree cannot answer — a b-tree orders by prefix, and a substring has no
  * prefix. So the search read every event that survived the status filter and
  * evaluated four function calls on it: 93 ms at 50,000 events, the last O(n)
- * left on this endpoint after migration 063 removed the sort's.
+ * left on this endpoint after migration 066 removed the sort's.
  *
  * `pg_trgm` indexes text by its three-character subsequences, which is exactly
  * the shape of a substring question. `docs/operations/search-measurements.md`
@@ -34,7 +34,7 @@
  * cannot be installed, this logs what is missing and records itself as applied.
  *
  * Probed and not `try`/`catch`ed, because on PostgreSQL a failed statement
- * aborts the whole transaction — the trap migration 063 fell into, where the
+ * aborts the whole transaction — the trap migration 066 fell into, where the
  * caught error still poisoned the `INSERT INTO schema_migrations` that followed
  * it.
  *
@@ -99,11 +99,11 @@ async function trigramSchema(db) {
      exists to avoid. */
   if (!can?.available || !target || Number(can?.version_num) < 130000) {
     console.warn(
-      '[migration 064] pg_trgm is not installed and cannot be installed by this role '
+      '[migration 067] pg_trgm is not installed and cannot be installed by this role '
       + `(available=${Boolean(can?.available)}, writable_schema=${target ?? 'none'}, `
       + `server_version_num=${can?.version_num}). The search box stays correct and stays `
       + 'linear in event count. To fix: CREATE EXTENSION pg_trgm; then re-run this migration '
-      + 'or create the indexes named in server/migrations/064_search_trigram_indexes.js.'
+      + 'or create the indexes named in server/migrations/067_search_trigram_indexes.js.'
     );
     return null;
   }
@@ -156,7 +156,7 @@ async function columnExistsPg(db, table, column) {
 }
 
 export default {
-  version: 64,
+  version: 67,
   name: 'search_trigram_indexes',
   fileUrl: import.meta.url,
 

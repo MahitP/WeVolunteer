@@ -30,6 +30,7 @@ import EventApplicantsTab from './EventApplicantsTab';
 import AttendeeList from './AttendeeList';
 import ReportModal from './ReportModal';
 import Modal from './Modal';
+import { organizationPath } from '../utils/organizationUrl';
 
 
 export default function EventModal({
@@ -261,7 +262,7 @@ export default function EventModal({
   const handleRelease = async (app, slotName) => {
     const confirmed = app.status === 'accepted';
     const message = confirmed
-      ? `Release your spot for "${slotName}"?\n\n${event.organizerName} will be notified and the spot reopens for someone else.`
+      ? `Give up your spot for "${slotName}"?\n\n${event.organizerName} will be notified and the spot reopens for someone else.`
       : `Withdraw your application for "${slotName}"?`;
     if (!window.confirm(message)) return;
     setSubmitting(true);
@@ -735,7 +736,7 @@ export default function EventModal({
                       {event.organizationSlug && (
                         <>
                           {' '}
-                          <Link to={`/organizations/${event.organizationSlug}`}>
+                          <Link to={organizationPath(event.organizationSlug)}>
                             See {event.organizationName || 'the organization'}
                           </Link>
                         </>

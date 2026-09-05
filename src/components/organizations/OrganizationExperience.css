@@ -1,0 +1,1118 @@
+/**
+ * The organization experience: the plate, the two columns, the manage band, the
+ * invitation page, and the share dialog.
+ *
+ * ── Why this is a file next to the components and not more of index.css ──
+ *
+ * The same reason `EventHero.css` and `EventDetailsExperience.css` are: these
+ * rules exist for one screen and are meaningless anywhere else, and 12,000 lines
+ * of shared stylesheet is where a screen-specific rule goes to be forgotten. The
+ * shared tokens still come from `index.css`, which is where every colour in this
+ * file resolves to — `tokens.test.js` scans `.css` as well as `.jsx`, so a
+ * `var(--…)` here that names nothing fails the build.
+ *
+ * ── The colour idea, and its one constraint ──
+ *
+ * A club's own `avatar_color` reaches the page as `--org-accent`, set inline by
+ * the masthead from the eight-value palette the server validates. It is used in
+ * exactly two places: the emblem plate, and a three-pixel spine down the leading
+ * edge. Deliberately not as a full band — those tokens are pale pastels and are
+ * NOT re-tuned for dark mode (see the note above the palette in index.css), so a
+ * filled band would be a bright slab on a dark page. Two small uses read as an
+ * accent in either theme.
+ */
+
+/* ── The plate ───────────────────────────────────────────────────────────── */
+
+.org-plate {
+  position: relative;
+  overflow: hidden;
+  padding: var(--s6) var(--s6) var(--s5);
+  /* The spine occupies the first 3px, so the content starts after it. */
+  padding-left: calc(var(--s6) + 3px);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+}
+
+/**
+ * The club's colour, down the leading edge.
+ *
+ * `--org-accent` is set inline by the masthead when the club chose a colour, and
+ * declared at `:root` otherwise — so a club with no colour gets a quiet neutral
+ * hairline and nothing here has to know a default was applied.
+ */
+.org-plate-spine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--org-accent);
+}
+
+.org-plate-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+/**
+ * The emblem, on a plate of the club's own colour.
+ *
+ * `4.5rem` is `.avatar-lg`'s size and `3.5rem` below is its own mobile
+ * override — the same scale, reused rather than re-invented. The first version
+ * used 76px and 58px, which looked identical and meant a third set of avatar
+ * dimensions to keep in step with the other two.
+ */
+.org-plate-emblem {
+  display: grid;
+  place-items: center;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--r-md);
+  background: var(--org-accent);
+  /* An inner hairline rather than a border, so the plate's size does not change
+     between a club with a colour and one without. */
+  box-shadow: inset 0 0 0 1px var(--rule);
+  overflow: hidden;
+}
+
+.org-plate-emblem-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/**
+ * The mark on the plate — an emoji, or the building glyph when a club has
+ * neither a logo nor an emoji.
+ *
+ * ── Why the ink is `--org-accent-ink` and not `--ink` ──
+ *
+ * `--ink` flips with the theme; this ground does not. All eight palette values
+ * are pale in dark mode as well as light (deliberately not re-tuned — see the
+ * note above the palette in index.css), and `--org-accent`'s fallback is a pale
+ * neutral for the same reason. A theme-following ink would put a near-white
+ * glyph on a near-white tile every night: measured at about 1.1:1.
+ *
+ * The token is named for the ground it sits on rather than reaching for the
+ * fixed primitive here, so the rule states the rule instead of leaving the next
+ * reader to work out whether `var(--neutral-900)` was a decision or a mistake.
+ */
+.org-plate-emblem-mark {
+  display: grid;
+  place-items: center;
+  color: var(--org-accent-ink);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+/**
+ * The charter line: the club's vital statistics, in the utility face.
+ *
+ * `--font-mono` appears in this application on figures and on a certificate
+ * code — the register of something recorded rather than something written — and
+ * a founding year with two counts is exactly that. It is also what stops this
+ * masthead reading as the event page's four info pills with different labels.
+ */
+.org-charter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--s2);
+  margin: 0 0 var(--s2);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.org-charter-sep {
+  color: var(--rule-strong);
+}
+
+.org-plate-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3.4vw, 2.375rem);
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: -0.015em;
+  /* A club can be called "Example Valley High School Environmental Action and
+     Sustainability Club". Balanced so a wrap does not leave one word alone, and
+     clamped so it cannot push the action off a phone screen. */
+  text-wrap: balance;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* The same reason as the columns: a grid child defaults to `min-width: auto`,
+   so an unbroken 60-character club name would widen the plate rather than
+   wrapping inside it. */
+.org-plate-identity {
+  min-width: 0;
+}
+
+.org-plate-summary {
+  max-width: 62ch;
+  margin: var(--s3) 0 0;
+  color: var(--ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.org-plate-tags {
+  margin-top: var(--s4);
+}
+
+/**
+ * The action, and the sentence under it.
+ *
+ * Separated from the identity by a rule rather than by space alone: the reader
+ * has finished learning what this is and is now being asked to decide, and the
+ * line is what says so.
+ */
+.org-plate-action {
+  margin-top: var(--s5);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--rule);
+}
+
+.org-plate-controls {
+  gap: var(--s2);
+  align-items: center;
+}
+
+.org-plate-note {
+  margin: var(--s3) 0 0;
+  max-width: 56ch;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+/** A member's state. Not a button, because there is nothing to press. */
+.org-member-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 44px;
+  margin: 0;
+  padding: 0 var(--s4);
+  /* `--ok` at its own tint, bordered in the ordinary rule colour: the `ok`
+     family is a tint and an ink and has no border token, and inventing one for
+     a single pill would put a ninth status colour in the palette. */
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--ok-tint);
+  color: var(--ok);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+/* ── The two columns ────────────────────────────────────────────────────── */
+
+.org-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: var(--s5);
+  align-items: start;
+}
+
+/**
+ * The rail follows the reader down.
+ *
+ * `position: sticky` on the rail rather than on each card, so the two cards move
+ * as one block.
+ *
+ * The offset clears the topbar, which is sticky itself at `z-index: 40`, plus one
+ * step of breathing room. `--topbar-h` is declared beside `.topbar` in index.css
+ * and is measured rather than derived — the bar's height is its padding plus a
+ * line box, so no expression yields it — but naming it there beats a second
+ * magic number here, which is what this rule held first.
+ */
+.org-column-rail {
+  position: sticky;
+  top: calc(var(--topbar-h) + var(--s4));
+}
+
+/**
+ * Both columns are allowed to be narrower than their content.
+ *
+ * A grid child's `min-width` is `auto`, so a long word, a 90-character URL or a
+ * wide table inside either column would push the whole grid past the viewport
+ * and give the PAGE a horizontal scrollbar rather than scrolling inside itself.
+ * `minmax(0, …)` on the track is half of it; this is the other half.
+ */
+.org-column-main,
+.org-column-rail {
+  min-width: 0;
+}
+
+/* One column below the tablet breakpoint, and the rail stops sticking: a rail
+   that is as tall as the viewport has nothing to stick to. */
+@media (max-width: 960px) {
+  .org-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .org-column-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .org-plate {
+    padding: var(--s5) var(--s4) var(--s4);
+    padding-left: calc(var(--s4) + 3px);
+  }
+
+  .org-plate-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s4);
+  }
+
+  .org-plate-emblem {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+
+  .org-plate-emblem-mark {
+    font-size: 1.5rem;
+  }
+
+  /* Full-width primary action on a phone: it is the only thing on this screen
+     somebody came to press, and a 40%-wide button beside a Share is two small
+     targets where one large one belongs. */
+  .org-plate-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .org-plate-controls > .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /**
+   * The menu trigger stays its own size.
+   *
+   * `.profile-menu` and not `.btn-icon`: `ActionsMenu` wraps its trigger in a
+   * `div.profile-menu` (it has to — the menu is portalled and the wrapper is
+   * what positions it), so the DIV is the flex child here and the button inside
+   * it is not. Targeting the button meant this rule never applied, and
+   * `align-items: stretch` gave the wrapper the full 274px — an empty
+   * full-width row under Settings, with a 44px button sitting at the left of it.
+   * Measured at 375px.
+   */
+  .org-plate-controls > .profile-menu {
+    align-self: flex-end;
+  }
+}
+
+/* ── About ──────────────────────────────────────────────────────────────── */
+
+.org-about-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0;
+}
+
+/* ── The manage band ────────────────────────────────────────────────────── */
+
+/**
+ * Visibly a different area of the page.
+ *
+ * A manager needs to be able to tell at a glance which controls act on other
+ * people. The band gets its own ground, its own top rule and its own heading, so
+ * the boundary between "what a member reads" and "what a manager does" is
+ * something you can see rather than something you have to remember.
+ */
+.org-manage {
+  margin-top: var(--s4);
+  padding: var(--s5);
+  border: 1px solid var(--rule);
+  /**
+   * A rule you can actually see.
+   *
+   * `--surface-2` is one step from the page ground and in dark mode the two are
+   * close enough that the band read as LESS present than the cards above it
+   * rather than as a different area — measured in the browser, the boundary was
+   * invisible. A 3px accent edge is what makes the transition a line rather than
+   * a guess, and it uses the club's own colour so the band still belongs to this
+   * organization rather than looking like a system panel.
+   */
+  border-top: 3px solid var(--org-accent);
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+}
+
+.org-manage-head {
+  margin-bottom: var(--s5);
+}
+
+.org-manage-head h2 {
+  margin: 0 0 var(--s1);
+  font-size: 1.0625rem;
+}
+
+.org-manage-head p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .org-manage {
+    padding: var(--s4) var(--s3);
+  }
+}
+
+/* ── Requests ───────────────────────────────────────────────────────────── */
+
+.org-request {
+  gap: var(--s3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.org-request-who {
+  display: flex;
+  flex: 1 1 14rem;
+  min-width: 0;
+  gap: var(--s3);
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.org-request-body {
+  min-width: 0;
+}
+
+.org-request-name {
+  font-weight: 600;
+}
+
+.org-request-actions {
+  gap: var(--s2);
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  /* The two decisions go full width rather than shrinking to thumb-hostile
+     targets beside a name that is already wrapping. */
+  .org-request-actions {
+    width: 100%;
+  }
+
+  .org-request-actions .btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
+
+/* ── The membership settings ────────────────────────────────────────────── */
+
+.org-policy-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.org-policy-legend {
+  margin-bottom: var(--s3);
+  padding: 0;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+/**
+ * One option: the control, its label, and what choosing it does.
+ *
+ * A grid rather than a flex row so the radio stays aligned to the FIRST line of
+ * the label however many lines the consequence runs to.
+ */
+.org-policy-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+  min-height: 44px;
+  padding: var(--s3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.org-policy-option + .org-policy-option {
+  margin-top: var(--s2);
+}
+
+.org-policy-option:hover {
+  border-color: var(--border-hover);
+}
+
+/* The chosen one is marked on the container, not only on the radio, so the
+   selection is legible without tracing which dot is filled. */
+.org-policy-option:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+
+/**
+ * While a save is in flight.
+ *
+ * The radios were disabled and the cards looked identical, so a manager who
+ * pressed Save could still click options and see nothing change — the form was
+ * locked and did not say so. Dimmed and with the pointer cursor withdrawn, which
+ * is the fourth column of the component spec (default / hover / selected /
+ * disabled) and the one that was missing.
+ *
+ * `:has(input:disabled)` rather than a class, so the state cannot disagree with
+ * the control's actual `disabled` attribute.
+ */
+.org-policy-option:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* And no hover affordance on a locked option. */
+.org-policy-option:has(input:disabled):hover {
+  border-color: var(--rule);
+}
+
+/**
+ * The focus ring belongs to the whole option, not to the 16px dot.
+ *
+ * `:focus-within` rather than styling the input, because the input is the only
+ * focusable thing in here and the reader needs to see WHICH option they are on.
+ * The global `:focus-visible` rule still applies to the input itself; this adds
+ * the surrounding indication a keyboard user needs on a card this size.
+ */
+.org-policy-option:focus-within {
+  border-color: var(--brand);
+  box-shadow: var(--focus);
+}
+
+.org-policy-option input {
+  margin: 0;
+  /* Aligned to the cap height of the label beside it rather than to the top of
+     the line box. */
+  margin-top: 0.125rem;
+}
+
+.org-policy-text {
+  display: block;
+  min-width: 0;
+}
+
+.org-policy-label {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.org-policy-consequence {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.org-policy-note {
+  display: block;
+  margin-top: var(--s2);
+  color: var(--ink-3);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.org-policy-footnote {
+  margin: var(--s3) 0 0;
+}
+
+/* ── The share dialog ───────────────────────────────────────────────────── */
+
+/**
+ * The link, given the treatment the certificate code gets.
+ *
+ * Both are values the platform issued, shown to somebody about to hand them to
+ * another person, so both sit on their own plate in the mono face rather than
+ * inline in a paragraph.
+ */
+.org-share-plate {
+  padding: var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.org-share-url {
+  width: 100%;
+  margin-top: var(--s2);
+  padding: var(--s3);
+  border: 1px solid var(--input-border);
+  border-radius: var(--r-sm);
+  background: var(--input-bg);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  /* A 90-character URL must scroll inside its own field rather than widen the
+     dialog. `text-overflow` is deliberately not set: an ellipsis on a value
+     somebody is about to select by hand hides part of what they are copying. */
+  overflow-x: auto;
+}
+
+.org-share-age {
+  margin: var(--s2) 0 0;
+}
+
+.org-share-actions {
+  gap: var(--s2);
+}
+
+.org-share-empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--s3);
+  align-items: start;
+  padding: var(--s4);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--r-md);
+  color: var(--ink-3);
+}
+
+.org-share-empty-title {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/**
+ * The dialog footer: one control, and the sentence that explains it.
+ *
+ * It used to hold Regenerate and Turn off at opposite ends, which is what
+ * `space-between` was for. Those moved onto each link's own plate in the
+ * multi-link rewrite, and the footer now carries "New link" plus the
+ * at-capacity explanation — where `space-between` pushed the sentence as far
+ * from the button it describes as the dialog is wide.
+ */
+.org-share-foot {
+  justify-content: flex-start;
+  gap: var(--s3);
+  align-items: center;
+}
+
+/* ── Sign in to join ────────────────────────────────────────────────────── */
+
+.org-signin-choices .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ── The invitation page ────────────────────────────────────────────────── */
+
+/**
+ * Rendered outside the shell, so it supplies its own frame.
+ *
+ * Same shape as the certificate verification page — a centred topbar carrying
+ * the mark, then one column of content — because they are the same kind of
+ * arrival: somebody following a link from outside the product who has never seen
+ * it before.
+ */
+.invite-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--surface-2);
+}
+
+.invite-topbar {
+  justify-content: center;
+}
+
+.invite-main {
+  width: 100%;
+  /* `rem`, which is what every other max-width in this project uses — see
+     `.recipient-picker` at 32rem. 45rem is the 720px this held first. */
+  max-width: 45rem;
+  margin: 0 auto;
+  padding: var(--s6) var(--s4);
+}
+
+.invite-upcoming-row {
+  align-items: center;
+}
+
+.invite-upcoming-title {
+  font-weight: 600;
+}
+
+.invite-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  justify-content: center;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+/**
+ * One entrance, and only one.
+ *
+ * The plate is the thing the page is about, so it is the thing that arrives.
+ * Nothing else on the page animates: scattered reveals on a club page for
+ * fifteen-year-olds read as a template rather than as care.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .org-plate,
+  .invite-main > .org-plate {
+    animation: org-plate-in 240ms ease-out both;
+  }
+}
+
+@keyframes org-plate-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/**
+ * The membership block inside the organization settings form.
+ *
+ * A rule above it rather than a card of its own: the form is already one card,
+ * and nesting a second surface inside it for one of six fields would make the
+ * page look like two forms. The rule and the fieldset legends are enough to say
+ * "this is a different question from the ones above".
+ */
+.org-policy-section {
+  margin-top: var(--s2);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--rule);
+}
+
+/**
+ * The heading over the membership block in the organization settings form.
+ *
+ * An `h2`, because the form's own title is the shell's `h1` and this is a
+ * genuine section of it — `headingLevels.test.js` owns the rule that a
+ * shell-rendered view does not declare its own `h1`. Sized between the form's
+ * field labels and its page title so it reads as a divider with a name rather
+ * than as another label.
+ */
+.org-policy-section-heading {
+  margin: 0 0 var(--s4);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  /**
+   * Copy link goes full width on a phone.
+   *
+   * It is the one thing anybody opens this dialog to do, and it was measured at
+   * 113px on a 375px screen — a legal target (44px tall) sitting in a third of
+   * the available width, beside nothing. The Share control keeps its own size
+   * when it is present, so the two sit side by side rather than stacking into a
+   * column of identical-looking bars.
+   */
+  .org-share-actions .btn {
+    flex: 1 1 8rem;
+    justify-content: center;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The invitation somebody has been offered
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The banner above the plate, for a reader who has been invited.
+ *
+ * ── Why it is above the plate and not inside it ──
+ *
+ * It is the reason the page looks the way it does to this reader: an
+ * invitation-only club showing a Join button makes no sense until you know
+ * somebody asked you. Inside the plate it would have competed with the club's
+ * own name for the first thing read; above it, it is a sentence that arrives
+ * first and then gets out of the way.
+ *
+ * The accent border is the club's own colour, which is what ties the notice to
+ * the club rather than to the platform — the same device the manage band uses.
+ */
+.org-invitation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s4) var(--s5);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--org-accent, var(--neutral-100));
+  border-radius: var(--r-md);
+}
+
+.org-invitation-body {
+  /* `min-width: 0` so a long note wraps instead of pushing the actions off the
+     right edge — the same reason both organization columns carry it. */
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+
+.org-invitation-title {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/**
+ * The note the club wrote.
+ *
+ * A `blockquote`, because it is somebody else's words inside this page and the
+ * element that says so is the right one. Indented off a rule rather than boxed:
+ * a second surface here would make a one-line note look like a document.
+ */
+.org-invitation-note {
+  margin: 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--rule);
+  color: var(--ink-2);
+  font-style: italic;
+  /* Long words in a note somebody typed — a URL, a class code — must not widen
+     the banner past the page. */
+  overflow-wrap: anywhere;
+}
+
+.org-invitation-actions {
+  flex: 0 0 auto;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The note on a request, and the invite composer
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The line a student wrote with their request.
+ *
+ * Clamped to three lines. A manager reading a queue needs to see who is waiting
+ * at a glance, and a 300-character note per row would push the fourth request
+ * below the fold — but truncating to one line loses the sentence that makes the
+ * decision. Three is the compromise, and the full text is never more than a
+ * hover away in the accessibility tree because the element is not `hidden`.
+ */
+.org-request-note {
+  /* A sibling of the person link rather than a child of it, so the link's
+     accessible name is a name and not a name plus 300 characters of somebody's
+     free text. `flex-basis: 100%` gives it the whole row under both, which is
+     where it sat visually before. */
+  flex: 1 1 100%;
+  margin: var(--s1) 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+/**
+ * The rest of a long note, on hover or keyboard focus.
+ *
+ * The clamp keeps a queue of eight requests scannable; without this the fourth
+ * line of a note was simply unreachable for a sighted reader, on the one piece
+ * of text the manager is being asked to decide on. `:focus-within` is what makes
+ * it reachable by keyboard rather than by pointer only.
+ *
+ * `-webkit-line-clamp: unset` rather than a height animation: the row grows, the
+ * ones below move down, and nothing overlaps. A 300-character bound is what
+ * makes that safe to do in place.
+ */
+.org-request:hover .org-request-note,
+.org-request:focus-within .org-request-note {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+
+.org-invite-composer {
+  padding: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+/* The magnifier sits inside the field's box, so the icon reads as part of the
+   search rather than as a button beside it. */
+.org-invite-search {
+  display: flex;
+  gap: var(--s2);
+  align-items: center;
+  padding-left: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+}
+
+.org-invite-search .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  /* The focus ring belongs to the wrapper, so an inner one would draw a second
+     rectangle inside the first. */
+  box-shadow: none;
+}
+
+.org-invite-search:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+
+.org-invite-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+
+/**
+ * One person in the result list.
+ *
+ * The whole row is the label, so the tap target is the row and not the 16px
+ * radio — the house rule is 44px and a radio alone is nowhere near it.
+ */
+.org-invite-result {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  /* 44px unconditionally, matching `.org-policy-option` above — the other
+     row-shaped radio in this file. The house 44px rule is scoped to coarse
+     pointers for controls that would otherwise be small; a LIST ROW is a
+     comfortable height with a mouse and a necessary one with a thumb, so
+     there is nothing to gain from making it conditional. */
+  min-height: 44px;
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.org-invite-result:last-child { border-bottom: none; }
+
+/**
+ * Somebody the club has already invited.
+ *
+ * Dimmed and unpickable rather than absent, because a name that vanishes from a
+ * search reads as "not on the platform" — and the reason is a row this manager
+ * can see one card above. The words say it too ("already invited"), so the
+ * state is not carried by the dimming alone.
+ */
+.org-invite-result[data-unavailable] {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.org-invite-result[data-unavailable]:hover { background: none; }
+.org-invite-result:hover { background: var(--surface-2); }
+.org-invite-result:has(input:checked) { background: var(--brand-tint); }
+.org-invite-result:focus-within {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Share dialog: several links, and the public address
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The public address plate.
+ *
+ * Marked out from the invitation links by its border rather than by a heading,
+ * because the distinction it carries — an address that grants nothing against a
+ * credential that does — is exactly the thing a manager must not skim past. A
+ * dashed edge reads as "this one is different" without shouting.
+ */
+.org-share-address {
+  border-style: dashed;
+}
+
+/**
+ * The line an unlisted club's manager sees where the address plate would be.
+ *
+ * Left-ruled rather than boxed: it is a pointer to a setting, not a value to
+ * copy, and giving it a plate would make it look like the thing it is saying
+ * does not exist.
+ */
+.org-share-unlisted {
+  margin: 0;
+  padding-left: var(--s3);
+  border-left: 2px solid var(--rule);
+}
+
+.org-share-labelrow {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.org-share-label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.org-share-rename {
+  align-items: center;
+  gap: var(--s2);
+}
+
+.org-share-rename .input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.org-share-expiry {
+  flex: 1 1 100%;
+  padding: var(--s3);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+}
+
+.org-share-new {
+  padding: var(--s4);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+/**
+ * The links that no longer work, collapsed.
+ *
+ * A `details` element, so the closed state costs one line and the open state is
+ * the browser's own disclosure — keyboard-operable and announced without any
+ * JavaScript. The history matters and does not matter enough to be the first
+ * thing in the dialog.
+ */
+.org-share-retired > summary {
+  display: flex;
+  /* Same reasoning as the rows above: a disclosure control somebody taps. */
+  min-height: 44px;
+  align-items: center;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.org-share-retired > summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.org-share-retired-row {
+  /* Dimmer than a live link, but not so dim it fails contrast — `--ink-2` is
+     the token that is still readable against both grounds, and the state is
+     carried by the words ("Switched off", "Expired") rather than by the colour
+     alone. */
+  color: var(--ink-2);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   The handle field
+   ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * `/organizations/@` as a prefix outside the input.
+ *
+ * So the value in the field is exactly what is stored, and the punctuation is
+ * not something a manager has to remember to type. `aria-hidden` on the prefix
+ * because the label already says "Web address" — read out, the prefix would be
+ * a URL fragment between the label and the field.
+ */
+.org-handle-input {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.org-handle-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--s2) 0 var(--s3);
+  background: var(--surface-2);
+  border-right: 1px solid var(--rule);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.org-handle-input .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-family: var(--font-mono);
+}
+
+.org-handle-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-tint);
+}
+
+@media (max-width: 480px) {
+  /**
+   * The prefix wraps above the field on a narrow screen.
+   *
+   * `/organizations/@` is fifteen mono characters; beside an input on a 375px
+   * screen it leaves about nine characters of room to type in. Stacking gives
+   * the field the full width and keeps the prefix as the label-like thing it
+   * reads as.
+   */
+  .org-handle-input {
+    flex-direction: column;
+  }
+
+  .org-handle-prefix {
+    border-right: none;
+    border-bottom: 1px solid var(--rule);
+    padding: var(--s1) var(--s3);
+  }
+}
+
+/**
+ * The extra line on a policy option, under the consequence.
+ *
+ * Used by the public-visibility option to list what a public page actually
+ * discloses. Smaller and softer than the consequence, because it is detail
+ * somebody reads once when deciding rather than every time they scan the group.
+ */
+.org-policy-note {
+  color: var(--ink-2);
+  font-size: 0.8125rem;
+}

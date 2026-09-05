@@ -741,3 +741,47 @@ describe('milestones and badges never restate a number', () => {
     }
   });
 });
+
+/**
+ * ── Bounds on the text fields, checked on the server ──
+ *
+ * The form's `maxLength` was the only limit, which made the real ceiling
+ * `express.json`'s 100 kB. Not a vulnerability — every render site is a React
+ * text child and no export interprets these — but a 4,000-character badge name
+ * breaks the definitions table for every administrator afterwards, and the
+ * `icon` column is documented as "one emoji" with nothing enforcing it.
+ */
+describe('badge definition bounds', () => {
+  let admin;
+  beforeAll(async () => { admin = await srv.login('admin@example.gov'); });
+
+  const valid = () => ({
+    name: `Bounded ${++seq}`, description: 'A badge.', icon: '🏅',
+    category: 'Service', criteria_type: 'manual', criteria_value: '',
+  });
+
+  it('refuses an over-long name, description or category, naming the field', async () => {
+    for (const [field, max] of Object.entries({ name: 80, description: 400, category: 40 })) {
+      const res = await srv.call('POST', '/api/admin/badges',
+        { ...valid(), [field]: 'x'.repeat(max + 1) }, admin);
+      expect(res.status, field).toBe(400);
+      expect(res.body.field, field).toBe(field);
+    }
+  });
+
+  it('accepts an emoji icon, including a multi-code-point one', async () => {
+    /* The reason the cap counts CODE POINTS. `'🏅'.length` is 2 and a ZWJ
+       sequence is longer still, so a UTF-16 cap of 2 would reject exactly the
+       values this column exists for. */
+    for (const icon of ['🏅', '🔥', '👩‍🚀']) {
+      const res = await srv.call('POST', '/api/admin/badges', { ...valid(), icon }, admin);
+      expect(res.status, icon).toBe(200);
+    }
+  });
+
+  it('refuses a word in the icon field', async () => {
+    const res = await srv.call('POST', '/api/admin/badges', { ...valid(), icon: 'trophy-icon' }, admin);
+    expect(res.status).toBe(400);
+    expect(res.body.field).toBe('icon');
+  });
+});

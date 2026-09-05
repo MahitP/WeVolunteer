@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserRound, Settings, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
+import { UserRound, Bell, LogOut, ChevronsUpDown } from 'lucide-react';
+import { can } from '../../authz';
+import { ACCOUNT_MENU_ITEMS } from '../../accountMenu';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -149,10 +151,34 @@ export default function ProfileMenu({ user, onSignOut }) {
             <Bell size={15} /> Notifications
           </button>
 
-          <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/settings')}>
-            <Settings size={15} /> Settings
-          </button>
-          
+          {/**
+            * The shared account destinations — "My hours" and Settings.
+            *
+            * They come AFTER Profile and Notifications, which is also the shape
+            * the `⋯` sheet has: the two entries that mirror NAV first, then the
+            * shared account destinations. The two controls therefore agree on
+            * order as well as on contents, which they did not before.
+            *
+            *
+            * Read from `src/accountMenu.js` rather than written out here,
+            * because the `⋯` sheet on a phone IS this control at that width and
+            * had its own copy of the list. Settings already existed twice, in
+            * two files, with nothing asserting they agreed; "My hours" was
+            * added here and measured missing from the sheet at 375px, which is
+            * a destination that exists on a laptop and not on a phone.
+            *
+            * Presentation stays local — `menu-item` and a 15px icon here, a
+            * `mobile-more-btn` and a 20px icon there — because that is what
+            * actually differs. Only the list is shared.
+            */}
+          {ACCOUNT_MENU_ITEMS
+            .filter(item => !item.requiredCap || can(user, item.requiredCap))
+            .map(({ id, path, label, icon: Icon }) => (
+              <button key={id} className="menu-item" role="menuitem" onClick={() => handleNavigate(path)}>
+                <Icon size={15} /> {label}
+              </button>
+            ))}
+
           <div className="menu-sep" />
           
           <button className="menu-item danger" role="menuitem" onClick={() => { onSignOut(); setIsOpen(false); }}>

@@ -1,7 +1,7 @@
 import React from 'react';
-import { MapPin, X } from 'lucide-react';
+import { MapPin } from 'lucide-react';
 import { useLocationContext } from '../../contexts/LocationContext';
-import './LocationDisplay.css';
+import NoticeBanner from '../notifications/NoticeBanner';
 
 /**
  * The opt-in that "near me" was always supposed to have.
@@ -30,6 +30,19 @@ import './LocationDisplay.css';
  * the server ever receives is a centre rounded to about a kilometre when a
  * radius filter is actually used. A promise this specific is one somebody can
  * hold the code to later.
+ *
+ * ── Why the markup now comes from `NoticeBanner` ──
+ *
+ * This banner's treatment became the shell's notice treatment: the legal change
+ * notice sits in the same slot and had to look like the same product. The
+ * markup and classes moved into the shared primitive unchanged — same
+ * declarations, neutral names — so there is one copy of "what a notice looks
+ * like" rather than two that agree today.
+ *
+ * It keeps its own `showPrompt` guard even though `AppNotices` already decides
+ * whether to render it. The guard is cheap and it keeps this component honest
+ * on its own terms: rendering it directly, as its test does, must not produce a
+ * banner for somebody who has already answered the question.
  */
 export default function LocationPrompt() {
   const ctx = useLocationContext();
@@ -39,35 +52,20 @@ export default function LocationPrompt() {
   if (!showPrompt) return null;
 
   return (
-    <div className="location-prompt" role="region" aria-label="Use your location">
-      <span className="location-prompt-icon" aria-hidden="true">
-        <MapPin size={16} />
-      </span>
-      <div className="location-prompt-body">
-        <span className="strong">See how far away opportunities are</span>
-        <span className="small dim">
-          Share your location to sort by distance and filter to what is nearby.
-          It stays on your device, and nothing is saved.
-        </span>
-      </div>
-      <div className="location-prompt-actions">
+    <NoticeBanner
+      label="Use your location"
+      icon={<MapPin size={16} />}
+      title="See how far away opportunities are"
+      action={(
         <button type="button" className="btn btn-primary btn-sm" onClick={() => requestLocation()}>
           Use my location
         </button>
-        <button
-          type="button"
-          /* `btn-icon` is what carries the 44px WIDTH floor on a phone. Without
-             it this was 37×44 at 320px — a 44-tall sliver, which is the exact
-             failure the rule's own comment in index.css describes. Measured in
-             a browser at 320px; the static touch-target guard cannot see it,
-             because the class that fixes it was simply absent. */
-          className="btn btn-ghost btn-sm btn-icon"
-          onClick={dismissPrompt}
-          aria-label="Not now — hide this for the rest of this session"
-        >
-          <X size={15} aria-hidden="true" />
-        </button>
-      </div>
-    </div>
+      )}
+      onDismiss={dismissPrompt}
+      dismissLabel="Not now — hide this for the rest of this session"
+    >
+      Share your location to sort by distance and filter to what is nearby.
+      It stays on your device, and nothing is saved.
+    </NoticeBanner>
   );
 }

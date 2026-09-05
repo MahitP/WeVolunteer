@@ -196,6 +196,15 @@ describe('Redis is never a source of truth', () => {
      * Redis, nothing here is a source of truth, and `travelRoutes.js` is still
      * absent by design — its key would derive from a minor's location, which
      * the test above enforces separately.
+     *
+     * `organizationLimiters.js` is a further limiter surface and qualifies
+     * under the same rule as the ones in app.js and no more: both of its
+     * throttles tick on ABUSE rather than on volume — an unauthenticated
+     * invitation-link lookup, and an attempt to join — so the command budget
+     * the module header reasons about is not at risk, and neither counter is
+     * ever read as truth about anything. Nothing about organization membership
+     * is stored in Redis; the source of truth is `organization_members` and
+     * `organization_join_requests`.
      */
     const callers = filesUnder(path.join(repoRoot, 'server'), ['.js'])
       .filter(f => !f.includes('.test.') && !f.includes(`${path.sep}redis${path.sep}`))
@@ -208,6 +217,7 @@ describe('Redis is never a source of truth', () => {
       path.join('server', 'applicationLimiter.js'),       // exact: applications per user
       path.join('server', 'checkinLimiters.js'),          // exact: check-in CODE guessing
       path.join('server', 'messageThrottle.js'),          // volume: 20 messages a minute
+      path.join('server', 'organizationLimiters.js'),     // exact: invite lookup + join
       path.join('server', 'reportLimiter.js'),            // exact: moderation report abuse
       path.join('server', 'routes', 'adminRoutes.js'),    // status panel, read-only
       path.join('server', 'routes', 'authRoutes.js'),     // login-failure counter

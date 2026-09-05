@@ -70,9 +70,12 @@ import hoursCloseOut from './058_hours_close_out.js';
 import eventSearchIndex from './059_event_search_index.js';
 import leaderboardCandidates from './060_leaderboard_candidates.js';
 import resyncUnacceptedLegalHashesAgain from './061_resync_unaccepted_legal_hashes_again.js';
-import schedulerLeases from './062_scheduler_leases.js';
-import eventSlotSummary from './063_event_slot_summary.js';
-import searchTrigramIndexes from './064_search_trigram_indexes.js';
+import organizationMembershipPolicy from './062_organization_membership_policy.js';
+import organizationPublicIdentity from './063_organization_public_identity.js';
+import resyncGuardianScopeHash from './064_resync_guardian_scope_hash.js';
+import schedulerLeases from './065_scheduler_leases.js';
+import eventSlotSummary from './066_event_slot_summary.js';
+import searchTrigramIndexes from './067_search_trigram_indexes.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -410,7 +413,40 @@ export const MIGRATIONS = [
   leaderboardCandidates,
   resyncUnacceptedLegalHashesAgain,
   /**
-   * 062 — leader leases for the four periodic sweeps.
+   * 062 — how somebody joins an organization, and the link that lets them.
+   *
+   * Two defaulted columns on `organizations` plus two new tables with foreign
+   * keys to it and to `users`, so it must run after both exist and after 001,
+   * which rebuilds `users`. Nothing else depends on its order, and it is
+   * additive on both engines.
+   */
+  organizationMembershipPolicy,
+  /**
+   * 063 — the club's public identity, its named invitation links, direct
+   * invitations, and the sentence a student may send with a request.
+   *
+   * MUST run after 062, which created the two tables it alters and the one it
+   * rebuilds. The rebuild is `organization_share_links`, moving its primary key
+   * off `organization_id` so a club can have more than one link; nothing
+   * references that table, so §8.3's child-row guards do not apply, and the copy
+   * is row-counted regardless.
+   */
+  organizationPublicIdentity,
+
+  /**
+   * Clears the one published Privacy Policy row nobody has accepted, so the
+   * boot does not refuse the re-scoped guardian bullet.
+   *
+   * Order does not matter against the organization migrations — it touches
+   * `legal_documents` and nothing else — but it MUST run before
+   * `syncLegalDocuments`, which the boot sequence guarantees by running the
+   * migration runner first. Third of its kind after 054 and 061; each one
+   * reconciles the edit its own commit made, which is what keeps the pair
+   * auditable.
+   */
+  resyncGuardianScopeHash,
+  /**
+   * 065 — leader leases for the four periodic sweeps.
    *
    * A standalone table with no foreign keys, so it is order-independent.
    *
@@ -425,18 +461,31 @@ export const MIGRATIONS = [
    * protects against the collision you can see coming, and nothing protects
    * against a parallel branch except merging often enough to find out. Once a
    * version has been recorded in `schema_migrations` anywhere real, its number
-   * is no longer yours to change.
+   * is no longer yours to change.*
+   * **Renumbered a second time, from 062-064 to 065-067.** The first
+   * renumbering (061 -> 062) was to dodge a collision on an unmerged branch.
+   * This one is the collision arriving anyway: `main` took 062, 063 and 064 for
+   * the organization-membership work while these three sat on a branch, and two
+   * migrations sharing a version is refused at boot.
+   *
+   * Trunk keeps its numbers and the branch moves, which is the only rule that
+   * scales past two people. It has a cost here that is worth writing down: these
+   * three had ALREADY been applied to the real Supabase database as 62, 63 and
+   * 64, so that database's bookkeeping now names the wrong migrations and has to
+   * be repaired before it is booted against this branch. See the deployment
+   * notes — it is not something the runner can fix for itself, because a version
+   * number is the only identity a recorded migration has.
    */
   schedulerLeases,
   /**
-   * 063 — `events.first_slot_start`, and the index the browse sort needs.
+   * 066 — `events.first_slot_start`, and the index the browse sort needs.
    *
    * Additive, with its backfill in the same migration so no deployment serves
    * a page ordered by a column that is NULL everywhere.
    */
   eventSlotSummary,
   /**
-   * 064 — the trigram indexes the search box needs, on PostgreSQL only.
+   * 067 — the trigram indexes the search box needs, on PostgreSQL only.
    *
    * Additive and index-only: nothing reads differently with or without it, and
    * it declines rather than failing the boot when the role cannot install the

@@ -296,7 +296,8 @@ will tell the student when an account change is made on their behalf.
 Specifically:
 
 - We **do not ask for a guardian's email address** at signup, or at any other point.
-- We **do not send a confirmation link** to anybody, and nothing waits for an approval.
+- We **do not send a guardian a confirmation link**, and no part of your account waits for
+  a guardian's approval.
 - We **do not verify** that a guardian saw these policies, or that one exists.
 - We **do not notify a guardian** automatically about anything — not a suspension, not a safety
   report, not a deletion. If you have not given us your email address, we do not have it.

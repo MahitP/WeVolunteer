@@ -31,6 +31,8 @@ const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
+const OrganizationInvite = React.lazy(() => import('../views/OrganizationInvite'));
+const OrganizationPublic = React.lazy(() => import('../views/OrganizationPublic'));
 const OrganizationForm = React.lazy(() => import('../views/OrganizationForm'));
 const OrganizationsHome = React.lazy(() => import('../views/OrganizationsHome'));
 const LogExternalHours = React.lazy(() => import('../views/LogExternalHours'));
@@ -70,6 +72,8 @@ const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'))
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
 const ModerationCenter = React.lazy(() => import('../views/ModerationCenter'));
 const WellyView = React.lazy(() => import('../views/WellyView'));
+const AcceptInvitation = React.lazy(() => import('../views/AcceptInvitation'));
+const AdminBadges = React.lazy(() => import('../views/AdminBadges'));
 
 /**
  * Views App.jsx routes itself rather than through a table below.
@@ -341,6 +345,23 @@ export const APP_ROUTES = [
   { path: '/admin/audit-logs', element: <AdminAuditExplorer />, requiredCap: 'audit.read' },
   { path: '/admin/roster', element: <AdminRoster />, requiredCap: 'admin.create' },
   /**
+   * Badge administration.
+   *
+   * `event.moderate`, matching every endpoint the page calls — the four in
+   * `server/routes/badgeRoutes.js` are gated on it, including revoke, because
+   * taking a recognition away from a student is not a lesser act than giving
+   * one and a split would create a role that can only delete.
+   *
+   * NOT SUPER_ONLY, deliberately, and that is the difference from
+   * `/admin/roster` above. Defining what the platform recognises and correcting
+   * a wrong award are programme administration, which is what an administrator
+   * is for; `admin.create` is about who holds administrative access at all.
+   * The page also reads `/api/directory/search` to find a person, which admins
+   * hold through `directory.read`, so nothing here needs a capability the role
+   * does not already have.
+   */
+  { path: '/admin/badges', element: <AdminBadges />, requiredCap: 'event.moderate' },
+  /**
    * The Legal Center editor.
    *
    * `/admin/legal` rather than `/legal/edit`, which would be captured by
@@ -519,6 +540,92 @@ export const PUBLIC_ROUTES = [
    */
   { path: '/about', element: <AboutUs /> },
   { path: '/appeal/:token', element: <Appeal /> },
+  /**
+   * An organization's invitation link.
+   *
+   * Public for the same reason `/verify/:code` is: the link is handed to
+   * somebody OUTSIDE the app — put on a flyer, pasted into a group chat, mailed
+   * to a parent — and asking them to make an account before they can see what
+   * they are being invited to is how a share link stops being worth sharing.
+   *
+   * What it opens is the allowlisted projection in `publicOrganization`, never
+   * the organization page: no member, no event location, no hours, no id.
+   * `/organizations/:key` is unchanged and still requires a session and
+   * `directory.read`.
+   *
+   * Three segments, so it cannot collide with `/organizations/:key`; the static
+   * `invite` outranks `/organizations/:key/edit` in the router's own ranking.
+   * And deliberately NO `requiredCap` — `routeGating.guard.test.js` fails the
+   * build on a gate key written into this table, because there is no principal
+   * here for it to apply to and it would read as enforcement while enforcing
+   * nothing.
+   *
+   * A reader who IS signed in is redirected by the view itself to
+   * `/organizations/<slug>`, which is strictly better for them: the shell, the
+   * navigation, their own service record, and a Join their session can actually
+   * complete.
+   */
+  { path: '/organizations/invite/:token', element: <OrganizationInvite /> },
+  /**
+   * An organization's canonical public address, `/organizations/@robotics`.
+   *
+   * ── Why this is the same pattern as the authenticated page ──
+   *
+   * React Router cannot express "a segment beginning with `@`" — the `@` is part
+   * of the parameter's VALUE, which is the same reason `/users/@:handle` cannot
+   * be written either. So this declares `/organizations/:key`, the very pattern
+   * `APP_ROUTES` uses, and the two are separated by SESSION rather than by path:
+   * `shellWhenSignedIn` tells `isPublicPath` to stand down for a reader who has
+   * one, so a member opening their club's public address still gets the shell,
+   * their own service record and a Join their session can complete.
+   *
+   * ── What a signed-out reader gets, and what they do not ──
+   *
+   * The `@handle` form opens `publicOrganization` — the allowlisted projection,
+   * carrying no member, no event location, no hours and no id — and only for a
+   * club that chose to be public. The bare legacy form `/organizations/robotics`
+   * is NOT a public address and the view does not even look it up: it says the
+   * page needs an account. That asymmetry is the point. The handle is an
+   * ADDRESS a club chose to publish; the bare path is the authenticated page it
+   * always was.
+   *
+   * Deliberately NO `requiredCap`, like every entry in this table —
+   * `routeGating.guard.test.js` fails the build on a gate key written here,
+   * because there is no principal for it to apply to and it would read as
+   * enforcement while enforcing nothing.
+   */
+  { path: '/organizations/:key', element: <OrganizationPublic />, shellWhenSignedIn: true },
+  /**
+   * Redeeming an administrator invitation.
+   *
+   * ── This path was live in production email and declared nowhere ──
+   *
+   * `sendAdminInvitationEmail` in server/email.js has always linked to
+   * `${APP_URL}/accept-invitation?token=…`. The path appeared in none of the
+   * three tables, so it fell through to the unknown-URL takeover and answered
+   * "Page not found" — for every administrator invitation this platform has
+   * ever sent. The invite-creation UI, the hashed single-use token, the
+   * seven-day expiry and the promote-and-audit transaction were all finished
+   * and tested; only the screen between them was missing, and nothing could see
+   * that: `internalLinks.test.js` scans `src/` for `href=`/`to=` attributes,
+   * and this link is a template literal assembled on the server.
+   *
+   * PUBLIC rather than an APP route, for the reason `/appeal/:token` is: an
+   * invitation is sent to an ADDRESS, so the session state of the browser that
+   * opens it is unknown, and a signed-out reader has to get a page that
+   * explains what to do rather than the signed-out catch-all's 404. Gating it
+   * on a capability would also be a lock on the key — the same argument
+   * `/organizer-agreement` records in APP_ROUTES above, and sharper here,
+   * because accepting is the act that GRANTS the administrative capabilities.
+   *
+   * The token stays in the QUERY rather than becoming a path segment, because
+   * that is the URL the email already sends and those links are in mailboxes
+   * now. The view reads it with `useSearchParams` and POSTs it in a request
+   * body; nothing interpolates it into a path. `clientRoutes.js` allows the
+   * literal `/accept-invitation`, and the query string is dropped before the
+   * pattern is matched — so an error report from this page can carry no token.
+   */
+  { path: '/accept-invitation', element: <AcceptInvitation /> },
 ];
 
 /**
@@ -529,9 +636,16 @@ export const PUBLIC_ROUTES = [
  * matches exactly one segment, which is the same rule the router applies and
  * the same one `server/clientRoutes.js` uses for its allowlist.
  */
-export function isPublicPath(pathname) {
+export function isPublicPath(pathname, { signedIn = false } = {}) {
   const segments = String(pathname || '').split('?')[0].split('/').filter(Boolean);
-  return PUBLIC_ROUTES.some(({ path }) => {
+  return PUBLIC_ROUTES.some(({ path, shellWhenSignedIn }) => {
+    /* A route the shell also serves stops being public the moment there IS a
+       session. Without this, a member opening their own club's public address
+       would be answered by the standalone public page — no navigation, no
+       Join, no service record — while signed in, which reads as being signed
+       out. The flag lives on the route rather than in a second list here, so it
+       cannot drift from the entry it describes. */
+    if (shellWhenSignedIn && signedIn) return false;
     const pattern = path.split('/').filter(Boolean);
     if (pattern.length !== segments.length) return false;
     return pattern.every((seg, i) => seg.startsWith(':') || seg === segments[i]);

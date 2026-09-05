@@ -470,6 +470,22 @@ explicit security review**, regardless of size. The 2026-07-30 auth audit found
 four broken auth flows that had been shipped and believed working. Small diffs
 in this area have an outsized blast radius.
 
+That review is the **`security-review` skill**, which is the authoritative
+mechanism — a hand-written summary is not a substitute for running it, and its
+findings must be resolved before the change is release-ready rather than
+recorded and carried.
+
+This paragraph exists because the rule above was written without naming the
+mechanism, and the Organization work in 1.4.0 reached its final hardening pass
+before anybody established what "explicit security review" was supposed to mean
+in practice. A gate nobody can name is a gate that gets satisfied by assertion.
+
+**This document is the only place that rule lives.** `CLAUDE.md` and
+`AGENTS.md` are gitignored on purpose (§6.5) — assistant-facing files are not
+part of the product — so a rule written only there protects one checkout and
+nobody else's, which is the same failure that ignore rule was added to prevent.
+An assistant file may point here; it may not be where the rule is kept.
+
 #### Deploy failures
 
 - `npm run build` fails, or emits an error

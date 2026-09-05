@@ -17,7 +17,7 @@
  *      administrator can help is simply false.
  */
 import { describe, it, expect } from 'vitest';
-import { denialDetail } from './denialDetail';
+import { denialDetail, FEATURE_NAMES } from './denialDetail';
 import { APP_ROUTES } from '../../routes/index.jsx';
 import { ALL_CAPABILITIES } from '../../authz';
 
@@ -73,19 +73,39 @@ describe('denialDetail', () => {
   });
 
   /**
-   * A capability with no plain-language name must degrade to naming nothing rather
-   * than printing `event.moderate` at a fifteen-year-old.
+   * A capability with no plain-language name must degrade to naming nothing
+   * rather than printing a capability id at a fifteen-year-old.
+   *
+   * ── The fixture is DERIVED, and that is the third fix to this case ──
+   *
+   * It has now been broken twice by the same mechanism. It named
+   * `analytics.platform`, which became route-gated with `/admin/impact` and so
+   * had to be given a name — putting this assertion in direct contradiction
+   * with the sweep below. It was changed to `event.moderate`, described in its
+   * own comment as "one that gates no route", and `/admin/badges` then gated
+   * exactly that.
+   *
+   * Naming any capability here makes it a hostage: the moment a route gates it,
+   * one of these two cases must fail. So the fixture is computed instead — any
+   * real capability the route table does NOT gate. The two cases can no longer
+   * disagree, because this one is defined as the complement of that one.
    */
   it('falls back to a generic reason rather than showing a capability id', () => {
-    /* `event.moderate` — the capability this test's own comment names, and one
-       that gates no route, so the sweep below cannot start requiring a name for
-       it. It previously used `analytics.platform`, which became a route-gated
-       capability with `/admin/impact` and therefore had to be given a name;
-       that made this assertion and the sweep below contradict each other. */
-    const detail = denialDetail({ requiredCap: 'event.moderate' });
-    expect(detail.feature).toBe(null);
-    expect(detail.reason).not.toMatch(/event\.moderate/);
-    expect(detail.reason).toMatch(/this area/);
+    const gated = new Set(APP_ROUTES.map(r => r.requiredCap).filter(Boolean));
+    const ungated = ALL_CAPABILITIES.filter(c => !gated.has(c) && !FEATURE_NAMES[c]);
+
+    /* Vacuity guard. If every capability were route-gated and named, there
+       would be no way to exercise the fallback at all, and this case would
+       silently stop testing anything. */
+    expect(ungated.length, 'no un-named, un-gated capability left to test the fallback with')
+      .toBeGreaterThan(0);
+
+    for (const cap of ungated) {
+      const detail = denialDetail({ requiredCap: cap });
+      expect(detail.feature, cap).toBe(null);
+      expect(detail.reason, cap).not.toContain(cap);
+      expect(detail.reason, cap).toMatch(/this area/);
+    }
   });
 
   /**

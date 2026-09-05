@@ -47,6 +47,7 @@ import pg from 'pg';
 import net from 'node:net';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { promises as dns } from 'node:dns';
+import { refuseNonDisposablePostgres } from './lib/db-safety.mjs';
 
 /**
  * The write probe needs TWO flags, and the second one is a sentence.
@@ -398,9 +399,19 @@ if (WRITE_PROBE_ASKED && !WRITE_PROBE) {
   const populated = present.yes
     ? await one(`SELECT COUNT(*)::int AS n FROM users WHERE id <> 'system-cli'`)
     : { n: 0 };
-  if (Number(populated.n) > 0) {
-    record('write probe', null, `REFUSED: ${populated.n} user rows — this is not a disposable database`);
-  } else {
+
+  /* The shared gate makes the decision, so that "what may this destroy" lives
+     in one module rather than in each tool's own judgement. It exits the
+     process rather than returning, which is why nothing below it needs a
+     second check. */
+  refuseNonDisposablePostgres({
+    tool: 'bin/supabase-check.mjs',
+    target: `${target.host}:${target.port}${target.database ? `/${target.database}` : ''}`,
+    userRows: Number(populated.n),
+    effect: 'create one temporary table, write three rows to it, and drop it',
+  });
+
+  {
     const table = `supabase_check_${Math.random().toString(36).slice(2, 10)}`;
     await db.query(`CREATE TABLE ${table} (id int primary key, note text)`);
     try {

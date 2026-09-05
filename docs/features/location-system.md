@@ -40,6 +40,12 @@ The location system in WeVolunteer provides an interactive, location-aware exper
   banner (`LocationPrompt`, built 2026-08-11 — the context had exposed the
   hooks for it since it was written, with no consumer), and stored solely in
   React state.
+- That banner's markup and styling moved into `components/notifications/`
+  (`NoticeBanner` + `AppNotices`) when the legal change notice needed the same
+  treatment. Nothing about its appearance or behaviour changed; the notice slot
+  now decides which of the two shows, and the location offer is the lower
+  priority of the two — suppressed while a legal change is pending, and back the
+  moment that is dismissed.
 - The exact position never leaves the device. Distance filtering sends a centre
   coarsened to two decimal places (~1.1km); the distance a volunteer READS is
   computed in the browser at full precision.

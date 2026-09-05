@@ -56,7 +56,7 @@ import { applyPostgresSchema } from '../server/db/postgresSchema.js';
 import { PostgresDatabase } from '../server/db/postgresConnection.js';
 import { translatePlaceholders } from '../server/db/sqlPlaceholders.js';
 import { runPostgresMigrations } from '../server/migrations/index.js';
-import { TRIGRAM_INDEXES } from '../server/migrations/064_search_trigram_indexes.js';
+import { TRIGRAM_INDEXES } from '../server/migrations/067_search_trigram_indexes.js';
 import { parseEventFilters, buildEventListStatement } from '../server/eventQuery.js';
 
 const arg = (name, fallback) => {

@@ -21,7 +21,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import LegalEditor from './LegalEditor';
 import { api, ApiError } from '../../utils/api';
-import { todayIso, latestEffectiveIso, MAX_EFFECTIVE_DAYS_AHEAD } from './legalDates';
+import { todayIso, latestEffectiveIso, isoPlusDays, MAX_EFFECTIVE_DAYS_AHEAD } from './legalDates';
 
 vi.mock('../../utils/api', async (importOriginal) => {
   const actual = await importOriginal();
@@ -384,4 +384,194 @@ describe('LegalEditor', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Network is down.');
     expect(screen.queryByLabelText('Document text')).not.toBeInTheDocument();
   });
+  /* ── The 30-day material-change rule, as the editor presents it ────────── */
+
+  describe('a material change', () => {
+    /** A signup document: the only scope the notice period applies to. */
+    const SIGNUP = () => DOC({
+      slug: 'terms-of-service',
+      title: 'Terms of Service',
+      reconsentOnMajor: true,
+      materialNoticeDays: 30,
+    });
+
+    /**
+     * The panel's own label, not any text containing the phrase.
+     *
+     * The date hint underneath gained the same words ("Because this is a
+     * material change, it also cannot be earlier than …"), which is right for
+     * the reader and ambiguous for a query — `getByText` found two nodes. The
+     * label element is the thing whose presence means "the panel is showing".
+     */
+    const materialPanel = () =>
+      document.querySelector('.legal-editor-warning .legal-editor-warning-label');
+    const materialPanelShown = () =>
+      Boolean([...document.querySelectorAll('.legal-editor-warning-label')]
+        .find(el => /This is a material change/i.test(el.textContent)));
+
+    const versionBox = () => screen.getByLabelText('Version number');
+    const dateBox = () => screen.getByLabelText('Takes effect');
+    const setVersion = (v) => fireEvent.change(versionBox(), { target: { value: v } });
+
+    const openSignup = async () => {
+      api.fetchEditableLegalDocument.mockResolvedValue(SIGNUP());
+      renderEditor();
+      await waitFor(() => expect(textarea()).toHaveValue(BODY));
+    };
+
+    it('says nothing while the version is a patch bump', async () => {
+      await openSignup();
+      expect(materialPanelShown()).toBe(false);
+    });
+
+    it('warns as soon as the major number moves, and names the earliest date', async () => {
+      await openSignup();
+      setVersion('2.0.0');
+
+      await waitFor(() => expect(materialPanelShown()).toBe(true));
+      expect(materialPanel().textContent).toMatch(/This is a material change/i);
+      /* The consequence, in the panel, not only in a refusal after the fact. */
+      const panel = document.querySelector('.legal-editor-warning');
+      expect(panel.textContent).toMatch(/accept this document again/i);
+      expect(panel.textContent).toMatch(/October 4, 2026|30/);
+    });
+
+    /**
+     * The picker's floor and the server's refusal come from ONE number.
+     *
+     * `materialNoticeDays` arrives on the payload, so a change to §13 moves
+     * both without a second edit in the bundle. A literal 30 here would be the
+     * copy that drifts.
+     */
+    it('moves the date picker floor to 30 days out', async () => {
+      await openSignup();
+      expect(dateBox()).toHaveAttribute('min', todayIso());
+
+      setVersion('2.0.0');
+      await waitFor(() => expect(dateBox()).toHaveAttribute('min', isoPlusDays(30)));
+    });
+
+    it('marks the date invalid while it is inside the notice period', async () => {
+      await openSignup();
+      setVersion('2.0.0');
+      await waitFor(() => expect(dateBox()).toHaveAttribute('aria-invalid', 'true'));
+
+      fireEvent.change(dateBox(), { target: { value: isoPlusDays(30) } });
+      await waitFor(() => expect(dateBox()).not.toHaveAttribute('aria-invalid'));
+    });
+
+    it('points at a MINOR version as the way out', async () => {
+      /* By far the likeliest cause: a correction that leaves nobody worse off,
+         given a MAJOR number by accident. The panel should teach that rather
+         than only blocking. */
+      await openSignup();
+      setVersion('2.0.0');
+      await waitFor(() => expect(materialPanelShown()).toBe(true));
+      expect(document.querySelector('.legal-editor-warning').textContent)
+        .toMatch(/it is a\s+clarification/i);
+    });
+
+    it('does not warn about a document the rule does not cover', async () => {
+      api.fetchEditableLegalDocument.mockResolvedValue(DOC({ reconsentOnMajor: false }));
+      renderEditor();
+      await waitFor(() => expect(textarea()).toHaveValue(BODY));
+      setVersion('2.0.0');
+      expect(materialPanelShown()).toBe(false);
+    });
+
+    it('says nothing mid-typing, while the version is unparseable', async () => {
+      await openSignup();
+      setVersion('2.');
+      expect(materialPanelShown()).toBe(false);
+    });
+
+    describe('the override', () => {
+      const REASON = 'Our analytics subprocessor was terminated today after a breach '
+        + 'disclosure, and this document names them as a recipient.';
+
+      const openOverride = async () => {
+        await openSignup();
+        setVersion('2.0.0');
+        fireEvent.click(await screen.findByRole('button', {
+          name: /Something obliges this to take effect sooner/i,
+        }));
+        return screen.findByLabelText(/Why the 30-day notice period cannot be given/i);
+      };
+
+      it('is closed until the owner opens it', async () => {
+        await openSignup();
+        setVersion('2.0.0');
+        await waitFor(() => expect(materialPanelShown()).toBe(true));
+        expect(screen.queryByLabelText(/Why the 30-day notice period/i)).not.toBeInTheDocument();
+      });
+
+      it('says the reason is audited, and who it is attributed to', async () => {
+        await openOverride();
+        expect(screen.getByText(/audit trail/i)).toBeInTheDocument();
+        expect(screen.getByText(/with your name on it/i)).toBeInTheDocument();
+      });
+
+      it('sends the reason with the publication', async () => {
+        api.publishLegalRevision.mockResolvedValue(SIGNUP({ version: '2.0.0' }));
+        const box = await openOverride();
+        fireEvent.change(box, { target: { value: REASON } });
+        type(`${BODY}\nWe may now share your record with your district.\n`);
+
+        fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
+
+        await waitFor(() => expect(api.publishLegalRevision).toHaveBeenCalled());
+        expect(api.publishLegalRevision.mock.calls[0][1]).toMatchObject({
+          version: '2.0.0',
+          noticePeriodOverride: REASON,
+        });
+      });
+
+      it('sends nothing when the date already gives the full notice period', async () => {
+        /* The server refuses an override it did not need, so sending one
+           speculatively would turn a valid save into an error. */
+        api.publishLegalRevision.mockResolvedValue(SIGNUP({ version: '2.0.0' }));
+        const box = await openOverride();
+        fireEvent.change(box, { target: { value: REASON } });
+        fireEvent.change(dateBox(), { target: { value: isoPlusDays(45) } });
+        type(`${BODY}\nA change.\n`);
+
+        fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
+
+        await waitFor(() => expect(api.publishLegalRevision).toHaveBeenCalled());
+        expect(api.publishLegalRevision.mock.calls[0][1].noticePeriodOverride).toBeUndefined();
+      });
+
+      /**
+       * The panel closes, and the reason is DISCARDED, when the warning no
+       * longer applies.
+       *
+       * A reason left behind in hidden state would be sent on the next save and
+       * recorded in the audit trail against a publication nobody meant to
+       * except — and the server refuses an override that was not needed, so the
+       * owner would meet a confusing error instead of a save.
+       */
+      it('disarms itself when the version stops being material', async () => {
+        api.publishLegalRevision.mockResolvedValue(SIGNUP({ version: '1.0.1' }));
+        const box = await openOverride();
+        fireEvent.change(box, { target: { value: REASON } });
+
+        setVersion('1.0.1');
+        await waitFor(() =>
+          expect(screen.queryByLabelText(/Why the 30-day notice period/i)).not.toBeInTheDocument());
+
+        type(`${BODY}\nA clarification.\n`);
+        fireEvent.click(screen.getByRole('button', { name: /Save changes/i }));
+        await waitFor(() => expect(api.publishLegalRevision).toHaveBeenCalled());
+        expect(api.publishLegalRevision.mock.calls[0][1].noticePeriodOverride).toBeUndefined();
+      });
+
+      it('can be closed again in favour of giving the full notice', async () => {
+        await openOverride();
+        fireEvent.click(screen.getByRole('button', { name: /Give the full notice period instead/i }));
+        await waitFor(() =>
+          expect(screen.queryByLabelText(/Why the 30-day notice period/i)).not.toBeInTheDocument());
+      });
+    });
+  });
+
 });

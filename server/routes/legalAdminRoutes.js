@@ -12,7 +12,7 @@ import { documentBySlug } from '../legalDocuments.js';
 import { PolicyContentError } from '../legalContent.js';
 import {
   resolveDocument, effectiveDocuments, publishRevision, validatePublication,
-  revisionHistory, LegalValidationError, MAX_BODY_LENGTH,
+  revisionHistory, LegalValidationError, MAX_BODY_LENGTH, MATERIAL_NOTICE_DAYS,
 } from '../legalStore.js';
 
 /**
@@ -101,6 +101,19 @@ function editorMeta(doc) {
      * consent model and the client should not be the second place that knows it.
      */
     reconsentOnPublish: doc.scope === 'organizer-onboarding',
+    /**
+     * Whether a MAJOR bump on this document re-consents its whole audience,
+     * and how many days' notice the Terms owe that audience.
+     *
+     * Sent rather than inferred client-side for the same reason
+     * `reconsentOnPublish` is: the condition belongs to the consent model, and
+     * a second copy in the bundle is a second thing to keep in step with §13.
+     * The editor uses `materialNoticeDays` to compute the `min` on the date
+     * picker, so the browser's floor and the server's refusal come from one
+     * number.
+     */
+    reconsentOnMajor: doc.scope === 'signup',
+    materialNoticeDays: MATERIAL_NOTICE_DAYS,
   };
 }
 
@@ -212,7 +225,7 @@ router.post(
     }
 
     const version = typeof req.body?.version === 'string' ? req.body.version.trim() : '';
-    const { body, effectiveAt } = req.body ?? {};
+    const { body, effectiveAt, noticePeriodOverride } = req.body ?? {};
 
     try {
       /**
@@ -224,7 +237,7 @@ router.post(
        * owner's step-up grant still intact — they fix the field and press save
        * again without proving who they are a second time.
        */
-      await validatePublication(db, { slug, version, body, effectiveAt });
+      await validatePublication(db, { slug, version, body, effectiveAt, noticePeriodOverride });
 
       await runInTransaction(db, async (tx) => {
         /* Bound to the values about to be WRITTEN, never the ones the client
@@ -233,16 +246,48 @@ router.post(
         await spendChallenge(tx, req, 'legal.publish', { slug, version });
 
         const result = await publishRevision(tx, {
-          slug, body, version, effectiveAt, userId: req.user.id,
+          slug, body, version, effectiveAt, noticePeriodOverride, userId: req.user.id,
         });
 
+        /**
+         * Two rows when the notice period was overridden, one otherwise.
+         *
+         * The publication row records what was published; the override row
+         * records that a promise the Terms make to every reader was set aside,
+         * by whom, and why. Folding the reason into the first row's `details`
+         * would bury the most consequential fact of the day inside a sentence
+         * about a content hash, and would make it unfilterable — the Audit
+         * Explorer's own filter is a `SELECT DISTINCT action`, so a thing
+         * without its own action name cannot be found by looking for it.
+         *
+         * Written INSIDE the same transaction as the insert and the step-up
+         * spend, for the reason the header gives: recorded-but-not-published
+         * and published-but-not-recorded are both worse than a clean failure.
+         */
+        const material = result.materialNotice;
         await recordAudit(tx, {
           adminId: req.user.id,
           action: 'LEGAL_DOCUMENT_PUBLISHED',
           targetUserId: null,
           details: `Published ${documentBySlug(slug).title} version ${result.version} `
-            + `(effective ${result.effectiveAt}, content ${result.contentHash.slice(0, 16)})`,
+            + `(effective ${result.effectiveAt}, content ${result.contentHash.slice(0, 16)})`
+            + (material
+              ? ` — MATERIAL change, ${material.fromVersion} to ${result.version}, asks every `
+                + 'existing account to accept again'
+              : ''),
         });
+
+        if (result.noticePeriodOverride) {
+          await recordAudit(tx, {
+            adminId: req.user.id,
+            action: 'LEGAL_NOTICE_PERIOD_OVERRIDDEN',
+            targetUserId: null,
+            details: `${documentBySlug(slug).title} ${result.version} takes effect on `
+              + `${result.effectiveAt}, sooner than the ${material.days} days the Terms `
+              + `promise for a material change (earliest was ${material.earliest}). `
+              + `Reason given: ${result.noticePeriodOverride}`,
+          });
+        }
 
       });
     } catch (err) {

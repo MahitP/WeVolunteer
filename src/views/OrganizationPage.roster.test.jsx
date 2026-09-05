@@ -37,7 +37,12 @@ const payload = (viewer) => ({
   },
   members: [BOSS, HELPER, MEMBER],
   events: [],
-  viewer: { isMember: true, memberRole: null, canManage: false, canPost: false, hours: 0, events: 0, history: [], ...viewer },
+  viewer: {
+    isMember: true, memberRole: null, canManage: false, canPost: false,
+    affordance: 'member', joinPolicy: 'open', canInvite: false, shareLink: null,
+    pendingRequests: null,
+    hours: 0, events: 0, history: [], ...viewer,
+  },
   totals: null,
 });
 
@@ -58,6 +63,13 @@ describe('organization roster ranks', () => {
        crash; mocked here so the tests measure the roster instead. */
     api.fetchOrganizationAnnouncements.mockResolvedValue({ announcements: [] });
     api.fetchOrganizationAppeals.mockResolvedValue({ appeals: [] });
+    api.fetchOrganizationJoinRequests.mockResolvedValue({ requests: [], pendingRequests: 0 });
+    /* The manage band also mounts the invitation panel, which fetches on mount.
+       Left unmocked, the auto-mock returns `undefined`, `.then` throws inside a
+       passive effect and the WHOLE page unmounts — which reads as "the control is
+       correctly absent" on half of these assertions. Vacuous-pass by crash. */
+    api.fetchOrganizationInvitations.mockResolvedValue({ invitations: [] });
+    api.searchDirectory.mockResolvedValue({ users: [], organizations: [] });
   });
 
   it('names the rank somebody holds', async () => {

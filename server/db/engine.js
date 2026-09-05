@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertNotProductionDatabase } from './productionDatabaseGuard.js';
 
 /** The repository root, so a relative CA path does not depend on the cwd. */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -213,6 +214,18 @@ export function postgresConfig(env = process.env) {
  * pooler clients. 25 leaves room for eight instances against the pooler, or two
  * against a direct connection — which is another reason to use the pooler.
    */
+  /**
+   * Refuse a preview or development process pointed at the production database.
+   *
+   * Here rather than in `config.js` because this is the one place the
+   * application resolves a PostgreSQL connection string — a check anywhere else
+   * would be a second place that has to be kept in step with this one. It runs
+   * before the pool is sized or TLS is resolved, so a caught mistake costs no
+   * connection attempt. See productionDatabaseGuard.js.
+   */
+  const guard = assertNotProductionDatabase(env, connectionString);
+  if (guard.warning) console.warn(guard.warning);
+
   const max = Number(env.DATABASE_POOL_MAX ?? 25);
   if (!Number.isInteger(max) || max < 1 || max > 100) {
     throw new Error(`FATAL: DATABASE_POOL_MAX="${env.DATABASE_POOL_MAX}" must be an integer between 1 and 100.`);

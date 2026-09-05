@@ -27,20 +27,74 @@ describe('Admin CSV Export Route', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns a valid CSV file for admins', async () => {
+  /**
+   * ── An ordinary administrator is refused now ──
+   *
+   * This case asserted a 200 for `admin@example.gov`, because the endpoint was
+   * gated on `report.resolve`. That capability means "resolve the safety
+   * reports people file", and the endpoint returns every active student's id,
+   * NAME, EMAIL, school, join date and credited hours — so reviewing one report
+   * about one person also granted a bulk download of every child's address, and
+   * the path name made the mismatch look intentional.
+   *
+   * It is `roster.export` now: SUPER_ONLY, so it is also ungrantable, on the
+   * same argument `audit.read` records. An administrator who needs figures
+   * rather than people still has `/impact`, which is aggregate.
+   */
+  it('refuses an ordinary administrator', async () => {
     const token = await srv.login('admin@example.gov');
     const res = await fetch(srv.base + '/api/admin/reports/export', {
       headers: { Cookie: `wev_session=${token}` }
     });
-    
+    expect(res.status).toBe(403);
+  });
+
+  it('returns a valid CSV file to the owner, and records the export', async () => {
+    /* `loginAsOwner` promotes a seeded account to super_admin and enrols the
+       second factor in the same step — `requireCap` refuses an owner with no
+       second factor, which is correct and a confusing way to learn it. */
+    const owner = await srv.loginAsOwner('admin@example.gov');
+    const res = await fetch(srv.base + '/api/admin/reports/export', {
+      headers: { Cookie: `wev_session=${owner}` }
+    });
+
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/csv');
-    expect(res.headers.get('content-disposition')).toContain('attachment; filename="wevolunteer_students_export.csv"');
-    
+    /* Datestamped, so a copy found in a Downloads folder later can be dated.
+       Matched loosely on the shape rather than on today's date, which would make
+       this case fail at midnight. */
+    expect(res.headers.get('content-disposition'))
+      .toMatch(/attachment; filename="wevolunteer_students_\d{4}-\d{2}-\d{2}\.csv"/);
+
     const text = await res.text();
     const lines = text.trim().split('\n');
-    expect(lines[0]).toBe('ID,Name,Email,School/Affiliation,Joined Date,Total Credited Hours');
+    /* No internal `id` column: it is useless outside this system and useful
+       inside a leaked file, where a stable identifier is what lets two extracts
+       be correlated into a longer record about a named child. */
+    expect(lines[0]).toBe('Name,Email,School/Affiliation,Joined Date,Total Credited Hours');
     expect(text).toContain('Leo Chen');
+
+    /**
+     * The row is the point. A bulk PII egress that leaves no trace is the one
+     * thing this endpoint must not be, and it left none at all before this —
+     * so an incident review had no way to learn that a file containing every
+     * student's address had been produced, or by whom.
+     */
+    const { db } = await import('./db.js');
+    /* `insertionTiebreak`, not a literal `rowid`: that column exists only on
+       SQLite, so this assertion passed on one engine and failed the whole case
+       with `column "rowid" does not exist` on the other. The dialect layer owns
+       the difference — see db/dialectSql.js. */
+    const { insertionTiebreak } = await import('./db/dialectSql.js');
+    const row = await db.prepare(
+      'SELECT action, target_user_id, details FROM admin_audit_logs '
+      + `WHERE action = 'ROSTER_EXPORTED' ORDER BY ${insertionTiebreak(db)} DESC LIMIT 1`
+    ).get();
+    expect(row, 'the export wrote no audit row').toBeTruthy();
+    /* No target: the subject is every student at once, which is what makes the
+       row worth having. The count is what a review needs. */
+    expect(row.target_user_id).toBeFalsy();
+    expect(row.details).toMatch(/\d+ student/);
   });
 });
 

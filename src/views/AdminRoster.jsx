@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, User, Crown, AlertTriangle, X } from 'lucide-react';
+import { Shield, Activity, User, Crown, AlertTriangle, X, Download } from 'lucide-react';
 
-import { ROLE } from '../authz';
+import { ROLE, can } from '../authz';
 import { useStepUp } from '../components/auth/useStepUp';
 import { STEP_UP } from '../utils/stepUp';
 import { useModal } from '../utils/useModal';
@@ -206,7 +206,7 @@ function RevokeAdminModal({ admin, onCancel, onRevoke }) {
   );
 }
 
-export default function AdminRoster() {
+export default function AdminRoster({ currentUser }) {
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -215,6 +215,10 @@ export default function AdminRoster() {
   const [promoting, setPromoting] = useState(false);
   const [revoking, setRevoking] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  /* With the other state rather than beside the handler below: that handler is
+     defined after the loading and error early-returns, so a hook there is
+     called conditionally. oxlint's react-hooks rule catches it. */
+  const [exporting, setExporting] = useState(false);
   
   const { run, modal: stepUpModal } = useStepUp();
 
@@ -303,6 +307,42 @@ export default function AdminRoster() {
     );
   }
 
+  /**
+   * Download the STUDENT roster — every active student, with contact details.
+   *
+   * ── Why this control exists here ──
+   *
+   * `GET /api/admin/reports/export` had no user interface at all, so the only
+   * way to run it was curl. It also used to be gated on `report.resolve`, which
+   * means "resolve the safety reports people file" — so the capability to
+   * review one report granted a bulk download of every child's email address.
+   * It is `roster.export` now, SUPER_ONLY and ungrantable; see the note in
+   * `server/authz.js`.
+   *
+   * On this page because this is where a roster already lives, and because the
+   * page is already the owner's. Not on the Admin hub as a tile: a tile is a
+   * destination, and this is an action.
+   */
+  const exportStudents = async () => {
+    setExporting(true);
+    try {
+      const blob = await api.exportStudentRosterCSV();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'WeVolunteer_students.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showFeedback('success', 'Student roster downloaded. The export is recorded in the audit trail.');
+    } catch (err) {
+      showFeedback('error', `Could not export the roster: ${err.message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="page">
       <header className="page-head">
@@ -310,7 +350,22 @@ export default function AdminRoster() {
           <h2 className="page-title">Administrator Roster</h2>
           <p className="muted">Platform administrators and their effective capabilities</p>
         </div>
-        <div>
+        <div className="row row-wrap">
+          {/* Gated on the capability the endpoint requires rather than on this
+              page's own. Both are SUPER_ONLY today, so the sets are identical —
+              but coupling one capability's membership to another is how a
+              button comes to appear for somebody the server then refuses. */}
+          {can(currentUser, 'roster.export') && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={exportStudents}
+              disabled={exporting}
+            >
+              <Download size={16} aria-hidden="true" />
+              {exporting ? ' Preparing…' : ' Export students (CSV)'}
+            </button>
+          )}
           <button type="button" className="btn btn-primary" onClick={() => setPromoting(true)}>
             Promote Administrator
           </button>

@@ -543,6 +543,46 @@ export const SUPER_ONLY = [
    * proof of identity: see `legal.publish` in sensitiveActions.js.
    */
   'legal.edit',
+  /**
+   * Exporting the student roster as CSV.
+   *
+   * ── Why this is not `report.resolve` ──
+   *
+   * `GET /api/admin/reports/export` was gated on `report.resolve`, which means
+   * "resolve the safety reports people file". The endpoint returns every active
+   * student's id, NAME, EMAIL, school, join date and credited hours. So the
+   * capability to review a report about one person also granted a bulk download
+   * of the contact details of every child on the platform, and the path name —
+   * `reports/export` — made the mismatch look deliberate.
+   *
+   * OWASP's Authorization Cheat Sheet states the rule this violates directly:
+   * "For every combination of user type and resource, determine what
+   * operations, if any, the user … must be able to perform on that resource."
+   * A moderation queue and a roster of minors are different resources.
+   *
+   * FERPA sharpens it for this deployment. A school official's access is
+   * limited to "the purposes for which the disclosure was made"
+   * (studentprivacy.ed.gov), and an email address is not among the fields
+   * usually designated directory information — so a bulk export of student
+   * addresses is not something a moderation role should acquire by implication.
+   *
+   * ── Why SUPER_ONLY ──
+   *
+   * The same argument `audit.read` records one entry up: SUPER_ONLY is checked
+   * BEFORE per-user grants and `userCapabilities.js` refuses to store a grant
+   * naming one, so this is ungrantable. "Let the person doing our hours
+   * reporting export the roster" is an extremely reasonable-sounding grant and
+   * it would hand every student's address to an account nobody vetted for it.
+   * Ungrantable means that conversation happens as a role change instead.
+   *
+   * An administrator who needs figures rather than people still has `/impact`,
+   * which is aggregate and carries no PII.
+   *
+   * Every export writes a `ROSTER_EXPORTED` audit row with the row count. That
+   * is new: the endpoint previously left no trace at all, which for a bulk PII
+   * egress is the one thing that must not be true.
+   */
+  'roster.export',
 ];
 
 export const ALL_CAPABILITIES = [...new Set([

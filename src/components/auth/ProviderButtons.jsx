@@ -76,7 +76,41 @@ export default function ProviderButtons({ onSelect, disabled, labelFor, showUnav
   const rows = PROVIDER_ORDER
     .map(id => providers.find(p => p.id === id))
     .filter(Boolean)
-    .filter(p => p.enabled || showUnavailable);
+    /**
+     * ── `coming_soon` is not shown on a sign-in screen; `misconfigured` is ──
+     *
+     * The two unusable states are not the same kind of thing, and `showUnavailable`
+     * alone could not tell them apart:
+     *
+     * The test is `implemented`, NOT `state === 'misconfigured'`. Keying on the
+     * label was wrong and the suite caught it: `/api/oauth/providers` is public
+     * and a cached bundle can outlive a deploy, so a server that predates the
+     * `state` field sends `{enabled: false, implemented: true}` with no state at
+     * all — and a predicate reading `state` would have hidden a Microsoft that
+     * is one environment variable from working, which is the exact regression
+     * this file was written for.
+     *
+     *   not implemented   nothing is built behind it (Apple). Nobody is waiting to
+     *                  be told, there is nothing an operator could configure,
+     *                  and a disabled button promising a date the product has
+     *                  not committed to is a roadmap control in the most-viewed
+     *                  screen in the application. A first-time visitor counted
+     *                  four ways to sign in and found that two of them were
+     *                  decoration.
+     *   implemented     built, and THIS deployment has no credentials.
+     *                  Kept visible deliberately — see the AADSTS900144 note
+     *                  below. A school told "use your school account" needs to
+     *                  learn the button is missing because the site is broken,
+     *                  not because they misremembered; and the operator sees the
+     *                  same screen as everybody else, so it is their only
+     *                  signal too.
+     *
+     * `showUnavailable` still means what it meant: `false` hides every unusable
+     * provider, which is what `VerifyIdentityModal` wants because that row is a
+     * re-authentication choice rather than a sign-in one. The change is only to
+     * what `true` admits.
+     */
+    .filter(p => p.enabled || (showUnavailable && p.implemented !== false));
 
   if (rows.length === 0) return null;
 

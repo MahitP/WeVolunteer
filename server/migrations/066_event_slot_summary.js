@@ -91,7 +91,7 @@ function hasColumn(db, table, column) {
 }
 
 export default {
-  version: 63,
+  version: 66,
   name: 'event_slot_summary',
   /* Hashed from the FILE, not from `up.toString()` — without this the checksum
      covers only the SQLite half and a change to the PostgreSQL one would go

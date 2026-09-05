@@ -46,6 +46,12 @@ const ACTIONS = {
   /* Reading the message bodies preserved with a safety report. The most
      invasive power on this platform, and the reason the read is double-logged. */
   REPORT_EVIDENCE_VIEWED:   ['Report evidence read', TONES.GRAVE],
+  /* GRAVE, and it is the only row on this page that is about every student at
+     once: one file containing the name, email and school of every child on the
+     platform left the system. Nothing about that is routine, and the endpoint
+     wrote no row at all until the capability was separated from
+     `report.resolve`. */
+  ROSTER_EXPORTED:          ['Student roster exported', TONES.GRAVE],
   /* Manual badge awards and revocations. Routine rather than notable: a badge
      is a recognition, it carries no authority, and an administrator handing one
      out is ordinary work. They are logged at all because the alternative is a
@@ -121,6 +127,28 @@ const ACTIONS = {
      to see classmates' details and write on their service records. */
   ORGANIZATION_RANK_CHANGED: ['Organization rank changed', TONES.NOTABLE],
   ORGANIZATION_ROSTER_EXPORTED: ['Organization roster exported', TONES.NOTABLE],
+  /**
+   * The invitation link, and the setting that decides who needs one.
+   *
+   * NOTABLE rather than ROUTINE. Regenerating is the act that stops every copy
+   * of a link already handed out from working, and changing who may join is the
+   * question somebody asks six months later when a student turns up in a club
+   * they should not be in. Neither is grave — nobody's standing changes — but a
+   * reader scanning the trail should see them.
+   */
+  ORGANIZATION_SHARE_LINK_CREATED: ['Organization invitation link created', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_ROTATED: ['Organization invitation link regenerated', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_REVOKED: ['Organization invitation link switched off', TONES.NOTABLE],
+  ORGANIZATION_SHARE_LINK_EXPIRY_SET: ['Organization invitation link expiry changed', TONES.NOTABLE],
+  ORGANIZATION_MEMBERSHIP_POLICY_CHANGED: ['Organization membership settings changed', TONES.NOTABLE],
+  ORGANIZATION_HANDLE_CHANGED: ['Organization web address changed', TONES.NOTABLE],
+  ORGANIZATION_INVITATION_SENT: ['Organization invitation sent', TONES.ROUTINE],
+  ORGANIZATION_INVITATION_REVOKED: ['Organization invitation withdrawn', TONES.ROUTINE],
+  /* Admitting somebody, or declining them. ROUTINE: it is the ordinary running
+     of a club, it happens as often as students ask, and a trail in which every
+     row is notable has no notable rows. */
+  ORGANIZATION_REQUEST_ACCEPTED: ['Request to join accepted', TONES.ROUTINE],
+  ORGANIZATION_REQUEST_REJECTED: ['Request to join declined', TONES.ROUTINE],
   /* The one action that makes a student's service record unchangeable. NOTABLE
      rather than routine: it is irreversible, and the trail is the only place
      that records who did it. */
@@ -173,6 +201,10 @@ const ACTIONS = {
      is no bounded set of affected users to notify and no undo, which is the
      definition the scale uses for its top rung. */
   LEGAL_DOCUMENT_PUBLISHED: ['Legal document published', TONES.GRAVE],
+  /* Its own action rather than a sentence inside the row above, so it can be
+     found by filtering. Setting aside a notice period the Terms promise to
+     every reader is the gravest thing the Legal Center can do. */
+  LEGAL_NOTICE_PERIOD_OVERRIDDEN: ['Legal notice period overridden', TONES.GRAVE],
 };
 
 /**

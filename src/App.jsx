@@ -12,8 +12,7 @@ import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
 import LoadingSkeleton from './components/common/LoadingSkeleton';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
-import LocationPrompt from './components/location/LocationPrompt';
-import LegalUpdateModal from './components/LegalUpdateModal';
+import AppNotices from './components/notifications/AppNotices';
 import AccountProfile from './views/AccountProfile';
 import ThemeToggle from './components/ThemeToggle';
 import ProfileMenu from './components/account/ProfileMenu';
@@ -31,9 +30,12 @@ import {
   AdminDashboard, VolunteerDashboard, OrganizerDashboard,
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
+import { consumePendingRedirect } from './utils/pendingInvite';
+import { ACCOUNT_MENU_ITEMS } from './accountMenu.js';
+import { organizationPath } from './utils/organizationUrl';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
+  X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -446,6 +448,46 @@ for (const entry of NAV) {
  * titled "Moderation Center" with the wrong rail item highlighted: silent, and
  * invisible to every existing test.
  */
+/**
+ * Which areas of the product actually DO anything with a shared location.
+ *
+ * ── Why the location offer needed a condition at all ──
+ *
+ * `AppNotices` mounts the location opt-in at the shell level, so
+ * "See how far away opportunities are — share your location to sort by distance
+ * and filter to what is nearby" rendered above every page. Measured in a
+ * browser it was the largest element above the fold on the ADMIN hub, and it
+ * appears the same way on Messages, Settings and Notifications — pages where
+ * accepting it changes nothing a reader can see.
+ *
+ * That is worse than clutter, because it is the same slot the LEGAL change
+ * notices use. `AppNotices` puts the location offer last in its priority ladder
+ * precisely because it is an offer rather than news, and it comes back — the
+ * dismissal is remembered for the tab, not for ever. An offer that recurs on
+ * pages where it cannot pay off is how a reader learns to dismiss that strip
+ * without reading it, which is exactly what must not happen to a notice saying
+ * the Terms have changed.
+ *
+ * ── Keyed by TAB, not by path ──
+ *
+ * A literal list of paths would need `/discover` and `/events` (its redirect)
+ * spelled separately, and `/` means a different dashboard per persona. `tabForPath`
+ * is already the canonical answer to "which area is this", so the condition is
+ * expressed in the same vocabulary and inherits every path that maps into it.
+ *
+ * The three that qualify, and why each earns it:
+ *
+ *   dashboard  every persona's dashboard shows a next shift with travel time
+ *              and weather for its location.
+ *   browse     Discover sorts by distance and filters to what is nearby — the
+ *              thing the offer's own copy promises.
+ *   calendar   shifts laid out against where they are.
+ *
+ * Deliberately NOT `welly`: the assistant answers distance questions, but it
+ * asks for location itself, in the conversation, at the moment it needs it.
+ */
+export const LOCATION_AWARE_TABS = new Set(['dashboard', 'browse', 'calendar']);
+
 export function tabForPath(pathname) {
   if (pathname.startsWith('/events/new')) return 'create';
   /* `/discover` is the canonical Discover page and `/events` is its compatibility
@@ -499,6 +541,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/impact')) return 'impact';
   if (pathname.startsWith('/admin/audit-logs')) return 'audit';
   if (pathname.startsWith('/admin/roster')) return 'roster';
+  if (pathname.startsWith('/admin/badges')) return 'badges';
   if (pathname.startsWith('/admin/legal')) return 'legalEditor';
   /**
    * The Legal Center, and every document under it.
@@ -702,6 +745,7 @@ export const PAGE_META = {
     welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
+    badges: { title: 'Badges', sub: 'What the platform recognises, and who holds what' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
        so no other persona can reach the page and an entry under one would be a
        title nobody will ever see. */
@@ -1165,9 +1209,31 @@ function AppShell({ toasts, addToast, removeToast }) {
     await signOut();
   };
 
+  /**
+   * Where somebody lands after signing in or signing up.
+   *
+   * ── The invitation hand-off ──
+   *
+   * Somebody who opened a club's invitation link with no account, pressed Join,
+   * and was sent here to make one is not trying to reach the dashboard. The club
+   * they came for is written to `sessionStorage` before they leave the invitation
+   * page and read back once, here.
+   *
+   * This is deliberately NOT a `returnTo`. What comes back is a SLUG that this
+   * application's own server produced, and it is interpolated into a fixed
+   * `/organizations/` prefix — so there is no input that can make this navigate
+   * anywhere else, and therefore nothing to validate and no open-redirect
+   * surface to get wrong. `consumePendingRedirect` marks it spent, so a later
+   * sign-in in the same tab lands on the dashboard like any other.
+   *
+   * A storage failure (a private window, blocked site data) simply returns null
+   * and the person lands on the dashboard. Losing the destination is the right
+   * way for that to fail; losing the sign-in would not be.
+   */
   const handleLoginSuccess = () => {
     refreshAll();
-    navigate('/');
+    const invite = consumePendingRedirect();
+    navigate(invite ? organizationPath(invite.slug) : '/');
   };
 
   const setViewingProfileState = (profile) => {
@@ -1302,7 +1368,10 @@ function AppShell({ toasts, addToast, removeToast }) {
      table, so adding a route to PUBLIC_ROUTES left it unreachable — it fell
      through to the signed-out catch-all and answered 404 while looking
      correctly declared. */
-  if (isPublicPath(currentPath)) {
+  /* `signedIn` matters: `/organizations/:key` is in both tables, and a reader
+     with a session must get the shell's organization page rather than the
+     standalone public one — see `shellWhenSignedIn` on that entry. */
+  if (isPublicPath(currentPath, { signedIn: Boolean(currentUser) })) {
     return (
       <React.Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -1590,7 +1659,14 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/appeals/new': {},
     '/impact': {},
     '/admin/audit-logs': {},
-    '/admin/roster': {},
+    /* \`currentUser\` for the student-roster export control, which is gated on
+       \`roster.export\` — the capability the endpoint requires, rather than on
+       this page's own. */
+    '/admin/roster': { currentUser },
+    /* Declared EMPTY, not omitted: `withProps` throws on a missing entry so a
+       new route cannot mount with every prop silently absent. AdminBadges reads
+       everything it needs from `api` and takes no shell state. */
+    '/admin/badges': {},
     '/admin/legal': { addToast },
     '/admin/impact': {},
     '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }
@@ -1741,17 +1817,38 @@ function AppShell({ toasts, addToast, removeToast }) {
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}
           <PersonaPreviewBanner preview={currentUser.preview} onEnded={refreshAll} />
-          {/* Inside the signed-in shell, not in main.jsx with the provider: a
-              banner asking to use your location has no business on the sign-in
-              screen, and the browser would refuse the permission there anyway
-              because nobody has pressed anything yet. */}
-          <LocationPrompt />
-          {/* Inside the signed-in shell for the same reason as the banner
-              above: "which documents has THIS account not been shown" is only
-              answerable once there is an account, and the Terms promise notice
-              in the app rather than at the sign-in screen. Renders nothing when
-              there is nothing to say, which is almost always. */}
-          <LegalUpdateModal />
+          {/**
+            * The notice slot: the location opt-in, legal document changes, and
+            * the mandatory re-acceptance dialog, in that priority order.
+            *
+            * Inside the signed-in shell, not in main.jsx with the provider. A
+            * banner asking to use your location has no business on the sign-in
+            * screen — the browser would refuse the permission there anyway,
+            * because nobody has pressed anything yet — and "which documents has
+            * THIS account not been shown" is only answerable once there is an
+            * account. The Terms promise notice in the app, not at the sign-in
+            * screen.
+            *
+            * `key` on the user id, because everything it holds is about one
+            * account. Signing out and back in as somebody else must not leave
+            * the previous account's pending notices, or its dismissals, on
+            * screen. Same reason `NotificationsBell` above is keyed.
+            *
+            * Renders nothing at all when there is nothing to say, which is
+            * almost always — see the note in the component about why "nothing"
+            * has to mean no node rather than an empty one.
+            */}
+          <AppNotices
+            key={currentUser.id}
+            onAccepted={refreshAll}
+            onSignOut={handleLogout}
+            /* The lowest tier of the notice ladder is an OFFER, and an offer
+               belongs only where accepting it does something. See
+               LOCATION_AWARE_TABS. The legal tiers above it are unconditional
+               and must stay that way — a document somebody is held to is news
+               wherever they are standing. */
+            locationRelevant={LOCATION_AWARE_TABS.has(activeTab)}
+          />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering
               both arms of the ternary below, since the profile views are lazy
@@ -1976,16 +2073,36 @@ function AppShell({ toasts, addToast, removeToast }) {
                 */}
               {moreItems.map(renderMoreItem)}
 
-              <button
-                className="mobile-more-btn"
-                onClick={() => {
-                  setShowMobileMore(false);
-                  navigate('/settings');
-                }}
-              >
-                <SettingsIcon size={20} />
-                <span>Settings</span>
-              </button>
+              {/**
+                * The shared account destinations, from `src/accountMenu.js`.
+                *
+                * This sheet IS the account control at this width — there is no
+                * avatar menu on a phone, which is what `accountOnly` on the
+                * Profile NAV entry records. It had its own hand-written Settings
+                * button, so Settings existed in two files with nothing asserting
+                * they matched; then "My hours" was added to `ProfileMenu` and
+                * measured missing HERE at 375px, which is a destination that
+                * exists on a laptop and not on a phone.
+                *
+                * Filtered by capability for the same reason `ProfileMenu` filters
+                * it: `/hours` is `portfolio.write`, and offering it to an
+                * organizer or an administrator would be offering a 403.
+                */}
+              {ACCOUNT_MENU_ITEMS
+                .filter(item => !item.requiredCap || can(currentUser, item.requiredCap))
+                .map(({ id, path, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    className="mobile-more-btn"
+                    onClick={() => {
+                      setShowMobileMore(false);
+                      navigate(path);
+                    }}
+                  >
+                    <Icon size={20} />
+                    <span>{label}</span>
+                  </button>
+                ))}
 
               <div className="menu-sep" style={{ margin: 'var(--s2) 0' }} />
 

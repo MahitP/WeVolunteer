@@ -5,7 +5,7 @@
  *
  * ── Why this needs a tool ──
  *
- * Migration 064 is allowed to DECLINE. `CREATE EXTENSION` needs a privilege the
+ * Migration 067 is allowed to DECLINE. `CREATE EXTENSION` needs a privilege the
  * application's role may not have, and failing the boot over an index would be
  * the wrong trade for a query that returns correct rows without one. So the
  * migration warns once, at a boot nobody was reading, and records itself as
@@ -27,7 +27,7 @@
  * Read-only. It creates nothing, drops nothing and writes nothing.
  */
 import { openPrivilegedDb } from './resolveDb.mjs';
-import { TRIGRAM_INDEXES } from '../server/migrations/064_search_trigram_indexes.js';
+import { TRIGRAM_INDEXES } from '../server/migrations/067_search_trigram_indexes.js';
 
 const STRICT = process.argv.includes('--strict');
 
@@ -42,7 +42,7 @@ const { db } = await openPrivilegedDb('bin/verify-search-indexes.mjs');
  */
 if (db.dialect !== 'postgres') {
   console.log('engine: SQLite — trigram indexes are a PostgreSQL-only optimisation.');
-  console.log('The search box is correct here and scans; see migration 064.');
+  console.log('The search box is correct here and scans; see migration 067.');
   process.exit(0);
 }
 
@@ -127,7 +127,7 @@ if (missing > 0) {
   console.log('To fix, as a role that may create extensions:');
   console.log('  CREATE EXTENSION IF NOT EXISTS pg_trgm;');
   console.log('then restart the application, or create the indexes named above with');
-  console.log('CREATE INDEX CONCURRENTLY using the expressions listed in migration 064.');
+  console.log('CREATE INDEX CONCURRENTLY using the expressions listed in migration 067.');
 } else {
   console.log('\nEvery index is present but the planner is not using one. Check that '
     + "the extension's schema is on the connection's search_path, and run ANALYZE events.");
