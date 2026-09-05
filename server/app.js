@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { csrfGuard } from './csrfGuard.js';
 import { createRedisLimitStore } from './redis/limitStore.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -518,6 +519,21 @@ app.use(express.json({ limit: '100kb' }));
 // Populates req.cookies for authenticateToken. Mounted before the routers and
 // before the rate limiters so every downstream handler sees the same shape.
 app.use(cookieParser());
+
+/**
+ * CSRF defence in depth, immediately after cookie-parser and before any router.
+ *
+ * Scoped to `/api` because that is the whole state-changing surface; the static
+ * bundle below is public files served to anyone. Placed here so it runs before
+ * the rate limiters — a refused cross-site write should not first consume a
+ * legitimate user's limiter budget, since the attacker chooses the volume.
+ *
+ * This does NOT replace the Origin allowlist above or `sameSite: 'lax'`. It
+ * closes the case neither can: a SIBLING SUBDOMAIN is same-site, so Lax still
+ * attaches the cookie, and the Origin check would admit it the moment someone
+ * added the marketing hostname to CORS_ORIGINS. See csrfGuard.js.
+ */
+app.use('/api', csrfGuard);
 
 /**
  * Which limiters keep a SHARED counter, and which stay in process memory.
