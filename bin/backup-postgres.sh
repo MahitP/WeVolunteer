@@ -226,6 +226,27 @@ else
   log "WARNING: it contains every student's personal data in readable form."
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy it off this host.
+#
+# Everything above produced a verified archive on the same machine the database
+# is reached from and, on the Oracle deployment, the same machine the
+# application runs on. That protects against a bad migration and an accidental
+# DELETE. It does not protect against losing the host, losing the Oracle
+# tenancy, or losing access to the Supabase project — which are the scenarios a
+# restore is most often actually needed for.
+#
+# Non-fatal by design when nothing is configured: a local-only backup is worth
+# far more than no backup, and refusing to finish would discard the archive that
+# was just verified. It is fatal when a destination IS configured and the upload
+# fails, because that is the case where an operator believes off-site copies
+# exist. bin/backup-upload.mjs draws exactly that distinction in its exit code.
+UPLOAD_TARGET="$OUT"
+[ -f "$OUT.enc" ] && UPLOAD_TARGET="$OUT.enc"
+if ! node "$(dirname "$0")/backup-upload.mjs" "$UPLOAD_TARGET" "$MANIFEST"; then
+  fail "the off-site upload failed — the local archive is kept at $UPLOAD_TARGET"
+fi
+
 # Prune only after a successful new backup, so a run of failures can never age
 # out the last good copy. Manifests are pruned on the same schedule as the
 # archives they describe.
