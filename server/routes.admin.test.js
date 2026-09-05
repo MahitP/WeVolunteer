@@ -60,11 +60,18 @@ describe('Admin CSV Export Route', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/csv');
-    expect(res.headers.get('content-disposition')).toContain('attachment; filename="wevolunteer_students_export.csv"');
+    /* Datestamped, so a copy found in a Downloads folder later can be dated.
+       Matched loosely on the shape rather than on today's date, which would make
+       this case fail at midnight. */
+    expect(res.headers.get('content-disposition'))
+      .toMatch(/attachment; filename="wevolunteer_students_\d{4}-\d{2}-\d{2}\.csv"/);
 
     const text = await res.text();
     const lines = text.trim().split('\n');
-    expect(lines[0]).toBe('ID,Name,Email,School/Affiliation,Joined Date,Total Credited Hours');
+    /* No internal `id` column: it is useless outside this system and useful
+       inside a leaked file, where a stable identifier is what lets two extracts
+       be correlated into a longer record about a named child. */
+    expect(lines[0]).toBe('Name,Email,School/Affiliation,Joined Date,Total Credited Hours');
     expect(text).toContain('Leo Chen');
 
     /**

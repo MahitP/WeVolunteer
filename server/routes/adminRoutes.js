@@ -989,9 +989,18 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('roster.ex
     `).all();
 
     // Create CSV content
-    const headers = ['ID', 'Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
+    /**
+     * No internal `id` column.
+     *
+     * It was the first field, and it is the one column that is useless outside
+     * this system and useful inside a leaked file: a stable identifier is what
+     * lets two copies of an export, or an export and some other extract, be
+     * correlated into a longer record about a named child. A school reconciling
+     * against its own roster joins on name, school and email; nothing it does
+     * needs `user-diana`.
+     */
+    const headers = ['Name', 'Email', 'School/Affiliation', 'Joined Date', 'Total Credited Hours'];
     const rows = students.map(s => [
-      s.id,
       csvCell(s.name),
       csvCell(s.email),
       csvCell(s.school),
@@ -1022,7 +1031,18 @@ router.get('/api/admin/reports/export', authenticateToken, requireCap('roster.ex
     });
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="wevolunteer_students_export.csv"');
+    /**
+     * Datestamped, so a copy found later can be dated.
+     *
+     * Every export used to arrive as `wevolunteer_students_export.csv`, so a
+     * file in somebody's Downloads folder or attached to an old email carried
+     * no indication of how stale it was — and two exports a year apart were
+     * indistinguishable by name. The `ROSTER_EXPORTED` audit row is the
+     * authoritative record; this is what lets a file be matched back to one.
+     */
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Disposition',
+      `attachment; filename="wevolunteer_students_${stamp}.csv"`);
     res.send(csvContent);
   } catch (err) {
     console.error('Export error:', err);

@@ -32,7 +32,7 @@ import crypto from 'node:crypto';
  * the server. A bare `process.env` read is not. `src/serverModuleBoundary.test.js`
  * enforces this.
  *
- * The category's `replyTo` is therefore a KEY (`'support'`, `'security'`), not
+ * The routing value is therefore a KEY (`'support'`, `'security'`), not
  * an address. `server/routes/issueRoutes.js` resolves it against the address
  * book, which keeps the mail identity where the mail is sent and keeps the
  * address book out of the browser bundle entirely.
@@ -45,11 +45,12 @@ import crypto from 'node:crypto';
  * as an engineering triage taxonomy. "Something isn't working" is what somebody
  * types; "Bug" is what we would call it afterwards.
  *
- * `replyTo` is which departmental mailbox a reply belongs in. It lives in
- * REPLY_TO_BY_CATEGORY below rather
+ * Which departmental mailbox a reply belongs in lives in
+ * `server/issueRouting.js` rather
  * than at the send site so that adding a category cannot silently route
  * somewhere wrong — a category missing from that map fails the completeness
- * test.
+ * test. That module is server-only ON PURPOSE: this one is compiled into the
+ * browser bundle, and the mailbox keys must not be.
  */
 export const ISSUE_CATEGORIES = Object.freeze([
   { value: 'bug', label: "Something isn't working" },
@@ -75,49 +76,9 @@ export const ISSUE_CATEGORIES = Object.freeze([
   { value: 'other', label: 'Something else' },
 ]);
 
-/**
- * Which mailbox KEY each category's replies belong in.
- *
- * ── Why this is a separate map and not a field on the array above ──
- *
- * It WAS a `replyTo` field on each entry, and the deleted
- * `GET /api/issues/categories` stripped it before answering, with the reason
- * stated plainly: "It is an internal routing decision, and publishing it would
- * tell every reader which mailbox each category reaches."
- *
- * That protection was illusory. `src/issueReports.js` re-exports this module
- * INTO THE BROWSER BUNDLE, so every one of those keys — `security`, `privacy`,
- * `legal`, `admin` — was compiled into the JavaScript every visitor downloads.
- * Verified by grepping the built chunk, where the whole array appeared with its
- * `replyTo` fields intact. The endpoint was guarding a door beside an open
- * window, and a first attempt at fixing this by projecting the array in the
- * client mirror did not help either: the source array is still imported to
- * project FROM, so it stays in the chunk.
- *
- * Keys rather than addresses, so the exposure was small — `issueRoutes.js`
- * resolves them against `emailIdentity.js`, the import that must never reach
- * the browser. It was also pointless: nothing in the client reads the field.
- * Moving it out of the array is what makes the original intent true, because
- * the array the client imports no longer contains it.
- *
- * One list still decides the vocabulary: this map is keyed BY that list, and
- * the completeness case in `issueReports.test.js` fails if the two disagree, so
- * a new category cannot quietly acquire the default mailbox.
- */
-export const REPLY_TO_BY_CATEGORY = Object.freeze({
-  bug: 'support',
-  account: 'support',
-  event: 'support',
-  organization: 'support',
-  profile: 'support',
-  accessibility: 'support',
-  information: 'support',
-  conduct: 'admin',
-  privacy: 'privacy',
-  security: 'security',
-  legal: 'legal',
-  other: 'support',
-});
+/* Reply routing lives in `server/issueRouting.js`, which nothing under `src/`
+   imports — see that file for why the two earlier attempts to keep these keys
+   out of the browser bundle both failed. */
 
 export const ISSUE_CATEGORY_VALUES = Object.freeze(ISSUE_CATEGORIES.map(c => c.value));
 
@@ -127,16 +88,6 @@ export const SENSITIVE_CATEGORIES = Object.freeze(['security', 'privacy']);
 export const MIN_DESCRIPTION = 20;
 export const MAX_DESCRIPTION = 4000;
 
-/**
- * Which mailbox KEY a category's replies belong in — `'support'`, `'security'`.
- *
- * Deliberately not the address: resolving the key against `emailIdentity.js`
- * happens in `issueRoutes.js`, because that import is what used to break the
- * browser bundle. See the header.
- */
-export function replyToKeyFor(category) {
-  return REPLY_TO_BY_CATEGORY[category] || 'support';
-}
 
 /** True when this category's contents deserve the narrower audience. */
 export const isSensitive = (category) => SENSITIVE_CATEGORIES.includes(category);

@@ -19,9 +19,11 @@ export {
 } from '../server/issueReports.js';
 
 /**
- * `replyTo` is deliberately NOT among these, and it is no longer here to omit:
- * it moved out of `ISSUE_CATEGORIES` into `REPLY_TO_BY_CATEGORY`, which this
- * file does not re-export. See the note on that map — the mailbox keys were
- * being compiled into the bundle every visitor downloads, which made the
- * deleted `GET /api/issues/categories`'s stripping of them decorative.
+ * Reply routing is deliberately not reachable from here. It lives in
+ * `server/issueRouting.js`, which nothing under `src/` imports, and that
+ * separation is the ONLY thing that keeps the mailbox keys out of the bundle:
+ * two earlier attempts — projecting this array, and moving the field to a map
+ * inside `server/issueReports.js` — both left the data in the built chunk,
+ * because Rollup preserves a top-level `Object.freeze({...})` as a side effect
+ * even when the binding is tree-shaken. See that file.
  */

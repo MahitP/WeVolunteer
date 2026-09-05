@@ -189,28 +189,64 @@ describe('the module that broke', () => {
     ).toBe(false);
   });
 
-  it('still carries the routing key, so categories cannot lose their mailbox', async () => {
-    /* The address moved to the route; the KEY has to stay here, or a category
-       added later has nowhere declared to send its replies.
-       It is no longer a `replyTo` FIELD on each category — it moved into
-       `REPLY_TO_BY_CATEGORY`, because as a field it was being compiled into the
-       browser bundle, which made the deleted `/api/issues/categories`
-       endpoint's stripping of it decorative. */
-    expect(shared).toMatch(/replyToKeyFor/);
-    expect(shared).toMatch(/REPLY_TO_BY_CATEGORY/);
+  /**
+   * ── The reply routing must be UNREACHABLE from the client, not just unexported ──
+   *
+   * This case used to grep the source of `server/issueReports.js` for
+   * `replyTo: 'security'`. That was the wrong instrument, and it certified a
+   * fix that had not happened. Three attempts, two of which looked verified:
+   *
+   *   1. The field stayed on `ISSUE_CATEGORIES`, and the deleted
+   *      `GET /api/issues/categories` stripped it before answering. Decorative:
+   *      the client mirror re-exports the array, so the keys were in the bundle
+   *      regardless of what the endpoint withheld.
+   *   2. The client mirror projected the array to `{value, label}`. No help —
+   *      the source array is still imported in order to project FROM.
+   *   3. The field moved into a `REPLY_TO_BY_CATEGORY` map in the same file,
+   *      not re-exported, and `grep 'replyTo:' dist/assets/*.js` came back
+   *      empty. The grep was testing the field NAME, which had just been
+   *      renamed away. Rollup had kept the DATA, because a top-level
+   *      `Object.freeze({...})` is a side effect it preserves even when the
+   *      binding is tree-shaken. The chunk still read
+   *      ``conduct:`admin`,privacy:`privacy` ``.
+   *
+   * So the assertion is now about the IMPORT GRAPH, which is the thing that
+   * actually decides. `server/issueRouting.js` must not appear in the set of
+   * modules reachable from `src/` — and no grep for a name can substitute,
+   * because the failure mode is a bundler keeping an expression whose name is
+   * gone.
+   */
+  it('keeps the reply-routing module out of the client import graph entirely', () => {
+    const routing = path.join(ROOT, 'server', 'issueRouting.js');
+    expect(fs.existsSync(routing), 'server/issueRouting.js has moved or gone').toBe(true);
 
-    /* Asserted against the modules rather than the source text, which is what
-       makes this cover a category ADDED later: every value in the vocabulary
-       must have a declared mailbox, so a new one cannot quietly fall through to
-       the `'support'` default. */
-    const { ISSUE_CATEGORY_VALUES, REPLY_TO_BY_CATEGORY } =
-      await import('../server/issueReports.js');
+    /* Computed here rather than shared from the other describe block: this one
+       is about a module that must be ABSENT, so it should not depend on state
+       another block happens to have built. */
+    const reached = [...reachable().modules].map(rel);
+    expect(
+      reached,
+      'server/issueRouting.js is reachable from src/, so its mailbox keys are '
+      + 'compiled into the browser bundle. That is the whole reason it is a '
+      + 'separate module — import replyToKeyFor only from server code.'
+    ).not.toContain(path.relative(ROOT, routing));
+  });
+
+  it('still declares a mailbox for every category, so none can lose one', async () => {
+    /* Asserted against the MODULES rather than the source text, so it covers a
+       category added later: a new value with no row in the routing map would
+       silently fall through to the `support` default. */
+    const { ISSUE_CATEGORY_VALUES } = await import('../server/issueReports.js');
+    const { ROUTED_CATEGORIES, replyToKeyFor } = await import('../server/issueRouting.js');
+
     expect(ISSUE_CATEGORY_VALUES.length).toBeGreaterThan(5);
-    for (const value of ISSUE_CATEGORY_VALUES) {
-      expect(REPLY_TO_BY_CATEGORY[value], `${value} has no declared mailbox`).toBeTruthy();
-    }
-    /* And the sensitive ones still reach their own mailboxes rather than support. */
-    expect(REPLY_TO_BY_CATEGORY.security).toBe('security');
-    expect(REPLY_TO_BY_CATEGORY.privacy).toBe('privacy');
+    expect([...ROUTED_CATEGORIES].sort()).toEqual([...ISSUE_CATEGORY_VALUES].sort());
+
+    /* And the sensitive ones still route away from the general support inbox. */
+    expect(replyToKeyFor('security')).toBe('security');
+    expect(replyToKeyFor('privacy')).toBe('privacy');
+    expect(replyToKeyFor('conduct')).toBe('admin');
+    /* A prototype member must not resolve — the map is prototype-free. */
+    expect(replyToKeyFor('constructor')).toBe('support');
   });
 });

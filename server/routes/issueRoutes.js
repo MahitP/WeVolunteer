@@ -11,8 +11,10 @@ import '../config.js';
 import { ADDRESSES } from '../emailIdentity.js';
 import {
   validateIssue, sanitiseContext, newIssueId, newReference,
-  replyToKeyFor, isSensitive, ISSUE_CATEGORIES,
+  isSensitive, ISSUE_CATEGORIES,
 } from '../issueReports.js';
+/* Server-only: these keys must not reach the browser bundle. See issueRouting.js. */
+import { replyToKeyFor } from '../issueRouting.js';
 
 const router = express.Router();
 
