@@ -102,10 +102,14 @@ describe('the account menu offers Profile, and does not offer editing', () => {
    * is the point of this case: the menu is small on purpose, and the way it
    * stops being small is one reasonable addition at a time.
    */
-  it('lists exactly Profile, My hours, Notifications, Settings and Sign Out', () => {
+  it('lists exactly Profile, Notifications, My hours, Settings and Sign Out', () => {
     fireEvent.click(document.querySelector('.userchip'));
     const items = screen.getAllByRole('menuitem').map(b => b.textContent.trim());
-    expect(items).toEqual(['Profile', 'My hours', 'Notifications', 'Settings', 'Sign Out']);
+    /* Profile and Notifications mirror NAV entries; My hours and Settings are
+       the shared account destinations from src/accountMenu.js. That is also the
+       order the mobile `⋯` sheet renders in, so the two controls agree on
+       sequence as well as contents. */
+    expect(items).toEqual(['Profile', 'Notifications', 'My hours', 'Settings', 'Sign Out']);
   });
 
   /**
@@ -234,5 +238,61 @@ describe('the rail did not grow', () => {
     const notifications = secondary.find(n => n.path === '/notifications');
     if (!notifications) return;
     expect(notifications.accountOnly).toBeUndefined();
+  });
+});
+
+/**
+ * ── The two account controls cannot drift apart again ──
+ *
+ * "The account control" is `ProfileMenu` on the desktop rail and the `⋯` sheet
+ * on a phone, where there is no avatar menu at all. They were assembled
+ * independently, so Settings existed in two files with nothing asserting they
+ * agreed — and the moment one of them gained "My hours", a student's own
+ * service record was reachable on a laptop and unreachable on a phone.
+ *
+ * Both now render `ACCOUNT_MENU_ITEMS`. This asserts the shared list is what
+ * `ProfileMenu` actually shows, so deleting the shared read and hand-writing
+ * the buttons back fails here rather than silently at 375px.
+ */
+describe('the shared account destinations', () => {
+  const menuFor = (role) => {
+    cleanup();
+    render(
+      <MemoryRouter>
+        <ProfileMenu user={{ name: 'Sam', username: 'sam', role, avatar: '🦊' }} onSignOut={vi.fn()} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(document.querySelector('.userchip'));
+    return screen.getAllByRole('menuitem').map(b => b.textContent.trim());
+  };
+
+  it('renders every shared item a student is allowed to open', async () => {
+    const { ACCOUNT_MENU_ITEMS } = await import('./accountMenu.js');
+    const { can } = await import('./authz');
+    const items = menuFor('student');
+    for (const entry of ACCOUNT_MENU_ITEMS) {
+      if (entry.requiredCap && !can({ role: 'student' }, entry.requiredCap)) continue;
+      expect(items, `${entry.label} is declared but the menu does not render it`)
+        .toContain(entry.label);
+    }
+  });
+
+  it('renders no shared item the role cannot open', async () => {
+    const { ACCOUNT_MENU_ITEMS } = await import('./accountMenu.js');
+    const { can } = await import('./authz');
+    const items = menuFor('organizer');
+    for (const entry of ACCOUNT_MENU_ITEMS) {
+      if (!entry.requiredCap || can({ role: 'organizer' }, entry.requiredCap)) continue;
+      expect(items, `${entry.label} is offered to a role that would get a 403`)
+        .not.toContain(entry.label);
+    }
+  });
+
+  /* Vacuity guard: if the shared list is emptied or the import breaks, the two
+     loops above pass over nothing and report success. */
+  it('has shared items to check', async () => {
+    const { ACCOUNT_MENU_ITEMS } = await import('./accountMenu.js');
+    expect(ACCOUNT_MENU_ITEMS.length).toBeGreaterThan(1);
+    expect(ACCOUNT_MENU_ITEMS.some(i => i.requiredCap)).toBe(true);
   });
 });

@@ -31,10 +31,11 @@ import {
   VolunteerProfile, OrganizerProfile, OAuthCallback, ResetPassword
 } from './routes/index.jsx';
 import { consumePendingRedirect } from './utils/pendingInvite';
+import { ACCOUNT_MENU_ITEMS } from './accountMenu.js';
 import { organizationPath } from './utils/organizationUrl';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
-  X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles, Settings as SettingsIcon
+  X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles
 } from 'lucide-react';
 
 // The two heaviest modals. EventModal pulls in the whole organizer surface —
@@ -2063,16 +2064,36 @@ function AppShell({ toasts, addToast, removeToast }) {
                 */}
               {moreItems.map(renderMoreItem)}
 
-              <button
-                className="mobile-more-btn"
-                onClick={() => {
-                  setShowMobileMore(false);
-                  navigate('/settings');
-                }}
-              >
-                <SettingsIcon size={20} />
-                <span>Settings</span>
-              </button>
+              {/**
+                * The shared account destinations, from `src/accountMenu.js`.
+                *
+                * This sheet IS the account control at this width — there is no
+                * avatar menu on a phone, which is what `accountOnly` on the
+                * Profile NAV entry records. It had its own hand-written Settings
+                * button, so Settings existed in two files with nothing asserting
+                * they matched; then "My hours" was added to `ProfileMenu` and
+                * measured missing HERE at 375px, which is a destination that
+                * exists on a laptop and not on a phone.
+                *
+                * Filtered by capability for the same reason `ProfileMenu` filters
+                * it: `/hours` is `portfolio.write`, and offering it to an
+                * organizer or an administrator would be offering a 403.
+                */}
+              {ACCOUNT_MENU_ITEMS
+                .filter(item => !item.requiredCap || can(currentUser, item.requiredCap))
+                .map(({ id, path, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    className="mobile-more-btn"
+                    onClick={() => {
+                      setShowMobileMore(false);
+                      navigate(path);
+                    }}
+                  >
+                    <Icon size={20} />
+                    <span>{label}</span>
+                  </button>
+                ))}
 
               <div className="menu-sep" style={{ margin: 'var(--s2) 0' }} />
 
