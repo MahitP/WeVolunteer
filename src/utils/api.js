@@ -1160,6 +1160,31 @@ export const api = {
   // ── Messaging ─────────────────────────────────
   fetchConversations: async () => apiFetch('/api/messages/conversations'),
   searchMessagesUsers: async (q) => apiFetch(`/api/messages/users/search?q=${encodeURIComponent(q)}`),
+
+  /**
+   * Search the BODIES of messages in the caller's own conversations.
+   *
+   * ── This endpoint was finished, bug-fixed, and uncallable ──
+   *
+   * `GET /api/messages/search` scopes every row through
+   * `conversation_participants`, so it can only ever return messages from
+   * threads the caller is in. It even carries a fix: the `events` join was an
+   * inner join, which silently dropped every thread with no event — and the
+   * comment on that fix says a member "could search their messages, match
+   * nothing from a friend, and reasonably conclude the search was broken rather
+   * than that it had never looked." Somebody corrected a search nobody could
+   * perform.
+   *
+   * What the UI had instead was a client-side filter over already-loaded
+   * conversation metadata — names and event titles. So typing a phrase you
+   * remembered somebody saying matched nothing, which is precisely the
+   * conclusion that comment predicted.
+   *
+   * Below two characters the server answers `{ results: [] }` rather than
+   * scanning, so the client does not need a second rule about minimum length.
+   */
+  searchMessages: async (q, { signal } = {}) =>
+    apiFetch(`/api/messages/search?q=${encodeURIComponent(q)}`, { signal }),
   resolveConversation: async (eventId, studentId) => apiFetch('/api/messages/conversations/resolve', {
     method: 'POST',
     body: JSON.stringify({ eventId, studentId })
