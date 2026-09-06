@@ -272,11 +272,40 @@ describe('inviting somebody to an organization', () => {
     });
 
     it('notifies the person invited, without naming who invited them', async () => {
+      /**
+       * Scoped to the notification THIS case created, by diffing the ids around
+       * the invite.
+       *
+       * The read here was `ORDER BY id DESC` with `rows[0]`. Notification ids
+       * are `notif-${randomUUID()}` — text, and random — so that sorted UUIDs
+       * lexicographically and returned an arbitrary row, not the newest one.
+       *
+       * That mattered because notifications ACCUMULATE across this file: by the
+       * time this case runs the invitee holds ten of them, nine invitations and
+       * one "You were banned from Invitation Club …" left by an earlier case. So
+       * the assertion drew one row out of ten at random and failed roughly one
+       * run in ten. It failed exactly that way in a full-suite run, and passed
+       * six times out of six in isolation, which is what a random-id flake looks
+       * like from the outside and why it survived this long.
+       *
+       * Neither obvious repair is enough. `ORDER BY created_at DESC` ties for
+       * rows written in the same millisecond. Filtering by `kind` does not
+       * narrow it either — the invitation kind is the `APPLICATION` category,
+       * which the nine earlier invitations also carry.
+       *
+       * Diffing the ids is exact: whatever this invite wrote is the row that was
+       * not there a moment ago.
+       */
+      const before = new Set(
+        (await db.prepare('SELECT id FROM notifications WHERE user_id = ?').all(inviteeId))
+          .map((r) => r.id)
+      );
       await invite({ userId: inviteeId, message: 'we would love to have you' });
-      const rows = await db.prepare(
-        'SELECT title, body FROM notifications WHERE user_id = ? ORDER BY id DESC'
-      ).all(inviteeId);
-      expect(rows.length).toBeGreaterThan(0);
+      const rows = (await db.prepare(
+        'SELECT id, title, body FROM notifications WHERE user_id = ?'
+      ).all(inviteeId)).filter((r) => !before.has(r.id));
+
+      expect(rows.length, 'the invite wrote no notification for the invitee').toBe(1);
       const text = `${rows[0].title} ${rows[0].body}`;
       expect(text).toMatch(/invited/i);
       /* The club invites, not the individual member who pressed the button.
