@@ -39,6 +39,7 @@ import pg from 'pg';
 import { applyPostgresSchema } from '../server/db/postgresSchema.js';
 import { PostgresDatabase } from '../server/db/postgresConnection.js';
 import { translatePlaceholders } from '../server/db/sqlPlaceholders.js';
+import { recordAudit } from '../server/auditLog.js';
 
 const URL = process.env.DRILL_DB_URL;
 if (!URL) { console.error('DRILL_DB_URL required'); process.exit(1); }
@@ -84,7 +85,7 @@ const CONVOS = Math.floor(EVENTS / 2);
 const MSGS = CONVOS * 6;
 const AUDIT = Math.floor(USERS / 10);
 
-async function seed() {
+async function seed(db) {
   log(`\nseeding synthetic data — ${USERS.toLocaleString()} users / ${EVENTS.toLocaleString()} events`);
   const t = now();
 
@@ -171,9 +172,25 @@ async function seed() {
                   'Synthetic message body.', now()::text
            FROM generate_series(1, $1) g`, [MSGS, CONVOS, USERS]);
 
-  await q(`INSERT INTO admin_audit_logs (id, admin_id, action, target_user_id, created_at)
-           SELECT 'aud-' || g, 'u-1', 'ROSTER_EXPORTED', 'u-' || (1 + (g % $2)), now()::text
-           FROM generate_series(1, $1) g`, [AUDIT, USERS]);
+  /* Through `recordAudit`, one row at a time, and NOT as a bulk INSERT.
+     `server/auditLog.test.js` asserts that the helper is the only writer of
+     `admin_audit_logs` anywhere in `server/` or `bin/`, with no allowlist — and
+     it is right to. The rule exists so the actor check, the UUID id and the
+     error propagation always apply, and a seed script is exactly the kind of
+     caller that would quietly grow into a second writer.
+     
+     It also makes the fixture more faithful: these rows are shaped by the same
+     code path that writes the real ones, so a restore is verified against what
+     the application actually stores. Two thousand sequential round trips
+     against a local server cost well under a second. */
+  for (let g = 1; g <= AUDIT; g += 1) {
+    await recordAudit(db, {
+      adminId: 'u-1',
+      action: 'ROSTER_EXPORTED',
+      targetUserId: `u-${1 + (g % USERS)}`,
+      details: 'Synthetic audit row generated for a backup drill.',
+    });
+  }
 
   log(`  seeded in ${ms(t)}`);
 }
@@ -209,7 +226,7 @@ async function main() {
     process.exit(1);
   }
 
-  await seed();
+  await seed(db);
   const before = await counts();
   log('\nrow counts:');
   for (const [k, v] of Object.entries(before)) log(`  ${k.padEnd(16)} ${v.toLocaleString()}`);
