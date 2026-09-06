@@ -50,6 +50,31 @@ this project's short history, believed to be true and was not.
       ```
 - [ ] `npm test` passes **on a clean checkout of the release ref**, not in your
       working directory.
+- [ ] **`npm test` again, against PostgreSQL.** This is a separate item because
+      the default run is not the production engine and silently proves less than
+      it appears to:
+      ```bash
+      createdb wev_release_check
+      TEST_POSTGRES_URL="postgres://$(whoami)@localhost:5432/wev_release_check" npm test
+      dropdb wev_release_check
+      ```
+      The bare `npm test` runs on SQLite and reports **176 skipped**. Those skips
+      are `describe.skipIf(!RUNNING_ON_POSTGRES)` — 143 of them are the
+      PostgreSQL dialect, transaction, pooler and concurrency tests, i.e. exactly
+      the engine production runs on. With `TEST_POSTGRES_URL` set the run is
+      **10,436 passed / 33 skipped**, and a green SQLite run is not evidence
+      about PostgreSQL.
+
+      Measured on 2026-09-06: both pass. The point of the item is that a release
+      signed off on the SQLite run alone has not tested the production engine.
+- [ ] `npm run test:postgres` passes with `TEST_POSTGRES_URL` set — the
+      application-level PostgreSQL suite (6,789 tests). Note that this script
+      needs `TEST_POSTGRES_URL`; running it bare tests nothing new. Do **not**
+      additionally force `DATABASE_ENGINE=postgres` across both vitest projects —
+      the parallel test files then share one database and collide, which looks
+      like ~190 product failures and is not one.
+- [ ] `npm run a11y` passes, with `WEV_DB_PATH` pointed at a scratch database
+      (the harness refuses to run without it, on purpose).
 - [ ] `npm run build` exits 0.
 - [ ] `npm run lint` exits 0. (It exited 1 for a while on two
       `react-hooks(rules-of-hooks)` errors — one of which was a genuine crash when an
