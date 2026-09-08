@@ -366,9 +366,32 @@ describe('a club with no link yet', () => {
     expect(screen.getByText(/stop letting anybody in after that date/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Create link/ }));
+    /**
+     * Asserted as an INSTANT, not as a substring of the ISO string.
+     *
+     * The manager picks a calendar day and the dialog sends the last moment of
+     * that day in the reader's own timezone. Serialised to UTC, that instant
+     * lands on the NEXT calendar date for anybody west of Greenwich:
+     *
+     *   America/New_York   2026-12-02T04:59:59.000Z
+     *   UTC                2026-12-01T23:59:59.000Z
+     *   Asia/Kolkata       2026-12-01T18:29:59.000Z
+     *
+     * The previous assertion looked for the literal "2026-12-01" in that
+     * string, so it passed under UTC and east of it and failed under
+     * America/New_York — the timezone this product is actually deployed into.
+     * The application was right; the assertion was reading a different day.
+     *
+     * Recomputing the same local end-of-day makes the case say what it means —
+     * "the link stops working at the end of the day the manager picked" — in
+     * every timezone a contributor or CI runner might have.
+     */
+    const endOfPickedDay = new Date('2026-12-01T00:00:00');
+    endOfPickedDay.setHours(23, 59, 59, 0);
+
     await waitFor(() => expect(api.createOrganizationShareLink).toHaveBeenCalledWith(
       'chess-club',
-      { label: undefined, expiresAt: expect.stringContaining('2026-12-01') },
+      { label: undefined, expiresAt: endOfPickedDay.toISOString() },
     ));
   });
 
