@@ -102,6 +102,72 @@ TEST_POSTGRES_URL=… WEV_POSTGRES_APP_TEST=1 npx vitest run --project server
 
 ---
 
+### Transaction-mode pooling, measured — 2026-09-06 → 2026-09-10
+
+`deploy/wevolunteer.env.example` tells operators to point `DATABASE_URL` at
+Supavisor in **transaction mode** (port 6543), and
+`server/db/postgresConnection.js` leaves `pg`'s named prepared statements off
+because a transaction pooler can put a different backend under a client between
+checkouts. Supabase states it plainly: *"Transaction mode does not support
+prepared statements."*
+
+That was an argument, not a measurement, and two release reports recorded
+`server/pooler.behaviour.test.js` as **blocked on provider access**. It was not
+blocked. The thing under test is transaction pooling as a *protocol behaviour*,
+and pgbouncer speaks the same protocol — so it can be verified locally, for $0,
+with no Supabase project involved.
+
+**Result: 8 passed**, against pgbouncer 1.25.2 in `pool_mode = transaction` on
+`127.0.0.1:6543` in front of PostgreSQL 17.9. Ordinary statements, connection
+reuse without pinning, no named prepared statements left behind, a transaction
+held on one backend start to finish, concurrent transactions serialised on the
+same row, a rolled-back transaction leaving nothing, pool recovery after a
+failed statement, and more concurrent work than the pool has clients.
+
+Reproduce it:
+
+```bash
+createdb wev_pool
+cat > /tmp/userlist.txt <<'EOF'
+"youruser" ""
+EOF
+cat > /tmp/pgbouncer.ini <<'EOF'
+[databases]
+wev_pool = host=127.0.0.1 port=5432 dbname=wev_pool
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = 6543
+auth_type = trust
+auth_file = /tmp/userlist.txt
+pool_mode = transaction
+max_client_conn = 100
+default_pool_size = 5
+ignore_startup_parameters = extra_float_digits,options
+EOF
+pgbouncer -q /tmp/pgbouncer.ini &
+
+TEST_POOLER_URL="postgres://youruser@127.0.0.1:6543/wev_pool" \
+  npx vitest run server/pooler.behaviour.test.js
+```
+
+Without `TEST_POOLER_URL` the same eight report as **skipped**, not passed —
+which is what makes a green run evidence rather than an absence of one.
+
+**Still not proven, and it is a narrower gap than it was:** Supavisor's own
+build and Supabase's network path. The application is correct against
+transaction pooling; one vendor's implementation of it is a separate claim.
+
+**A live deviation worth knowing.** The production `DATABASE_URL` in
+`.env.operator` points at the Supavisor host on port **5432 — session mode**,
+not the 6543 transaction mode the example recommends. Session mode is *safer*
+for this application (it is what `LISTEN`/`NOTIFY` needs, and the realtime
+adapter depends on that) but it holds one server connection per client, so it
+consumes the free tier's connection budget far faster. Decide deliberately
+rather than by inheritance; see the realtime-adapter notes in `.env.example`.
+
+---
+
 ## 1. Why one instance is still the answer
 
 The deployment is a single systemd unit on one VM (`deploy/wevolunteer.service`).

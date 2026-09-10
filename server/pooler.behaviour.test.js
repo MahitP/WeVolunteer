@@ -19,6 +19,20 @@ import { runInTransaction } from './db/connectionContext.js';
  * through a transaction pooler, so the most load-bearing compatibility decision
  * in the deployment was an argument rather than a measurement.
  *
+ * ── It has now been measured ──
+ *
+ * Run 2026-09-10 against pgbouncer 1.25.2 in `pool_mode = transaction` on
+ * 127.0.0.1:6543, in front of PostgreSQL 17.9: **8 passed**. pgbouncer's own log
+ * shows the client connections being opened and returned, so the statements went
+ * through the pooler rather than around it. Without `TEST_POOLER_URL` the same
+ * eight report as SKIPPED rather than passed, which is what makes the run above
+ * evidence.
+ *
+ * Two release reports had recorded this suite as blocked on provider access. It
+ * was not: the thing under test is transaction pooling as a protocol behaviour,
+ * and pgbouncer speaks it. Reproduction is in
+ * `docs/operations/horizontal-scaling.md`.
+ *
  * pgbouncer in transaction mode is the same protocol behaviour and runs
  * locally. `TEST_POOLER_URL` points at it; without it these skip, exactly as
  * the PostgreSQL suites skip without `TEST_POSTGRES_URL`.
