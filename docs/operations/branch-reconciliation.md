@@ -1,8 +1,84 @@
 # Branch reconciliation
 
 **Originally written:** 2026-09-06, for `claude/release-candidate`
-**Superseded:** 2026-09-06 — every branch below is now merged into `main` and
-deleted. `main` is the only branch, locally and on the remote.
+**Superseded:** 2026-09-06 — the work of every branch below reached `main`.
+**Corrected and closed:** 2026-09-09 at the release freeze. See the first
+section; the 2026-09-06 header claimed the branches had been *deleted* and that
+`main` was the only ref, and that is not true of this clone.
+
+---
+
+## 2026-09-09 — final reconciliation at the release freeze
+
+The 2026-09-06 note above said the branches were deleted. They are not: six
+local branches exist — `main` and five others — and `claude/release-candidate`
+is still receiving commits from a concurrent working session; it moved
+repeatedly during the freeze pass, most recently while this section was being
+written.
+That is not a problem to fix by deleting anything. It is a reason to state, once
+and precisely, what the relationship between that branch and the trunk actually
+is, so nobody merges it on the strength of its name.
+
+### `claude/release-candidate` is a subset of `main`, not a superset
+
+Compared as trees, not as commit graphs — the histories were rewritten, so
+identical work carries different SHAs on each side and `git log main..RC` is
+misleading:
+
+| Measure | Result |
+|---|---|
+| Files on the branch that `main` lacks | **0** |
+| Files on `main` that the branch lacks | **45** |
+| `git diff --shortstat main <branch>` | 134 files, 928 insertions, **20,269 deletions** |
+
+The 45 files are the perf-scaling work: scheduler leases, the event-slot summary
+and trigram-index migrations (065–067), the Redis volume limiter, the Socket.IO
+adapter seam, `bin/load-test.mjs`, and their tests. **Merging that branch into
+`main` would delete them.** It must not be merged.
+
+### The five commits that were only on the branch, and where each went
+
+Subjects, not SHAs — the histories diverge by hash for identical content.
+
+| Branch commit | Disposition |
+|---|---|
+| `test: a simulated week…` | Already on `main` as `2446aaf`. `server/weekSimulation.test.js` is **byte-identical** on both sides. |
+| `fix(test): the roster-export audit assertion ordered by a column PostgreSQL does not have` | Already on `main`: `server/routes.admin.test.js` uses `insertionTiebreak(db)` there too. |
+| `fix(db): the TLS certificate path resolved against the cwd…` | Already on `main`: `server/db/engine.js` resolves the CA as `[cwd, ROOT].find(existsSync) ?? ROOT` on both sides. Only the comment wording differs. |
+| `docs(email): the daily cap is the constraint…` | **Taken.** Cherry-picked here — it was genuine operator research that `main` did not carry. One hunk was *not* taken: it asserted that the production Supabase project is provisioned and verified, which is another session's claim that this pass cannot confirm and which must not enter release documentation unverified. |
+| `fix(deps): take the patched sharp and nodemailer releases` | **Applied independently**, not cherry-picked: the two lockfiles have diverged too far for the patch to mean the same thing. `main` additionally fixes **multer**, which the branch does not — see below. |
+
+### The dependency advisories, reconciled
+
+`npm audit --omit=dev` on `main` at the start of the freeze reported three HIGH
+advisories in the *shipped* tree:
+
+| Package | Locked | Advisory | Now |
+|---|---|---|---|
+| `sharp` | 0.35.3 | `<0.35.4` — libheif decoder bugs | **0.35.4** |
+| `nodemailer` | 9.0.3 | `<=9.1.0` — `resolveContent()` bypasses `disableFileAccess` | **9.1.1** |
+| `multer` | 2.2.0 | `<=2.2.0` — DoS via crafted multipart field names | **2.3.0** |
+
+`sharp` is the material one: it decodes user-uploaded images on a platform whose
+users are minors. All three were already inside the declared ranges, so this is a
+lockfile refresh — `package.json` and `server/package.json` are untouched, and
+the update was a targeted `npm update sharp nodemailer multer`, never
+`npm audit fix`, because regenerating the lockfile wholesale drops the
+cross-platform entries and the deployment target is ARM64. The 26 `@img/sharp-*`
+platform entries were compared before and after: none were lost.
+
+Production tree afterwards: **0 vulnerabilities.** Five moderate advisories
+remain in dev-only tooling (`vitest`, `@vitest/mocker`, `autocannon`, `hyperid`,
+`uuid`); none of it ships, and the fix for the vitest pair is a major-version
+bump of the test runner, which is not a thing to do during a freeze.
+
+### The other three branches
+
+`claude/trunk-security-port` is at the same commit as `main`. The perf-scaling,
+production-architecture and owner-center branches are all behind it and their
+work is integrated, as the 2026-09-06 record below describes. None of them needs
+another merge; none of them is deleted here, because deleting a branch somebody
+else may be working from is not this pass's call to make.
 
 > **Read the status table first; the reasoning below it is history.**
 >

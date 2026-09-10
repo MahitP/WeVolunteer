@@ -403,13 +403,21 @@ expensive — 17 and 30 in particular.
 
 ---
 
-## What the release candidate contains
+## What the release contains
 
-`claude/release-candidate` is `main` with both feature branches merged:
+> **The release is `main`, not `claude/release-candidate`.** That branch was the
+> integration branch during the merge pass and is now a strict *subset* of the
+> trunk: 0 files exist on it that `main` lacks, 45 files exist on `main` that it
+> lacks, and merging it would delete about 20,000 lines of integrated work.
+> `docs/operations/branch-reconciliation.md` records the comparison and the five
+> commits that were reconciled out of it. Deploy the commit tagged
+> `v1.0.0-rc*`; do not deploy that branch.
+
+`main` is both feature branches plus the perf-scaling branch, merged:
 
 | Source | Brings |
 |---|---|
-| `main` (15 commits newer than either branch) | the improved production-database fingerprint guard, roster-export authorization fix, bundle mailbox-key fix, badge administration, message search |
+| `main` (the trunk) | the improved production-database fingerprint guard, roster-export authorization fix, bundle mailbox-key fix, badge administration, message search |
 | `claude/wevolunteer-production-architecture-89e97f` | PostgreSQL backup + restore, R2 off-site upload, schema-source guard, CSRF guard, `/live` + `/ready`, `WEV_UPLOADS_DIR`, Nginx config, bundle secret scanner |
 | `claude/owner-center-certificate-upgrade-7eef59` | Owner Center, CertificateView / CertificateDocument / CertificateShareDialog, certificate double-`h1` fix, dark-mode contrast fix, focus-ring cascade fix, telemetry IP redaction |
 
