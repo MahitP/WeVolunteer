@@ -36,17 +36,29 @@ this project's short history, believed to be true and was not.
       your editor:
       ```bash
       REF=<tag-or-sha>
+      # Braces around REF are required, not style: in zsh — the default shell on
+      # macOS — `$REF:server/...` is parsed as a history modifier and git is
+      # handed a mangled path.
+
       # Must print nothing. If it prints a route, the destructive demo-reset
       # endpoint is still in the build.
-      git show $REF:server/routes/accountRoutes.js | grep "router.post('/api/auth/reset'"
+      git show ${REF}:server/routes/accountRoutes.js | grep "router.post('/api/auth/reset'"
 
       # Must print 0. Any hit means waitlist promotion is still gated on
       # auto_approve, so promotion silently never fires on organizer-run events.
-      git show $REF:server/routes/applicationRoutes.js | grep -c 'auto_approve === 1'
+      #
+      # Comment lines are stripped first, and that is not cosmetic: the fix left
+      # behind a comment saying "the `auto_approve === 1` condition that used to
+      # be here is gone", so the naive grep now reports 1 and halts a release
+      # over the paragraph explaining why there is nothing to halt over. The
+      # same false positive already cost this repository a debugging session in
+      # a limiter guard.
+      git show ${REF}:server/routes/applicationRoutes.js \
+        | grep -vE '^\s*(//|\*|/\*)' | grep -c 'auto_approve === 1'
 
       # Must be non-zero. 0 means APPLICATION_WAITLISTED is unmapped and
       # waitlisted students receive "You have a new notification."
-      git show $REF:server/services/notificationContent.js | grep -c APPLICATION_WAITLISTED
+      git show ${REF}:server/services/notificationContent.js | grep -c APPLICATION_WAITLISTED
       ```
 - [ ] `npm test` passes **on a clean checkout of the release ref**, not in your
       working directory.
