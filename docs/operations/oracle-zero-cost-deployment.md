@@ -113,7 +113,25 @@ This is the single largest availability risk in the $0 architecture, and it is n
 
 ### The two tight constraints, named
 
-**Resend's 100/day cap** is the first ceiling you will hit, and it hits password resets and verification emails — the worst possible thing to have fail on day one of a pilot. 300 students onboarding in one afternoon exceeds it. **Stagger onboarding**, or accept that day-one signups queue.
+**Resend's 100/day cap** is the first ceiling you will hit, and it hits password resets and verification emails — the worst possible thing to have fail on day one of a pilot. 300 students onboarding in one afternoon exceeds it.
+
+*Researched again 2026-09-08, and the earlier advice here — "stagger onboarding" — was an operational workaround for something with a free technical fix.*
+
+Two things were open and are now settled:
+
+- **What happens at the cap.** Resend does not queue and does not silently drop: on the free plan **sending pauses**, and the free tier is not auto-upgraded or billed. So the failure mode is a password reset that never arrives, with no bill and no bounce to notice it by.
+- **There is a larger free tier, and this codebase already speaks its protocol.** Brevo's free plan is **300/day (9,000/month)**, forever, no card, with transactional API *and* SMTP, and SPF/DKIM/DMARC on a custom domain. `server/email.js` prefers `RESEND_API_KEY` and otherwise falls back to `nodemailer` over `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` — so Brevo needs **no code change at all**, only environment variables.
+
+**Recommendation: send through Brevo over SMTP.** Three times the daily headroom on the exact constraint that binds, for the same $0, using a path the application already supports and tests. Keep Resend configured as the alternative if its API and dashboard are preferred — but then plan the onboarding around 100/day, because the cap is a pause, not a queue.
+
+| | Resend free | Brevo free |
+|---|---|---|
+| Monthly | 3,000 | 9,000 |
+| **Daily** | **100** | **300** |
+| At the cap | sending pauses | sending pauses |
+| Custom domain, SPF/DKIM/DMARC | yes | yes |
+| Card required | no | no |
+| Code change needed here | none (`RESEND_API_KEY`) | none (`SMTP_*`) |
 
 **Upstash's 500K commands/month.** Rate limiting touches Redis on most API requests; at ~5 commands/request that is ~100K requests/month. Redis is an *optional* dependency here — the limiters degrade to per-process counters and the application keeps working — so exhaustion is a degradation, not an outage. Watch it.
 
@@ -429,8 +447,10 @@ Grouped by what each item actually needs, so nothing here reads as a code defect
 ### Requires Resend
 | Item | Why |
 |---|---|
-| Behaviour at the 100/day cap | untested — whether it queues or drops is unverified, and it lands on password resets |
 | Deliverability of a new sending subdomain | needs DNS |
+
+The 100/day behaviour is no longer open: sending **pauses**, and Brevo's 300/day
+free tier is reachable with no code change — see the cost audit above.
 
 ### Repository verified — no further work
 Backup and restore including every failure path, the schema-source guard, the
