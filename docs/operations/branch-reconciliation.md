@@ -72,13 +72,46 @@ remain in dev-only tooling (`vitest`, `@vitest/mocker`, `autocannon`, `hyperid`,
 `uuid`); none of it ships, and the fix for the vitest pair is a major-version
 bump of the test runner, which is not a thing to do during a freeze.
 
+### `claude/trunk-security-port` — live, and carrying work this release does not
+
+This branch was at `main`'s commit when the paragraph above was first written
+and had moved four commits ahead ninety minutes later, mid-freeze. That is the
+state of it: another session is working there now. Its content as of the freeze:
+
+| Commit | What | Disposition |
+|---|---|---|
+| `fix(deps): three high-severity advisories on the upload and mail paths` | The same `sharp` / `nodemailer` / `multer` advisories | **Already fixed here**, independently and identically, plus `multer`. |
+| `security: say no-store at the origin, instead of hoping three things agree` | `Cache-Control: no-store` set by `server/app.js` on every `/api` response, with `server/apiCacheIsolation.test.js` | **Not merged.** See below. |
+| `docs(deploy)`, `docs(audit)` | A 749-line zero-cost infrastructure report and deployment notes | **Not merged.** Another session's document; it can land with its branch. |
+
+**Why the `no-store` commit is not a release blocker, and was still not taken.**
+
+It is good work — it removes the release's dependency on three separate things
+agreeing about whether `/api` may be cached, and it is mutation-tested. But the
+property it protects is not open in this release: `deploy/nginx/wevolunteers.conf`
+already sets `Cache-Control: no-store, no-cache, must-revalidate, private` with
+`always` on `location /api/`, and that file ships with the release. The branch's
+own commit message says as much and keeps the nginx rule as defence in depth.
+
+So the choice was between shipping a leak and shipping defence in depth, and it
+is the second. Against that, cherry-picking it here would have meant taking
+application code out of another session's branch minutes after it landed,
+without its author's gates, into a tree where `server/app.js`,
+`package-lock.json` and this very file have all diverged — and would have left a
+duplicate commit to conflict with when that branch merges properly. That is the
+blind merge this pass exists to avoid, wearing a security fix's clothes.
+
+**Recommendation:** merge `claude/trunk-security-port` on its own terms, after
+this release, as its own pass with its own gates. Nothing in it is urgent
+enough to justify taking it during a freeze; nothing in it should be lost.
+
 ### The other three branches
 
-`claude/trunk-security-port` is at the same commit as `main`. The perf-scaling,
-production-architecture and owner-center branches are all behind it and their
-work is integrated, as the 2026-09-06 record below describes. None of them needs
-another merge; none of them is deleted here, because deleting a branch somebody
-else may be working from is not this pass's call to make.
+The perf-scaling, production-architecture and owner-center branches are all
+behind `main` and their work is integrated, as the 2026-09-06 record below
+describes. None of them needs another merge; none of them is deleted here,
+because deleting a branch somebody else may be working from is not this pass's
+call to make.
 
 > **Read the status table first; the reasoning below it is history.**
 >
