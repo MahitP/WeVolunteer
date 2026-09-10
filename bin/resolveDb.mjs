@@ -185,6 +185,15 @@ function loadDotEnv() {
  * @returns {{ db: DatabaseSync, dbPath: string }}
  */
 export async function openPrivilegedDb(command) {
+  /**
+   * Whether the CALLER named the file, read BEFORE `loadDotEnv()` mutates
+   * `process.env`.
+   *
+   * This is the whole basis of the guard below, and it has to be sampled here:
+   * a moment later `.env`'s value is indistinguishable from one the operator
+   * typed, which is exactly the confusion that made the hazard possible.
+   */
+  const callerNamedPath = process.env.WEV_DB_PATH !== undefined;
   const dbPath = anchorRelative(loadDotEnv());
   const engine = (process.env.DATABASE_ENGINE ?? SQLITE_ENGINE).trim().toLowerCase();
 
@@ -329,6 +338,80 @@ export async function openPrivilegedDb(command) {
     console.error('Check WEV_DB_PATH in .env, or set it for this command:');
     console.error(`  WEV_DB_PATH=./pilot.db node ${command} ...`);
     process.exit(1);
+  }
+
+  /**
+   * Fail closed when a file nobody named turns out to hold real people.
+   *
+   * ── The hazard ──
+   *
+   * `.env` carried `WEV_DB_PATH=../pilot.db`. Every script in this directory
+   * resolves through `loadDotEnv()`, so from `server/` that string is the
+   * repository root's `pilot.db` — the real pilot database, holding minors'
+   * service records. The default target of every privileged command was
+   * therefore live data, and each command was protected only by whatever guard
+   * it had thought to add for itself. Some had a typed confirmation, some a
+   * blocklist of file NAMES, and three had nothing.
+   *
+   * ── Why provenance is the right test, and not the path ──
+   *
+   * A name blocklist answers "is this file called pilot.db". The question worth
+   * asking is "did anybody actually choose this file". An operator who types
+   *
+   *     WEV_DB_PATH=./pilot.db node bin/reset-2fa.mjs someone@example.org
+   *
+   * has chosen it, and that is the emergency path this module exists to keep
+   * working — `bin/reset-2fa.mjs` is the only way to clear a locked-out
+   * administrator's second factor. Refusing them would be the guard causing the
+   * outage. Whereas a command that inherited the path from a file, and finds
+   * two owner accounts and eighteen audit records behind it, has found live data
+   * by accident.
+   *
+   * So: caller-explicit is allowed, inherited-and-non-disposable is refused.
+   *
+   * ── Why content and not size or mtime ──
+   *
+   * `describeNonDisposableContent` looks for markers a fresh demo seed cannot
+   * produce: `super_admin` accounts, deleted-account tombstones, administrative
+   * audit rows. A size or age heuristic would refuse a large demo database and
+   * admit a small real one, which is the wrong failure in both directions. It
+   * reads counts only — no record is read out of the file, which matters
+   * because the thing being protected is exactly that content.
+   *
+   * ── The override ──
+   *
+   * `WEV_ALLOW_REAL_DATA=1`, distinct from
+   * `WEV_ALLOW_DESTROYING_REAL_DATA=1` in `bin/lib/db-safety.mjs`. They are
+   * different permissions: one says "operate on live data", the other says
+   * "destroy it", and a runbook step that needs the first must not silently
+   * confer the second.
+   */
+  if (!callerNamedPath && process.env.WEV_ALLOW_REAL_DATA !== '1') {
+    const { describeNonDisposableContent } = await import('./lib/db-safety.mjs');
+    const realData = describeNonDisposableContent(dbPath);
+    if (realData) {
+      announcePath();
+      console.error(`Refused: ${dbPath} holds real data and nothing on this`);
+      console.error('command line asked for it.');
+      console.error('');
+      console.error(`  found: ${realData}`);
+      console.error('');
+      console.error('The path came from `.env` or the built-in default, not from');
+      console.error('this invocation. A privileged command acting on live records');
+      console.error('by inheritance is the incident this module already records');
+      console.error('twice over.');
+      console.error('');
+      console.error('If you meant a scratch database, name it:');
+      console.error(`  WEV_DB_PATH=/tmp/scratch.db node ${command} ...`);
+      console.error('');
+      console.error('If you genuinely meant this one, say so explicitly — either');
+      console.error('by naming it on the command line, which is preferred because');
+      console.error('it is visible in the transcript:');
+      console.error(`  WEV_DB_PATH=${dbPath} node ${command} ...`);
+      console.error('or, for a runbook step that cannot pass the path:');
+      console.error(`  WEV_ALLOW_REAL_DATA=1 node ${command} ...`);
+      process.exit(1);
+    }
   }
 
   const db = new DatabaseSync(dbPath);

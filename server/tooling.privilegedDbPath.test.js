@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, symlinkSync, cpSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
+import { DatabaseSync } from 'node:sqlite';
 import { databaseFingerprint } from './db/productionDatabaseGuard.js';
 
 /** Same reasoning as `tooling.dbPath.test.js`: these spawn real `node` processes. */
@@ -203,26 +204,57 @@ describe('privileged CLI database resolution', () => {
    * assertion is that the repository's own `.env` value is what appears, which is
    * only true if the file was parsed.
    */
+  /**
+   * `.env` is parsed with no `--env-file` flag.
+   *
+   * ── Why this no longer reads the developer's own `.env` ──
+   *
+   * It used to run against the real repository file and assert the resolved path
+   * was not the built-in fallback — the reasoning being that reaching anything
+   * else proved the file had been read. That made the case depend on the
+   * contents of an untracked file, and it broke the moment `WEV_DB_PATH` was
+   * deliberately removed from it: the hazardous default this suite exists to
+   * document was the very thing the case was using as its fixture.
+   *
+   * A temp copy with a `.env` this test writes proves the same property and
+   * cannot be invalidated by a local configuration change. It also states the
+   * expected path positively instead of by exclusion, which is a stronger claim.
+   */
   it('reads WEV_DB_PATH from the repository .env with no --env-file flag', () => {
-    const envFile = path.join(ROOT, '.env');
-    if (!existsSync(envFile)) {
-      /* Nothing to prove on a checkout without one; the cwd test above covers the
-         resolution rule itself. Skipping loudly rather than passing quietly. */
-      console.warn('[skipped] no .env in this checkout');
-      return;
+    const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'wev-envparse-')));
+    try {
+      const skip = (src) => /\.test\.[cm]?js$|\.db(-wal|-shm)?$/.test(src);
+      cpSync(path.join(ROOT, 'bin'), path.join(dir, 'bin'), { recursive: true, filter: (s) => !skip(s) });
+      cpSync(path.join(ROOT, 'server'), path.join(dir, 'server'), { recursive: true, filter: (s) => !skip(s) });
+      symlinkSync(dependencyTree(), path.join(dir, 'node_modules'));
+      cpSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
+
+      /* A disposable database, so the real-data guard has nothing to say and
+         this case stays about `.env` parsing alone. */
+      const named = path.join(dir, 'from-dotenv.db');
+      const db = new DatabaseSync(named);
+      db.exec("CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, account_status TEXT);"
+        + "INSERT INTO users VALUES ('u-1','student','active');");
+      db.close();
+      writeFileSync(path.join(dir, '.env'), `WEV_DB_PATH=${named}\n`);
+
+      /* No WEV_DB_PATH in the environment and cwd elsewhere, so reading `.env`
+         is the only way to arrive at that file. */
+      const r = spawnSync(process.execPath, [path.join(dir, 'bin', 'grant-ownership.mjs'),
+        'nobody@example.invalid', 'probe'], {
+        cwd: tmpdir(),
+        env: { ...process.env, WEV_DB_PATH: undefined, DATABASE_ENGINE: undefined,
+               DATABASE_URL: undefined },
+        encoding: 'utf8',
+        input: 'y\n',
+      });
+      const out = (r.stdout || '') + (r.stderr || '');
+
+      const line = out.split('\n').find((l) => l.startsWith('Database: '));
+      expect(line, 'the .env file was not parsed').toContain(named);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
-
-    /* Deliberately no WEV_DB_PATH in the environment, and cwd elsewhere, so the
-       only way to reach the repository's pilot.db is to have read `.env`. */
-    const out = run('bin/grant-ownership.mjs', ['nobody@example.invalid', 'probe'],
-      { WEV_DB_PATH: undefined, __cwd: tmpdir() });
-
-    expect(out).toContain('Database: ');
-    /* The fallback is `server/wevolunteer.db`. Reaching anything else proves the
-       file was parsed. Asserted as "not the fallback" rather than a hardcoded
-       pilot.db so this still holds on a checkout whose `.env` names another file. */
-    const line = out.split('\n').find((l) => l.startsWith('Database: '));
-    expect(line).not.toContain(path.join(ROOT, 'server', 'wevolunteer.db'));
   });
 
   /**
@@ -310,6 +342,162 @@ describe('privileged CLI database resolution', () => {
    * suites read that file concurrently. The copy is bin/ plus server/ with
    * node_modules symlinked — about a fifth of a second.
    */
+  /**
+   * A file nobody named, holding real people.
+   *
+   * ── The hazard this closes ──
+   *
+   * `.env` carried `WEV_DB_PATH=../pilot.db`. Every script in `bin/` resolves
+   * through `loadDotEnv()`, so the DEFAULT target of every privileged command
+   * was the real pilot database — minors' service records — and each command was
+   * protected only by whatever guard it had thought to add for itself. Two had a
+   * typed confirmation, one had a blocklist of file NAMES, and three had nothing
+   * at all.
+   *
+   * ── Why the test is about provenance and not about the filename ──
+   *
+   * A name blocklist answers "is this called pilot.db", which the operator can
+   * defeat by copying the file. The question worth asking is "did anybody choose
+   * this file". So all three cases below use the SAME database and vary only how
+   * the path arrived: inherited from `.env` (refused), named on the command line
+   * (allowed), and inherited but explicitly authorised (allowed).
+   *
+   * The database is built here rather than copied from `pilot.db`, for the
+   * reason the fixture above already gives about stray `.db` files — and because
+   * a test that needs real minors' records in a temp directory to prove a
+   * privacy guard has defeated its own purpose. Three synthetic rows reproduce
+   * the markers `describeNonDisposableContent` actually looks for.
+   */
+  describe('a privileged command refuses real data it was not pointed at', () => {
+    /** A repository copy whose `.env` names a SQLite file holding real-looking data. */
+    function repoWithRealDataDotEnv() {
+      const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'wev-realdata-')));
+      const skip = (src) => /\.test\.[cm]?js$|\.db(-wal|-shm)?$/.test(src);
+      cpSync(path.join(ROOT, 'bin'), path.join(dir, 'bin'), { recursive: true, filter: (s) => !skip(s) });
+      cpSync(path.join(ROOT, 'server'), path.join(dir, 'server'), { recursive: true, filter: (s) => !skip(s) });
+      symlinkSync(dependencyTree(), path.join(dir, 'node_modules'));
+      cpSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
+
+      /* The markers, and enough schema for the tool to get past its own
+         "is this a WeVolunteer database" check: a super_admin account, a
+         tombstone and an audit row. */
+      /**
+       * Two markers, not three, and deliberately NOT the audit table.
+       *
+       * `describeNonDisposableContent` returns non-null on ANY marker, so an
+       * owner account and a tombstone are sufficient. Seeding
+       * `admin_audit_logs` would have been more lifelike and is not worth it:
+       * `auditLog.test.js` asserts that `recordAudit()` is the only thing in
+       * `server/` or `bin/` containing that INSERT, it scans test files too, and
+       * it has no allowlist. Writing the statement here — even in a fixture
+       * fabricating a marker rather than recording a real action — trips it, and
+       * the ways around that are all worse: an allowlist entry weakens a guard
+       * protecting the most consequential table in the schema, and assembling
+       * the string dynamically evades it while leaving the comment claiming
+       * otherwise.
+       */
+      const target = path.join(dir, 'inherited.db');
+      const db = new DatabaseSync(target);
+      db.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY, name TEXT, email TEXT, password_hash TEXT,
+          grade TEXT, role TEXT, created_at TEXT, account_status TEXT
+        );
+        INSERT INTO users (id,name,email,password_hash,grade,role,created_at,account_status)
+          VALUES ('u-own','Owner','owner@example.invalid','x','12','super_admin','now','active');
+        INSERT INTO users (id,name,email,password_hash,grade,role,created_at,account_status)
+          VALUES ('u-gone','Gone','gone@example.invalid','x','11','student','now','deleted');
+      `);
+      db.close();
+
+      writeFileSync(path.join(dir, '.env'), `WEV_DB_PATH=${target}\n`);
+      return { dir, target };
+    }
+
+    /* A local copy: the sibling block's `runIn` is scoped to it, and the
+       environment this one needs to clear differs — WEV_ALLOW_REAL_DATA has to
+       start unset or the override case proves nothing. */
+    function runIn(dir, env) {
+      const r = spawnSync(process.execPath, [path.join(dir, 'bin', 'grant-ownership.mjs'),
+        'nobody@example.invalid', 'probe'], {
+        cwd: dir,
+        env: { ...process.env, WEV_DB_PATH: undefined, DATABASE_ENGINE: undefined,
+               DATABASE_URL: undefined, WEV_ALLOW_REAL_DATA: undefined, ...env },
+        encoding: 'utf8',
+        input: 'y\n',
+      });
+      return (r.stdout || '') + (r.stderr || '');
+    }
+
+    it('refuses when the path came from .env, and says what it found', () => {
+      const { dir, target } = repoWithRealDataDotEnv();
+      try {
+        const out = runIn(dir, {});
+        expect(out, 'a privileged command operated on real data nobody named')
+          .toContain('holds real data');
+        /* The refusal has to name the evidence, or the operator cannot tell it
+           from a path typo. */
+        expect(out).toContain('owner (super_admin) account');
+        expect(out).toContain('deleted-account tombstone');
+        /* And it must not have gone on to do the thing. */
+        expect(out).not.toContain('Successfully granted');
+        expect(out).toContain(target);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('allows the same database when the caller names it', () => {
+      /* The emergency path. `bin/reset-2fa.mjs` is the only way to clear a
+         locked-out administrator's second factor, and an operator who typed the
+         path has chosen it. A guard that refused this would be the outage. */
+      const { dir, target } = repoWithRealDataDotEnv();
+      try {
+        const out = runIn(dir, { WEV_DB_PATH: target });
+        expect(out, 'naming the file on the command line was still refused')
+          .not.toContain('holds real data');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('allows an inherited path when WEV_ALLOW_REAL_DATA=1 is set', () => {
+      /* For a runbook step that cannot pass the path. Distinct from
+         WEV_ALLOW_DESTROYING_REAL_DATA: operating on live data and destroying it
+         are different permissions, and the first must not confer the second. */
+      const { dir } = repoWithRealDataDotEnv();
+      try {
+        const out = runIn(dir, { WEV_ALLOW_REAL_DATA: '1' });
+        expect(out).not.toContain('holds real data');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('says nothing about a disposable database that arrived the same way', () => {
+      /* The guard must be about CONTENT, not about inheritance alone — otherwise
+         every ordinary `.env`-configured development command starts refusing. */
+      const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'wev-disposable-')));
+      try {
+        const skip = (src) => /\.test\.[cm]?js$|\.db(-wal|-shm)?$/.test(src);
+        cpSync(path.join(ROOT, 'bin'), path.join(dir, 'bin'), { recursive: true, filter: (s) => !skip(s) });
+        cpSync(path.join(ROOT, 'server'), path.join(dir, 'server'), { recursive: true, filter: (s) => !skip(s) });
+        symlinkSync(dependencyTree(), path.join(dir, 'node_modules'));
+        cpSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
+        const target = path.join(dir, 'scratch.db');
+        const db = new DatabaseSync(target);
+        db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, role TEXT, account_status TEXT);
+                 INSERT INTO users VALUES ('u-1','student','active');`);
+        db.close();
+        writeFileSync(path.join(dir, '.env'), `WEV_DB_PATH=${target}\n`);
+
+        expect(runIn(dir, {})).not.toContain('holds real data');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('an explicit database path outranks a .env engine', () => {
     const SENTINEL = 'db.SENTINEL-MUST-NOT-BE-REACHED.supabase.co';
     /* The exact string the harness writes into `.env`, so the fingerprint

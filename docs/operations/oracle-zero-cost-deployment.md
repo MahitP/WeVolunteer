@@ -265,6 +265,48 @@ Mounted **before** the rate limiters: after them, a blocked CSRF attempt becomes
 Everything below needs an account, DNS, or a provisioned host. None of it has been done.
 
 ### 1. Oracle
+
+> **Choose the home region before anything else, and choose it carefully. It is
+> permanent.**
+>
+> Oracle's own documentation, on
+> [managing regions](https://docs.oracle.com/en-us/iaas/Content/Identity/regions/managingregions.htm):
+> *"Can I change my home region? No. Oracle assigns your home region and you
+> can't change it."* And on
+> [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm):
+> *"You must create the Always Free compute instances in your home region."*
+>
+> Those two sentences together are the whole risk. The Ampere A1 shape is the
+> only free shape this application fits on — 1 GB on the AMD micro is not enough
+> once `sharp` is decoding images — and A1 capacity is exhausted in the popular
+> regions. Oracle's guidance when it is: *"this indicates a temporary lack of
+> Always Free shapes in your home region. Try creating the instance in a
+> different availability domain, or wait a while, then try to create the instance
+> again."*
+>
+> So a tenancy created in a contended region can be left permanently unable to
+> provision the host, with no remedy inside that account. Verified against
+> Oracle's documentation on 2026-09-10.
+>
+> **Two things to do at signup, in this order:**
+>
+> 1. **Prefer a region with three availability domains.** "Try a different
+>    availability domain" is Oracle's own first suggestion and it is only
+>    available to you if the region has more than one. Most regions have a single
+>    AD; Ashburn, Phoenix, Frankfurt and London are among those with three.
+> 2. **Avoid the most contended regions.** Community reports through 2026 put
+>    US East (Ashburn) under sustained A1 pressure, and Frankfurt
+>    (`eu-frankfurt-1`) and Singapore (`ap-singapore-1`) as reliably
+>    provisionable. Weigh that against latency to your users — for a
+>    Santa Barbara pilot, a US West or US East region is far better placed, so
+>    this is a genuine trade-off rather than a lookup.
+>
+> **If provisioning fails repeatedly:** upgrading the account to Pay-As-You-Go is
+> widely reported to give launch priority, and Always Free resources remain free
+> on a PAYG account. It also removes the guard rail that an account with no
+> payment method cannot be billed, so if you do it, the `$1` budget alert below
+> stops being optional. Do not upgrade as a first move.
+
 Create the tenancy. Provision **Ampere A1, Ubuntu 24.04, 1 OCPU / 6 GB** (see reclamation). Open 443 to Cloudflare ranges only. If the account is Pay-As-You-Go, **set a $1 budget alert.**
 
 ### 2. Cloudflare

@@ -202,6 +202,69 @@ Domain logic lives in `attendance.js`, `hoursLedger.js`, `certificates.js`,
 '127.0.0.1')`. The process is unreachable from any other host. A reverse proxy
 on the same machine is mandatory, not optional.
 
+### Which database a command touches — and the guard that decides
+
+`pilot.db` at the repository root holds the real pilot's records. It is not
+served by anything today — production is PostgreSQL — but it is live data, and
+for a while it was also the DEFAULT target of every command in `bin/`.
+
+**What went wrong.** `.env` carried `WEV_DB_PATH=../pilot.db`. Both the server
+and `bin/resolveDb.mjs` read that file, and `bin/` scripts anchor a relative
+path at `server/`, so those six characters named the real pilot database. Every
+privileged command — grant ownership, promote an administrator, suspend an
+account, clear a second factor — therefore pointed at live records unless the
+operator overrode it, and each was protected only by whatever guard it had
+thought to add for itself: two had a typed confirmation, one had a blocklist of
+file *names*, and three had nothing.
+
+**What changed.**
+
+1. **`.env` no longer sets `WEV_DB_PATH`.** Unset, the server and
+   `bin/resolveDb.mjs` both fall back to `server/wevolunteer.db`, which is
+   disposable. The absence of configuration is now the safe state.
+2. **`bin/resolveDb.mjs` fails closed on real data it was not pointed at.** If
+   the resolved SQLite file holds markers a fresh demo seed cannot produce —
+   `super_admin` accounts, deleted-account tombstones, administrative audit rows
+   — and the path came from `.env` or the built-in default rather than from this
+   invocation, the command refuses and names what it found.
+
+**Why provenance rather than the filename.** A name blocklist answers "is this
+called `pilot.db`", which a copy defeats. The question worth asking is whether
+anybody chose the file. An operator who types
+
+```bash
+WEV_DB_PATH=./pilot.db node bin/reset-2fa.mjs someone@example.org
+```
+
+has chosen it, and that is the emergency path this tooling exists to keep
+working — `bin/reset-2fa.mjs` is the only way to clear a locked-out
+administrator's second factor, because every `/api/2fa/*` route is self-service
+behind `requireAAL2`. A guard that refused this would be the outage.
+
+**So the safe procedure is: name the database.**
+
+```bash
+# Scratch work — the ordinary case.
+WEV_DB_PATH=/tmp/scratch.db node bin/<script>.mjs ...
+
+# The pilot database, deliberately. Visible in the transcript, which is the point.
+WEV_DB_PATH=./pilot.db node bin/<script>.mjs ...
+
+# For a runbook step that cannot pass a path.
+WEV_ALLOW_REAL_DATA=1 node bin/<script>.mjs ...
+```
+
+`WEV_ALLOW_REAL_DATA` is deliberately **not** the same permission as
+`WEV_ALLOW_DESTROYING_REAL_DATA` in `bin/lib/db-safety.mjs`. Operating on live
+data and destroying it are different decisions, and a step that needs the first
+must not silently confer the second.
+
+Proven by `server/tooling.privilegedDbPath.test.js` — refusal when inherited,
+passage when named, passage under the override, and silence for a disposable
+database that arrived the same way. Removing the guard fails the first of those.
+
+---
+
 ### SQLite database
 
 `node:sqlite`'s `DatabaseSync` — the Node built-in, not `better-sqlite3`. One
