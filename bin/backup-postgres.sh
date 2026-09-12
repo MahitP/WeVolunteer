@@ -150,7 +150,27 @@ log "live: users=$USERS credited_hours=$HOURS certificates=$CERTS ledger=$LEDGER
 # not exist locally. Without these, a restore drill fails on role errors that
 # have nothing to do with the data.
 log "dumping -> $OUT"
+# --schema=public: OUR data, not the provider's infrastructure.
+#
+# A managed Postgres carries schemas we neither own nor want in a backup. On
+# Supabase that is auth (23 tables), storage, realtime, vault, graphql and
+# pgbouncer, plus provider-only extensions. Dumping them made the archive
+# UNRESTORABLE anywhere but Supabase: a drill against stock PostgreSQL 17 died on
+#
+#   pg_restore: error: could not execute query: ERROR: extension
+#   "supabase_vault" is not available
+#
+# — which meant the disaster-recovery story was "restore onto the provider you
+# just lost". Observed on the live host 2026-09-12; the drill is the only thing
+# that could have found it, because the archive verified fine structurally.
+#
+# Restricting to `public` also halves the archive (400K -> 196K here) and keeps
+# the provider's own auth tables out of a file we encrypt and ship off-host.
+#
+# The restore side must create any extension `public` depends on — pg_trgm for
+# the four trigram indexes. verify-restore-postgres.sh does this.
 if ! pg_dump --format=custom --no-owner --no-privileges --compress=9 \
+     --schema=public \
      -d "$DATABASE_URL" -f "$OUT" 2>/tmp/wev-pgdump-err.$$; then
   ERRTXT="$(head -c 2000 /tmp/wev-pgdump-err.$$ || true)"; rm -f /tmp/wev-pgdump-err.$$
   rm -f "$OUT"
@@ -175,7 +195,21 @@ fi
 # The tables the platform cannot be reconstructed without. A dump that parsed
 # cleanly but contains no `users` table is a dump of the wrong database.
 for t in users events attendance certificates; do
-  printf '%s' "$TOC" | grep -qE "TABLE DATA public $t( |$)" \
+  # A here-string, NOT `printf ... | grep -q`.
+  #
+  # `grep -q` exits the moment it matches. In a pipeline `printf` is then still
+  # writing and takes SIGPIPE (141), and `set -o pipefail` at the top turns that
+  # into the pipeline's exit status — so a SUCCESSFUL match was reported as a
+  # failure, and the archive it had just verified was deleted.
+  #
+  # Size-dependent, which is how it survived. With a small table of contents
+  # `printf` finishes before `grep` exits and the race never happens: the local
+  # drill (70 tables) passed every time. Production's TOC is 846 lines, because a
+  # Supabase dump carries that provider's own `auth` schema alongside ours, and
+  # there it failed on the FIRST table, every night. Observed on the live host
+  # 2026-09-12 — "the archive has no data for table 'users'" one line after
+  # "live: users=3", with "printf: Broken pipe" between them. Same event.
+  grep -qE "TABLE DATA public $t( |$)" <<<"$TOC" \
     || { rm -f "$OUT"; fail "the archive has no data for table '$t' — wrong database, or a partial dump"; }
 done
 log "verified: archive parses and carries data for users, events, attendance, certificates"

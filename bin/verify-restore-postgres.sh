@@ -132,6 +132,34 @@ print(urlunsplit((u.scheme, u.netloc, '/' + sys.argv[2], u.query, u.fragment)))
 PY
 )"
 
+# Prepare the target to match the shape the archive expects.
+#
+# Two things, both discovered by an actual drill on 2026-09-12 rather than by
+# reading the dump:
+#
+#   1. The archive begins `SELECT pg_catalog.set_config('search_path','',false)`
+#      and then `CREATE SCHEMA public`. A freshly created database ALREADY has a
+#      public schema, so the restore aborts with "schema public already exists".
+#      Dropping it first is safe precisely because the database is new and empty
+#      — this script created it moments ago and drops it again at the end.
+#
+#   2. With an empty search_path every object is fully qualified, and the four
+#      trigram indexes are emitted as `extensions.gin_trgm_ops` — the schema the
+#      provider installs pg_trgm into. So the target needs an `extensions` schema
+#      holding pg_trgm, not merely pg_trgm somewhere.
+#
+# pg_trgm, pgcrypto and uuid-ossp are ordinary contrib extensions present in any
+# standard PostgreSQL installation; none of this requires provider software.
+log "preparing the scratch database (drop empty public, create extensions schema)"
+psql -tAX -d "$SCRATCH_URL" -c "DROP SCHEMA IF EXISTS public CASCADE;" >/dev/null \
+  || fail "could not drop the empty public schema on the scratch database"
+psql -tAX -d "$SCRATCH_URL" -c "CREATE SCHEMA IF NOT EXISTS extensions;" >/dev/null \
+  || fail "could not create the extensions schema on the scratch database"
+for ext in pg_trgm pgcrypto "uuid-ossp"; do
+  psql -tAX -d "$SCRATCH_URL" -c "CREATE EXTENSION IF NOT EXISTS \"$ext\" WITH SCHEMA extensions;" >/dev/null 2>&1 \
+    || log "  note: $ext unavailable on this target (only pg_trgm is load-bearing)"
+done
+
 log "restoring"
 # --exit-on-error: a restore that reports success while having skipped statements
 # is exactly the false green this whole exercise exists to eliminate.
@@ -147,7 +175,10 @@ log "restored schema: $TABLES tables"
 [ "$TABLES" -gt 0 ] || fail "the restored database has no tables"
 
 for t in users events attendance certificates hours_ledger; do
-  psql -tAX -d "$SCRATCH_URL" -c "SELECT to_regclass('public.$t');" | grep -q "^$t$" \
+  # Here-string for the reason recorded in bin/backup-postgres.sh: a pipeline
+  # into `grep -q` can take SIGPIPE on the writer, and `pipefail` then reports a
+  # successful match as a failure.
+  grep -q "^$t$" <<<"$(psql -tAX -d "$SCRATCH_URL" -c "SELECT to_regclass('public.$t');")" \
     || fail "restored database is missing table '$t'"
 done
 log "verified: every table the platform cannot be reconstructed without is present"

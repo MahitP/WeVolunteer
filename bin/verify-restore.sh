@@ -152,9 +152,9 @@ if [ -z "$HEALTH" ]; then
 fi
 
 log "health: $HEALTH"
-echo "$HEALTH" | grep -q '"status":"ok"' || fail "/health did not report ok: $HEALTH"
+grep -q '"status":"ok"' <<<"$HEALTH" || fail "/health did not report ok: $HEALTH"
 # The write probe is what proves the restored file is usable, not merely readable.
-echo "$HEALTH" | grep -q '"writable":true' || fail "restored database is not writable: $HEALTH"
+grep -q '"writable":true' <<<"$HEALTH" || fail "restored database is not writable: $HEALTH"
 
 log "shutting the rehearsal instance down"
 kill -TERM "$APP_PID" 2>/dev/null || true
