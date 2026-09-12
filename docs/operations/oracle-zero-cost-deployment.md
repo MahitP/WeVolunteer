@@ -402,10 +402,10 @@ expensive — 17 and 30 in particular.
 | # | Step | Who | Notes |
 |---|---|---|---|
 | 1 | Create Oracle tenancy | HUMAN | If it becomes Pay-As-You-Go, set a **$1 budget alert** immediately |
-| 2 | Create Always Free Ampere A1 VM, Ubuntu 24.04 | HUMAN | **1 OCPU / 6 GB** — smaller resists idle reclamation better |
+| 2 | Create Always Free Ampere A1 VM, Ubuntu 24.04 **or 26.04** | HUMAN | **1 OCPU / 6 GB** — smaller resists idle reclamation better. On 26.04 read §*Packages on Ubuntu 26.04* below **before** step 5 |
 | 3 | Configure VCN / security list | HUMAN | 443 from **Cloudflare ranges only**; 22 from your IP only |
 | 4 | Configure SSH access | HUMAN | Key-only; disable password auth |
-| 5 | Install Node 24, Nginx, `postgresql-client-17` | HUMAN | Client major **must match** the Supabase server major |
+| 5 | Install Node 24, Nginx, `postgresql-client-17` | HUMAN | Neither comes from Ubuntu's own repository — commands below. Client major **must match** the Supabase server major |
 | 6 | Create directories and service user | HUMAN | `/srv/wevolunteer`, `/var/lib/wevolunteer{,/uploads,/exports}`, user `wev` |
 | 7 | Create Supabase project | HUMAN | **Leave the database empty** — do not run the baseline migration |
 | 8 | Create Upstash Redis database | HUMAN | Note the 500K commands/month ceiling |
@@ -436,6 +436,52 @@ expensive — 17 and 30 in particular.
 | 33 | Production browser workflows: student, organizer, admin, owner | BOTH | Navigate through the UI, not by URL |
 | 34 | Final security check: anonymous 401, student 403, owner 200, IDOR | BOTH | |
 | 35 | **Only then** begin the pilot | HUMAN | Stagger onboarding — Resend allows 100 emails/day |
+
+### Packages on Ubuntu 26.04 — neither Node nor the PostgreSQL client comes from Ubuntu
+
+Step 5 is two traps, and both fail in a way that looks like something else.
+
+**Node.** Ubuntu 26.04 ships **Node 22** in its own repository. `package.json`
+requires `>=24.0.0 <25`, so `apt install nodejs` gives a runtime the application
+refuses. Use NodeSource, whose `nodistro` suite is version-independent and
+publishes arm64:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs
+node -v      # expect v24.x — NOT v22
+```
+
+Not `nvm`: it installs into a user's home directory, and the systemd unit calls
+`/usr/bin/env node` as the `wev` user, which will not find it. The pilot runbook
+records this under *Node*.
+
+**PostgreSQL client.** Supabase runs PostgreSQL 17 and `pg_dump` refuses a
+server newer than itself — exiting non-zero **and leaving a zero-byte file**, so
+a backup job that checked only an exit code would encrypt nothing, prune the
+previous generation and report success. The PGDG repository supports Ubuntu
+26.04 (`resolute`) on arm64; note the codename differs from 24.04's `noble`:
+
+```bash
+sudo apt-get install -y curl ca-certificates
+sudo install -d /usr/share/postgresql-common/pgdg
+sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+  --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+  https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+  > /etc/apt/sources.list.d/pgdg.list'
+sudo apt-get update && sudo apt-get install -y postgresql-client-17
+
+pg_dump --version   # expect 17.x
+```
+
+Then set `WEV_PG_BIN` in `deploy/wevolunteer-backup.service` to wherever that
+landed — `/usr/lib/postgresql/17/bin` — which is what the unit already assumes.
+
+*Verified against NodeSource's and PGDG's own documentation on 2026-09-12. Both
+are free; neither adds a recurring cost.*
+
+---
 
 ### The three steps most often skipped, and what they cost
 
