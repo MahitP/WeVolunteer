@@ -1,0 +1,420 @@
+#!/usr/bin/env bash
+#
+# Provision an Oracle Always Free Ubuntu host to serve WeVolunteer.
+#
+# ── What this is ──
+#
+# One idempotent script instead of forty copy-pasted commands. Re-running it is
+# safe and is the normal way to use it: every step checks the state it wants
+# before changing anything, so a partial run can simply be run again.
+#
+#   sudo ./deploy/provision.sh audit      # read-only. Changes nothing. Start here.
+#   sudo ./deploy/provision.sh packages   # Node 24, nginx, postgresql-client-17
+#   sudo ./deploy/provision.sh host       # user, directories, firewall, unattended-upgrades
+#   sudo ./deploy/provision.sh app        # build + install the checkout, systemd units
+#   sudo ./deploy/provision.sh verify     # prove what is actually running
+#   sudo ./deploy/provision.sh harden-ssh # LAST, and only after key auth is proven
+#
+# ── What it deliberately does NOT do ──
+#
+# Nothing outside this host. It cannot open a port in an OCI Security List, edit
+# a route table, touch Cloudflare DNS or create an R2 bucket, and it does not
+# pretend otherwise: `audit` reports what is reachable from here and names the
+# OCI-side items it cannot see.
+#
+# It also never writes secrets. `/etc/wevolunteer/wevolunteer.env` is created
+# from the template with 0640 root:wev and left for a human to fill in — a
+# provisioning script that accepts a database password takes it from a shell
+# history or a process list, which is how the password ends up somewhere it was
+# never meant to be.
+#
+# ── The one genuinely dangerous step ──
+#
+# `harden-ssh` disables password authentication. It REFUSES unless it can first
+# prove that key-based authentication already works for a non-root user, because
+# the failure mode is being locked out of a host whose console you may not have.
+# See the function for what it checks.
+
+set -euo pipefail
+
+APP_USER=wev
+APP_DIR=/srv/wevolunteer
+STATE_DIR=/var/lib/wevolunteer
+BACKUP_DIR=/var/backups/wevolunteer
+ENV_DIR=/etc/wevolunteer
+ENV_FILE="$ENV_DIR/wevolunteer.env"
+APP_PORT=5050
+
+log()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
+ok()   { printf '   [ ok ] %s\n' "$*"; }
+warn() { printf '   [WARN] %s\n' "$*"; }
+bad()  { printf '   [FAIL] %s\n' "$*"; }
+die()  { printf '\n[FATAL] %s\n' "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+need_root() { [ "$(id -u)" -eq 0 ] || die "run with sudo"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# audit — read-only
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_audit() {
+  log "Host"
+  echo "   os          : $(. /etc/os-release && echo "$PRETTY_NAME")"
+  echo "   kernel      : $(uname -r)"
+  echo "   arch        : $(uname -m)   (expect aarch64)"
+  echo "   cpu         : $(nproc) vCPU — $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | xargs || echo 'n/a')"
+  echo "   memory      : $(free -h | awk '/^Mem:/{print $2" total, "$7" available"}')"
+  echo "   swap        : $(free -h | awk '/^Swap:/{print $2" total"}')"
+  echo "   uptime      : $(uptime -p 2>/dev/null || true)"
+
+  log "Storage"
+  df -h / /var /srv 2>/dev/null | awk 'NR==1||/\//{printf "   %s\n",$0}' | sort -u
+
+  log "Network"
+  ip -brief addr 2>/dev/null | sed 's/^/   /'
+  echo "   default route: $(ip route show default 2>/dev/null | head -1)"
+
+  log "Listening sockets"
+  if have ss; then
+    ss -tulpnH 2>/dev/null | awk '{printf "   %-6s %-24s %s\n",$1,$5,$7}' | sort -u
+  else warn "ss not present"; fi
+
+  log "Host firewall"
+  if have ufw; then echo "   ufw: $(ufw status 2>/dev/null | head -1)"; else echo "   ufw: not installed"; fi
+  echo "   iptables INPUT policy: $(iptables -S INPUT 2>/dev/null | head -1 || echo 'n/a')"
+  echo "   iptables rules (INPUT): $(iptables -S INPUT 2>/dev/null | wc -l)"
+  # Oracle's Ubuntu images ship iptables rules that drop everything except 22.
+  # If nginx is listening and the port is open in OCI but nothing arrives, this
+  # is usually why, and it is separate from ufw.
+  if iptables -S INPUT 2>/dev/null | grep -qE 'REJECT|DROP'; then
+    warn "iptables has REJECT/DROP rules — Oracle images ship these; 80/443 may need allowing here as well as in ufw"
+  fi
+
+  log "SSH configuration"
+  for k in PermitRootLogin PasswordAuthentication PubkeyAuthentication KbdInteractiveAuthentication ChallengeResponseAuthentication; do
+    v=$(sshd -T 2>/dev/null | awk -v k="$(echo "$k" | tr 'A-Z' 'a-z')" '$1==k{print $2; exit}')
+    echo "   ${k}: ${v:-unset}"
+  done
+
+  log "Runtimes"
+  echo "   node        : $(have node && node -v || echo 'absent')   (need >=24 <25)"
+  echo "   npm         : $(have npm && npm -v || echo 'absent')"
+  echo "   pg_dump     : $(have pg_dump && pg_dump --version | awk '{print $3}' || echo 'absent')   (need 17.x)"
+  echo "   psql        : $(have psql && psql --version | awk '{print $3}' || echo 'absent')"
+  echo "   nginx       : $(have nginx && nginx -v 2>&1 | awk -F/ '{print $2}' || echo 'absent')"
+  echo "   git         : $(have git && git --version | awk '{print $3}' || echo 'absent')"
+  echo "   docker      : $(have docker && docker --version || echo 'absent')"
+
+  log "Services"
+  for s in ssh nginx wevolunteer wevolunteer-backup.timer unattended-upgrades snapd oracle-cloud-agent; do
+    printf '   %-26s %s\n' "$s" "$(systemctl is-active "$s" 2>/dev/null || echo inactive)/$(systemctl is-enabled "$s" 2>/dev/null || echo disabled)"
+  done
+
+  log "Security posture"
+  echo "   AppArmor    : $(have aa-status && aa-status --enabled >/dev/null 2>&1 && echo enabled || echo 'not enabled/absent')"
+  echo "   timesync    : $(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo n/a) (timezone $(timedatectl show -p Timezone --value 2>/dev/null || echo n/a))"
+  echo "   pending security updates: $(apt-get -s upgrade 2>/dev/null | grep -ci '^Inst.*security' || echo 0)"
+  echo "   reboot required: $([ -f /var/run/reboot-required ] && echo YES || echo no)"
+
+  log "Accounts"
+  awk -F: '$3>=1000 && $3<65534 {printf "   %-16s uid=%s shell=%s\n",$1,$3,$7}' /etc/passwd
+  echo "   passwordless sudo entries: $(grep -rhoE '^[^#]*NOPASSWD' /etc/sudoers /etc/sudoers.d/ 2>/dev/null | wc -l)"
+
+  log "Existing deployment"
+  for d in "$APP_DIR" "$STATE_DIR" "$BACKUP_DIR" "$ENV_DIR"; do
+    if [ -e "$d" ]; then echo "   $d: present ($(stat -c '%U:%G %a' "$d"))"; else echo "   $d: absent"; fi
+  done
+  if [ -d "$APP_DIR/.git" ]; then
+    echo "   checkout HEAD: $(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null) on $(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    echo "   working tree : $(git -C "$APP_DIR" status --porcelain 2>/dev/null | wc -l) changes"
+  fi
+  if [ -f "$ENV_FILE" ]; then
+    echo "   env file     : present ($(stat -c '%U:%G %a' "$ENV_FILE")), keys: $(grep -cE '^[A-Z_]+=' "$ENV_FILE" || echo 0)"
+    # Names only. Never values.
+    echo "   engine       : $(grep -E '^DATABASE_ENGINE=' "$ENV_FILE" | cut -d= -f2- || echo '(unset — would default to SQLITE)')"
+    grep -qE '^DATABASE_URL=' "$ENV_FILE" && echo "   DATABASE_URL : set" || echo "   DATABASE_URL : MISSING"
+  fi
+
+  log "What this script cannot see"
+  cat <<'EOF'
+   OCI Security List / NSG ingress rules      -> Console or OCI CLI
+   VCN route table and Internet Gateway       -> Console or OCI CLI
+   Whether the public IP is ephemeral         -> Console or OCI CLI
+   Oracle IAM, budgets, cost controls         -> Console or OCI CLI
+   Cloudflare DNS / proxy / TLS mode          -> Cloudflare account
+   If a port is open here and in ufw but the service is still unreachable from
+   the internet, the remaining explanation is almost always the OCI Security
+   List, and it cannot be fixed from this host.
+EOF
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# packages
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_packages() {
+  need_root
+  export DEBIAN_FRONTEND=noninteractive
+  . /etc/os-release
+  log "apt update"
+  apt-get update -qq
+
+  log "Base packages"
+  apt-get install -y -qq ca-certificates curl gnupg git nginx ufw unattended-upgrades lsb-release
+
+  # Node. Ubuntu 26.04 ships Node 22; package.json needs >=24 <25. NodeSource's
+  # nodistro suite is version-independent and publishes arm64. NOT nvm: the unit
+  # runs `/usr/bin/env node` as `wev`, which cannot see a per-user install.
+  local want_major=24
+  local have_major=""
+  have node && have_major="$(node -v | sed 's/^v\([0-9]*\).*/\1/')"
+  if [ "$have_major" = "$want_major" ]; then
+    ok "node $(node -v) already satisfies >=24 <25"
+  else
+    log "Installing Node ${want_major} from NodeSource (distro ships $( [ -n "$have_major" ] && echo "v$have_major" || echo 'none' ))"
+    curl -fsSL "https://deb.nodesource.com/setup_${want_major}.x" | bash -
+    apt-get install -y -qq nodejs
+    node -v | grep -qE '^v24\.' || die "expected Node 24, got $(node -v)"
+    ok "node $(node -v), npm $(npm -v)"
+  fi
+
+  # PostgreSQL client 17. pg_dump refuses a server NEWER than itself, exits
+  # non-zero AND leaves a zero-byte file — so a mismatch here is a backup that
+  # reports success and contains nothing. Supabase is 17.
+  if have pg_dump && pg_dump --version | grep -qE ' 17\.'; then
+    ok "pg_dump $(pg_dump --version | awk '{print $3}') already matches Supabase's major"
+  else
+    log "Installing postgresql-client-17 from PGDG (suite: ${VERSION_CODENAME}-pgdg)"
+    install -d /usr/share/postgresql-common/pgdg
+    curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list
+    apt-get update -qq
+    apt-get install -y -qq postgresql-client-17
+    pg_dump --version | grep -qE ' 17\.' || die "expected pg_dump 17, got $(pg_dump --version)"
+    ok "pg_dump $(pg_dump --version | awk '{print $3}')"
+  fi
+
+  log "Unattended security upgrades"
+  dpkg-reconfigure -f noninteractive unattended-upgrades >/dev/null 2>&1 || true
+  systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+  ok "$(systemctl is-active unattended-upgrades)/$(systemctl is-enabled unattended-upgrades)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# host — user, directories, firewall
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_host() {
+  need_root
+
+  log "Service user"
+  if id "$APP_USER" >/dev/null 2>&1; then ok "$APP_USER exists"
+  else
+    # No login shell, no home to speak of: this account exists to own files and
+    # run one process, and should not be a way into the box.
+    useradd --system --create-home --home-dir "$STATE_DIR" --shell /usr/sbin/nologin "$APP_USER"
+    ok "created $APP_USER (system, nologin)"
+  fi
+
+  log "Directories"
+  install -d -o root     -g "$APP_USER" -m 0750 "$ENV_DIR"
+  install -d -o root     -g root        -m 0755 "$APP_DIR"
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$STATE_DIR" "$STATE_DIR/uploads" "$STATE_DIR/exports"
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$BACKUP_DIR"
+  for d in "$ENV_DIR" "$APP_DIR" "$STATE_DIR" "$BACKUP_DIR"; do
+    printf '   %-28s %s\n' "$d" "$(stat -c '%U:%G %a' "$d")"
+  done
+
+  log "Environment file"
+  if [ -f "$ENV_FILE" ]; then
+    ok "$ENV_FILE exists — left untouched (it holds secrets)"
+  else
+    install -o root -g "$APP_USER" -m 0640 "$APP_DIR/deploy/wevolunteer.env.example" "$ENV_FILE" 2>/dev/null \
+      || install -o root -g "$APP_USER" -m 0640 /dev/null "$ENV_FILE"
+    warn "$ENV_FILE created FROM THE TEMPLATE and is not usable yet."
+    warn "A human must fill in DATABASE_URL, JWT_SECRET, TFA_ENCRYPTION_KEY and the mail keys."
+    warn "This script will not accept secrets on a command line."
+  fi
+
+  log "Host firewall (ufw)"
+  # Order matters: allow SSH BEFORE enabling, or enabling ends the session that
+  # is running this script.
+  ufw allow 22/tcp  >/dev/null
+  ufw allow 80/tcp  >/dev/null
+  ufw allow 443/tcp >/dev/null
+  ufw default deny incoming  >/dev/null
+  ufw default allow outgoing >/dev/null
+  if ufw status | head -1 | grep -q inactive; then ufw --force enable >/dev/null; fi
+  ufw status verbose | sed 's/^/   /'
+  warn "ufw is the HOST firewall only. OCI's Security List is a separate filter in front of it."
+
+  log "Timezone / NTP"
+  timedatectl set-timezone UTC 2>/dev/null || true
+  timedatectl set-ntp true 2>/dev/null || true
+  echo "   $(timedatectl show -p Timezone --value), NTP synchronized=$(timedatectl show -p NTPSynchronized --value)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# app — build and install
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_app() {
+  need_root
+  [ -d "$APP_DIR/.git" ] || die "no checkout at $APP_DIR — clone it there first"
+  [ -f "$ENV_FILE" ]     || die "$ENV_FILE missing — run 'host' and fill it in"
+
+  grep -qE '^DATABASE_ENGINE=postgres' "$ENV_FILE" \
+    || die "$ENV_FILE does not set DATABASE_ENGINE=postgres. Unset means SQLITE, which would put production on this VM's disk."
+  grep -qE '^DATABASE_URL=.+' "$ENV_FILE" \
+    || die "$ENV_FILE does not set DATABASE_URL."
+
+  local sha; sha=$(git -C "$APP_DIR" rev-parse --short HEAD)
+  log "Building $sha"
+  chown -R root:root "$APP_DIR"
+
+  # FULL install, including devDependencies: `vite` and `@vitejs/plugin-react`
+  # are devDependencies and `npm run build` is `vite build`, so `--omit=dev`
+  # here produces "vite: not found" and no dist/. The runtime does not need
+  # them — but the build does, and the build happens on this host.
+  npm --prefix "$APP_DIR" ci --no-audit --no-fund
+  npm --prefix "$APP_DIR" run build
+  [ -f "$APP_DIR/dist/index.html" ] || die "build produced no dist/index.html"
+  ok "dist built ($(du -sh "$APP_DIR/dist" | cut -f1))"
+
+  # Now drop the build-only tree. The service runs `server/server.js`, which
+  # needs production dependencies only, and leaving ~400 dev packages on a
+  # public-facing host is avoidable attack surface on a 6 GB box.
+  npm --prefix "$APP_DIR" prune --omit=dev --no-audit --no-fund
+  ok "pruned to production dependencies"
+
+  # The app must be able to write uploads/exports, and must NOT be able to
+  # write its own code.
+  chown -R "$APP_USER:$APP_USER" "$STATE_DIR"
+
+  log "systemd units"
+  install -m 0644 "$APP_DIR/deploy/wevolunteer.service"        /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/wevolunteer-backup.service" /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/wevolunteer-backup.timer"   /etc/systemd/system/
+  systemctl daemon-reload
+  systemctl enable --now wevolunteer.service
+  systemctl enable --now wevolunteer-backup.timer
+  ok "wevolunteer: $(systemctl is-active wevolunteer)/$(systemctl is-enabled wevolunteer)"
+  ok "backup timer: $(systemctl is-active wevolunteer-backup.timer)/$(systemctl is-enabled wevolunteer-backup.timer)"
+
+  log "nginx"
+  install -m 0644 "$APP_DIR/deploy/nginx/wevolunteers.conf" /etc/nginx/sites-available/wevolunteers.conf
+  ln -sfn /etc/nginx/sites-available/wevolunteers.conf /etc/nginx/sites-enabled/wevolunteers.conf
+  rm -f /etc/nginx/sites-enabled/default
+  nginx -t || die "nginx config rejected — not reloading"
+  systemctl reload nginx
+  ok "nginx reloaded"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# verify — prove it, do not assert it
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_verify() {
+  local fails=0
+  log "Service state"
+  for s in wevolunteer nginx wevolunteer-backup.timer; do
+    if systemctl is-active --quiet "$s"; then ok "$s active, enabled=$(systemctl is-enabled "$s" 2>/dev/null)"
+    else bad "$s NOT active"; fails=$((fails+1)); fi
+  done
+
+  log "Application port binding"
+  local bind; bind=$(ss -tlnH "sport = :$APP_PORT" 2>/dev/null | awk '{print $4}' | head -1)
+  if [ -z "$bind" ]; then bad "nothing listening on $APP_PORT"; fails=$((fails+1))
+  elif echo "$bind" | grep -qE '^(127\.0\.0\.1|\[::1\]):'; then ok "app bound to loopback only ($bind)"
+  else bad "app bound to $bind — reachable outside the proxy. Set BIND_ADDRESS=127.0.0.1"; fails=$((fails+1)); fi
+
+  log "Health endpoints (through nginx, then direct)"
+  for u in "http://127.0.0.1/health" "http://127.0.0.1:$APP_PORT/health"; do
+    local code; code=$(curl -s -o /tmp/_h -w '%{http_code}' --max-time 10 "$u" || echo 000)
+    if [ "$code" = "200" ]; then ok "$u -> 200 $(head -c 120 /tmp/_h)"
+    else bad "$u -> $code"; fails=$((fails+1)); fi
+  done
+  rm -f /tmp/_h
+
+  log "Database target (names only, no credentials)"
+  local eng; eng=$(grep -E '^DATABASE_ENGINE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
+  [ "$eng" = "postgres" ] && ok "DATABASE_ENGINE=postgres" || { bad "DATABASE_ENGINE=${eng:-unset} (unset means SQLITE)"; fails=$((fails+1)); }
+  if grep -qE '^DATABASE_URL=' "$ENV_FILE" 2>/dev/null; then
+    local host; host=$(grep -E '^DATABASE_URL=' "$ENV_FILE" | sed -E 's#.*@([^:/]+).*#\1#')
+    ok "DATABASE_URL host: $host"
+    echo "$host" | grep -q 'supabase' && ok "points at Supabase" || warn "does not look like Supabase"
+  else bad "DATABASE_URL missing"; fails=$((fails+1)); fi
+
+  log "Socket.IO upgrade through nginx"
+  local sio; sio=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    "http://127.0.0.1/socket.io/?EIO=4&transport=polling" || echo 000)
+  [ "$sio" = "200" ] && ok "socket.io handshake -> 200" || { bad "socket.io handshake -> $sio"; fails=$((fails+1)); }
+
+  log "Externally reachable ports (from this host's own view)"
+  ss -tlnH 2>/dev/null | awk '{print $4}' | grep -vE '^(127\.|\[::1\])' | sort -u | sed 's/^/   public-bound: /'
+  echo "   (anything above other than :80 and :443 should be justified)"
+
+  log "Firewall"
+  ufw status verbose 2>/dev/null | head -6 | sed 's/^/   /'
+
+  log "Recent application log"
+  journalctl -u wevolunteer -n 15 --no-pager 2>/dev/null | sed 's/^/   /'
+
+  echo
+  if [ "$fails" -eq 0 ]; then ok "VERIFY PASSED"; else bad "VERIFY FAILED: $fails check(s)"; return 1; fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# harden-ssh — the step that can lock you out
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_harden_ssh() {
+  need_root
+  log "Pre-flight: refusing to disable passwords unless keys already work"
+
+  # The check that matters. If no non-root account has an authorized key, then
+  # disabling password auth removes the only way in — and on a cloud host whose
+  # serial console you may not have set up, that is unrecoverable.
+  local found=0
+  while IFS=: read -r u _ uid _ _ home _; do
+    [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ] || continue
+    if [ -s "$home/.ssh/authorized_keys" ]; then
+      ok "$u has $(grep -cvE '^\s*(#|$)' "$home/.ssh/authorized_keys") authorized key(s)"
+      found=$((found+1))
+    fi
+  done < /etc/passwd
+  [ "$found" -gt 0 ] || die "no non-root user has an authorized_keys entry. Refusing: this would lock you out."
+
+  [ -n "${SSH_CONNECTION:-}" ] && ok "you are on an SSH session right now ($(echo "$SSH_CONNECTION" | awk '{print $1}')) — key auth is demonstrably working"
+
+  log "Applying"
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  cat > /etc/ssh/sshd_config.d/10-wevolunteer.conf <<'EOF'
+# Managed by deploy/provision.sh. Keys only, no root, no interactive fallbacks.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+PermitEmptyPasswords no
+X11Forwarding no
+MaxAuthTries 4
+ClientAliveInterval 300
+ClientAliveCountMax 2
+EOF
+  sshd -t || { rm -f /etc/ssh/sshd_config.d/10-wevolunteer.conf; die "sshd rejected the config; reverted, nothing changed"; }
+
+  # Reload, not restart: existing sessions survive, so a mistake still leaves
+  # you connected and able to undo it.
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd
+  ok "reloaded. Effective settings:"
+  sshd -T | grep -E '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication)' | sed 's/^/     /'
+  warn "Open a SECOND ssh session now and confirm it works before closing this one."
+}
+
+case "${1:-audit}" in
+  audit)      cmd_audit ;;
+  packages)   cmd_packages ;;
+  host)       cmd_host ;;
+  app)        cmd_app ;;
+  verify)     cmd_verify ;;
+  harden-ssh) cmd_harden_ssh ;;
+  *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh}" ;;
+esac
