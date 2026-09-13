@@ -8,7 +8,7 @@ import { recordAudit } from '../auditLog.js';
 import { sendAdminInvitationEmail } from '../email.js';
 import {
   createInvitation, invitationRefusal, listPendingInvitations,
-  resolveInvitation, revokeInvitation, INVITABLE_ROLES, INVITE_REJECTED, describeFailure,
+  resolveInvitation, revokeInvitation, acceptInvitation, INVITABLE_ROLES, INVITE_REJECTED, describeFailure,
 } from '../adminInvitations.js';
 
 const router = express.Router();
@@ -176,38 +176,14 @@ router.post('/api/auth/accept-invitation', authenticateToken, async (req, res) =
     }
 
     const { invitation } = resolved;
-    const now = new Date().toISOString();
-
-    await runInTransaction(db, async (tx) => {
-      await tx.prepare(`
-        UPDATE admin_invitations
-           SET status = 'accepted', resolved_at = ?, accepted_by = ?
-         WHERE id = ? AND status = 'pending'
-      `).run(now, req.user.id, invitation.id);
-
-      await tx.prepare(`
-        UPDATE users
-           SET role = ?, promoted_at = ?, promoted_by = ?, promotion_reason = ?,
-               token_version = token_version + 1
-         WHERE id = ?
-      `).run(ROLE.ADMIN, now, invitation.invited_by, invitation.reason, req.user.id);
-
-      await recordAudit(tx, {
-        adminId: invitation.invited_by,
-        action: 'ADMIN_INVITE_ACCEPTED',
-        targetUserId: req.user.id,
-        details: `${invitation.email} accepted the ${invitation.role} invitation. Reason on the invitation: ${invitation.reason}`,
-      });
-    });
-
-    /**
-     * `token_version` IS bumped here, unlike suspension — and for the opposite
-     * reason. The session was minted before this account held any administrative
-     * capability, and the JWT is what carries `tokenVersion`; re-issuing forces a
-     * clean session for the new authority rather than leaving one that predates
-     * it. Nothing is being hidden from the person, so there is no explanation to
-     * preserve.
-     */
+    /* The claim, the promotion and the audit are one decision taken against the
+       row as it is NOW — see acceptInvitation. A revocation that lands after the
+       check above is refused here with the same answer as any other failure. */
+    const accepted = await acceptInvitation(db, { invitation, userId: req.user.id });
+    if (!accepted.ok) {
+      console.warn(describeFailure(accepted.logReason));
+      return res.status(400).json({ error: INVITE_REJECTED.error, code: INVITE_REJECTED.code });
+    }
     res.json({
       accepted: true,
       role: invitation.role,

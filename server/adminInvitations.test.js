@@ -194,3 +194,87 @@ describe('invitationRefusal', () => {
     expect(res?.code).toBe('already_owner');
   });
 });
+
+/**
+ * Accepting acts on the invitation as it is WHEN THE ROLE CHANGES, not as it was
+ * when the token was checked.
+ *
+ * The route called `resolveInvitation` — which reads the row and finds it
+ * pending — and then, in a later transaction, marked it accepted and made the
+ * account an administrator. That UPDATE was guarded `WHERE status = 'pending'`
+ * but its row count was never read, so the promotion ran whether or not the
+ * claim succeeded. On PostgreSQL every statement is an await, so an owner's
+ * revocation can commit between the two: the invitation ends up revoked and the
+ * account ends up an administrator anyway.
+ *
+ * Driven deterministically by handing `acceptInvitation` the stale snapshot a
+ * racing request would hold.
+ */
+describe('acceptInvitation', () => {
+  /* Accounts of their own, outside the `inv-%` names the file's beforeEach
+     deletes: a successful acceptance writes a retained audit row naming the
+     inviting owner, and audit authors cannot be deleted by design. */
+  let seq = 0;
+  const actors = async () => {
+    seq += 1;
+    const owner = `acc-owner-${seq}`;
+    const targetId = `acc-target-${seq}`;
+    const email = `accept-${seq}@example.invalid`;
+    await addUser(owner, `${owner}@example.invalid`, 'super_admin');
+    await addUser(targetId, email, 'student');
+    const invite = () => mod.createInvitation(db, {
+      email, role: 'admin', reason: 'Elected to the board for 2026', invitedBy: owner, now: NOW,
+    });
+    const user = async () => db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+    return { targetId, invite, user };
+  };
+  const roleOf = async (id) => (await db.prepare('SELECT role FROM users WHERE id = ?').get(id)).role;
+
+  it('promotes the invited account and records the acceptance', async () => {
+    const a = await actors();
+    const { token } = await a.invite();
+    const resolved = await mod.resolveInvitation(db, { token, user: await a.user(), now: NOW });
+    expect(resolved.ok).toBe(true);
+
+    const result = await mod.acceptInvitation(db, { invitation: resolved.invitation, userId: a.targetId, now: NOW });
+    expect(result.ok).toBe(true);
+    expect(await roleOf(a.targetId)).toBe('admin');
+    const row = await db.prepare('SELECT status, accepted_by FROM admin_invitations WHERE id = ?').get(resolved.invitation.id);
+    expect(row).toMatchObject({ status: 'accepted', accepted_by: a.targetId });
+  });
+
+  it('does not promote when the invitation was revoked after it was checked', async () => {
+    const a = await actors();
+    const { token } = await a.invite();
+    const resolved = await mod.resolveInvitation(db, { token, user: await a.user(), now: NOW });
+    expect(resolved.ok).toBe(true);
+
+    // The owner revokes it while the acceptance is between its read and its write.
+    await mod.revokeInvitation(db, { id: resolved.invitation.id, now: NOW });
+
+    const result = await mod.acceptInvitation(db, { invitation: resolved.invitation, userId: a.targetId, now: NOW });
+    expect(result.ok).toBe(false);
+    expect(await roleOf(a.targetId)).toBe('student');
+    const audits = await db.prepare(
+      "SELECT COUNT(*) AS n FROM admin_audit_logs WHERE action = 'ADMIN_INVITE_ACCEPTED' AND target_user_id = ?"
+    ).get(a.targetId);
+    expect(Number(audits.n)).toBe(0);
+  });
+
+  it('does not promote twice from the same approval', async () => {
+    const a = await actors();
+    const { token } = await a.invite();
+    const resolved = await mod.resolveInvitation(db, { token, user: await a.user(), now: NOW });
+    expect((await mod.acceptInvitation(db, { invitation: resolved.invitation, userId: a.targetId, now: NOW })).ok).toBe(true);
+    expect((await mod.acceptInvitation(db, { invitation: resolved.invitation, userId: a.targetId, now: NOW })).ok).toBe(false);
+  });
+
+  it('does not promote on an invitation that expired between the check and the claim', async () => {
+    const a = await actors();
+    const { token } = await a.invite();
+    const resolved = await mod.resolveInvitation(db, { token, user: await a.user(), now: NOW });
+    const later = new Date(Date.parse(resolved.invitation.expires_at) + 1000);
+    expect((await mod.acceptInvitation(db, { invitation: resolved.invitation, userId: a.targetId, now: later })).ok).toBe(false);
+    expect(await roleOf(a.targetId)).toBe('student');
+  });
+});

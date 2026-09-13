@@ -6,6 +6,8 @@ import crypto from 'node:crypto';
  * scattered string is a silent deny, while a typo here cannot compile.
  */
 import { ROLE } from './authz.js';
+import { runInTransaction } from './db/connectionContext.js';
+import { recordAudit } from './auditLog.js';
 
 /**
  * Administrator invitations — §4.3, IV-1 … IV-15.
@@ -239,6 +241,59 @@ export async function resolveInvitation(db, { token, user, now = new Date() }) {
 }
 
 /** The owner-facing list (IV-14): address, role, inviter, age, expiry. */
+/**
+ * Accepts an invitation that `resolveInvitation` has approved — against the row
+ * as it is now, not as it was read.
+ *
+ * ── Why the claim decides, and its row count is read ──
+ *
+ * The route used to mark the invitation accepted with
+ * `UPDATE … WHERE id = ? AND status = 'pending'` and then promote the account in
+ * the same transaction without looking at whether that UPDATE matched. On
+ * PostgreSQL every statement between `resolveInvitation`'s read and this write is
+ * an await, so an owner's revocation (or the expiry passing, or a second
+ * acceptance) could land in between: the invitation stayed revoked and the
+ * account became an administrator anyway.
+ *
+ * Now the claim is the authority. It must move exactly one row that is still
+ * pending and still unexpired; otherwise the transaction is rolled back before
+ * the role changes or anything is audited, and the caller gets the same refusal
+ * shape as every other failure.
+ *
+ * @returns {Promise<{ok: true} | {ok: false, logReason: string}>}
+ */
+export async function acceptInvitation(db, { invitation, userId, now = new Date() }) {
+  const at = now.toISOString();
+  const lost = new Error('invitation no longer claimable');
+  try {
+    await runInTransaction(db, async (tx) => {
+      const claim = await tx.prepare(`
+        UPDATE admin_invitations
+           SET status = 'accepted', resolved_at = ?, accepted_by = ?
+         WHERE id = ? AND status = 'pending' AND expires_at > ?
+      `).run(at, userId, invitation.id, at);
+      if (Number(claim.changes) !== 1) throw lost;
+
+      await tx.prepare(`
+        UPDATE users
+           SET role = ?, promoted_at = ?, promoted_by = ?, promotion_reason = ?,
+               token_version = token_version + 1
+         WHERE id = ?
+      `).run(ROLE.ADMIN, at, invitation.invited_by, invitation.reason, userId);
+      await recordAudit(tx, {
+        adminId: invitation.invited_by,
+        action: 'ADMIN_INVITE_ACCEPTED',
+        targetUserId: userId,
+        details: `${invitation.email} accepted the ${invitation.role} invitation. Reason on the invitation: ${invitation.reason}`,
+      });
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err === lost) return { ok: false, logReason: 'the invitation stopped being pending before it could be claimed' };
+    throw err;
+  }
+}
+
 export async function listPendingInvitations(db, { now = new Date() } = {}) {
   const rows = await db.prepare(`
     SELECT i.id, i.email, i.role, i.reason, i.created_at, i.expires_at,
