@@ -7,8 +7,11 @@ development and nothing in the application reads them.
 |---|---|
 | `wevolunteer.service` | The main systemd service for the application |
 | `wevolunteer.env.example` | Template for server secrets (copied to `/etc/wevolunteer/wevolunteer.env`) |
-| `wevolunteer-backup.service` | Runs `bin/backup.sh` once |
+| `wevolunteer-backup.service` | Runs `bin/backup-postgres.sh` once |
 | `wevolunteer-backup.timer` | Fires the service nightly at 03:00 |
+| `wevolunteer-cf-ip-refresh.sh` | Rebuilds the Cloudflare allowlist in the host firewall |
+| `wevolunteer-cf-ip-refresh.service` | Runs the refresh once |
+| `wevolunteer-cf-ip-refresh.timer` | Fires it weekly, Monday 05:00 plus up to 2h of jitter |
 
 Everything else about deployment lives in
 [`docs/operations/pilot-deployment-runbook.md`](../docs/operations/pilot-deployment-runbook.md).
@@ -148,3 +151,124 @@ sudo systemctl edit wevolunteer-backup.service
 
 At minimum, check `systemctl list-timers` and the newest file in
 `/var/backups/wevolunteer` during the first week.
+
+---
+
+## Cloudflare origin allowlist
+
+Installed by `sudo ./deploy/provision.sh cloudflare-firewall`. **Run it only
+after DNS is proxied through Cloudflare and a real Origin CA certificate is
+installed.** Run it earlier and you cut the origin off from the only thing
+allowed to reach it.
+
+### What problem it solves
+
+With a proxied DNS record, visitors reach Cloudflare and Cloudflare reaches the
+origin. Nothing stops somebody who learns the origin IP from skipping that first
+hop. That matters beyond "they can see the site": nginx trusts
+`CF-Connecting-IP` to identify the real client, so a direct caller can *choose*
+the header's value and pick which rate-limit bucket to spend. The allowlist is
+what makes trusting that header sound.
+
+### The layer this changes
+
+Host `iptables`/`ip6tables` only, persisted by `netfilter-persistent` — the same
+mechanism the Oracle image already uses. **Not ufw**, which is not installed and
+would add a second, competing set of chains. Nothing here touches the OCI
+Security List; that is a separate filter in front of the host, editable only
+from the Oracle Console or CLI.
+
+Two chains are added, `CF-HTTPS` and `CF-HTTPS6`, each holding one `ACCEPT` per
+published Cloudflare range followed by a terminal `DROP`. A single `INPUT` rule
+jumps to them for `state NEW --dport 443`. Everything else in `INPUT` — port 22,
+loopback, `ESTABLISHED,RELATED`, ICMP, port 80, and Oracle's `InstanceServices`
+chain — is never addressed and therefore never disturbed.
+
+`DROP`, not `REJECT`, is deliberate: silence makes origin discovery by scanning
+slower and never confirms the host is listening.
+
+### Why port 80 stays open
+
+The scope of this change is 443. Port 80 serves only a 301 to HTTPS. Closing it
+too is defensible, but it is a separate decision and is not made here.
+
+### The weekly refresh, and why it exists
+
+Cloudflare adds ranges. A range the firewall does not know about is silently
+dropped, which reaches visitors as an intermittent Cloudflare **522** — a
+timeout that looks like application trouble and sends you debugging the wrong
+thing. `wevolunteer-cf-ip-refresh.timer` re-fetches weekly.
+
+Each run:
+
+1. Fetches `cloudflare.com/ips-v4` and `ips-v6`, retrying three times.
+2. Validates every entry: strict CIDR parse, correct family, count within sane
+   bounds, and **no prefix broader than `/8` (v4) or `/19` (v6)** — a truncated
+   or tampered response yielding `0.0.0.0/0` would otherwise silently undo the
+   entire allowlist.
+3. Diffs against what is live. **If nothing changed it exits without touching
+   the firewall.**
+4. Snapshots both tables to `/root/fw-backup/` (ten retained).
+5. Builds complete replacement chains, unreferenced, then checks their rule
+   count and terminal `DROP` before going near `INPUT`.
+6. Swaps with a single `iptables -R` on the existing jump — one rule replaced in
+   place, so there is no instant where 443 has no rule at all.
+7. **Verifies `https://app.wevolunteers.org/health` returns 200 through
+   Cloudflare.** Only then are the old chains retired and the new ones renamed
+   into place.
+8. Persists with `netfilter-persistent save`, then re-checks health.
+
+### Rollback
+
+**Automatic.** The old chain is deliberately *not* deleted before the health
+check passes, so rollback is a second `iptables -R` back onto a chain that is
+still resident — no restore, no flush, and the previous ranges are live again
+immediately. The script then removes its own `-new` chains and exits non-zero.
+
+**Manual**, if you need to undo a run after the fact:
+
+```bash
+sudo iptables-restore  < /root/fw-backup/rules.v4.<timestamp>
+sudo ip6tables-restore < /root/fw-backup/rules.v6.<timestamp>
+sudo netfilter-persistent save
+```
+
+To drop the restriction entirely and return 443 to the whole internet:
+
+```bash
+sudo systemctl disable --now wevolunteer-cf-ip-refresh.timer
+sudo iptables -R INPUT "$(iptables -L INPUT -n --line-numbers | awk '$2=="CF-HTTPS"{print $1}')" \
+     -p tcp -m state --state NEW --dport 443 -j ACCEPT
+sudo netfilter-persistent save
+```
+
+### Failure modes, and what each does
+
+| Failure | Behaviour |
+|---|---|
+| Cloudflare endpoint unreachable | Three retries, then exit non-zero. **Firewall untouched.** A stale-but-working allowlist beats a broken one. |
+| Response fails validation | Exit non-zero before any firewall call. |
+| New chain fails its structural check | Exit non-zero; the jump still points at the old chain. |
+| Health check fails after the swap | Automatic rollback, exit non-zero. |
+| `netfilter-persistent save` fails | Rollback rather than leave the boot configuration disagreeing with the live rules. |
+
+The unit exits non-zero on failure on purpose, so `systemctl --failed` shows it.
+A job that quietly exits 0 for six months while the allowlist rots is the exact
+failure this is meant to prevent. **There is no alerting on this unit until you
+add it**, for the same reason the backup unit says so — see *Alerting* above and
+use the same drop-in pattern.
+
+### What is and is not tested
+
+`server/deploy.cloudflareFirewall.test.js` is a **static** test. It reads these
+files and asserts the properties that make the design safe — validation bounds,
+terminal `DROP`, atomic `-R` swap, health check before commit, rollback before
+failure, no flush, `ProtectSystem=strict`, the timer's schedule and jitter, and
+that `provision.sh` installs everything with the right mode and owner. It runs
+no firewall commands and proves nothing about runtime packet handling.
+
+The runtime behaviour was exercised against the live host on 2026-09-13: the
+no-op path, a real range change, an unreachable-endpoint run (firewall checksum
+identical before and after), and a forced health-check failure that rolled back
+to the exact prior chain. Those results are recorded in the deployment history,
+not reproduced by `npm test`.

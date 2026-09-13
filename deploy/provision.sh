@@ -15,6 +15,14 @@
 #   sudo ./deploy/provision.sh verify     # prove what is actually running
 #   sudo ./deploy/provision.sh harden-ssh # LAST, and only after key auth is proven
 #
+#   sudo ./deploy/provision.sh cloudflare-firewall
+#                                         # restrict 443 to Cloudflare's ranges and
+#                                         # install the weekly refresh timer. Run it
+#                                         # ONLY once DNS is proxied through Cloudflare
+#                                         # and a real Origin CA cert is installed —
+#                                         # earlier, it cuts the origin off from the
+#                                         # only thing allowed to reach it.
+#
 # ── What it deliberately does NOT do ──
 #
 # Nothing outside this host. It cannot open a port in an OCI Security List, edit
@@ -87,7 +95,7 @@ cmd_audit() {
   # If nginx is listening and the port is open in OCI but nothing arrives, this
   # is usually why, and it is separate from ufw.
   if iptables -S INPUT 2>/dev/null | grep -qE 'REJECT|DROP'; then
-    warn "iptables has REJECT/DROP rules — Oracle images ship these; 80/443 may need allowing here as well as in ufw"
+    warn "iptables has REJECT/DROP rules — Oracle images ship these; 80/443 must be allowed HERE (this host uses iptables directly, not ufw)"
   fi
 
   log "SSH configuration"
@@ -106,7 +114,7 @@ cmd_audit() {
   echo "   docker      : $(have docker && docker --version || echo 'absent')"
 
   log "Services"
-  for s in ssh nginx wevolunteer wevolunteer-backup.timer unattended-upgrades snapd oracle-cloud-agent; do
+  for s in ssh nginx wevolunteer wevolunteer-backup.timer wevolunteer-cf-ip-refresh.timer unattended-upgrades snapd oracle-cloud-agent; do
     printf '   %-26s %s\n' "$s" "$(systemctl is-active "$s" 2>/dev/null || echo inactive)/$(systemctl is-enabled "$s" 2>/dev/null || echo disabled)"
   done
 
@@ -142,7 +150,7 @@ cmd_audit() {
    Whether the public IP is ephemeral         -> Console or OCI CLI
    Oracle IAM, budgets, cost controls         -> Console or OCI CLI
    Cloudflare DNS / proxy / TLS mode          -> Cloudflare account
-   If a port is open here and in ufw but the service is still unreachable from
+   If a port is open here in iptables but the service is still unreachable from
    the internet, the remaining explanation is almost always the OCI Security
    List, and it cannot be fixed from this host.
 EOF
@@ -159,7 +167,16 @@ cmd_packages() {
   apt-get update -qq
 
   log "Base packages"
-  apt-get install -y -qq ca-certificates curl gnupg git nginx ufw unattended-upgrades lsb-release
+  # iptables-persistent, NOT ufw. This changed after the first real deployment:
+  # the Oracle Ubuntu image already ships iptables rules (including the
+  # InstanceServices chain that Oracle Cloud Agent needs), and enabling ufw on
+  # top installs a second, competing set of chains. Production has never had ufw
+  # installed; provisioning a fresh host with it produced a box whose firewall
+  # did not match the one that was actually tested. Preseed the two prompts so
+  # the install stays non-interactive and does NOT overwrite existing rules.
+  echo iptables-persistent iptables-persistent/autosave_v4 boolean false | debconf-set-selections
+  echo iptables-persistent iptables-persistent/autosave_v6 boolean false | debconf-set-selections
+  apt-get install -y -qq ca-certificates curl gnupg git nginx iptables-persistent unattended-upgrades lsb-release
 
   # Node. Ubuntu 26.04 ships Node 22; package.json needs >=24 <25. NodeSource's
   # nodistro suite is version-independent and publishes arm64. NOT nvm: the unit
@@ -236,17 +253,43 @@ cmd_host() {
     warn "This script will not accept secrets on a command line."
   fi
 
-  log "Host firewall (ufw)"
-  # Order matters: allow SSH BEFORE enabling, or enabling ends the session that
-  # is running this script.
-  ufw allow 22/tcp  >/dev/null
-  ufw allow 80/tcp  >/dev/null
-  ufw allow 443/tcp >/dev/null
-  ufw default deny incoming  >/dev/null
-  ufw default allow outgoing >/dev/null
-  if ufw status | head -1 | grep -q inactive; then ufw --force enable >/dev/null; fi
-  ufw status verbose | sed 's/^/   /'
-  warn "ufw is the HOST firewall only. OCI's Security List is a separate filter in front of it."
+  log "Host firewall (iptables + netfilter-persistent)"
+  # ── Why not ufw ──
+  #
+  # The Oracle Ubuntu image arrives with a populated INPUT chain: ACCEPT for
+  # ESTABLISHED/RELATED, icmp, loopback and port 22, then a terminal
+  # `REJECT --reject-with icmp-host-prohibited`, plus an `InstanceServices`
+  # chain that Oracle Cloud Agent depends on. ufw would install a parallel set
+  # of chains and its own persistence, leaving two mechanisms disagreeing about
+  # the same packets. Production has never run ufw. This edits the rules that
+  # are already there.
+  #
+  # Nothing here flushes. Each rule is added only if absent, so re-running is a
+  # no-op, and port 22 is never touched — the session running this script
+  # survives.
+  local reject_pos
+  for port in 80 443; do
+    if iptables -C INPUT -p tcp -m state --state NEW --dport "$port" -j ACCEPT 2>/dev/null; then
+      ok "tcp/$port already allowed"
+    else
+      # Insert ABOVE the terminal REJECT, or append if this host has none.
+      reject_pos=$(iptables -L INPUT -n --line-numbers | awk '$2=="REJECT"{print $1; exit}')
+      if [ -n "$reject_pos" ]; then
+        iptables -I INPUT "$reject_pos" -p tcp -m state --state NEW --dport "$port" -j ACCEPT
+      else
+        iptables -A INPUT -p tcp -m state --state NEW --dport "$port" -j ACCEPT
+      fi
+      ok "allowed tcp/$port"
+    fi
+  done
+  iptables -C INPUT -p tcp -m state --state NEW --dport 22 -j ACCEPT 2>/dev/null \
+    || warn "tcp/22 has no explicit ACCEPT — NOT adding one blindly; check before you log out"
+  netfilter-persistent save >/dev/null 2>&1 && ok "rules persisted to /etc/iptables/rules.v{4,6}" \
+    || warn "netfilter-persistent save failed — rules are live but will not survive reboot"
+  iptables -L INPUT -n --line-numbers | sed 's/^/   /'
+  warn "This is the HOST firewall only. OCI's Security List is a separate filter in front of it."
+  warn "Port 443 is still open to the whole internet here. Run '$0 cloudflare-firewall'"
+  warn "to restrict it to Cloudflare once DNS is proxied and the origin cert is installed."
 
   log "Timezone / NTP"
   timedatectl set-timezone UTC 2>/dev/null || true
@@ -310,6 +353,92 @@ cmd_app() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# cloudflare-firewall — restrict 443 to Cloudflare, and keep it current
+#
+# Run this ONLY once DNS is proxied through Cloudflare and a real Origin CA
+# certificate is installed. Run it earlier and you cut the origin off from the
+# only thing allowed to reach it.
+#
+# The lockdown itself is performed by wevolunteer-cf-ip-refresh.sh rather than
+# duplicated here. That script is the one with fetch validation, atomic chain
+# replacement, a health check and rollback; a second implementation living in
+# the provisioner would be the one nobody tests. All this function does is
+# create the chain/jump *structure* the script expects — permissively, so
+# behaviour is unchanged — and then let the script perform the actual
+# restriction and prove it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Ensures `<chain>` exists and INPUT jumps to it for tcp/443, without changing
+# what is currently allowed. The placeholder chain is a bare ACCEPT: exactly
+# equivalent to the blanket rule it replaces, so there is no window in which
+# 443 is more open OR more closed than it was a moment ago.
+ensure_cf_chain() {
+  local cmd=$1 chain=$2 pos shadowed
+  if $cmd -S "$chain" >/dev/null 2>&1; then
+    ok "$chain exists"
+  else
+    $cmd -N "$chain"
+    $cmd -A "$chain" -j ACCEPT
+    ok "created $chain (permissive placeholder — the refresh script fills it in)"
+  fi
+
+  if $cmd -C INPUT -p tcp -m state --state NEW --dport 443 -j "$chain" 2>/dev/null; then
+    ok "INPUT already jumps to $chain for tcp/443"
+    return 0
+  fi
+
+  pos=$($cmd -L INPUT -n --line-numbers | awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}')
+  if [ -n "$pos" ]; then
+    $cmd -I INPUT "$pos" -p tcp -m state --state NEW --dport 443 -j "$chain"
+    shadowed=$($cmd -L INPUT -n --line-numbers | awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}')
+    [ -n "$shadowed" ] && $cmd -D INPUT "$shadowed"
+    ok "jump inserted at INPUT $pos, blanket ACCEPT removed"
+  else
+    pos=$($cmd -L INPUT -n --line-numbers | awk '$2=="REJECT" || $2=="DROP" {print $1; exit}')
+    if [ -n "$pos" ]; then
+      $cmd -I INPUT "$pos" -p tcp -m state --state NEW --dport 443 -j "$chain"
+    else
+      $cmd -A INPUT -p tcp -m state --state NEW --dport 443 -j "$chain"
+    fi
+    ok "jump added (no blanket 443 rule was present)"
+  fi
+}
+
+cmd_cloudflare_firewall() {
+  need_root
+  [ -f "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh" ] || die "no checkout at $APP_DIR"
+
+  log "Refresh script and units"
+  # /usr/local/sbin, not $APP_DIR/bin: this runs as root every week, and
+  # $APP_DIR is a git checkout. Keeping a root-executed script out of the tree
+  # the application can be redeployed into removes an obvious escalation path.
+  install -o root -g root -m 0755 \
+    "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh" /usr/local/sbin/wevolunteer-cf-ip-refresh.sh
+  install -o root -g root -m 0644 \
+    "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.service" /etc/systemd/system/
+  install -o root -g root -m 0644 \
+    "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.timer" /etc/systemd/system/
+  systemctl daemon-reload
+  ok "installed /usr/local/sbin/wevolunteer-cf-ip-refresh.sh (root:root 0755)"
+
+  log "Chain structure"
+  ensure_cf_chain iptables  CF-HTTPS
+  ensure_cf_chain ip6tables CF-HTTPS6
+
+  log "Applying the Cloudflare allowlist (via the refresh script)"
+  # If this fails it has already rolled itself back, and 443 is left exactly as
+  # it was. Failing the provisioning run is correct: a half-restricted origin is
+  # worse than an unrestricted one, because it looks finished.
+  /usr/local/sbin/wevolunteer-cf-ip-refresh.sh \
+    || die "the allowlist was not applied — 443 is unchanged; read the output above"
+
+  log "Weekly timer"
+  systemctl enable --now wevolunteer-cf-ip-refresh.timer
+  ok "timer: $(systemctl is-active wevolunteer-cf-ip-refresh.timer)/$(systemctl is-enabled wevolunteer-cf-ip-refresh.timer)"
+  systemctl list-timers wevolunteer-cf-ip-refresh.timer --no-pager | sed 's/^/   /'
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # verify — prove it, do not assert it
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_verify() {
@@ -353,7 +482,40 @@ cmd_verify() {
   echo "   (anything above other than :80 and :443 should be justified)"
 
   log "Firewall"
-  ufw status verbose 2>/dev/null | head -6 | sed 's/^/   /'
+  iptables -L INPUT -n --line-numbers 2>/dev/null | sed 's/^/   /'
+  iptables -C INPUT -p tcp -m state --state NEW --dport 22 -j ACCEPT 2>/dev/null \
+    && ok "tcp/22 allowed" || { bad "tcp/22 has no ACCEPT rule"; fails=$((fails+1)); }
+  if systemctl is-enabled netfilter-persistent >/dev/null 2>&1; then
+    ok "netfilter-persistent enabled (rules survive reboot)"
+  else
+    bad "netfilter-persistent not enabled — firewall is lost on reboot"; fails=$((fails+1))
+  fi
+
+  log "Cloudflare origin allowlist (optional — only after DNS is proxied)"
+  if iptables -S CF-HTTPS >/dev/null 2>&1; then
+    local cf_n cf_last
+    cf_n=$(iptables -S CF-HTTPS | grep -c ' -s ')
+    cf_last=$(iptables -S CF-HTTPS | tail -1 | awk '{print $NF}')
+    if [ "$cf_last" = "DROP" ] && [ "$cf_n" -ge 8 ]; then
+      ok "CF-HTTPS: $cf_n ranges, terminal DROP"
+    else
+      bad "CF-HTTPS present but looks wrong ($cf_n ranges, terminal $cf_last)"; fails=$((fails+1))
+    fi
+    iptables -C INPUT -p tcp -m state --state NEW --dport 443 -j CF-HTTPS 2>/dev/null \
+      && ok "INPUT jumps to CF-HTTPS for tcp/443" \
+      || { bad "CF-HTTPS exists but INPUT does not jump to it — 443 is NOT restricted"; fails=$((fails+1)); }
+    if iptables -S INPUT | grep -q -- '--dport 443 -j ACCEPT'; then
+      bad "a blanket 443 ACCEPT still exists — the allowlist is bypassed"; fails=$((fails+1))
+    else
+      ok "no blanket 443 ACCEPT"
+    fi
+    local tstate; tstate=$(systemctl is-enabled wevolunteer-cf-ip-refresh.timer 2>/dev/null || echo missing)
+    [ "$tstate" = "enabled" ] && ok "weekly refresh timer enabled" \
+      || { bad "refresh timer is $tstate — the allowlist will go stale and cause 522s"; fails=$((fails+1)); }
+  else
+    warn "CF-HTTPS chain absent — 443 is open to the internet."
+    warn "That is expected before Cloudflare is in front. Run '$0 cloudflare-firewall' after."
+  fi
 
   log "Recent application log"
   journalctl -u wevolunteer -n 15 --no-pager 2>/dev/null | sed 's/^/   /'
@@ -416,5 +578,6 @@ case "${1:-audit}" in
   app)        cmd_app ;;
   verify)     cmd_verify ;;
   harden-ssh) cmd_harden_ssh ;;
-  *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh}" ;;
+  cloudflare-firewall) cmd_cloudflare_firewall ;;
+  *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh|cloudflare-firewall}" ;;
 esac

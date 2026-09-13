@@ -1,0 +1,22 @@
+[Unit]
+Description=Weekly refresh of the Cloudflare origin allowlist
+Documentation=file:///usr/local/sbin/wevolunteer-cf-ip-refresh.sh
+
+[Timer]
+# Monday 05:00 local. Clear of the 03:00 database backup so the two never
+# contend, and well outside any plausible sign-up or event window.
+OnCalendar=Mon *-*-* 05:00:00
+
+# Cloudflare publishes these lists to every origin on the internet. Firing at
+# exactly 05:00:00 alongside everyone else's cron is how you turn a routine
+# fetch into a thundering herd. Spread it over two hours.
+RandomizedDelaySec=2h
+
+# If the host was off on Monday, run once it is back rather than skipping the
+# week. A missed week is a week of drift toward 522s.
+Persistent=true
+
+Unit=wevolunteer-cf-ip-refresh.service
+
+[Install]
+WantedBy=timers.target

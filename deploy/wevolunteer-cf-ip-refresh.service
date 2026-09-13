@@ -1,0 +1,43 @@
+[Unit]
+Description=Refresh the Cloudflare origin allowlist (host firewall, port 443)
+Documentation=file:///usr/local/sbin/wevolunteer-cf-ip-refresh.sh
+# Cloudflare must be reachable for this to do anything. Without the network the
+# script fails its fetch and changes nothing, which is the safe outcome, but
+# there is no reason to burn a run on it.
+After=network-online.target netfilter-persistent.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# Root is required: this manipulates iptables and writes the persisted rules.
+# The script itself is the security boundary — it only ever touches its own
+# CF-HTTPS/CF-HTTPS6 chains and the single INPUT rule that jumps to them.
+ExecStart=/usr/local/sbin/wevolunteer-cf-ip-refresh.sh
+
+# ProtectHome is deliberately NOT set: rollback snapshots live in
+# /root/fw-backup alongside the ones taken when the allowlist was first
+# installed, and splitting them across two locations would mean an operator
+# looking for "the backups" finds half of them.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/etc/iptables
+ReadWritePaths=/root/fw-backup
+
+# A failure here is meaningful — it means the allowlist is going stale, which
+# eventually shows up as Cloudflare 522s. Let it surface in `systemctl --failed`
+# rather than exiting 0 and rotting silently.
+#
+# THERE IS NO ALERTING ON THIS UNIT UNTIL YOU ADD IT, for the same reason the
+# backup unit says so: an alert target is environment-specific and inventing one
+# here would produce a dangling OnFailure= that systemd logs and ignores.
+#   sudo systemctl edit wevolunteer-cf-ip-refresh.service
+#   # [Unit]
+#   # OnFailure=your-alert-unit@%n.service
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
