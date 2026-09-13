@@ -7,6 +7,8 @@ import { db } from '../db.js';
 import { isSessionRevoked } from '../utils.js';
 import { configureRealtimeAdapter } from './adapter.js';
 
+export const TYPING_PACKET_LIMIT_BYTES = 8 * 1024;
+
 const SESSION_CHECK_INTERVAL = Number(process.env.SOCKET_SESSION_CHECK_INTERVAL_MS) || 5 * 60 * 1000;
 
 /**
@@ -122,7 +124,19 @@ export function initSocketServer(httpServer) {
     cors: {
       origin: (origin, cb) => cb(null, isAllowedOrigin(origin)),
       credentials: true
-    }
+    },
+    /**
+     * The largest message a CLIENT may send, in bytes. Socket.IO's default is
+     * one megabyte per packet.
+     *
+     * The only events a browser sends here are the two typing indicators, whose
+     * payload is one conversation id. Everything else this server carries flows
+     * outward. A megabyte per packet is therefore a megabyte of parsing and
+     * buffering handed to any signed-in account for nothing, on a host sized
+     * for $0. A packet over the limit closes that client's connection; the
+     * client reconnects, which is the correct outcome for a client that sent it.
+     */
+    maxHttpBufferSize: TYPING_PACKET_LIMIT_BYTES,
   });
 
   setRealtimeServer(io);
@@ -166,6 +180,23 @@ export function initSocketServer(httpServer) {
       }
 
       const payload = jwt.verify(token, JWT_SECRET);
+
+      /**
+       * A half-finished sign-in is not a session — the same rule
+       * `authenticateToken` enforces for HTTP, and it was missing here.
+       *
+       * `wev_preauth` is signed with this secret and carries `id`, `tokenVersion`
+       * and `jti`: every claim the checks below consult. It proves the password
+       * and not the second factor. Accepted here, it joined `user:<id>`, which
+       * receives the account's messages and notifications as they arrive — so
+       * holding an administrator's password was enough to read their inbox live,
+       * with two-factor authentication switched on. A client sets its own cookie
+       * header; that the browser keeps the two tokens in differently named
+       * cookies protects nothing. `realtime.handshakeHardening.test.js`.
+       */
+      if (payload?.preauth) {
+        return next(new Error('Authentication error: Sign-in not finished'));
+      }
 
       /**
        * `payload.id`, not `payload.userId`.
@@ -249,12 +280,23 @@ export function initSocketServer(httpServer) {
       return true;
     }
 
-    socket.on('typing.start', async ({ conversationId }) => {
-      await handleTypingEvent(socket, conversationId, 'typing.start', checkTypingRateLimit);
+    /**
+     * The payload is whatever the client sent, including nothing at all.
+     *
+     * These were `async ({ conversationId }) => …`. An emit with no argument, or
+     * with `null`, throws while destructuring — inside an async function, so it
+     * becomes a rejected promise that Socket.IO does not await. `shutdown.js`
+     * treats `unhandledRejection` as fatal and drains the process, which made
+     * `socket.emit('typing.start')` from any signed-in browser console a way to
+     * stop the platform, repeatably. The id is read defensively and the handler
+     * cannot reject; see `realtime.handshakeHardening.test.js`.
+     */
+    socket.on('typing.start', (payload) => {
+      handleTypingEvent(socket, payload?.conversationId, 'typing.start', checkTypingRateLimit);
     });
-    
-    socket.on('typing.stop', async ({ conversationId }) => {
-      await handleTypingEvent(socket, conversationId, 'typing.stop', checkTypingRateLimit);
+
+    socket.on('typing.stop', (payload) => {
+      handleTypingEvent(socket, payload?.conversationId, 'typing.stop', checkTypingRateLimit);
     });
   });
   
@@ -262,10 +304,13 @@ export function initSocketServer(httpServer) {
 }
 
 async function handleTypingEvent(socket, conversationId, eventType, checkLimit) {
-  if (!conversationId) return;
-  if (!checkLimit()) return;
-  
+  /* A conversation id is a string. Anything else — an object, a number, an
+     array — is not a question worth a database round trip, and an object is
+     not a value a driver should be asked to bind. */
+  if (typeof conversationId !== 'string' || !conversationId || conversationId.length > 200) return;
+
   try {
+    if (!checkLimit()) return;
     const participant = await db.prepare('SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id = ?').get(conversationId, socket.data.user.id);
     if (!participant) return;
     
