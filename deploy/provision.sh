@@ -305,7 +305,15 @@ cmd_host() {
   log "Directories"
   install -d -o root     -g "$APP_USER" -m 0750 "$ENV_DIR"
   install -d -o root     -g root        -m 0755 "$APP_DIR"
-  install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$STATE_DIR" "$STATE_DIR/uploads" "$STATE_DIR/exports"
+  # 0751 on the state directory and uploads/: nginx (www-data) serves /uploads
+  # straight from disk, so it must be able to TRAVERSE both, and nothing more —
+  # the trailing 1 is search without read, so neither can be listed. These were
+  # 0750, which made every uploaded picture a 403 in production from the day the
+  # host was provisioned; there were no uploads yet, so nobody saw it (found
+  # 2026-09-13 during the rollout). exports/ stays 0750: nothing but the app
+  # reads it, and the worker creates each export 0700 on top of that.
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0751 "$STATE_DIR" "$STATE_DIR/uploads"
+  install -d -o "$APP_USER" -g "$APP_USER" -m 0750 "$STATE_DIR/exports"
   install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$BACKUP_DIR"
   for d in "$ENV_DIR" "$APP_DIR" "$STATE_DIR" "$BACKUP_DIR"; do
     printf '   %-28s %s\n' "$d" "$(stat -c '%U:%G %a' "$d")"
@@ -413,6 +421,9 @@ cmd_app() {
   # The app must be able to write uploads/exports, and must NOT be able to
   # write its own code.
   chown -R "$APP_USER:$APP_USER" "$STATE_DIR"
+  # And nginx must be able to reach uploads/ (see cmd_host). Re-asserted here so a
+  # host provisioned before that fix is corrected by the next release.
+  chmod o+x "$STATE_DIR" "$STATE_DIR/uploads"
 
   log "systemd units"
   install -m 0644 "$APP_DIR/deploy/wevolunteer.service"        /etc/systemd/system/

@@ -481,6 +481,16 @@ describe('the release path does not reintroduce a credential on the host', () =>
     expect(body.indexOf('systemctl daemon-reload')).toBeLessThan(restart);
   });
 
+  it('lets nginx traverse to uploaded pictures without listing anything', () => {
+    /* nginx serves /uploads from /var/lib/wevolunteer/uploads as www-data. With
+       both directories 0750 wev:wev every picture was a 403 in production. */
+    const src = code(provision);
+    expect(src).toMatch(/install -d -o "\$APP_USER" -g "\$APP_USER" -m 0751 "\$STATE_DIR" "\$STATE_DIR\/uploads"/);
+    expect(src).toMatch(/-m 0750 "\$STATE_DIR\/exports"/);
+    const app = src.slice(src.indexOf('cmd_app() {'));
+    expect(app.slice(0, app.indexOf('\n}\n'))).toContain('chmod o+x "$STATE_DIR" "$STATE_DIR/uploads"');
+  });
+
   it('documents both forms where an operator will look', () => {
     expect(provision).toContain('Two deployment forms, both supported');
     const readme = readFileSync(path.join(repoRoot, 'deploy', 'README.md'), 'utf8');

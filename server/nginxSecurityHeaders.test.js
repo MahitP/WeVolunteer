@@ -116,6 +116,12 @@ describe('the nginx site config', () => {
     expect(code(CONF)).not.toMatch(/^\s*gzip\s+on\s*;/m);
   });
 
+  it('never marks an error response as cacheable for a year', () => {
+    /* `add_header … always` attaches the header to 404s and 403s too, and
+       Cloudflare cached a 403 for an uploads URL for that reason. */
+    expect(code(CONF)).not.toMatch(/add_header\s+Cache-Control\s+"public[^"]*immutable"\s+always/);
+  });
+
   it('is provisioned: the snippet is installed before nginx -t', () => {
     const provision = code(readFileSync(path.join(ROOT, 'deploy/provision.sh'), 'utf8'));
     const install = provision.indexOf('/etc/nginx/snippets/wevolunteers-security-headers.conf');
