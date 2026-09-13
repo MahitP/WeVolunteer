@@ -478,7 +478,16 @@ ensure_cf_chain() {
     return 0
   fi
 
-  pos=$(awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
+  # The jump must sit ABOVE every rule that would accept tcp/443 on its own: the
+  # Cloudflare chain ends in DROP, so anything below the jump is unreachable,
+  # but anything above it lets the whole internet reach the origin past
+  # Cloudflare. This used to look only for the exact `state NEW tcp dpt:443`
+  # rendering, so a hand-added rule written `--dport 443 -m conntrack`, or a
+  # multiport list containing 443, was not recognised — and the jump could land
+  # below it. Any tcp ACCEPT naming port 443 now counts. Only the canonical
+  # blanket rule is deleted afterwards; other spellings are left in place, below
+  # the jump, where they can match nothing.
+  pos=$(awk '$2=="ACCEPT" && ($3=="tcp" || $3=="6") && (/dpt:443([^0-9]|$)/ || /dports ([0-9]+[,:])*443([^0-9]|$)/) {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
   if [ -n "$pos" ]; then
     $cmd -I INPUT "$pos" -p tcp -m state --state NEW --dport 443 -j "$chain"
     shadowed=$(awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
