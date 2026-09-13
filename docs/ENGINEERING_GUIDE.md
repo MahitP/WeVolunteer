@@ -994,11 +994,15 @@ once the commit exists.
 
 ### 6.7 Known accepted advisories
 
-> **Status, 2026-09-03: `npm audit` reports zero entries at every severity**,
-> with and without `--omit=dev`. The react-router entries in item 1 no longer
-> appear against the pinned `react-router-dom@7.18.2`, and item 3 was closed on
-> this date. The assessments below are kept regardless of the count: the
-> reasoning is what saves the next person re-deriving it if an entry returns.
+> **Status, 2026-09-13: `npm audit --omit=dev` reports zero entries.** The full
+> tree reports three moderate entries, which are the one development-only
+> advisory in item 4. The `vitest`/`@vitest/mocker` entry that sat beside it was
+> closed on this date by the 4.1.11 patch release.
+>
+> *2026-09-03:* zero entries at every severity. The react-router entries in item
+> 1 no longer appear against the pinned `react-router-dom@7.18.2`, and item 3 was
+> closed on that date. The assessments below are kept regardless of the count:
+> the reasoning is what saves the next person re-deriving it if an entry returns.
 > Counts in this section go stale by design; the assessments do not.
 
 `npm audit` reports **three** high-severity entries, which are **two** distinct
@@ -1103,6 +1107,27 @@ override stands. That is an npm reporting quirk for overrides under workspaces,
 not a broken tree — a tree built entirely by npm from the same manifests
 reproduces it exactly, and `npm ci` installs cleanly with 0 vulnerabilities. No
 gate runs `npm ls`.
+
+**4 — uuid missing buffer bounds check** (three moderate entries: `uuid`,
+`hyperid`, `autocannon`).
+[GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq).
+Accepted, development-only, and unreachable even there.
+
+- **It never ships.** `autocannon` is the HTTP load generator behind
+  `bin/load-test.mjs`, a root `devDependency`; `npm audit --omit=dev` does not
+  list it.
+- **The vulnerable call is not made.** The advisory is a missing bounds check in
+  `v3`/`v5`/`v6` *when a caller passes its own output buffer*. `hyperid` is the
+  only consumer, and `node_modules/hyperid/uuid-node.js` uses `crypto.randomUUID`
+  whenever it exists — which it does on every Node this repository supports —
+  falling back to `uuid.v4` with no buffer only when it does not. No version of
+  the affected functions is reached.
+- **The offered remedy is worse than the advisory.** `npm audit fix --force`
+  proposes `autocannon@2.0.1`, a downgrade of six majors of a tool whose
+  measurements are recorded in `docs/operations/`. Not taken.
+
+**Remove this entry** when an `autocannon` release depends on a `hyperid` that
+depends on `uuid >= 11.1.1`.
 
 ### 6.8 Step-up re-authentication (AAL2)
 
