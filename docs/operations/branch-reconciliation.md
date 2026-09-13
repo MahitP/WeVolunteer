@@ -2,9 +2,94 @@
 
 **Originally written:** 2026-09-06, for `claude/release-candidate`
 **Superseded:** 2026-09-06 — the work of every branch below reached `main`.
-**Corrected and closed:** 2026-09-09 at the release freeze. See the first
-section; the 2026-09-06 header claimed the branches had been *deleted* and that
+**Corrected and closed:** 2026-09-09 at the release freeze.
+**Completed:** 2026-09-13 — the last branch holding unmerged work was carried to
+`main`. See the first section; that is the current record. The 2026-09-09
+section follows it; the 2026-09-06 header claimed the branches had been *deleted* and that
 `main` was the only ref, and that is not true of this clone.
+
+---
+
+## 2026-09-13 — branch completion pass
+
+**Base:** `main` at `abfa9df` (three commits ahead of `origin/main` at `6b1c1d6`,
+unpushed). Production was live and was not touched: no deploy, no restart, no
+database, DNS, Cloudflare, OCI or firewall change.
+
+Every ref was compared by **patch-id and by file-by-file content**, not by name
+or commit graph, because this repository's histories were rewritten and
+identical work carries different hashes on each side.
+
+### What was found
+
+| Ref | Unique by patch-id | Disposition |
+|---|---|---|
+| `claude/trunk-security-port` | 4 | **Carried to `main`** — see below. The only ref holding work `main` did not have. |
+| `claude/release-candidate` | 5 | **Superseded.** All five verified present on `main` by content: the share-link timezone assertion and `TZ=America/New_York` in CI, `insertionTiebreak` in the roster-export audit test, the cwd/ROOT CA resolution in `engine.js`, the Brevo email research, and the `sharp`/`nodemailer` lockfile versions (`main` also has `multer` 2.3.0, which the branch lacks). Merging it would still delete the perf-scaling work. |
+| `claude/wevolunteer-perf-scaling-ad3613` | 2 | **Superseded.** `migrations.convergence.test.js`, the environment × database matrix in `productionDatabaseGuard.test.js` and the three-key `idx_events_browse_order` are all on `main`; the only differences in migration 066 are comment wording. The share-link assertion is the same fix as above. |
+| `claude/wevolunteer-production-architecture-89e97f` | 0 | **Merged** (via the release candidate). |
+| `claude/owner-center-certificate-upgrade-7eef59` | 0 | **Merged** (via the release candidate). |
+| Closed PR #4, `feature/social-directory-and-organizations` | 0 of 332 | **Superseded.** Every commit is on `main` by patch-id. The files it has that `main` lacks were deleted on `main` deliberately (`CertificateModal.jsx` in `ea4df89`, `LocationDisplay.jsx` in `11a26c7`, the unwired e2e harness in `4045712`). |
+| `.claude/worktrees/rc-final` (on `claude/release-candidate`) | — | **Superseded, left untouched.** Six uncommitted changes, last modified 2026-09-09. Its `server/app.js` hunk and `server/apiCacheIsolation.test.js` are byte-identical to `trunk-security-port`'s `cfa5be8`, so it is a second copy of work now on `main`. It belongs to another session and was neither modified nor cleaned. |
+
+The files that branches carry and `main` lacks — `LegalUpdateModal.jsx`,
+`LocationDisplay.jsx`, `CertificateModal.jsx` — were each deleted on `main` in a
+named commit, not lost.
+
+The 28 tags are rollback and pre-rewrite snapshots (`backup/*`, `checkpoint/*`,
+`preintegration/*`, releases). They are archives by design and were not
+treated as unfinished work.
+
+### What `claude/trunk-security-port` held, and how each piece landed
+
+| Branch commit | On `main` as | Notes |
+|---|---|---|
+| `cfa5be8` origin `no-store` | `3b4dd72` | **Not verbatim.** The branch mounted it beside cookie-parser and said it covered responses that never reach a router. The CORS 403 and the 413/400 body refusals are produced above that point and did not carry it — shown by mutation: at the branch's position three new cases fail. Moved ahead of the `/api` CORS layer; seven on-the-wire cases, plus a production-boot probe that the hashed bundle keeps `immutable`. |
+| `f5c9db2` dependency advisories | `ad0dac3` | `multer`/`sharp`/`nodemailer` were already on `main`. `vitest` 4.1.11 was not, and closes the advisory the freeze note said needed a major bump. The remaining `uuid` advisory is assessed in ENGINEERING_GUIDE §6.7 item 4. |
+| `0dc9080` deploy template and email research | `10f1d29` | Reconciled against `main`'s document (one conflict, resolved to `main`'s row). `CORS_ORIGINS` and `docs/operations/resend-mcp.md` carried the same wrong host and were fixed too. |
+| `a31aa02` $0 infrastructure report | `87821b8` | Added with a status note; the report's own record of a production boot on Pinecone namespace `development` produced a template comment. |
+
+`security-review` was run over the integrated diff before it reached `main`: no
+finding at the reporting threshold. Two below-threshold observations about
+`deploy/provision.sh` are recorded in "Still open" below rather than dropped.
+
+### Verification on the integrated tree
+
+| Check | Result |
+|---|---|
+| `npm test` (SQLite) | 618 files passed, 10 skipped; **10,400 passed, 0 failed**, 176 skipped |
+| `npm run test:postgres` | 397 files passed, 2 skipped; **6,896 passed, 0 failed**, 41 skipped |
+| `npm run lint` | clean |
+| `npm run build` | clean |
+| `npm run scan:bundle` | 172 files, CLEAN (`VITE_AMPLITUDE_API_KEY` public by design) |
+| `npm audit --omit=dev` | 0 vulnerabilities |
+| `npm ci --ignore-scripts` from a clean copy | installs; lockfile byte-identical |
+| `bash -n` on every tracked shell script | all nine parse |
+
+The skips are environment-gated rather than ignored: PostgreSQL-only cases in the
+SQLite run and SQLite-only cases in the PostgreSQL run, live-service checks that
+need real vendor credentials, the Supavisor pooler case, and the legal-hash
+enforcement mode.
+
+### Still open — none of it autonomous
+
+- **Confirm the live host's values match the corrected template.** If
+  `/etc/wevolunteer/wevolunteer.env` was written from the old template, check
+  `APP_URL`, `CORS_ORIGINS` and `OAUTH_REDIRECT_URI` name `app.wevolunteers.org`,
+  and that `PINECONE_NAMESPACE` is unset or `production`. If a Resend webhook was
+  created, confirm its endpoint is `https://app.wevolunteers.org/api/webhooks/resend`.
+  Reading a production secret file is an owner action, not a repository one.
+- **Two hardening notes on `deploy/provision.sh`** (below the security-review
+  threshold, and in commits another session landed today): `ensure_cf_chain`
+  recognises an existing blanket 443 rule only as `iptables -L` renders the
+  `-m state --state NEW --dport 443` spelling (`provision.sh`, the awk match), so a hand-written rule in another spelling would sit above the
+  Cloudflare jump and keep 443 open; and `cmd_host` edits only the IPv4 table,
+  where the `ufw default deny incoming` it replaced also governed IPv6 under
+  ufw's default `IPV6=yes`. Neither is exploitable
+  as written — real-IP trust stays limited to Cloudflare's ranges, and OCI's
+  Security List filters in front — but both belong in that script's next change.
+- **Branch deletion** is a separate decision. Every non-`main` branch above is
+  either merged or superseded; none holds work that `main` lacks.
 
 ---
 

@@ -286,6 +286,11 @@ Needed to convert the proven upload *integration* into a real provider drill.
 
 ### 6.4 Merge `claude/trunk-security-port` after launch
 
+> **Done, 2026-09-13.** Carried to `main` rather than merged, and the `no-store`
+> middleware was moved above CORS and the body parsers on the way, because the
+> branch's placement missed three refusal paths. See
+> `docs/operations/branch-reconciliation.md`, 2026-09-13.
+
 Four commits, one of them a genuine security improvement (`Cache-Control:
 no-store` from the application rather than only the proxy). Not urgent — the
 shipped nginx config already sets it — and should be merged on its own terms
