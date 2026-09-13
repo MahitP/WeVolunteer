@@ -108,6 +108,14 @@ describe('the nginx site config', () => {
     expect(outsideLocations).not.toMatch(/add_header/);
   });
 
+  it('never repeats a directive Ubuntu\'s nginx.conf already sets at http level', () => {
+    /* `gzip on;` is set by /etc/nginx/nginx.conf on Ubuntu, and a second copy
+       at http level makes `nginx -t` fail. Production was hand-patched on
+       2026-09-12 to remove it; the repository kept it, so provisioning would
+       have installed a config that cannot load. */
+    expect(code(CONF)).not.toMatch(/^\s*gzip\s+on\s*;/m);
+  });
+
   it('is provisioned: the snippet is installed before nginx -t', () => {
     const provision = code(readFileSync(path.join(ROOT, 'deploy/provision.sh'), 'utf8'));
     const install = provision.indexOf('/etc/nginx/snippets/wevolunteers-security-headers.conf');

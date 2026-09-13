@@ -369,6 +369,17 @@ cmd_host() {
 # ─────────────────────────────────────────────────────────────────────────────
 # app — build and install
 # ─────────────────────────────────────────────────────────────────────────────
+# Waits up to 60s for the application to answer /ready with 200.
+wait_for_ready() {
+  local i code
+  for i in $(seq 1 30); do
+    code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:$APP_PORT/ready" 2>/dev/null || true)
+    [ "$code" = "200" ] && { ok "ready after ~$((i * 2))s"; return 0; }
+    sleep 2
+  done
+  return 1
+}
+
 cmd_app() {
   need_root
   app_dir_has_source \
@@ -423,8 +434,23 @@ cmd_app() {
     warn "$HEARTBEATS_FILE created from the template with every heartbeat unset."
     warn "Until a human fills it in, backups, the firewall refresh and host health are NOT alerted."
   fi
+  # The Cloudflare refresh unit is installed by `cloudflare-firewall`, which also
+  # mutates the firewall. When that step has already run on this host, keep its
+  # unit file current here (it gained failure reporting) without touching any
+  # rule. A host that never ran it gets nothing.
+  if [ -f /etc/systemd/system/wevolunteer-cf-ip-refresh.service ]; then
+    install -o root -g root -m 0644 "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.service" /etc/systemd/system/
+    ok "refreshed wevolunteer-cf-ip-refresh.service (unit file only; firewall untouched)"
+  fi
   systemctl daemon-reload
-  systemctl enable --now wevolunteer.service
+  # RESTART, not `enable --now`. `--now` starts a unit that is stopped and does
+  # nothing to one that is running — so on a live host every previous run of this
+  # step rebuilt the tree and left the old process serving the old code, with
+  # .deployed-sha claiming otherwise. Observed on production 2026-09-13: the
+  # process predated the stamp by ten hours. `restart` also starts a stopped unit.
+  systemctl enable wevolunteer.service
+  systemctl restart wevolunteer.service
+  wait_for_ready || die "wevolunteer did not become ready after restart — see: journalctl -u wevolunteer -n 80"
   systemctl enable --now wevolunteer-backup.timer
   systemctl enable --now wevolunteer-host-check.timer
   ok "wevolunteer: $(systemctl is-active wevolunteer)/$(systemctl is-enabled wevolunteer)"

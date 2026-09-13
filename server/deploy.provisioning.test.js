@@ -468,6 +468,19 @@ describe('the release path does not reintroduce a credential on the host', () =>
     expect(writes).toBeNull();
   });
 
+  it('restarts the application after building, instead of enable --now', () => {
+    /* `systemctl enable --now` does nothing to a unit that is already running,
+       so on a live host the rebuilt tree was never loaded and .deployed-sha
+       described code that was not running. Observed on production 2026-09-13. */
+    const app = code(provision).slice(code(provision).indexOf('cmd_app() {'));
+    const body = app.slice(0, app.indexOf('\n}\n'));
+    expect(body).not.toMatch(/enable --now wevolunteer\.service/);
+    const restart = body.indexOf('systemctl restart wevolunteer.service');
+    expect(restart).toBeGreaterThan(-1);
+    expect(body.indexOf('wait_for_ready', restart)).toBeGreaterThan(restart);
+    expect(body.indexOf('systemctl daemon-reload')).toBeLessThan(restart);
+  });
+
   it('documents both forms where an operator will look', () => {
     expect(provision).toContain('Two deployment forms, both supported');
     const readme = readFileSync(path.join(repoRoot, 'deploy', 'README.md'), 'utf8');
