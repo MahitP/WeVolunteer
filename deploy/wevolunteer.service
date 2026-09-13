@@ -5,6 +5,12 @@ After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=/var/lib/wevolunteer
 
+# Restart budget: at most five starts in two minutes, then stay failed so the
+# host check and the uptime monitors report it rather than the service cycling
+# forever. In [Unit] deliberately — see the note beside Restart= below.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=wev
@@ -44,8 +50,12 @@ ExecStart=/usr/bin/env node --import ./server/observability/register.mjs server/
 
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=5
-StartLimitIntervalSec=120
+# StartLimitBurst= and StartLimitIntervalSec= used to sit here. In [Service]
+# systemd accepts `StartLimitBurst` and the legacy `StartLimitInterval`, but not
+# `StartLimitIntervalSec` (checked in systemd's load-fragment-gperf table). So
+# the burst of five applied against the DEFAULT ten-second interval — and five
+# starts spaced by a five-second RestartSec can never fit in ten seconds, so a
+# crash loop restarted indefinitely. Both now sit in [Unit] above.
 
 # ── Filesystem confinement ───────────────────────────────────────────────────
 #
@@ -78,6 +88,40 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
+
+# ── The rest of the sandbox ──────────────────────────────────────────────────
+#
+# The unit above confined the filesystem and nothing else. A Node web process
+# needs none of what follows, so an exploited request handler gets none of it:
+# no capabilities, no devices beyond null/zero/random, no kernel tunables,
+# modules, logs or clock, no namespaces, no SUID, no realtime scheduling, and
+# only the socket families an HTTP server, its database client and
+# `os.networkInterfaces()` (netlink) use.
+#
+# MemoryDenyWriteExecute= is deliberately ABSENT: V8's JIT maps writable,
+# executable memory, and setting it stops node before the first request.
+#
+# Verify on the host before the restart that applies it, and watch that restart:
+#   sudo systemd-analyze verify /etc/systemd/system/wevolunteer.service
+#   sudo systemd-analyze security wevolunteer.service
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# No UMask=, on purpose: nginx serves /uploads straight from disk as a different
+# user, so an uploaded picture must stay world-readable (0644). Exports, which
+# must not be, are created 0700 by the worker itself.
 ReadWritePaths=/var/lib/wevolunteer
 
 StandardOutput=journal
