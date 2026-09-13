@@ -1206,6 +1206,38 @@ is that the list of reasons it must is short, evidenced and written down in
   link, and the renderer degrades an unsafe target to plain text rather than
   dropping it, so a clause never silently disappears.
 
+### Security
+
+- **Every `/api` response now says `Cache-Control: no-store`, from the
+  application itself.** `GET /api/auth/me` is one URL that returns a different
+  person for every session, so any shared cache that stores it — a CDN, a
+  corporate proxy, a school's filtering appliance — serves one student's
+  identity to the next caller. The property was previously carried by three
+  separate things agreeing: the reverse proxy adding the header, the CDN's
+  default of only caching by file extension, and two individual handlers that
+  set it by hand after somebody found a specific leak. None of them is the
+  application's own guarantee. The default is set ahead of the CORS check and
+  the body parsers, so it also reaches the refusals those produce, and handlers
+  keep the ability to set something stricter. The static bundle is deliberately
+  out of scope and stays immutably cacheable.
+- **Three high-severity advisories in the shipped dependency tree are closed:**
+  `multer` (denial-of-service and limit-bypass issues, on the code path that
+  receives every uploaded file), `sharp` (libheif, on the code path that decodes
+  every uploaded image) and `nodemailer` (recipient-domain validation bypasses
+  that can deliver mail to an attacker-controlled domain). All three were
+  already permitted by the declared version ranges, so this is a lockfile
+  refresh with no manifest change. `vitest` was updated for a moderate
+  development-only advisory. `npm audit --omit=dev` reports zero.
+
+### Deployment
+
+- **The deployment template named the wrong host for the API.** Under the domain
+  split the apex `wevolunteers.org` is marketing and the application is
+  `app.wevolunteers.org`, but `APP_URL`, `CORS_ORIGINS`, the OAuth redirect
+  example and the mail-provider webhook address still named the apex or a
+  placeholder. The webhook was the material one: the apex has no `/api`, so
+  registering it there would have discarded every bounce and complaint.
+
 ## [1.3.1] — Unreleased
 
 > **Two-factor authentication changed who can complete it.** Once an account has

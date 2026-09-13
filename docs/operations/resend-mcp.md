@@ -134,7 +134,9 @@ moment it is deleted.
 
 Once, at launch, after the production domain is serving:
 
-- endpoint `https://wevolunteers.org/api/webhooks/resend`
+- endpoint `https://app.wevolunteers.org/api/webhooks/resend` — the `app.` host,
+  where `/api` is served. The apex is the marketing site and has no API, so a
+  webhook registered there 404s every delivery event.
 - events: `email.sent`, `email.delivered`, `email.delivery_delayed`,
   `email.bounced`, `email.complained`, `email.failed`
 

@@ -124,14 +124,29 @@ Two things were open and are now settled:
 
 **Recommendation: send through Brevo over SMTP.** Three times the daily headroom on the exact constraint that binds, for the same $0, using a path the application already supports and tests. Keep Resend configured as the alternative if its API and dashboard are preferred — but then plan the onboarding around 100/day, because the cap is a pause, not a queue.
 
-| | Resend free | Brevo free |
-|---|---|---|
-| Monthly | 3,000 | 9,000 |
-| **Daily** | **100** | **300** |
-| At the cap | sending pauses | sending pauses |
-| Custom domain, SPF/DKIM/DMARC | yes | yes |
-| Card required | no | no |
-| Code change needed here | none (`RESEND_API_KEY`) | none (`SMTP_*`) |
+*All four candidates re-checked against the providers' own pages on 2026-09-09.*
+
+| | Resend free | **Brevo free** | Mailgun free | SendGrid |
+|---|---|---|---|---|
+| Monthly | 3,000 | **9,000** | ~3,000 | — |
+| **Daily** | **100** | **300** | **100** | — |
+| Permanent? | yes | yes | yes | **no — 60-day trial** |
+| At the cap | sending pauses | sending pauses | sending pauses | sending pauses at trial end |
+| Custom domain, SPF/DKIM/DMARC | yes | yes | yes (1 domain) | n/a |
+| Card required | no | no | no | n/a |
+| Code change needed here | none (`RESEND_API_KEY`) | **none (`SMTP_*`)** | none (`SMTP_*`) | n/a |
+
+**SendGrid is disqualified**, not merely worse: Twilio converted the free plan
+into a 60-day trial effective 27 May 2025, after which "email sending will be
+paused for accounts on all free plans". It is not a $0 option any more.
+**Mailgun is permanent and free but caps at the same 100/day as Resend**, so it
+does not solve the constraint that binds.
+
+**One caveat on Brevo worth knowing before you rely on it:** the 300/day is
+shared across marketing *and* transactional sending on the same account. This
+application sends everything through one path, so all 300 are available to it —
+but if you later run a Brevo marketing campaign from the same account, it eats
+the same budget that password resets draw on.
 
 **Upstash's 500K commands/month.** Rate limiting touches Redis on most API requests; at ~5 commands/request that is ~100K requests/month. Redis is an *optional* dependency here — the limiters degrade to per-process counters and the application keeps working — so exhaustion is a degradation, not an outage. Watch it.
 
@@ -254,6 +269,21 @@ The guard refuses unsafe methods when the browser reports `Sec-Fetch-Site: same-
 
 Mounted **before** the rate limiters: after them, a blocked CSRF attempt becomes a denial of service against the account it failed to attack.
 
+**Cache isolation (`server/app.js`).** Every `/api` response carries
+`Cache-Control: no-store`, set before the CORS layer and both body parsers, so it
+also covers the CORS 403, the 413 and 400 body refusals, rate-limiter refusals
+and the error handler. Cloudflare's free plan caches by file extension and would
+not store an extensionless `/api` path by default — but "Cache Everything" is
+one rule away, and one stored `/api/auth/me` served to a second visitor is one
+student's identity handed to another. Saying it at the origin makes the
+guarantee a property of the application rather than of the CDN, the reverse
+proxy and three handlers all agreeing. `server/apiCacheIsolation.test.js`
+asserts it on the wire; `server/app.ordering.test.js` asserts, in a production
+boot, that the content-hashed bundle is *not* caught by it — immutable asset
+caching is what keeps origin egress inside the free tier. Nginx's own
+`add_header` on `/api/` appends a second, equally restrictive Cache-Control
+line; two lines on the wire are expected.
+
 **Bundle secret scanning (`npm run scan:bundle`).** Runs in CI after the build. The real bundle is clean across 143 files; six planted positive controls were each detected.
 
 **Uploads.** `WEV_UPLOADS_DIR` is **required** on this host. The default is inside the read-only mount created by `ProtectSystem=strict`, and the directory is created at import time — so leaving it unset does not break uploads, it stops the service from starting.
@@ -317,7 +347,7 @@ Add the zone, move nameservers, enable DNSSEC. Set SSL/TLS to **Full (strict)** 
 | `wevolunteers.org` | A | VM IP | Proxied |
 | `app` | A | VM IP | Proxied |
 | `status` | CNAME | Better Stack | **DNS-only** |
-| mail records | TXT/CNAME | from Resend | **DNS-only** |
+| mail records | TXT/CNAME | from the email provider (Brevo or Resend) | **DNS-only** |
 
 ### 3. Supabase
 
@@ -409,7 +439,7 @@ expensive — 17 and 30 in particular.
 | 6 | Create directories and service user | HUMAN | `/srv/wevolunteer`, `/var/lib/wevolunteer{,/uploads,/exports}`, user `wev` |
 | 7 | Create Supabase project | HUMAN | **Leave the database empty** — do not run the baseline migration |
 | 8 | Create Upstash Redis database | HUMAN | Note the 500K commands/month ceiling |
-| 9 | Create Resend account, verify sending subdomain | HUMAN | `mail.wevolunteers.org`; DKIM/SPF/DMARC as issued |
+| 9 | Create the email account, verify sending subdomain | HUMAN | **Brevo recommended** (300/day vs Resend's 100) — see the cost audit. `mail.wevolunteers.org`; DKIM/SPF/DMARC as issued |
 | 10 | Create R2 bucket + scoped credentials | HUMAN | Object read/write on one bucket; nothing wider |
 | 11 | Generate the backup keypair **off the server** | HUMAN | Upload only the certificate; keep the private key elsewhere |
 | 12 | Write `/etc/wevolunteer/wevolunteer.env` (0600, owned by `wev`) | HUMAN | Template in §4 above |
@@ -435,7 +465,7 @@ expensive — 17 and 30 in particular.
 | 32 | Configure Better Stack monitors; confirm one alert reaches a human | HUMAN | Unpause only once the domain resolves |
 | 33 | Production browser workflows: student, organizer, admin, owner | BOTH | Navigate through the UI, not by URL |
 | 34 | Final security check: anonymous 401, student 403, owner 200, IDOR | BOTH | |
-| 35 | **Only then** begin the pilot | HUMAN | Stagger onboarding — Resend allows 100 emails/day |
+| 35 | **Only then** begin the pilot | HUMAN | On Brevo, 300 emails/day carries a 300-student onboarding across two afternoons; on Resend's 100/day, stagger it |
 
 ### Packages on Ubuntu 26.04 — neither Node nor the PostgreSQL client comes from Ubuntu
 
@@ -540,7 +570,7 @@ Grouped by what each item actually needs, so nothing here reads as a code defect
 | Live R2 upload | no credentials. Proven against a local S3-compatible endpoint and AWS's published SigV4 derivation vector |
 | Full (strict) TLS and real-IP restoration | needs the zone and the origin certificate |
 
-### Requires Resend
+### Requires the email provider
 | Item | Why |
 |---|---|
 | Deliverability of a new sending subdomain | needs DNS |
