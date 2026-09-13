@@ -1220,6 +1220,14 @@ is that the list of reasons it must is short, evidenced and written down in
   the body parsers, so it also reaches the refusals those produce, and handlers
   keep the ability to set something stricter. The static bundle is deliberately
   out of scope and stays immutably cacheable.
+- **The application page now carries its Content-Security-Policy.** In
+  production nginx serves the page itself, so helmet's CSP, HSTS and framing
+  rules reached only API responses — JSON, which a CSP does not protect — and
+  the page shipped with none. The headers are now rendered for nginx from the
+  same source Express uses (`server/securityHeaders.js`), a test fails if the
+  two disagree, and the built application was checked in a real browser under
+  the exact policy before this was committed. `X-Frame-Options` now says `DENY`,
+  matching `frame-ancestors 'none'`.
 - **Three high-severity advisories in the shipped dependency tree are closed:**
   `multer` (denial-of-service and limit-bypass issues, on the code path that
   receives every uploaded file), `sharp` (libheif, on the code path that decodes

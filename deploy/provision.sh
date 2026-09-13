@@ -413,6 +413,10 @@ cmd_app() {
   ok "backup timer: $(systemctl is-active wevolunteer-backup.timer)/$(systemctl is-enabled wevolunteer-backup.timer)"
 
   log "nginx"
+  # The security-header snippet first: the site config includes it, and
+  # `nginx -t` below rejects a config whose include is missing.
+  install -d -m 0755 /etc/nginx/snippets
+  install -m 0644 "$APP_DIR/deploy/nginx/wevolunteers-security-headers.conf" /etc/nginx/snippets/wevolunteers-security-headers.conf
   install -m 0644 "$APP_DIR/deploy/nginx/wevolunteers.conf" /etc/nginx/sites-available/wevolunteers.conf
   ln -sfn /etc/nginx/sites-available/wevolunteers.conf /etc/nginx/sites-enabled/wevolunteers.conf
   rm -f /etc/nginx/sites-enabled/default
