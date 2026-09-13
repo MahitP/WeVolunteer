@@ -1,5 +1,5 @@
 /**
- * Who may read, and post into, an event's comment thread.
+ * Who may read, and post into, an event's comment thread — and read the leaderboard.
  *
  * ── The failure this forbids ──
  *
@@ -97,5 +97,29 @@ describe('an event comment thread', () => {
   it('cannot be posted into by an organizer who has not accepted the agreement', async () => {
     const res = await srv.call('POST', `/api/events/${EVENT}/comments`, { body: 'Hello' }, unagreedOrganizer);
     expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * The leaderboard is the same disclosure: a student's name beside their hours,
+ * opted in for the school community.
+ */
+describe('the leaderboard', () => {
+  beforeAll(async () => {
+    await db.prepare("UPDATE users SET leaderboard_opt_in = 1, hours_visibility = 'public' WHERE id = 'user-student-1'").run();
+  });
+
+  it('shows an opted-in student to another student', async () => {
+    const res = await srv.call('GET', '/api/leaderboard', undefined, otherStudent);
+    expect(res.status).toBe(200);
+    expect(threadText(res)).toContain('Leo Chen');
+  });
+
+  it('refuses a partner and an unagreed organizer without naming anyone', async () => {
+    for (const cookie of [partner, unagreedOrganizer]) {
+      const res = await srv.call('GET', '/api/leaderboard', undefined, cookie);
+      expect(res.status).toBe(403);
+      expect(threadText(res)).not.toContain('Leo Chen');
+    }
   });
 });

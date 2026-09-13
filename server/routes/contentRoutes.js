@@ -580,7 +580,17 @@ router.get('/api/stats/organizer', authenticateToken, requireCap('analytics.own_
 });
 
 // 22. Leaderboard (requires login — prevents public student data exposure)
-router.get('/api/leaderboard', authenticateToken, async (req, res) => {
+/**
+ * And `directory.read`, for the reason the event comment thread above needs it.
+ *
+ * A student opts in to "the school leaderboard" — their name and hour total,
+ * shown to the school community. Login alone widened that to every account: an
+ * external `partner`, which does not hold `directory.read` precisely so that it
+ * cannot list schoolchildren by name, and an organizer whose `directory.read`
+ * is withheld until they accept the Organizer Agreement. Neither is the
+ * audience the student agreed to, and neither role's dashboard asks for it.
+ */
+router.get('/api/leaderboard', authenticateToken, requireCap('directory.read'), async (req, res) => {
   try {
     /**
      * The deleted-account clause is part of the identity check, not a filter.

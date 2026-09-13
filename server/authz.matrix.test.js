@@ -322,6 +322,10 @@ const EXPECTED = [
   // wrote in it by name, and partner does not hold that capability. Fake event
   // id — the capability gate runs before any lookup, so a 404 still proves the
   // gate was passed. POST carries a body so the allowed roles reach the lookup.
+  // Opted-in students' names and hour totals, published to the school
+  // community — which a partner is not.
+  ['GET', '/api/leaderboard',
+    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['GET', '/api/events/event-fake-000/comments',
     { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
   ['POST', '/api/events/event-fake-000/comments',
