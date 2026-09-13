@@ -66,7 +66,28 @@ router.patch('/api/notifications', authenticateToken, async (req, res) => {
 
 // 17. Comments on an event
 
-router.get('/api/events/:id/comments', authenticateToken, async (req, res) => {
+/**
+ * Reading and posting an event's comment thread both require `directory.read`.
+ *
+ * These two routes were declared "open to any signed-in user by design", and the
+ * declaration predates the two decisions it now contradicts. A thread is a list
+ * of the people who wrote in it — name, avatar and role beside every question a
+ * student asked — so it is the member directory in another shape:
+ *
+ *   - `partner` deliberately does not hold `directory.read`, because an external
+ *     organization with a login is not the school community a student's public
+ *     profile is visible to (server/authz.js, beside the partner role).
+ *   - An organizer who has not accepted the Organizer Agreement has it WITHHELD
+ *     (server/organizerAgreement.js), because it is "the power to search
+ *     schoolchildren by name".
+ *
+ * Both could read every thread on the platform here, by event id, and both
+ * could post into it — which notifies the host, or every applicant when the
+ * host posts. The capability that already answers "may this account see other
+ * members' public identities" is the one that gates the thread; nothing new is
+ * named, so the client mirror and the refusal copy already know it.
+ */
+router.get('/api/events/:id/comments', authenticateToken, requireCap('directory.read'), async (req, res) => {
   try {
     const rows = await db.prepare(`
       SELECT c.*, u.name as author_name, u.avatar as author_avatar, u.role as author_role
@@ -90,7 +111,7 @@ router.get('/api/events/:id/comments', authenticateToken, async (req, res) => {
 /** Named so the cap and the message it produces cannot drift apart. */
 const MAX_COMMENT_LENGTH = 1000;
 
-router.post('/api/events/:id/comments', authenticateToken, async (req, res) => {
+router.post('/api/events/:id/comments', authenticateToken, requireCap('directory.read'), async (req, res) => {
   try {
     const { body } = req.body;
     /**

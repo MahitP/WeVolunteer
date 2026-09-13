@@ -318,6 +318,16 @@ const EXPECTED = [
 
   // ── contentRoutes.js (Task 7d) ──
 
+  // The comment thread is gated on `directory.read`: it lists the students who
+  // wrote in it by name, and partner does not hold that capability. Fake event
+  // id — the capability gate runs before any lookup, so a 404 still proves the
+  // gate was passed. POST carries a body so the allowed roles reach the lookup.
+  ['GET', '/api/events/event-fake-000/comments',
+    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 }],
+  ['POST', '/api/events/event-fake-000/comments',
+    { student: 'allow', organizer: 'allow', admin: 'allow', super_admin: 'allow', partner: 403 },
+    { body: { body: 'Is parking available?' } }],
+
   // Real cmt-1 (authored by the organizer fixture on event-softball). Roles
   // ordered denied-first: whichever of organizer/admin runs would actually
   // DELETE the comment, and a later 404 still reads as 'allow' — but if that

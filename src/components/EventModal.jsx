@@ -379,7 +379,12 @@ export default function EventModal({
       : []),
     { id: 'attendees', label: isOwner || isAdmin ? 'Roster' : "Who's going", icon: Users },
     { id: 'updates', label: 'Updates', icon: Megaphone },
-    { id: 'questions', label: 'Questions', icon: MessageSquare }
+    /* The thread is gated on `directory.read` on the server — it names the
+       students who wrote in it — so a role without it (partner, or an organizer
+       who has not accepted the agreement) is not offered a tab that would 403. */
+    ...(can(currentUser, 'directory.read')
+      ? [{ id: 'questions', label: 'Questions', icon: MessageSquare }]
+      : [])
   ];
 
   const now = new Date();
