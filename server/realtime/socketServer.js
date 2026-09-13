@@ -324,11 +324,13 @@ export function initSocketServer(httpServer) {
      * cannot reject; see `realtime.handshakeHardening.test.js`.
      */
     socket.on('typing.start', (payload) => {
-      handleTypingEvent(socket, payload?.conversationId, 'typing.start', checkTypingRateLimit);
+      handleTypingEvent(socket, payload?.conversationId, 'typing.start', checkTypingRateLimit)
+        .catch(() => { /* handleTypingEvent catches its own errors; this is the explicit end of the chain */ });
     });
 
     socket.on('typing.stop', (payload) => {
-      handleTypingEvent(socket, payload?.conversationId, 'typing.stop', checkTypingRateLimit);
+      handleTypingEvent(socket, payload?.conversationId, 'typing.stop', checkTypingRateLimit)
+        .catch(() => { /* as above */ });
     });
   });
   

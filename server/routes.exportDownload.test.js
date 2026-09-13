@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { startTestServer } from './testServer.js';
-import { RUNNING_ON_POSTGRES } from './testEngine.js';
+import { isPostgres } from './db/dialectSql.js';
 
 const PW = 'Password123';
 
@@ -120,26 +120,43 @@ describe('export download: the gate', () => {
     expect(rows[0].admin_id).toBe(userId);
   });
 
-  /* SQLite-only: the failure is forced with a trigger, and a trigger body is
-     dialect-specific. The ordering it proves is engine-independent — the audit
-     and the spend share one `runInTransaction` on both. */
-  it.skipIf(RUNNING_ON_POSTGRES)('sends nothing, and keeps the grant, when the release cannot be recorded', async () => {
+  /* The failure is forced with a trigger on the audit table, written in each
+     engine's own dialect, so the ordering is proven on both — the audit and the
+     spend share one runInTransaction on SQLite and PostgreSQL alike. */
+  it('sends nothing, and keeps the grant, when the release cannot be recorded', async () => {
     const signed = await srv.signupConfirmed(account());
     const { jobId } = await completedExport(signed.cookie);
     const header = await srv.verified(signed.cookie, 'data.download', { password: PW, params: { jobId } });
 
-    await db.prepare(`
-      CREATE TRIGGER test_refuse_download_audit BEFORE INSERT ON admin_audit_logs
-      WHEN NEW.action = 'DATA_EXPORT_DOWNLOADED'
-      BEGIN SELECT RAISE(ABORT, 'audit store unavailable'); END
-    `).run();
+    const pg = isPostgres(db);
+    if (pg) {
+      await db.prepare(`
+        CREATE OR REPLACE FUNCTION test_refuse_download_audit() RETURNS trigger AS $body$
+        BEGIN
+          IF NEW.action = 'DATA_EXPORT_DOWNLOADED' THEN RAISE EXCEPTION 'audit store unavailable'; END IF;
+          RETURN NEW;
+        END $body$ LANGUAGE plpgsql
+      `).run();
+      await db.prepare(`
+        CREATE TRIGGER test_refuse_download_audit BEFORE INSERT ON admin_audit_logs
+        FOR EACH ROW EXECUTE FUNCTION test_refuse_download_audit()
+      `).run();
+    } else {
+      await db.prepare(`
+        CREATE TRIGGER test_refuse_download_audit BEFORE INSERT ON admin_audit_logs
+        WHEN NEW.action = 'DATA_EXPORT_DOWNLOADED'
+        BEGIN SELECT RAISE(ABORT, 'audit store unavailable'); END
+      `).run();
+    }
     let refused;
     try {
       refused = await fetch(`${srv.base}/api/privacy/export/download/${jobId}`, {
         headers: { Cookie: `wev_session=${signed.cookie}`, ...header },
       });
     } finally {
-      await db.prepare('DROP TRIGGER IF EXISTS test_refuse_download_audit').run();
+      await db.prepare(pg
+        ? 'DROP TRIGGER IF EXISTS test_refuse_download_audit ON admin_audit_logs'
+        : 'DROP TRIGGER IF EXISTS test_refuse_download_audit').run();
     }
     expect(refused.status).toBe(500);
     expect(await refused.text()).not.toContain('PK-ARCHIVE');

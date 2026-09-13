@@ -550,11 +550,13 @@ describe('the production Content Security Policy allows Amplitude', () => {
    *
    * Read from source: helmet's config is applied at import time and asserting it
    * through a live response would need a booted server for a string comparison.
+   * The options live in server/securityHeaders.js, which both app.js and the
+   * nginx header renderer consume, so the page and the API share this policy.
    */
   const csp = () => {
     const fs = require('node:fs');
     const path = require('node:path');
-    return fs.readFileSync(path.join(process.cwd(), 'server', 'app.js'), 'utf8');
+    return fs.readFileSync(path.join(process.cwd(), 'server', 'securityHeaders.js'), 'utf8');
   };
 
   it('lets the page reach the ingestion and config hosts', () => {
