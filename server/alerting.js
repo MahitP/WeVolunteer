@@ -263,9 +263,10 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
         ? 'The backup directory exists but contains no archives at all.'
         : status.status === 'unconfigured'
           ? 'There is no backup directory on this host, so nothing is being backed '
-            + 'up at all. On Supabase, bin/backup.sh does not apply — it is a '
-            + 'sqlite3 .backup — so this is the expected state until either the '
-            + 'provider\'s managed backups are confirmed or a pg_dump schedule exists.'
+            + 'up at all. The nightly PostgreSQL backup (bin/backup-postgres.sh, run by '
+            + 'wevolunteer-backup.timer) writes to WEV_BACKUP_DIR, default '
+            + '/var/backups/wevolunteer — so either the timer has never run here, or it '
+            + 'writes somewhere this application is not looking.'
           : 'The backup directory could not be read.';
 
     await send({

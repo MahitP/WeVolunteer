@@ -38,15 +38,24 @@ export const staleAfterHours = () => Number(process.env.BACKUP_STALE_HOURS) || 2
 export const backupDir = () => process.env.WEV_BACKUP_DIR || '/var/backups/wevolunteer';
 
 /**
- * Both shapes `bin/backup.sh` can produce.
- *
  * `.db.gz` is a plaintext archive; `.db.gz.enc` is the same thing encrypted to
  * the operator's public key. Recognising only the first would mean that turning
  * encryption ON — the safer configuration — made every backup invisible to
  * monitoring and started paging about a system that was working perfectly.
  * A security improvement that silences your alerting is a security regression.
+ *
+ * Both scripts' archives: `bin/backup.sh` (SQLite, `.db.gz`) and
+ * `bin/backup-postgres.sh` (PostgreSQL, `.dump`), each with its `.enc` form.
+ *
+ * This listed only the SQLite names, and production is PostgreSQL — so on the
+ * live host a directory of good nightly `.dump.enc` archives read as "no
+ * archives at all", the Owner Center reported no backups, and the backup alert
+ * would have told operators every twelve hours that backups were not running.
+ * Manifests (`.manifest.json`) are deliberately not archives: one is written
+ * before encryption and upload, so a run that failed after writing it must not
+ * count. `alerting.backup.test.js` covers each name.
  */
-const ARCHIVE_SUFFIXES = ['.db.gz', '.db.gz.enc'];
+const ARCHIVE_SUFFIXES = ['.db.gz', '.db.gz.enc', '.dump', '.dump.enc'];
 
 const isArchive = (name) => ARCHIVE_SUFFIXES.some(s => name.endsWith(s));
 

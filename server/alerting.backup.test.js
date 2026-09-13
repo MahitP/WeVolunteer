@@ -84,6 +84,49 @@ describe('when the backups are healthy', () => {
   });
 });
 
+/**
+ * The archives production actually writes.
+ *
+ * Production is PostgreSQL, backed up by `bin/backup-postgres.sh`, which writes
+ * `wevolunteer-<stamp>.dump` — `.dump.enc` once encryption is on — beside a
+ * `.manifest.json`. `backupStatus` recognised only the SQLite script's `.db.gz`
+ * names, so on the live host a directory of good, encrypted, nightly archives
+ * read as "contains no archives at all": the Owner Center reported no backups,
+ * and the alert above would have mailed operators every twelve hours that
+ * backups were not running. An alert that is always wrong is how the true one
+ * gets ignored.
+ */
+describe('the PostgreSQL backup script\'s archives', () => {
+  it('counts an encrypted pg_dump archive as a fresh, encrypted backup', async () => {
+    archive('wevolunteer-20260912T030000Z.dump.enc', 3);
+    const status = backupStatus();
+    expect(status.status).toBe('ok');
+    expect(status.encrypted).toBe(true);
+    expect(status.count).toBe(1);
+    const res = await sendBackupAlert({ send, status });
+    expect(res.sent).toBe(0);
+  });
+
+  it('counts an unencrypted pg_dump archive, and says it is not encrypted', () => {
+    archive('wevolunteer-20260912T030000Z.dump', 3);
+    const status = backupStatus();
+    expect(status.status).toBe('ok');
+    expect(status.encrypted).toBe(false);
+  });
+
+  it('never counts a manifest as a backup', () => {
+    /* A manifest is written before the archive is encrypted and uploaded; a
+       run that failed after writing it must not look like a success. */
+    archive('wevolunteer-20260912T030000Z.manifest.json', 1);
+    expect(backupStatus().status).toBe('none');
+  });
+
+  it('still goes stale when the newest pg_dump archive is old', () => {
+    archive('wevolunteer-20260901T030000Z.dump.enc', 60);
+    expect(backupStatus().status).toBe('stale');
+  });
+});
+
 describe('when the backups have stopped', () => {
   it('emails about a stale archive', async () => {
     archive('wevolunteer-old.db.gz', 40);
@@ -120,9 +163,14 @@ describe('when the backups have stopped', () => {
         status: { status: 'unconfigured', lastBackupAt: null, ageHours: null, count: 0 },
       });
       expect(res).toMatchObject({ sent: 1, status: 'unconfigured' });
-      /* The message has to say why it is not simply "turn the timer on", because
-         on this deployment the timer is the wrong tool. */
-      expect(send.mock.calls[0][0].text).toMatch(/sqlite3 \.backup|pg_dump/);
+      /* The message names the thing that should have produced archives. It used
+         to say a pg_dump schedule did not exist yet; one does
+         (bin/backup-postgres.sh on wevolunteer-backup.timer), so the useful
+         sentence is where it writes and what to check. */
+      const text = send.mock.calls[0][0].text;
+      expect(text).toMatch(/backup-postgres\.sh/);
+      expect(text).toMatch(/wevolunteer-backup\.timer/);
+      expect(text).not.toMatch(/until .* a pg_dump schedule exists/);
     } finally {
       process.env.NODE_ENV = previous;
     }
