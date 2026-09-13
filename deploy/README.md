@@ -12,6 +12,8 @@ development and nothing in the application reads them.
 | `wevolunteer-cf-ip-refresh.sh` | Rebuilds the Cloudflare allowlist in the host firewall |
 | `wevolunteer-cf-ip-refresh.service` | Runs the refresh once |
 | `wevolunteer-cf-ip-refresh.timer` | Fires it weekly, Monday 05:00 plus up to 2h of jitter |
+| `make-release.sh` | Builds a release archive from a committed tree and ships it |
+| `provision.sh` | Idempotent host provisioning; `audit` first, always |
 
 Everything else about deployment lives in
 [`docs/operations/pilot-deployment-runbook.md`](../docs/operations/pilot-deployment-runbook.md).
@@ -272,3 +274,71 @@ no-op path, a real range change, an unreachable-endpoint run (firewall checksum
 identical before and after), and a forced health-check failure that rolled back
 to the exact prior chain. Those results are recorded in the deployment history,
 not reproduced by `npm test`.
+
+---
+
+## Shipping a release
+
+Production is **not** a git checkout, and should not become one.
+
+The runbook used to say `git clone <your-remote-url> /srv/wevolunteer`. For a
+private repository that puts a deploy key or access token on the public-facing
+host — a credential that is never used at runtime, because nothing in the
+application reads git metadata. `/health` takes its version from
+`server/package.json`. A credential that does nothing but sit there is a
+credential that exists only to be stolen.
+
+So a release is an archive of a **committed** tree, stamped with the commit it
+came from:
+
+```bash
+./deploy/make-release.sh --to ubuntu@<host> -i ~/path/to/ssh-key
+```
+
+Then on the host:
+
+```bash
+sudo /srv/wevolunteer/deploy/provision.sh app
+sudo /srv/wevolunteer/deploy/provision.sh verify
+```
+
+To produce a tarball instead of shipping directly, omit `--to`. To ship a tag
+rather than `HEAD`, pass `--ref v1.2.0`.
+
+### Why the archive is safe to ship
+
+`git archive` emits **tracked files only**. `.env` is ignored, so it is
+structurally impossible for it to appear in a release — there is no exclusion
+list to maintain and nothing to forget. The script checks the built artifact for
+`.env`, `.pem` and private-key filenames anyway, and refuses to send one that
+contains them: "structurally impossible" is worth testing once per release.
+
+It also refuses to build from a **dirty working tree**. `git archive` ships what
+is committed, so a release built beside uncommitted fixes would silently not
+contain them — which is precisely the 2026-07-30 failure the release checklist
+exists to prevent. `--allow-dirty` overrides it and states plainly which changes
+are being left out.
+
+The host needs no git remote, no deploy key, and no `git` binary.
+
+### How provisioning knows what is deployed
+
+`provision.sh` resolves identity in this order, and never fails:
+
+1. `.deployed-sha` — written into the archive by `make-release.sh` → `release <sha> (archive)`
+2. git metadata, if a checkout happens to be there → `checkout <sha> on <branch>`
+3. otherwise → `unknown`
+
+The stamp wins when both exist, because it records what was deliberately
+*shipped*; a checkout's `HEAD` only records what someone last fetched into the
+directory.
+
+`provision.sh app` requires `package.json` and `package-lock.json` — what
+`npm ci` actually needs. It does **not** require `.git`. The old check was a
+proxy for "did somebody put the code here", and it rejected the only deployment
+form production uses, creating pressure to put a credential on the host purely
+to satisfy it.
+
+Both forms are exercised by `server/deploy.provisioning.test.js`, which sources
+`provision.sh` and calls the real functions against fixture directories — one
+stamped archive, one git checkout, one empty.

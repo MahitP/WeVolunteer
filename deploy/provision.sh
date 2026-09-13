@@ -23,6 +23,23 @@
 #                                         # earlier, it cuts the origin off from the
 #                                         # only thing allowed to reach it.
 #
+# ── Two deployment forms, both supported ──
+#
+# `app` builds whatever source is at /srv/wevolunteer. It does not care how the
+# code got there, and checks for package.json + package-lock.json rather than a
+# .git directory:
+#
+#   release archive (what production uses) — ./deploy/make-release.sh ships a
+#     committed tree over ssh and stamps .deployed-sha. No git remote, no deploy
+#     key and no git binary is needed on the host.
+#
+#   git checkout (convenient for a staging box) — clone it there yourself. The
+#     identity then comes from `git rev-parse` instead of the stamp.
+#
+# Nothing in the application reads git metadata at runtime; /health reports the
+# version from server/package.json. A checkout on production would be a
+# credential on a public-facing host that buys nothing.
+#
 # ── What it deliberately does NOT do ──
 #
 # Nothing outside this host. It cannot open a port in an OCI Security List, edit
@@ -46,7 +63,11 @@
 set -euo pipefail
 
 APP_USER=wev
-APP_DIR=/srv/wevolunteer
+# WEV_APP_DIR exists so the provisioning logic can be exercised against fixture
+# directories in tests. It is namespaced deliberately: a bare APP_DIR is a common
+# enough variable that an operator could have one exported for something else and
+# silently provision the wrong directory.
+APP_DIR=${WEV_APP_DIR:-/srv/wevolunteer}
 STATE_DIR=/var/lib/wevolunteer
 BACKUP_DIR=/var/backups/wevolunteer
 ENV_DIR=/etc/wevolunteer
@@ -61,6 +82,41 @@ die()  { printf '\n[FATAL] %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
 need_root() { [ "$(id -u)" -eq 0 ] || die "run with sudo"; }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Which build is deployed here?
+#
+# Production is NOT a git checkout and deliberately never will be. The runbook
+# used to say `git clone <your-remote-url> /srv/wevolunteer`, which for a private
+# repository means a deploy key or token sitting on the public-facing host — a
+# credential that buys nothing at runtime, because nothing in the application
+# reads git metadata. `/health` takes its version from server/package.json.
+#
+# So a release is shipped as an archive of a committed tree (see
+# deploy/make-release.sh) and stamped with .deployed-sha. Git, when a checkout
+# happens to be present, is a fallback rather than the primary source.
+#
+# Prints a short identity string; never fails.
+deploy_identity() {
+  local sha branch
+  if [ -r "$APP_DIR/.deployed-sha" ]; then
+    sha=$(tr -d ' \t\n\r' < "$APP_DIR/.deployed-sha")
+    [ -n "$sha" ] && { printf 'release %s (archive)\n' "$sha"; return 0; }
+  fi
+  if [ -d "$APP_DIR/.git" ] && have git; then
+    sha=$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || true)
+    branch=$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+    [ -n "$sha" ] && { printf 'checkout %s on %s\n' "$sha" "${branch:-detached}"; return 0; }
+  fi
+  printf 'unknown (no .deployed-sha, no usable git checkout)\n'
+}
+
+# The real precondition for building: npm ci needs both manifests. `.git` was
+# never it — it was a proxy for "somebody actually put the code here", and it
+# rejected the archive deployments that production actually uses.
+app_dir_has_source() {
+  [ -f "$APP_DIR/package.json" ] && [ -f "$APP_DIR/package-lock.json" ]
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # audit — read-only
@@ -132,9 +188,14 @@ cmd_audit() {
   for d in "$APP_DIR" "$STATE_DIR" "$BACKUP_DIR" "$ENV_DIR"; do
     if [ -e "$d" ]; then echo "   $d: present ($(stat -c '%U:%G %a' "$d"))"; else echo "   $d: absent"; fi
   done
-  if [ -d "$APP_DIR/.git" ]; then
-    echo "   checkout HEAD: $(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null) on $(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-    echo "   working tree : $(git -C "$APP_DIR" status --porcelain 2>/dev/null | wc -l) changes"
+  echo "   deployed     : $(deploy_identity)"
+  if app_dir_has_source; then
+    echo "   source       : package.json + package-lock.json present (buildable)"
+  else
+    echo "   source       : INCOMPLETE — no package.json/package-lock.json"
+  fi
+  if [ -d "$APP_DIR/.git" ] && have git; then
+    echo "   working tree : $(git -C "$APP_DIR" status --porcelain 2>/dev/null | wc -l) uncommitted changes"
   fi
   if [ -f "$ENV_FILE" ]; then
     echo "   env file     : present ($(stat -c '%U:%G %a' "$ENV_FILE")), keys: $(grep -cE '^[A-Z_]+=' "$ENV_FILE" || echo 0)"
@@ -302,7 +363,9 @@ cmd_host() {
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_app() {
   need_root
-  [ -d "$APP_DIR/.git" ] || die "no checkout at $APP_DIR — clone it there first"
+  app_dir_has_source \
+    || die "no application source at $APP_DIR (need package.json and package-lock.json).
+       Ship a release with deploy/make-release.sh, or clone a checkout there."
   [ -f "$ENV_FILE" ]     || die "$ENV_FILE missing — run 'host' and fill it in"
 
   grep -qE '^DATABASE_ENGINE=postgres' "$ENV_FILE" \
@@ -310,8 +373,7 @@ cmd_app() {
   grep -qE '^DATABASE_URL=.+' "$ENV_FILE" \
     || die "$ENV_FILE does not set DATABASE_URL."
 
-  local sha; sha=$(git -C "$APP_DIR" rev-parse --short HEAD)
-  log "Building $sha"
+  log "Building $(deploy_identity)"
   chown -R root:root "$APP_DIR"
 
   # FULL install, including devDependencies: `vite` and `@vitejs/plugin-react`
@@ -406,12 +468,14 @@ ensure_cf_chain() {
 
 cmd_cloudflare_firewall() {
   need_root
-  [ -f "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh" ] || die "no checkout at $APP_DIR"
+  [ -f "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh" ] \
+    || die "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh missing — ship a release that contains it first"
 
   log "Refresh script and units"
   # /usr/local/sbin, not $APP_DIR/bin: this runs as root every week, and
-  # $APP_DIR is a git checkout. Keeping a root-executed script out of the tree
-  # the application can be redeployed into removes an obvious escalation path.
+  # $APP_DIR is replaced wholesale on every release. Keeping a root-executed
+  # script out of the tree the application is redeployed into removes an obvious
+  # escalation path, and stops the weekly job vanishing mid-deploy.
   install -o root -g root -m 0755 \
     "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.sh" /usr/local/sbin/wevolunteer-cf-ip-refresh.sh
   install -o root -g root -m 0644 \
@@ -571,13 +635,18 @@ EOF
   warn "Open a SECOND ssh session now and confirm it works before closing this one."
 }
 
-case "${1:-audit}" in
-  audit)      cmd_audit ;;
-  packages)   cmd_packages ;;
-  host)       cmd_host ;;
-  app)        cmd_app ;;
-  verify)     cmd_verify ;;
-  harden-ssh) cmd_harden_ssh ;;
-  cloudflare-firewall) cmd_cloudflare_firewall ;;
-  *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh|cloudflare-firewall}" ;;
-esac
+# Only dispatch when executed. Sourcing the script defines the functions without
+# running anything, which is how the provisioning logic is tested against both
+# deployment forms without a root shell or a real host.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  case "${1:-audit}" in
+    audit)      cmd_audit ;;
+    packages)   cmd_packages ;;
+    host)       cmd_host ;;
+    app)        cmd_app ;;
+    verify)     cmd_verify ;;
+    harden-ssh) cmd_harden_ssh ;;
+    cloudflare-firewall) cmd_cloudflare_firewall ;;
+    *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh|cloudflare-firewall}" ;;
+  esac
+fi

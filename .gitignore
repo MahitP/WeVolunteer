@@ -169,3 +169,7 @@ AGENTS.md
 /test-results/
 /playwright-report/
 /a11y/.auth/
+
+# Release stamp written by deploy/make-release.sh into the shipped archive.
+# It identifies a deployed build on a host that has no git checkout.
+.deployed-sha

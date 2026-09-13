@@ -1020,24 +1020,57 @@ lines and the app will fail at import with a module-not-found error.
 ```bash
 sudo useradd --system --create-home --shell /usr/sbin/nologin wev
 sudo mkdir -p /srv/wevolunteer /var/lib/wevolunteer /var/backups/wevolunteer
-sudo chown -R wev:wev /srv/wevolunteer /var/lib/wevolunteer /var/backups/wevolunteer
+sudo chown -R root:root /srv/wevolunteer
+sudo chown -R wev:wev /var/lib/wevolunteer /var/backups/wevolunteer
+sudo chmod 755 /srv/wevolunteer
 sudo chmod 700 /var/lib/wevolunteer /var/backups/wevolunteer
 ```
 
-The database lives in `/var/lib/wevolunteer`, **deliberately outside the code
-checkout**, so a redeploy or a `git clean` cannot touch it.
+**The code directory is root-owned on purpose.** `wev` must be able to write
+uploads and exports, and must *not* be able to rewrite its own code — otherwise
+any bug that lets the application write an arbitrary path becomes a way to
+change what runs on the next restart. `deploy/provision.sh` does the same thing
+(`chown -R root:root /srv/wevolunteer`), and production is `root:root 755`
+today. An earlier revision of this step said `chown -R wev:wev
+/srv/wevolunteer`, which quietly gave that away.
 
-### Step 2 — Clone
+The database lives in `/var/lib/wevolunteer`, **deliberately outside the code
+checkout**, so a redeploy — which replaces `/srv/wevolunteer` wholesale — cannot touch it.
+
+### Step 2 — Ship a release
+
+**Do not clone onto the production host.** For a private repository that means a
+deploy key or access token living on a public-facing machine, and it buys
+nothing at runtime: nothing in the application reads git metadata — `/health`
+reports its version from `server/package.json`. A credential that is never used
+is a credential that exists only to be stolen.
+
+Instead, build an archive of a **committed** tree on your own machine and push
+it over the SSH session you already have:
 
 ```bash
-sudo -u wev git clone <your-remote-url> /srv/wevolunteer
-cd /srv/wevolunteer
-sudo -u wev git checkout main
-sudo -u wev git rev-parse HEAD    # record this — it is your build identity
+./deploy/make-release.sh --to ubuntu@<host> -i ~/path/to/ssh-key
 ```
 
-If you deploy from the tag instead: `git checkout v1.0.0-pilot`. The only
-difference from `main` is the roadmap document.
+Ship as your **administrative** login (`ubuntu` on the Oracle image), not as
+`wev`: the service account is created with `--shell /usr/sbin/nologin` and cannot
+accept an SSH session at all. The script uses `sudo` on the far side to unpack
+into `/srv/wevolunteer`.
+
+That ships tracked files only — `.env` is ignored, so it is structurally
+impossible for a secret to ride along — and stamps `/srv/wevolunteer/.deployed-sha`
+with the commit. **That stamp is your build identity**, and it is what
+`provision.sh` reports as `release <sha> (archive)`.
+
+To ship a tag rather than `HEAD`, pass `--ref v1.0.0-pilot`. The script refuses
+to build from a dirty working tree, because `git archive` ships what is
+committed and a release built beside uncommitted fixes would silently not
+contain them — the exact failure the release checklist exists to prevent.
+
+A git checkout still works if you want one on a staging box; `provision.sh`
+accepts either form and takes the identity from `git rev-parse` when there is no
+stamp. It requires `package.json` and `package-lock.json` — what `npm ci` needs
+— not `.git`.
 
 ### Step 3 — Install dependencies
 
@@ -1046,7 +1079,7 @@ single install at the root covers both the client and the server. There is no
 separate install step for `server/`.
 
 ```bash
-sudo -u wev npm ci --include=dev
+sudo npm ci --include=dev --prefix /srv/wevolunteer
 ```
 
 Use `npm ci`, not `npm install` — it installs exactly the locked versions and
@@ -1075,10 +1108,10 @@ unset until the service starts.
 ### Step 4 — Build the client
 
 ```bash
-sudo -u wev npm run build
+sudo npm run build --prefix /srv/wevolunteer
 
 # Remove development dependencies like Vite to save space and reduce surface area
-sudo -u wev npm prune --omit=dev
+sudo npm prune --omit=dev --prefix /srv/wevolunteer
 ls -la dist/            # index.html, assets/, favicon.svg, icons.svg
 ```
 
@@ -1099,7 +1132,7 @@ There are **two** environment files and they must never be merged. The frontend 
 **1. Create the frontend environment file:**
 
 ```bash
-sudo -u wev tee /srv/wevolunteer/.env.production >/dev/null <<'EOF'
+sudo tee /srv/wevolunteer/.env.production >/dev/null <<'EOF'
 NODE_ENV=production
 # Add any required VITE_* variables here
 EOF
@@ -2783,9 +2816,9 @@ sudo -u wev git checkout <previous-sha>
 # 4. Reinstall and rebuild — dependency versions may differ.
 #    --include=dev is required: the build needs Vite, which is a devDependency,
 #    and npm omits devDependencies when NODE_ENV=production is set.
-sudo -u wev npm ci --include=dev
-sudo -u wev npm run build
-sudo -u wev npm prune --omit=dev
+sudo npm ci --include=dev --prefix /srv/wevolunteer
+sudo npm run build --prefix /srv/wevolunteer
+sudo npm prune --omit=dev --prefix /srv/wevolunteer
 
 # 5. Verify before starting.
 sudo -u wev sqlite3 /var/lib/wevolunteer/wevolunteer.db 'PRAGMA integrity_check;'
