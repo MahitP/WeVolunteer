@@ -67,6 +67,16 @@ function isAllowedOrigin(origin) {
  * tries again, which is what the per-socket version did by swallowing it too — a
  * failed check must not tear down live connections.
  */
+/** An Origin whose host is the host the request was sent to. A malformed Origin is not. */
+function isSameOrigin(origin, host) {
+  if (!host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 export async function sweepInvalidatedSockets(io) {
   const sockets = await io.fetchSockets();
   if (!sockets.length) return 0;
@@ -173,6 +183,28 @@ export function initSocketServer(httpServer) {
 
   io.use(async (socket, next) => {
     try {
+      /**
+       * The page that opened this socket must be this application, checked
+       * BEFORE the cookie is read.
+       *
+       * The `cors.origin` option above only decides CORS headers on polling
+       * responses — it refuses nothing — and a WebSocket upgrade is not subject
+       * to CORS at all. The marketing apex is the SAME SITE as `app.`, so
+       * `SameSite=Lax` attaches the session cookie to a socket it opens; the HTTP
+       * API closes that case with csrfGuard, and this channel had no equivalent.
+       * A page there could read the visitor's messages and notifications live.
+       *
+       * Same rule as app.js's CORS callback: no Origin (not a browser page), an
+       * allowlisted origin, a loopback origin outside production, or an Origin
+       * whose host is the Host this request was addressed to — which is the
+       * production topology, where nginx forwards `Host: app.wevolunteers.org`.
+       * `realtime.handshakeHardening.test.js`.
+       */
+      const origin = socket.handshake.headers.origin;
+      if (origin && !isAllowedOrigin(origin) && !isSameOrigin(origin, socket.handshake.headers.host)) {
+        return next(new Error('Authentication error: Origin not allowed'));
+      }
+
       const cookies = cookie.parse(socket.request.headers.cookie || '');
       const token = cookies[COOKIE_NAME];
       if (!token) {

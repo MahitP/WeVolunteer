@@ -110,6 +110,53 @@ describe('the handshake accepts only a finished sign-in', () => {
   });
 });
 
+/**
+ * A handshake from a page on another origin.
+ *
+ * The HTTP API refuses a cross-origin write twice over — CORS, and csrfGuard's
+ * Sec-Fetch-Site check for the case CORS cannot see: a SIBLING subdomain, which
+ * is same-site, so `SameSite=Lax` still attaches the session cookie. The socket
+ * server had neither. Its `cors.origin` callback only decides CORS headers on
+ * polling responses; it refuses nothing, and a WebSocket upgrade is not subject
+ * to CORS at all. So a page on the marketing apex — same site as `app.` — could
+ * open a socket with the visitor's cookie and read their messages and
+ * notifications as they arrived.
+ */
+describe('the handshake refuses a page on another origin', () => {
+  const openWithOrigin = (token, origin, transport = 'websocket') => new Promise((resolve, reject) => {
+    const s = ioClient(base, {
+      path: '/socket.io',
+      extraHeaders: { Cookie: `wev_session=${token}`, Origin: origin },
+      transports: [transport],
+      reconnection: false,
+    });
+    const timer = setTimeout(() => { s.close(); reject(new Error('connect timeout')); }, 8000);
+    s.on('connect', () => { clearTimeout(timer); resolve(s); });
+    s.on('connect_error', (e) => { clearTimeout(timer); s.close(); reject(new Error('REJECTED: ' + e.message)); });
+  });
+
+  it('refuses a websocket from a same-site sibling page carrying a valid session', async () => {
+    const full = await login('leo.chen@example.com');
+    await expect(openWithOrigin(full.session, 'https://wevolunteers.org')).rejects.toThrow(/REJECTED/);
+    await expect(openWithOrigin(full.session, 'https://evil.example')).rejects.toThrow(/REJECTED/);
+  });
+
+  it('refuses the same over long-polling', async () => {
+    const full = await login('leo.chen@example.com');
+    await expect(openWithOrigin(full.session, 'https://evil.example', 'polling')).rejects.toThrow(/REJECTED/);
+  });
+
+  it('still accepts the application\'s own origin, and a client that sends none', async () => {
+    const full = await login('leo.chen@example.com');
+    const own = await openWithOrigin(full.session, base);
+    expect(own.connected).toBe(true);
+    own.close();
+    const bare = await openSocket(full.session);
+    expect(bare.connected).toBe(true);
+    bare.close();
+  });
+});
+
 describe('a malformed client event cannot stop the process', () => {
   it('survives typing events with no payload, null, and nonsense', async () => {
     const rejections = [];
