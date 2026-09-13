@@ -405,6 +405,8 @@ describe('no pipeline lets an early-exiting reader SIGPIPE its producer', () => 
     'deploy/provision.sh',
     'deploy/make-release.sh',
     'deploy/wevolunteer-cf-ip-refresh.sh',
+    'deploy/wevolunteer-heartbeat.sh',
+    'deploy/wevolunteer-host-check.sh',
   ];
 
   /** Comments describing the trap are wanted; executable instances are not. */

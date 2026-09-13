@@ -1250,6 +1250,19 @@ is that the list of reasons it must is short, evidenced and written down in
   answered as an error rather than relayed, so a "blocked" image can never be
   cached for a week at the edge.
 
+### Operations
+
+- **Backups, the firewall refresh and the host itself now report to someone.**
+  Nothing on the host alerted a person when a scheduled job failed or simply
+  stopped running. Each job now pings a Better Stack heartbeat on success and
+  reports failure explicitly, and a fifteen-minute host check reports disk,
+  memory, restart loops, `/ready`, nginx, the origin certificate and backup age
+  as one result. A heartbeat notices the job that never ran, which nothing else
+  here could. The URLs are left unset until an operator fills them in.
+- **The Owner Center reported no backups on a PostgreSQL host with good
+  backups.** The freshness check recognised only the SQLite script's archive
+  names, and would have mailed "Backups are not running" every twelve hours.
+
 ### Deployment
 
 - **The deployment template named the wrong host for the API.** Under the domain

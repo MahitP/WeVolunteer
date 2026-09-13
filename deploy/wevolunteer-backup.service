@@ -1,5 +1,9 @@
 [Unit]
 Description=WeVolunteer nightly database backup
+# A failed run is reported to the BACKUP heartbeat immediately; a run that never
+# happens is caught by the heartbeat's own schedule. See the note under
+# ExecStartPost below.
+OnFailure=wevolunteer-heartbeat-fail@%n.service
 Documentation=file:///srv/wevolunteer/docs/operations/pilot-deployment-runbook.md
 # Do not run while the database volume is unavailable.
 RequiresMountsFor=/var/lib/wevolunteer
@@ -22,6 +26,9 @@ Group=wev
 # not fail to start the timer; the script itself refuses to run without a
 # connection string, which is the check that matters.
 EnvironmentFile=-/etc/wevolunteer/wevolunteer.env
+# The heartbeat URL, kept apart from the application's secrets so the units that
+# only report (refresh, host check, failure template) never load DATABASE_URL.
+EnvironmentFile=-/etc/wevolunteer/heartbeats.env
 
 Environment=WEV_BACKUP_DIR=/var/backups/wevolunteer
 Environment=WEV_BACKUP_KEEP_DAYS=14
@@ -35,42 +42,31 @@ Environment=WEV_PG_BIN=/usr/lib/postgresql/17/bin
 
 ExecStart=/srv/wevolunteer/bin/backup-postgres.sh
 
+# ── Alerting: a heartbeat, which also catches the run that never happens ──
+#
+# ExecStartPost runs only after ExecStart succeeded, so this pings the BACKUP
+# heartbeat (HEARTBEAT_URL_BACKUP, from heartbeats.env above) exactly when
+# a verified archive exists. OnFailure= in [Unit] reports an explicit failure.
+# Better Stack raises an incident on that failure AND when a day passes with no
+# ping — which is the case nothing else here can see: the timer disabled, the
+# host down at 03:00, the unit never started. Unset, the script says the job is
+# unmonitored and exits 0; it can never fail the backup.
+ExecStartPost=/usr/local/sbin/wevolunteer-heartbeat.sh BACKUP ok
+
 # The script exits non-zero on a failed integrity check, so systemd records a
 # failed unit rather than a silent success.
 #
-# ── Alerting is NOT configured here, and that is a deliberate statement ──
+# ── History: what the alerting note used to say ──
 #
-# This comment used to read "`OnFailure` below turns that into something a human
-# sees" — and there was no OnFailure= directive anywhere in this file. Anyone
-# reading the unit to check whether backup failures were alerted would have
-# concluded that they were. They were not, and had not been for the whole life of
-# the file.
+# This file once claimed "`OnFailure` below turns that into something a human
+# sees" with no OnFailure= anywhere, and was then corrected to say plainly that
+# nothing alerted. Both are now superseded by the heartbeat above. Two further
+# safety nets remain:
 #
-# Nothing is silently added in its place, because an alert target is
-# environment-specific: this project cannot know whether the district uses email, a
-# webhook, Nagios, or nothing at all. Inventing a unit name here would produce a
-# second kind of lie — a dangling OnFailure= pointing at a unit that does not
-# exist, which systemd logs and ignores.
+#   1. /api/admin/system/status and the Owner Center report backup freshness.
+#   2. `bin/verify-restore-postgres.sh` rehearses an actual restore. A backup
+#      nobody has restored is a hypothesis.
 #
-# So: THERE IS NO ALERTING ON THIS UNIT UNTIL YOU ADD IT. Two things exist to
-# reduce what that costs you:
-#
-#   1. The application reports backup freshness on /api/admin/system/status, which
-#      surfaces in the admin dashboard. A stale or missing backup is visible to a
-#      school administrator without an SSH session. That is a safety net, not a
-#      replacement for alerting — it cannot tell "the timer is disabled" from "the
-#      timer ran and failed".
-#
-#   2. `bin/verify-restore.sh` rehearses an actual restore from the newest archive.
-#      A backup nobody has restored is a hypothesis.
-#
-# To wire real alerting, create your alert unit and add a drop-in:
-#
-#   sudo systemctl edit wevolunteer-backup.service
-#   # [Unit]
-#   # OnFailure=your-alert-unit@%n.service
-#
-# See deploy/README.md § Alerting and the runbook's monitoring section.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

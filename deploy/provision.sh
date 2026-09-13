@@ -72,6 +72,7 @@ STATE_DIR=/var/lib/wevolunteer
 BACKUP_DIR=/var/backups/wevolunteer
 ENV_DIR=/etc/wevolunteer
 ENV_FILE="$ENV_DIR/wevolunteer.env"
+HEARTBEATS_FILE="$ENV_DIR/heartbeats.env"
 APP_PORT=5050
 
 log()  { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -406,9 +407,26 @@ cmd_app() {
   install -m 0644 "$APP_DIR/deploy/wevolunteer.service"        /etc/systemd/system/
   install -m 0644 "$APP_DIR/deploy/wevolunteer-backup.service" /etc/systemd/system/
   install -m 0644 "$APP_DIR/deploy/wevolunteer-backup.timer"   /etc/systemd/system/
+
+  # Monitoring: the heartbeat reporter, the failure template the monitored units
+  # name in OnFailure=, and the fifteen-minute host check. Installed before the
+  # daemon-reload so a unit never references a template systemd has not seen.
+  install -o root -g root -m 0755 "$APP_DIR/deploy/wevolunteer-heartbeat.sh"  /usr/local/sbin/wevolunteer-heartbeat.sh
+  install -o root -g root -m 0755 "$APP_DIR/deploy/wevolunteer-host-check.sh" /usr/local/sbin/wevolunteer-host-check.sh
+  install -m 0644 "$APP_DIR/deploy/wevolunteer-heartbeat-fail@.service" /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/wevolunteer-host-check.service"      /etc/systemd/system/
+  install -m 0644 "$APP_DIR/deploy/wevolunteer-host-check.timer"        /etc/systemd/system/
+  if [ -f "$HEARTBEATS_FILE" ]; then
+    ok "$HEARTBEATS_FILE exists — left untouched (it holds heartbeat tokens)"
+  else
+    install -o root -g "$APP_USER" -m 0640 "$APP_DIR/deploy/heartbeats.env.example" "$HEARTBEATS_FILE"
+    warn "$HEARTBEATS_FILE created from the template with every heartbeat unset."
+    warn "Until a human fills it in, backups, the firewall refresh and host health are NOT alerted."
+  fi
   systemctl daemon-reload
   systemctl enable --now wevolunteer.service
   systemctl enable --now wevolunteer-backup.timer
+  systemctl enable --now wevolunteer-host-check.timer
   ok "wevolunteer: $(systemctl is-active wevolunteer)/$(systemctl is-enabled wevolunteer)"
   ok "backup timer: $(systemctl is-active wevolunteer-backup.timer)/$(systemctl is-enabled wevolunteer-backup.timer)"
 
@@ -493,6 +511,13 @@ cmd_cloudflare_firewall() {
     "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.service" /etc/systemd/system/
   install -o root -g root -m 0644 \
     "$APP_DIR/deploy/wevolunteer-cf-ip-refresh.timer" /etc/systemd/system/
+  # The refresh unit reports success and failure to its heartbeat; install the
+  # reporter and the failure template here too, so this subcommand does not
+  # depend on `app` having run first.
+  install -o root -g root -m 0755 \
+    "$APP_DIR/deploy/wevolunteer-heartbeat.sh" /usr/local/sbin/wevolunteer-heartbeat.sh
+  install -o root -g root -m 0644 \
+    "$APP_DIR/deploy/wevolunteer-heartbeat-fail@.service" /etc/systemd/system/
   systemctl daemon-reload
   ok "installed /usr/local/sbin/wevolunteer-cf-ip-refresh.sh (root:root 0755)"
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the WeVolunteer host health check every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+# Survives a reboot or a sleep: a missed run happens at the next opportunity.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

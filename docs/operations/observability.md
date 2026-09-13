@@ -629,6 +629,16 @@ real hostname at deploy time — the free plan includes 10.
 
 ---
 
+## 12c. Host heartbeats
+
+Telemetry above describes requests. It cannot describe a job that did not run,
+a disk filling, or a service in a restart loop that is up whenever a probe
+arrives. Those are covered by three Better Stack heartbeats — `BACKUP`,
+`CF_REFRESH` and `HOST` — whose setup, thresholds and verification steps are in
+`deploy/README.md` § Alerting. They use the free plan's heartbeat allowance (ten)
+and send nothing about any user: the only body ever attached is the host check's
+list of findings (a path, a percentage, a unit name).
+
 ## 13. Mutation testing
 
 ```

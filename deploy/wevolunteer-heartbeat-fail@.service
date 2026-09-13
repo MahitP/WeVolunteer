@@ -1,0 +1,21 @@
+[Unit]
+Description=Report %i as failed to its Better Stack heartbeat
+Documentation=file:///usr/local/sbin/wevolunteer-heartbeat.sh
+
+# Instantiated by OnFailure=wevolunteer-heartbeat-fail@%n.service in the
+# monitored units, so %i is the name of the unit that failed. The heartbeat
+# script maps it to HEARTBEAT_URL_<NAME> and always exits 0, so this unit can
+# never itself be the thing that fails.
+
+[Service]
+Type=oneshot
+# Only the heartbeat URLs — not the application's database or mail secrets,
+# which this unit has no use for. 0640 root:wev.
+EnvironmentFile=-/etc/wevolunteer/heartbeats.env
+User=wev
+Group=wev
+ExecStart=/usr/local/sbin/wevolunteer-heartbeat.sh --unit %i fail "systemd unit %i failed on %H; see journalctl -u %i"
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

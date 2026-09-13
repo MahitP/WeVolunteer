@@ -1,0 +1,23 @@
+[Unit]
+Description=WeVolunteer host health check (disk, memory, service, certificate, backups)
+Documentation=file:///usr/local/sbin/wevolunteer-host-check.sh
+After=network-online.target
+# If the check itself cannot run, that is reported too.
+OnFailure=wevolunteer-heartbeat-fail@%n.service
+
+[Service]
+Type=oneshot
+# Root, read-only: it needs `systemctl show`, the backup directory (0700 wev),
+# and the origin certificate. It writes one counter under StateDirectory.
+EnvironmentFile=-/etc/wevolunteer/heartbeats.env
+ExecStart=/usr/local/sbin/wevolunteer-host-check.sh
+StateDirectory=wevolunteer-host-check
+Environment=WEV_HC_STATE_DIR=/var/lib/wevolunteer-host-check
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+StandardOutput=journal
+StandardError=journal

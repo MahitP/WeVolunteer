@@ -142,17 +142,32 @@ an assumption, not a backup.
 
 ## Alerting
 
-systemd will mark the unit failed, but nothing tells a human. Add whatever your
-environment uses, e.g. an `OnFailure=` drop-in:
+Every scheduled job on this host reports to a **Better Stack heartbeat** — a
+dead man's switch, which is the only kind of check that notices a job that
+never ran:
 
-```bash
-sudo systemctl edit wevolunteer-backup.service
-# [Unit]
-# OnFailure=your-alert-unit@%n.service
-```
+| Heartbeat | Pinged by | On failure | Configure in Better Stack |
+|---|---|---|---|
+| `BACKUP` | `wevolunteer-backup.service` after a verified archive (`ExecStartPost=`) | `OnFailure=` reports `/fail` | every 1 day, grace 2 h |
+| `CF_REFRESH` | `wevolunteer-cf-ip-refresh.service` after a successful refresh | `OnFailure=` reports `/fail` | every 7 days, grace 1 day |
+| `HOST` | `wevolunteer-host-check.timer`, every 15 min | the check reports `/fail` with its findings | every 15 min, grace 15 min |
 
-At minimum, check `systemctl list-timers` and the newest file in
-`/var/backups/wevolunteer` during the first week.
+`HOST` checks disk (≥ 90%), memory (< 5% available), `wevolunteer` and `nginx`
+being active, restart loops (≥ 3 restarts between checks), `/ready`, the origin
+certificate (< 21 days), and the newest backup (> 26 hours).
+
+The URLs live in `/etc/wevolunteer/heartbeats.env` (0640 root:wev), created from
+`deploy/heartbeats.env.example` by `provision.sh app`. They are **unset until a
+human fills them in**; until then each job runs normally and logs that it is not
+monitored. `deploy/wevolunteer-heartbeat.sh` always exits 0, so a monitoring
+outage can never fail a backup.
+
+Tested by running both scripts against fake `curl`, `systemctl`, `df` and
+`openssl` (`server/deploy.heartbeats.test.js`). systemd's own behaviour —
+`OnFailure=`, `ExecStartPost=` ordering — needs the host: after filling in the
+file, run `sudo systemctl start wevolunteer-host-check.service` and confirm the
+heartbeat turns green, and `sudo systemctl start wevolunteer-heartbeat-fail@wevolunteer-backup.service`
+once to confirm a failure alert reaches a person.
 
 ---
 

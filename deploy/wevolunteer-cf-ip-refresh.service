@@ -6,6 +6,9 @@ Documentation=file:///usr/local/sbin/wevolunteer-cf-ip-refresh.sh
 # there is no reason to burn a run on it.
 After=network-online.target netfilter-persistent.service
 Wants=network-online.target
+# A refresh that fails leaves the previous rules live (see the script), which is
+# safe today and silently wrong the week Cloudflare adds a range. Report it.
+OnFailure=wevolunteer-heartbeat-fail@%n.service
 
 [Service]
 Type=oneshot
@@ -13,7 +16,11 @@ Type=oneshot
 # Root is required: this manipulates iptables and writes the persisted rules.
 # The script itself is the security boundary — it only ever touches its own
 # CF-HTTPS/CF-HTTPS6 chains and the single INPUT rule that jumps to them.
+EnvironmentFile=-/etc/wevolunteer/heartbeats.env
 ExecStart=/usr/local/sbin/wevolunteer-cf-ip-refresh.sh
+# Pinged only after a successful refresh; set the heartbeat's period to a week
+# plus grace. The refresh script itself is unchanged.
+ExecStartPost=/usr/local/sbin/wevolunteer-heartbeat.sh CF_REFRESH ok
 
 # ProtectHome is deliberately NOT set: rollback snapshots live in
 # /root/fw-backup alongside the ones taken when the allowlist was first
