@@ -133,14 +133,26 @@
  * It was applied over CARTO Voyager, which is a light pastel cartography.
  * Inverting it does not produce a dark map, it produces a photographic
  * negative: parks magenta, water the colour of sand, and every white label halo
- * turned into a black smear around black text. `LeafletMap.jsx` now requests
- * CARTO's `dark_all` basemap instead — the same streets, drawn for a dark
- * background by people who draw maps.
+ * turned into a black smear around black text. `LeafletMap.jsx` now requests a
+ * basemap drawn dark — CARTO's `dark_all`, through the server's tile proxy — or,
+ * without a CARTO key, dims the light OpenStreetMap style (below) instead.
  *
  * Nothing sets `map-dark-mode` any more. Do not reintroduce a filter here: it
  * would composite over every tile on every pan, and it would land on the
  * attribution control, which must stay legible for licence reasons.
  */
+
+/**
+ * OpenStreetMap's standard style in dark mode, when the server has no CARTO key.
+ *
+ * Dimmed, not inverted, for the reasons above: brightness keeps every colour's
+ * meaning (parks green, water blue) and only takes the glare off a light map on a
+ * dark page. `className` on the TileLayer puts this on the tile pane alone, so the
+ * attribution control — a licence condition — is not dimmed with it.
+ */
+.map-tiles-dimmed {
+  filter: brightness(0.72) contrast(1.08);
+}
 
 /* --------------------------------------------------------------------------
    Weather Summary

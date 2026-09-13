@@ -1,61 +1,74 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { basemapFor } from './basemap';
 
 /**
- * The basemap is drawn dark, never a light one turned inside out.
+ * The basemap: where tiles come from, what they credit, and how dark mode draws.
  *
- * ── The bug ──
+ * ── History this file guards ──
  *
- * Both the organizer's event-creation picker and the student's event map render
- * the same `LeafletMap`, which served CARTO **Voyager** at every theme and, in
- * dark mode, laid `filter: invert(100%) hue-rotate(180deg)` over it. Voyager is
- * a light pastel cartography. Inverting it does not make a dark map — it makes a
- * photographic negative: parks magenta, water the colour of sand, and every
- * white label halo becomes a black smear around black text.
- *
- * CARTO publishes `dark_all` for this. These pin the swap so nobody
- * reintroduces the filter, and pin the attribution, which is a licence
- * condition of both OpenStreetMap and CARTO rather than a design choice.
+ * 1. Dark mode once laid `filter: invert(100%) hue-rotate(180deg)` over CARTO
+ *    Voyager, a light pastel map — producing a photographic negative. Never again.
+ * 2. The browser fetched tiles from CARTO directly, which showed every student's
+ *    IP address to a third party (compliance register R-18), and CARTO then began
+ *    requiring a key, printing "API KEY REQUIRED" across every tile. Tiles now
+ *    come from this application's `/tiles` proxy, which holds any key server-side.
  */
 
 const read = (p) => fs.readFileSync(path.join(process.cwd(), p), 'utf8');
-const MAP = read('src/components/location/LeafletMap.jsx');
-/* Comments stripped: the rule this file forbids is quoted verbatim in the
-   comment that replaced it, and a scanner that cannot tell prose from a
-   declaration would fail on its own gravestone. */
-const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '');
+const MAP = stripComments(read('src/components/location/LeafletMap.jsx'));
 const MAP_CSS = stripComments(read('src/components/location/LocationDisplay.css'));
 
-describe('map tiles', () => {
-  it('requests a purpose-built dark basemap in dark mode', () => {
-    expect(MAP).toMatch(/basemaps\.cartocdn\.com\/dark_all\//);
+describe('basemapFor', () => {
+  it('always requests tiles from this application, never a provider host', () => {
+    for (const isDark of [false, true]) {
+      for (const provider of ['carto', 'osm', null]) {
+        const { url } = basemapFor({ isDark, provider });
+        expect(url.startsWith('/tiles/')).toBe(true);
+        expect(url).not.toMatch(/cartocdn|openstreetmap\.org|https?:/);
+      }
+    }
   });
 
-  it('keeps Voyager for light mode', () => {
-    expect(MAP).toMatch(/basemaps\.cartocdn\.com\/rastertiles\/voyager\//);
+  it('asks for the dark style in dark mode and the light one otherwise', () => {
+    expect(basemapFor({ isDark: true, provider: 'carto' }).url).toBe('/tiles/dark/{z}/{x}/{y}.png');
+    expect(basemapFor({ isDark: false, provider: 'carto' }).url).toBe('/tiles/light/{z}/{x}/{y}.png');
   });
 
-  it('chooses between them on the theme', () => {
-    /* Both URLs present but not switched on would ship one of them dead. */
-    expect(MAP).toMatch(/isDark\s*\n?\s*\?\s*'https:\/\/\{s\}\.basemaps\.cartocdn\.com\/dark_all/);
+  it('credits CARTO only when CARTO is drawing, and OpenStreetMap always', () => {
+    const carto = basemapFor({ isDark: false, provider: 'carto' }).attribution;
+    const osm = basemapFor({ isDark: false, provider: 'osm' }).attribution;
+    const pending = basemapFor({ isDark: false, provider: null }).attribution;
+    expect(carto).toMatch(/openstreetmap\.org\/copyright/);
+    expect(carto).toMatch(/carto\.com\/attributions/);
+    expect(osm).toMatch(/openstreetmap\.org\/copyright/);
+    expect(osm).not.toMatch(/carto/i);
+    expect(pending).toMatch(/openstreetmap\.org\/copyright/);
   });
 
-  it('remounts the layer when the theme changes', () => {
-    /* Leaflet caches the tile URL on the layer instance; without a changing
-       `key` the swap does not take effect until the map is destroyed. */
-    expect(MAP).toMatch(/key=\{isDark \? 'dark' : 'light'\}/);
+  it('dims OpenStreetMap in dark mode, and leaves a purpose-built dark map alone', () => {
+    expect(basemapFor({ isDark: true, provider: 'osm' }).className).toBe('map-tiles-dimmed');
+    expect(basemapFor({ isDark: true, provider: 'carto' }).className).toBe('');
+    expect(basemapFor({ isDark: false, provider: 'osm' }).className).toBe('');
+  });
+});
+
+describe('the map component and its stylesheet', () => {
+  it('draws the tiles basemapFor chooses', () => {
+    expect(MAP).toMatch(/basemapFor\(\{ isDark, provider \}\)/);
+    expect(MAP).toMatch(/url=\{basemap\.url\}/);
+    expect(MAP).toMatch(/attribution=\{basemap\.attribution\}/);
   });
 
-  it('never inverts the tiles again', () => {
-    expect(MAP_CSS).not.toMatch(/\.map-dark-mode[^{]*\{[^}]*filter:\s*invert/);
-    expect(MAP).not.toMatch(/map-dark-mode/);
+  it('remounts the layer when the theme or the provider changes', () => {
+    /* Leaflet caches the URL and attribution on the layer instance. */
+    expect(MAP).toMatch(/key=\{`\$\{isDark \? 'dark' : 'light'\}-\$\{provider \?\? 'pending'\}`\}/);
   });
 
-  it('keeps the OpenStreetMap and CARTO attribution', () => {
-    /* A licence condition of both providers, not a design decision. */
-    expect(MAP).toMatch(/openstreetmap\.org\/copyright/);
-    expect(MAP).toMatch(/carto\.com\/attributions/);
+  it('never inverts the tiles', () => {
+    expect(MAP_CSS).not.toMatch(/filter:\s*[^;]*invert/);
   });
 
   it('does not hide the attribution control in CSS', () => {

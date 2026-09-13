@@ -142,7 +142,7 @@ GREEN 1–4 · YELLOW 5–9 · ORANGE 10–15 · RED 16–25
 | R-15 | Impersonation (v2.0, unimplemented) would let an adult act as a minor | 5 | 2 | **10** | ORANGE | **Yes, before it ships** |
 | R-16 | WCAG 2.1 AA not formally verified; district deadline 2027-04-26 | 3 | 3 | **9** | YELLOW | No |
 | R-17 | No ToS: no liability limit, no governing law, no termination right | 4 | 3 | **12** | ORANGE | **Yes** |
-| R-18 | Map tiles load from CARTO — students' browsers contact an uncontracted CDN | 3 | 4 | **12** | ORANGE | No |
+| R-18 | Map tiles load from CARTO — students' browsers contact an uncontracted CDN (**proxied in code 2026-09-13; deploy + policy text pending**) | 3 | 4 | **12** | ORANGE | No |
 | R-19 | `localStorage` caches account details, persisting on shared school devices | 2 | 4 | **8** | YELLOW | No |
 
 ---
@@ -498,6 +498,31 @@ when convenient. The proxy approach is consistent with the pattern the codebase 
 for its other two geo services, which is a strong hint it is the intended architecture.
 
 **Residual after proxying:** GREEN (2).
+
+> **Status, 2026-09-13 — proxied in code; not yet deployed, and two owner steps remain.**
+>
+> Tiles are now served by `server/routes/tileRoutes.js` at `/tiles`: the student's browser
+> requests them from this application, and the server fetches them with nothing about the
+> member attached — no cookie, no referrer, no address — and an identifying User-Agent. The
+> CSP no longer lists any tile host in `img-src` or `connect-src`, so the direct fetch is not
+> merely unused but refused. `server/tileProxy.test.js` asserts each property on the wire.
+>
+> What forced it: CARTO began requiring an API key for its basemaps, and without one every
+> tile is printed with "API KEY REQUIRED" — observed in production on 2026-09-13, on every
+> event map. Without a key the proxy draws OpenStreetMap's standard tiles instead, which
+> OSM's tile policy permits for an identified, caching relay; with `MAP_TILES_CARTO_KEY` it
+> draws the CARTO styles, and the key never reaches the bundle.
+>
+> Remaining, and neither is engineering:
+>
+> 1. **Deploy it.** Until then production still shows the defaced CARTO tiles and still
+>    exposes students' IPs to CARTO. The nginx `location /tiles/` block ships with it.
+> 2. **The published Privacy Policy (§ third parties, and the "CARTO is different" paragraph)
+>    and the Cookie and Tracking Notice (map images) still say the browser loads tiles
+>    directly from CARTO.** After deployment that overstates what is shared rather than
+>    understating it, but it is no longer accurate, and those documents are versioned through
+>    the Legal editor rather than edited in the repository. See the owner action list in
+>    `docs/audits/2026-09-13-production-readiness-pass.md`.
 
 ---
 

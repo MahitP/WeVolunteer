@@ -1229,6 +1229,19 @@ is that the list of reasons it must is short, evidenced and written down in
   refresh with no manifest change. `vitest` was updated for a moderate
   development-only advisory. `npm audit --omit=dev` reports zero.
 
+### Maps
+
+- **Every event map was printed with "API KEY REQUIRED".** CARTO began requiring
+  a key for its basemaps, and the browser fetched them directly, so each tile
+  arrived defaced. Tiles are now served by the application at `/tiles`: the
+  server fetches them — from CARTO when `MAP_TILES_CARTO_KEY` is set, otherwise
+  from OpenStreetMap — and a student's browser no longer contacts any map
+  provider at all, which closes the compliance register's R-18. The key, when
+  there is one, stays on the server. The page's Content-Security-Policy no
+  longer permits any tile host. A map provider that refuses the server is
+  answered as an error rather than relayed, so a "blocked" image can never be
+  cached for a week at the edge.
+
 ### Deployment
 
 - **The deployment template named the wrong host for the API.** Under the domain

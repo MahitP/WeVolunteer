@@ -50,6 +50,7 @@ import appealsRoutes from './routes/appealsRoutes.js';
 // pictures is the one that decides where they live, and the static mount below
 // serves exactly that. See the comment at the mount.
 import profilePictureRoutes, { UPLOADS_ROOT } from './routes/profilePictureRoutes.js';
+import tileRoutes from './routes/tileRoutes.js';
 import badgeRoutes from './routes/badgeRoutes.js';
 import twoFactorRoutes from './routes/twoFactorRoutes.js';
 import directoryRoutes from './routes/directoryRoutes.js';
@@ -286,8 +287,15 @@ app.use(helmet({
       // index.css:1 imports Bricolage Grotesque and Public Sans.
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
 
-      // data: covers the inline SVG favicon and any base64 image.
-      imgSrc: ["'self'", 'data:', 'https://*.tile.openstreetmap.org', 'https://*.basemaps.cartocdn.com'],
+      /**
+       * data: covers the inline SVG favicon and any base64 image.
+       *
+       * No map provider is listed, deliberately. Tiles are served by this
+       * application's `/tiles` proxy (routes/tileRoutes.js), so the page never
+       * contacts a tile host — and a provider host left here would quietly
+       * re-permit the direct fetch the proxy exists to end.
+       */
+      imgSrc: ["'self'", 'data:'],
 
       /**
        * The API is same-origin in both topologies: production serves the SPA
@@ -312,8 +320,6 @@ app.use(helmet({
        */
       connectSrc: [
         "'self'",
-        'https://*.tile.openstreetmap.org',
-        'https://*.basemaps.cartocdn.com',
         'https://api2.amplitude.com',
         'https://sr-client-cfg.amplitude.com',
         'https://gs.amplitude.com',
@@ -1646,6 +1652,16 @@ app.use('/api', (req, res) => {
  * `immutable` is safe because the filename carries `Date.now()` — replacing a
  * picture mints a new URL, so the bytes behind a given one never change.
  */
+/**
+ * Map tiles, proxied so the student's browser never contacts the tile provider
+ * and the provider's key never reaches the bundle. Outside `/api` on purpose:
+ * a tile is public cartography that Cloudflare should cache, and `/api` is
+ * `no-store` by rule. Registered above the SPA fallback for the same reason the
+ * uploads below are — a tile that falls through becomes index.html. See
+ * routes/tileRoutes.js.
+ */
+app.use(tileRoutes);
+
 app.use('/uploads', express.static(UPLOADS_ROOT, {
   index: false,
   dotfiles: 'deny',

@@ -26,10 +26,13 @@ describe('MapReveal', () => {
     expect(screen.queryByTestId('map-preview')).toBeNull();
   });
 
-  it('says which outside provider the tiles come from', async () => {
+  it('says where the map data comes from, and that the provider does not see the reader', async () => {
     render(<MapReveal {...PIN} />);
-    /* A consent nobody can read is not one. */
-    expect(screen.getByText(/CARTO/)).toBeInTheDocument();
+    /* Tiles are proxied by the server (tileRoutes.js), so the note must not
+       still claim an outside provider is contacted — and must not hide the
+       data source either. */
+    expect(screen.getByText(/OpenStreetMap/)).toBeInTheDocument();
+    expect(screen.getByText(/does not see your device/)).toBeInTheDocument();
   });
 
   it('shows the map once the button is pressed', () => {

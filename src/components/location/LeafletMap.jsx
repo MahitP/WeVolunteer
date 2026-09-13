@@ -2,6 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { basemapFor } from './basemap';
+
+/**
+ * The upstream the server chose, asked once per page load and shared by every
+ * map on it. A failure is not an error the reader needs to see: the map still
+ * draws, crediting OpenStreetMap, whose data every provider here renders.
+ */
+let providerRequest = null;
+function loadTileProvider() {
+  if (!providerRequest) {
+    providerRequest = fetch('/tiles/provider', { credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(body => (body?.provider === 'carto' || body?.provider === 'osm' ? body.provider : null))
+      .catch(() => null);
+  }
+  return providerRequest;
+}
 
 const customIcon = L.divIcon({
   className: 'custom-map-pin',
@@ -17,6 +34,13 @@ const customIcon = L.divIcon({
  */
 export default function LeafletMap({ latitude, longitude, label, interactive = false }) {
   const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute('data-theme') === 'dark');
+  const [provider, setProvider] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    loadTileProvider().then(p => { if (live) setProvider(p); });
+    return () => { live = false; };
+  }, []);
 
   useEffect(() => {
     const observer = new MutationObserver((mutations) => {
@@ -35,6 +59,8 @@ export default function LeafletMap({ latitude, longitude, label, interactive = f
     return () => observer.disconnect();
   }, []);
 
+  const basemap = basemapFor({ isDark, provider });
+
   return (
     <MapContainer
       center={[latitude, longitude]}
@@ -49,33 +75,23 @@ export default function LeafletMap({ latitude, longitude, label, interactive = f
       style={{ height: '100%', width: '100%' }}
     >
       {/**
-        * A basemap drawn dark, rather than a light one turned inside out.
+        * Tiles come from this application's `/tiles` route, which proxies the
+        * provider server-side — see basemap.js and server/routes/tileRoutes.js.
         *
-        * This used to serve Voyager at every theme and, in dark mode, put
-        * `filter: invert(100%) hue-rotate(180deg)` over it. Voyager is a light
-        * pastel cartography; inverting it does not produce a dark map, it
-        * produces a photographic negative — parks turn magenta, water turns
-        * sand, and the label halos that were white become black smears around
-        * black text. That is the "ugly, high-contrast" map, and it was on the
-        * organizer's event-creation picker and the student's event map alike,
-        * because both render this one component.
+        * A basemap drawn dark, rather than a light one turned inside out: CARTO's
+        * `dark_all` when the server has a CARTO key, and the light OpenStreetMap
+        * style dimmed (never inverted) when it does not. Attribution is a licence
+        * condition of both providers and is rendered by the control.
         *
-        * CARTO publishes `dark_all` for exactly this purpose: the same street
-        * network, drawn for a dark background, with labels designed to be
-        * legible on it. Swapping the URL is also cheaper than compositing a
-        * full-tile filter on every pan.
-        *
-        * `{r}` is Leaflet's retina suffix and both basemaps honour it.
-        * Attribution is identical and non-negotiable — OpenStreetMap's licence
-        * and CARTO's terms both require it, and it is rendered by the control,
-        * not by this string alone.
+        * `key` changes with theme and provider because Leaflet caches the tile
+        * URL on the layer instance; without it a swap would not take effect until
+        * the map was destroyed.
         */}
       <TileLayer
-        key={isDark ? 'dark' : 'light'}
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        url={isDark
-          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-          : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'}
+        key={`${isDark ? 'dark' : 'light'}-${provider ?? 'pending'}`}
+        attribution={basemap.attribution}
+        url={basemap.url}
+        className={basemap.className}
       />
       <Marker position={[latitude, longitude]} icon={customIcon}>
         {label && <Popup>{label}</Popup>}

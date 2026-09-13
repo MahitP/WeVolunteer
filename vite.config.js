@@ -123,6 +123,16 @@ export default defineConfig(({ mode }) => ({
        * work and the upgrade would silently fail, leaving the connection stuck on
        * long-polling.
        */
+      /**
+       * Map tiles are served by the API's own proxy (server/routes/tileRoutes.js)
+       * rather than fetched from a provider, so in development they must be
+       * forwarded like `/uploads` — otherwise a tile falls through to the SPA
+       * fallback and comes back as index.html, which draws as an empty map.
+       */
+      '/tiles': {
+        target: API_TARGET,
+        changeOrigin: true
+      },
       '/socket.io': {
         target: API_TARGET,
         ws: true,

@@ -8,17 +8,16 @@ import './LocationDisplay.css';
  *
  * ── Why this is not just `<MapPreview>` ──
  *
- * Map tiles are fetched by the student's own browser, directly from the tile
- * provider. That makes the provider the one third party in this application
- * that sees a student's IP address — the geocoder and the forecast service are
- * both called server-side and never learn who is asking. The compliance review
- * flagged it and named click-to-load as the accepted interim answer while a
- * server-side tile proxy remains unbuilt.
+ * Map tiles used to be fetched by the student's own browser, directly from the
+ * tile provider — the one third party in this application that saw a student's
+ * IP address. The compliance review named click-to-load as the interim and a
+ * server-side proxy as the fix; the proxy now exists (server/routes/tileRoutes.js),
+ * so no outside provider sees the reader at all.
  *
- * So: rendering a map because a page happened to open is a disclosure nobody
- * asked for. Rendering one because somebody pressed "Show map" is one they did.
- * The note under the button says which provider, because a consent nobody can
- * read is not one.
+ * Click-to-load stays anyway. A map is still a dozen requests and a 154 kB
+ * Leaflet chunk that most readers of an event never want, and the note under the
+ * button still says where the map data comes from, because that is true and
+ * worth knowing.
  *
  * It also happens to keep a 154 kB Leaflet chunk off the critical path, but
  * that is a side effect, not the reason.
@@ -42,7 +41,7 @@ export default function MapReveal({ latitude, longitude, label, height = 220 }) 
           <MapIcon size={14} aria-hidden="true" /> Show map
         </button>
         <span className="map-reveal-note">
-          Loads map tiles from CARTO, an outside map provider.
+          Map data from OpenStreetMap, loaded through WeVolunteer — the map provider does not see your device.
         </span>
       </div>
     );
