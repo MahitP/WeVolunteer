@@ -136,7 +136,7 @@ cmd_audit() {
 
   log "Network"
   ip -brief addr 2>/dev/null | sed 's/^/   /'
-  echo "   default route: $(ip route show default 2>/dev/null | head -1)"
+  echo "   default route: $(awk 'NR==1' <<<"$(ip route show default 2>/dev/null)")"
 
   log "Listening sockets"
   if have ss; then
@@ -144,19 +144,26 @@ cmd_audit() {
   else warn "ss not present"; fi
 
   log "Host firewall"
-  if have ufw; then echo "   ufw: $(ufw status 2>/dev/null | head -1)"; else echo "   ufw: not installed"; fi
-  echo "   iptables INPUT policy: $(iptables -S INPUT 2>/dev/null | head -1 || echo 'n/a')"
+  if have ufw; then echo "   ufw: $(awk 'NR==1' <<<"$(ufw status 2>/dev/null || true)")"; else echo "   ufw: not installed"; fi
+  echo "   iptables INPUT policy: $(awk 'NR==1' <<<"$(iptables -S INPUT 2>/dev/null || echo 'n/a')")"
   echo "   iptables rules (INPUT): $(iptables -S INPUT 2>/dev/null | wc -l)"
   # Oracle's Ubuntu images ship iptables rules that drop everything except 22.
   # If nginx is listening and the port is open in OCI but nothing arrives, this
   # is usually why, and it is separate from ufw.
-  if iptables -S INPUT 2>/dev/null | grep -qE 'REJECT|DROP'; then
+  if grep -qE 'REJECT|DROP' <<<"$(iptables -S INPUT 2>/dev/null || true)"; then
     warn "iptables has REJECT/DROP rules — Oracle images ship these; 80/443 must be allowed HERE (this host uses iptables directly, not ufw)"
   fi
 
   log "SSH configuration"
+  # Capture ONCE, then query the text. `sshd -T | awk '...{print; exit}'` under
+  # `set -o pipefail` is a trap: awk exits on the first match, sshd takes
+  # SIGPIPE, pipefail promotes 141 to the pipeline status and `set -e` kills the
+  # script. It killed `audit` two thirds of the way through on the production
+  # host, silently — the output simply stopped. Same defect class as the one
+  # that made every nightly backup fail.
+  SSHD_CFG=$(sshd -T 2>/dev/null || true)
   for k in PermitRootLogin PasswordAuthentication PubkeyAuthentication KbdInteractiveAuthentication ChallengeResponseAuthentication; do
-    v=$(sshd -T 2>/dev/null | awk -v k="$(echo "$k" | tr 'A-Z' 'a-z')" '$1==k{print $2; exit}')
+    v=$(awk -v k="$(echo "$k" | tr 'A-Z' 'a-z')" '$1==k{print $2; exit}' <<<"$SSHD_CFG")
     echo "   ${k}: ${v:-unset}"
   done
 
@@ -334,7 +341,7 @@ cmd_host() {
       ok "tcp/$port already allowed"
     else
       # Insert ABOVE the terminal REJECT, or append if this host has none.
-      reject_pos=$(iptables -L INPUT -n --line-numbers | awk '$2=="REJECT"{print $1; exit}')
+      reject_pos=$(awk '$2=="REJECT"{print $1; exit}' <<<"$(iptables -L INPUT -n --line-numbers)")
       if [ -n "$reject_pos" ]; then
         iptables -I INPUT "$reject_pos" -p tcp -m state --state NEW --dport "$port" -j ACCEPT
       else
@@ -449,14 +456,14 @@ ensure_cf_chain() {
     return 0
   fi
 
-  pos=$($cmd -L INPUT -n --line-numbers | awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}')
+  pos=$(awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
   if [ -n "$pos" ]; then
     $cmd -I INPUT "$pos" -p tcp -m state --state NEW --dport 443 -j "$chain"
-    shadowed=$($cmd -L INPUT -n --line-numbers | awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}')
+    shadowed=$(awk '/state NEW tcp dpt:443/ && $2=="ACCEPT" {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
     [ -n "$shadowed" ] && $cmd -D INPUT "$shadowed"
     ok "jump inserted at INPUT $pos, blanket ACCEPT removed"
   else
-    pos=$($cmd -L INPUT -n --line-numbers | awk '$2=="REJECT" || $2=="DROP" {print $1; exit}')
+    pos=$(awk '$2=="REJECT" || $2=="DROP" {print $1; exit}' <<<"$($cmd -L INPUT -n --line-numbers)")
     if [ -n "$pos" ]; then
       $cmd -I INPUT "$pos" -p tcp -m state --state NEW --dport 443 -j "$chain"
     else
@@ -514,7 +521,7 @@ cmd_verify() {
   done
 
   log "Application port binding"
-  local bind; bind=$(ss -tlnH "sport = :$APP_PORT" 2>/dev/null | awk '{print $4}' | head -1)
+  local bind; bind=$(awk 'NR==1{print $4}' <<<"$(ss -tlnH "sport = :$APP_PORT" 2>/dev/null)")
   if [ -z "$bind" ]; then bad "nothing listening on $APP_PORT"; fails=$((fails+1))
   elif echo "$bind" | grep -qE '^(127\.0\.0\.1|\[::1\]):'; then ok "app bound to loopback only ($bind)"
   else bad "app bound to $bind — reachable outside the proxy. Set BIND_ADDRESS=127.0.0.1"; fails=$((fails+1)); fi
@@ -568,7 +575,7 @@ cmd_verify() {
     iptables -C INPUT -p tcp -m state --state NEW --dport 443 -j CF-HTTPS 2>/dev/null \
       && ok "INPUT jumps to CF-HTTPS for tcp/443" \
       || { bad "CF-HTTPS exists but INPUT does not jump to it — 443 is NOT restricted"; fails=$((fails+1)); }
-    if iptables -S INPUT | grep -q -- '--dport 443 -j ACCEPT'; then
+    if grep -q -- '--dport 443 -j ACCEPT' <<<"$(iptables -S INPUT)"; then
       bad "a blanket 443 ACCEPT still exists — the allowlist is bypassed"; fails=$((fails+1))
     else
       ok "no blanket 443 ACCEPT"

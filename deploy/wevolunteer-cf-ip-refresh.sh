@@ -167,9 +167,14 @@ ip6tables -S "$NEW6" | tail -1 | grep -q -- '-j DROP' || fail "$NEW6 has no term
 # `iptables -R` replaces one rule in place: there is no instant where 443 has
 # no rule at all. The OLD chain is deliberately left resident so rollback is a
 # second -R back onto it, with no restore and no flush.
-jump_pos() { iptables -L INPUT -n --line-numbers | awk -v c="$1" '$2==c {print $1; exit}'; }
+# Here-strings, not pipes. `iptables -L | awk '''...{print; exit}'''` under
+# `set -o pipefail` lets awk exit first, iptables take SIGPIPE, and 141 become
+# the pipeline status — which `set -e` turns into a silent abort. Both lookups
+# run BEFORE any rule is touched, so an abort here changes nothing, but the
+# same construct killed `provision.sh audit` outright and is not worth keeping.
+jump_pos() { awk -v c="$1" '$2==c {print $1; exit}' <<<"$(iptables -L INPUT -n --line-numbers)"; }
 POS4=$(jump_pos "$CHAIN4"); [ -n "$POS4" ] || fail "no INPUT jump to $CHAIN4 found — not switching"
-POS6=$(ip6tables -L INPUT -n --line-numbers | awk -v c="$CHAIN6" '$2==c {print $1; exit}')
+POS6=$(awk -v c="$CHAIN6" '$2==c {print $1; exit}' <<<"$(ip6tables -L INPUT -n --line-numbers)")
 
 iptables -R INPUT "$POS4" -p tcp -m state --state NEW --dport 443 -j "$NEW4"
 log "IPv4 jump (INPUT $POS4) now targets $NEW4"

@@ -359,6 +359,92 @@ describe('make-release.sh produces a shippable, secret-free archive', () => {
   });
 });
 
+describe('no pipeline lets an early-exiting reader SIGPIPE its producer', () => {
+  /**
+   * This bug class has cost this project twice.
+   *
+   * Under `set -o pipefail`, a reader that exits on its first match (`grep -q`,
+   * `awk '...{print; exit}'`, `head`) leaves the producer writing into a closed
+   * pipe. The producer dies with SIGPIPE, 141 becomes the PIPELINE's status, and
+   * `set -e` turns a check that SUCCEEDED into a fatal error — or, inside an
+   * `if`, into a silent wrong answer.
+   *
+   * First it made every nightly backup delete a good archive. Then it killed
+   * `provision.sh audit` on the production host at exit 141, two thirds of the
+   * way through, with no error printed — the output simply stopped.
+   *
+   * Whether it fires depends on whether the producer is still writing when the
+   * reader quits, which makes it size-dependent and unreproducible in a small
+   * fixture. So this does not try to trigger it; it forbids the construct, and
+   * requires every surviving instance to be a producer whose entire output is a
+   * single line and therefore cannot be caught mid-write.
+   */
+  /**
+   * Instances reviewed and judged safe, each for a stated reason. Anything not
+   * on this list fails, which is the point: a new pipeline has to be looked at
+   * rather than pattern-matched past.
+   *
+   * A producer is safe when its ENTIRE output is one short line (it finishes
+   * writing before any reader could quit), or when the stage feeding the
+   * early-exiting reader consumes all of its own input first.
+   */
+  const REVIEWED_SAFE = [
+    // `node -v` and `pg_dump --version` each emit a single line.
+    "node -v | grep -qE '^v24\\.'",
+    "pg_dump --version | grep -qE ' 17\\.'",
+    // `echo` is a builtin writing one short line.
+    'elif echo "$bind" | grep -qE',
+    'echo "$host" | grep -q \'supabase\'',
+    // `tail -1` reads ALL of iptables' output before emitting one line, so
+    // iptables is never writing when grep quits.
+    'iptables  -S "$NEW4" | tail -1 | grep -q',
+    'ip6tables -S "$NEW6" | tail -1 | grep -q',
+  ];
+
+  const shellFiles = [
+    'deploy/provision.sh',
+    'deploy/make-release.sh',
+    'deploy/wevolunteer-cf-ip-refresh.sh',
+  ];
+
+  /** Comments describing the trap are wanted; executable instances are not. */
+  const stripComments = (src) =>
+    src
+      .split('\n')
+      .map((l) => (/^\s*#/.test(l) ? '' : l))
+      .join('\n');
+
+  it('has no unreviewed producer|early-exiting-reader pipeline', () => {
+    const offenders = [];
+    for (const rel of shellFiles) {
+      readFileSync(path.join(repoRoot, rel), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (/^\s*#/.test(line)) return;
+          if (!/\|\s*(grep -q|head\b|awk[^|]*\bexit\b)/.test(line)) return;
+          if (REVIEWED_SAFE.some((safe) => line.includes(safe))) return;
+          offenders.push(`${rel}:${i + 1}  ${line.trim()}`);
+        });
+    }
+    expect(
+      offenders,
+      'use a here-string: capture the producer fully, then feed the reader <<<"$var"',
+    ).toEqual([]);
+  });
+
+  it('reads sshd config once into a variable rather than piping it', () => {
+    const src = stripComments(readFileSync(PROVISION, 'utf8'));
+    expect(src).toContain('SSHD_CFG=$(sshd -T 2>/dev/null || true)');
+    expect(src).not.toMatch(/sshd -T[^\n]*\|\s*awk/);
+  });
+
+  it('checks the archive listing from a variable, not by re-walking the tar', () => {
+    const src = stripComments(readFileSync(MAKE_RELEASE, 'utf8'));
+    expect(src).toContain('TAR_LIST=$(tar -tf "$TAR")');
+    expect(src).not.toMatch(/tar -tf "\$TAR"[^\n]*\|\s*grep -q/);
+  });
+});
+
 describe('the release path does not reintroduce a credential on the host', () => {
   const release = readFileSync(MAKE_RELEASE, 'utf8');
   const provision = readFileSync(PROVISION, 'utf8');

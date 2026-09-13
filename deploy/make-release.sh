@@ -112,7 +112,7 @@ TAR="$TMP/release.tar"
 # "the last one wins" is conventional behaviour, not a guarantee — and reading
 # the stamp back out of the archive returns both concatenated. Refuse rather
 # than rely on it.
-if git ls-tree -r --name-only "$FULL" | grep -qx '.deployed-sha'; then
+if grep -qx '.deployed-sha' <<<"$(git ls-tree -r --name-only "$FULL")"; then
   die ".deployed-sha is tracked at $SHA. It is generated at release time and must stay
        untracked (it is in .gitignore); a tracked copy would collide with the stamp."
 fi
@@ -133,15 +133,23 @@ ok "$COUNT files from $SHA"
 ok "stamped .deployed-sha = $SHA"
 
 # ── The secret check, run on the artifact rather than trusted in the abstract ──
+#
+# The listing is taken ONCE into a variable and every check reads it as a
+# here-string. `tar -tf "$TAR" | grep -q ...` under `set -o pipefail` lets grep
+# exit on its match while tar is still writing 1400 entries; tar takes SIGPIPE,
+# 141 becomes the pipeline status, and a check that SUCCEEDED reads as a
+# failure. The tracked-stamp guard above had the inverse problem: a SIGPIPE
+# there would have made the guard silently pass.
 log "Checking the archive carries no secrets"
-LEAKED=$(tar -tf "$TAR" | grep -E '(^|/)\.env$|(^|/)\.env\.(local|production)$|\.pem$|(^|/)id_(rsa|ed25519)$' || true)
+TAR_LIST=$(tar -tf "$TAR")
+LEAKED=$(grep -E '(^|/)\.env$|(^|/)\.env\.(local|production)$|\.pem$|(^|/)id_(rsa|ed25519)$' <<<"$TAR_LIST" || true)
 if [ -n "$LEAKED" ]; then
   printf '%s\n' "$LEAKED" | sed 's/^/     /'
   die "refusing to ship: the archive contains files that look like secrets"
 fi
 ok "no .env, key or certificate files in the archive"
-tar -tf "$TAR" | grep -q '^package-lock.json$' || die "archive has no package-lock.json — 'provision.sh app' could not npm ci"
-tar -tf "$TAR" | grep -q '^package.json$'      || die "archive has no package.json"
+grep -q '^package-lock.json$' <<<"$TAR_LIST" || die "archive has no package-lock.json — 'provision.sh app' could not npm ci"
+grep -q '^package.json$'      <<<"$TAR_LIST" || die "archive has no package.json"
 ok "package.json and package-lock.json present"
 
 if [ -n "$TO" ]; then
