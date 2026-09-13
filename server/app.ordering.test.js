@@ -66,6 +66,12 @@ function bootProdAndProbe() {
       const health = await fetch(base + '/health');
       const api404 = await fetch(base + '/api/does-not-exist-xyz');
       const spa = await fetch(base + '/some/spa/route');
+      // A real content-hashed file out of the build, so the scope of the /api
+      // no-store rule is checked against the asset it must never reach.
+      const { readdirSync } = await import('node:fs');
+      const assetName = readdirSync('${root}/dist/assets').find(f => f.endsWith('.js'));
+      const asset = await fetch(base + '/assets/' + assetName);
+      const spaRoot = await fetch(base + '/');
       // A browser sends Origin when fetching <script type="module">, even
       // same-origin. CORS_ORIGINS names one origin that is not the probe base, so
       // this origin is deliberately NOT on the allowlist.
@@ -100,6 +106,12 @@ function bootProdAndProbe() {
         healthBody: await health.text(),
         api404Status: api404.status,
         api404CT: api404.headers.get('content-type') || '',
+        api404CC: api404.headers.get('cache-control') || '',
+        spaCC: spa.headers.get('cache-control') || '',
+        spaRootCC: spaRoot.headers.get('cache-control') || '',
+        assetStatus: asset.status,
+        assetCC: asset.headers.get('cache-control') || '',
+        apiForeignOriginCC: apiForeignOrigin.headers.get('cache-control') || '',
         spaCT: spa.headers.get('content-type') || '',
         spaWithOriginStatus: spaWithOrigin.status,
         spaWithOriginCT: spaWithOrigin.headers.get('content-type') || '',
@@ -166,6 +178,31 @@ describe('production middleware ordering (Task 11)', () => {
     // Proves /health returning JSON is not merely because the catch-all is
     // absent — a real SPA route still gets index.html.
     expect(probe.spaCT).toMatch(/text\/html/);
+  });
+
+  /**
+   * Cache scope in the production topology, where `dist/` is actually served.
+   *
+   * `apiCacheIsolation.test.js` proves `/api` says `no-store`; it cannot prove
+   * the rule stops at `/api`, because outside production there is no bundle to
+   * serve. Here there is. A hashed asset that lost `immutable` would be fetched
+   * again on every navigation — origin egress on the free tier — and an
+   * `index.html` that gained a max-age would pin returning users to the
+   * previous deployment's chunks.
+   */
+  it('/api says no-store, while the bundle keeps its own cache rules', () => {
+    expect(probe.api404CC).toBe('no-store');
+    expect(probe.apiForeignOriginCC).toBe('no-store');
+
+    expect(probe.assetStatus).toBe(200);
+    expect(probe.assetCC).toBe('public, max-age=31536000, immutable');
+    expect(probe.spaRootCC).toBe('no-cache');
+    /* A deep link reaches index.html through the catch-all's `sendFile`, which
+       sends `send`'s own `public, max-age=0` rather than the static handler's
+       `no-cache`. In the deployed topology Nginx serves `dist/` and this path is
+       never the front door, so it is recorded rather than changed here. The
+       property under test is only that the /api rule did not leak onto it. */
+    expect(probe.spaCC).not.toMatch(/no-store/);
   });
 });
 

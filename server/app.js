@@ -367,6 +367,50 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
+/**
+ * Every `/api` response is uncacheable, stated by the application itself.
+ *
+ * `GET /api/auth/me` is one URL that returns a different person for every
+ * session. Any shared cache willing to store it — a CDN, a corporate proxy, a
+ * school's filtering appliance — hands one student's identity to the next
+ * caller of that URL, and on this platform that identity usually belongs to a
+ * minor.
+ *
+ * The property used to be carried by three things agreeing, none of which is
+ * the application's own guarantee:
+ *
+ *   - `deploy/nginx/wevolunteers.conf` adds the header at the reverse proxy.
+ *     That file is deployment configuration; it can be edited, replaced, or
+ *     absent if the application is ever fronted by something else.
+ *   - Cloudflare's free plan caches by file extension, so an extensionless
+ *     `/api` path is not a candidate — until somebody adds a "Cache Everything"
+ *     rule, which is one click and not a review.
+ *   - `certificateRoutes` and `privacyRoutes` set it by hand. Both were added
+ *     after somebody found a specific leak, which is the pattern that leaves the
+ *     next handler uncovered.
+ *
+ * ── Why here, and not beside cookie-parser ──
+ *
+ * It was first written immediately before the CSRF guard, with a comment saying
+ * it covered "responses that never reach a router". Not all of them: the CORS
+ * refusal (403), an oversized body (413) and malformed JSON (400) are all
+ * produced by layers mounted ABOVE that point, which reach the error handler
+ * without ever passing through it. Mounted here, before CORS and before either
+ * body parser, every `/api` response that Express writes carries it.
+ * `server/apiCacheIsolation.test.js` asserts each of those three on the wire.
+ *
+ * It only establishes the default. A handler that sets something stricter still
+ * wins, and `send`/`res.download` will not overwrite a header that is already
+ * present — which is exactly the case `privacyRoutes` reasons about.
+ *
+ * The scope is deliberate: the content-hashed bundle must stay immutably
+ * cacheable, because that is what keeps origin egress inside the free tier.
+ */
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 // Scoped to /api deliberately.
 //
 // Mounted globally, this also guarded the static bundle — and browsers send an
