@@ -195,9 +195,32 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
    * user re-verifying after a broken download rather than a spendable grant
    * left behind by one that succeeded.
    */
+  /**
+   * The audit row is written in the SAME transaction as the spend, before a byte
+   * of the archive moves.
+   *
+   * It used to be written in `res.download`'s completion callback, after the
+   * transfer, inside a try/catch that swallowed a failure — and the comment
+   * there recorded the consequence as a finding nobody had fixed: a database
+   * failure at that instant lost the record that a minor's complete personal
+   * data had been collected, while the archive still left. For a bulk egress of
+   * one person's record, "we sent it and cannot say so" is the wrong failure.
+   *
+   * Now the order is the one that can refuse: if the record cannot be written,
+   * the transaction rolls back, the grant is NOT spent (the user can retry), and
+   * nothing is sent. The row therefore means "released for download": a transfer
+   * that breaks half way still has a row, which is correct — some of the bytes
+   * left. `routes.exportDownload.test.js` asserts both directions.
+   */
   try {
     await runInTransaction(db, async (tx) => {
       await spendChallenge(tx, req, 'data.download', { jobId });
+      await recordAudit(tx, {
+        adminId: userId,
+        action: 'DATA_EXPORT_DOWNLOADED',
+        targetUserId: userId,
+        details: 'Data export archive released for download'
+      });
     });
   } catch (err) {
     if (err instanceof ChallengeNotSpent) return refuseReauth(res, err.result);
@@ -227,40 +250,11 @@ router.get('/api/privacy/export/download/:id', authenticateToken, requireAAL2('d
    */
   res.set('Cache-Control', 'no-store');
 
-  res.download(job.file_location, 'wevolunteer-data-export.zip', async (err) => {
-    if (err) {
-      console.error('Error downloading file:', err);
-    } else {
-      /**
-       * Log successful download.
-       *
-       * The one call site in the application that catches. `recordAudit` never
-       * swallows — every other caller runs inside a transaction where a failed
-       * audit must take the work down with it — but this runs in `res.download`'s
-       * completion callback, after the archive has already been streamed to the
-       * user. There is no response left to fail and no transaction left to roll
-       * back, so a throw here would be an unhandled exception in a callback
-       * rather than an error anybody sees.
-       *
-       * The cost is real and is stated rather than hidden: a database failure at
-       * this instant loses the record that the archive was collected, while the
-       * archive still leaves. That is the wrong trade for a download of a
-       * personal-data export and it is recorded as a finding rather than fixed
-       * here — moving the audit ahead of `res.download`, so it is written before
-       * the bytes move and can refuse the download, is a behaviour change beyond
-       * this task's "convert the call sites, refactor nothing" boundary.
-       */
-      try {
-        await recordAudit(db, {
-          adminId: userId,
-          action: 'DATA_EXPORT_DOWNLOADED',
-          targetUserId: userId,
-          details: 'User downloaded data export'
-        });
-      } catch (e) {
-        console.error('Audit log failed:', e);
-      }
-    }
+  res.download(job.file_location, 'wevolunteer-data-export.zip', (err) => {
+    /* The release is already recorded above. A transfer that fails here — the
+       client hung up, the disk went away — is logged for operators and needs no
+       second record: the row says the archive was released, and it was. */
+    if (err) console.error('Error downloading file:', err.message);
   });
 });
 

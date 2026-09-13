@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { startTestServer } from './testServer.js';
+import { RUNNING_ON_POSTGRES } from './testEngine.js';
 
 const PW = 'Password123';
 
@@ -93,6 +94,62 @@ describe('export download: the gate', () => {
     const header = await srv.verified(cookie, 'data.download', { password: PW, params: { jobId } });
     const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, cookie, header);
     expect(res.status).toBe(200);
+  });
+
+  /**
+   * The release of a personal-data archive is recorded before the bytes move,
+   * and cannot happen without the record.
+   *
+   * The row used to be written in the download's completion callback, after the
+   * transfer, with its failure swallowed — so a database hiccup at that moment
+   * sent the archive and left no trace that it had gone.
+   */
+  it('records the release of the archive exactly once', async () => {
+    const signed = await srv.signupConfirmed(account());
+    const { jobId } = await completedExport(signed.cookie);
+    const userId = signed.user.id;
+
+    const header = await srv.verified(signed.cookie, 'data.download', { password: PW, params: { jobId } });
+    const res = await srv.call('GET', `/api/privacy/export/download/${jobId}`, undefined, signed.cookie, header);
+    expect(res.status).toBe(200);
+
+    const rows = await db.prepare(
+      "SELECT admin_id, target_user_id FROM admin_audit_logs WHERE action = 'DATA_EXPORT_DOWNLOADED' AND target_user_id = ?"
+    ).all(userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].admin_id).toBe(userId);
+  });
+
+  /* SQLite-only: the failure is forced with a trigger, and a trigger body is
+     dialect-specific. The ordering it proves is engine-independent — the audit
+     and the spend share one `runInTransaction` on both. */
+  it.skipIf(RUNNING_ON_POSTGRES)('sends nothing, and keeps the grant, when the release cannot be recorded', async () => {
+    const signed = await srv.signupConfirmed(account());
+    const { jobId } = await completedExport(signed.cookie);
+    const header = await srv.verified(signed.cookie, 'data.download', { password: PW, params: { jobId } });
+
+    await db.prepare(`
+      CREATE TRIGGER test_refuse_download_audit BEFORE INSERT ON admin_audit_logs
+      WHEN NEW.action = 'DATA_EXPORT_DOWNLOADED'
+      BEGIN SELECT RAISE(ABORT, 'audit store unavailable'); END
+    `).run();
+    let refused;
+    try {
+      refused = await fetch(`${srv.base}/api/privacy/export/download/${jobId}`, {
+        headers: { Cookie: `wev_session=${signed.cookie}`, ...header },
+      });
+    } finally {
+      await db.prepare('DROP TRIGGER IF EXISTS test_refuse_download_audit').run();
+    }
+    expect(refused.status).toBe(500);
+    expect(await refused.text()).not.toContain('PK-ARCHIVE');
+
+    // The grant was rolled back with the audit, so the same one still works.
+    const retry = await fetch(`${srv.base}/api/privacy/export/download/${jobId}`, {
+      headers: { Cookie: `wev_session=${signed.cookie}`, ...header },
+    });
+    expect(retry.status).toBe(200);
+    expect(await retry.text()).toBe('PK-ARCHIVE');
   });
 
   /**
