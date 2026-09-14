@@ -815,9 +815,22 @@ describe('the unported fixture surface', () => {
   });
 
   /** Lowered only by porting files, never raised to accommodate new ones. */
-  const CEILING = 113;
+  /**
+   * Raised from 113 to 152 on 2026-09-14 — by MEASUREMENT, not by adding debt.
+   *
+   * `unportedChains` counted `prepare(…).get/all/run(…)` and not `exec(…)`, so
+   * 39 unawaited `db.exec(…)` calls on the application handle were never in the
+   * number. They are the same defect: `PostgresDatabase.exec` is async,
+   * `DatabaseSync.exec` is not. One of them had already cost a full PostgreSQL
+   * run in ten — see the note on `execCallObject` in fixtureDebt.js — and it was
+   * fixed in the same pass, so this figure is what remains after that.
+   *
+   * The rule is unchanged: lower it when files are ported, never raise it to let
+   * a new one in.
+   */
+  const CEILING = 152;
 
-  it(`has at most ${CEILING} unawaited prepare() chains in proxy-holding test files`, () => {
+  it(`has at most ${CEILING} unawaited application-handle calls in test files`, () => {
     const offenders = new Map();
     for (const { rel, src } of FILES) {
       if (!rel.includes('.test.')) continue;
@@ -831,7 +844,7 @@ describe('the unported fixture surface', () => {
 
     expect(
       total,
-      `${total} unawaited prepare() chains across ${offenders.size} files — up from ${CEILING}. `
+      `${total} unawaited application-handle calls across ${offenders.size} files — up from ${CEILING}. `
       + 'Each one is correct on SQLite and broken on PostgreSQL, so adding more deepens the '
       + `port rather than failing today. Worst: ${worst}.`,
     ).toBeLessThanOrEqual(CEILING);

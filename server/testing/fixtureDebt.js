@@ -1,7 +1,8 @@
 /**
- * Counts unawaited `handle.prepare(…).get/all/run(…)` chains that run against
- * the APPLICATION's database handle, telling them apart from the ones that run
- * against a throwaway SQLite handle in the same file.
+ * Counts unawaited calls on the APPLICATION's database handle — both
+ * `handle.prepare(…).get/all/run(…)` chains and direct `handle.exec(…)` —
+ * telling them apart from the ones that run against a throwaway SQLite handle
+ * in the same file.
  *
  * ── Why this needs a parser and a scope stack ──
  *
@@ -52,6 +53,32 @@ function makeIsRawHandleInit(ctorNames) {
     if (isMember(c)) return c.property?.name === 'DatabaseSync';
     return false;
   };
+}
+
+/**
+ * `X.exec(…)` — a direct call on the handle rather than a `prepare()` chain.
+ *
+ * Counted alongside the chains because it is the same defect with the same
+ * cause: `PostgresDatabase.exec` is `async`, `DatabaseSync.exec` is not, so an
+ * unawaited `db.exec(…)` is correct on SQLite and a race on PostgreSQL.
+ *
+ * It was not counted until 2026-09-14, and the gap was not theoretical.
+ * `notificationSweep.test.js` seeded an event, a slot and an application in an
+ * unawaited `beforeAll` exec; roughly one full PostgreSQL run in ten then read
+ * the rows before they landed and failed with "expected 0 to be greater than 0".
+ * The file passes twelve times out of twelve in isolation either way — the race
+ * only opens under full-suite pool contention — so it read as noise for as long
+ * as nothing was measuring it.
+ *
+ * Resolution goes through the same scope chain as the `prepare()` case, so an
+ * `exec` on a genuine `new DatabaseSync(':memory:')` handle is still exempt: on
+ * that handle it really is synchronous.
+ */
+function execCallObject(node) {
+  if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return null;
+  const c = node.callee;
+  if (!c || !isMember(c) || c.computed || c.property?.name !== 'exec') return null;
+  return c.object?.type === 'Identifier' ? c.object.name : null;
 }
 
 /** `X.prepare(…).get(…)` — returns the object identifier's name, or null. */
@@ -242,7 +269,7 @@ export function unportedChains(src) {
   const out = [];
 
   walk(ast, (n, stack) => {
-    const name = prepareChainObject(n);
+    const name = prepareChainObject(n) ?? execCallObject(n);
     if (!name) return;
     const parent = stack[stack.length - 1];
     if (parent?.type === 'AwaitExpression') return;
