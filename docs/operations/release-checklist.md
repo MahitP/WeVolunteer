@@ -176,11 +176,35 @@ account can be used. This is not a step to defer.
 - [ ] `systemctl list-timers wevolunteer-backup.timer` shows a next run.
 - [ ] One run by hand succeeds: `sudo systemctl start wevolunteer-backup.service`,
       and the journal shows a `verified: users=… credited_hours=…` line.
-- [ ] **Off-host copy configured.** This is the one gap the project does not close
-      for you: `WEV_BACKUP_DIR` defaults to the same disk as the database, so a
-      volume failure loses the records and every archive together. Add an rsync,
-      an object-store push, or a snapshot schedule — whatever the district already
-      has. Do not skip this because everything else in this section passed.
+- [ ] **Off-host copy configured.** `WEV_BACKUP_DIR` defaults to the same disk as
+      the database, so a volume failure loses the records and every archive
+      together. This is no longer a "bring your own" item: set the four `B2_*`
+      variables and the nightly run uploads to Backblaze B2, checks B2's own
+      record of the object, **downloads it back and compares hashes**, and audits
+      what the bucket actually retains. All four or none — a half-configured
+      destination is refused rather than silently skipped.
+      Full procedure, including the bucket's lifecycle rule and Object Lock
+      settings, the three scoped keys, and why no key may have `deleteFiles`:
+      [`offsite-backups.md`](offsite-backups.md) §11.
+      Do not skip this because everything else in this section passed.
+- [ ] **Spending caps set on the B2 account, before the first upload.** A new
+      account has none, and without them "$0" is a forecast rather than a
+      guarantee. B2 refuses a breached cap instead of billing it — that is the
+      reason it was chosen over R2, and it only holds if the caps exist.
+      See [`offsite-backups.md`](offsite-backups.md) §10.
+- [ ] **The backup private key is NOT on this host.** If
+      `/root/backup-keys/backup-key.pem` (or any `WEV_BACKUP_TESTKEY` in the
+      environment file) exists, the host can decrypt every archive and the
+      encryption is decorative. Confirm the password manager holds a copy, prove
+      that copy restores on a machine that is not this one, then `shred -u` the
+      one here. **Prove the copy you are keeping works before destroying the one
+      you have.**
+- [ ] **Weekly restore drill scheduled on a machine that is not this host.**
+      `bin/restore-drill-postgres.sh` fetches from B2, decrypts, restores into a
+      throwaway cluster and compares against the manifest. It runs where the
+      private key already is — deliberately not here, and deliberately with no
+      systemd unit, since installing one would put the key back on this host.
+      Its verdict travels to the Owner Center through the bucket.
 - [ ] **Restore rehearsed**, with the shipped script:
       ```bash
       sudo -u wev WEV_BACKUP_DIR=/var/backups/wevolunteer bin/verify-restore.sh
@@ -362,5 +386,16 @@ admits its edges:
 - **Auto Select scheduling.** There is still no scheduler; if an organizer forgets to
   run a draw, applicants stay pending and are never told. Run the runbook's
   "pending past deadline" query daily.
-- **Off-host backup automation.** Checklist item, not shipped code.
-- **Backup failure alerting.** Deliberately not shipped; see §6.
+- **Off-host backup automation.** Shipped as of 2026-09-13: `bin/backup-offsite.mjs`
+  uploads to Backblaze B2 and proves the copy by downloading it back. What is NOT
+  shipped is the account — the bucket, its lifecycle rule, its caps and its three
+  keys are still a human step (§6, and `offsite-backups.md` §11), and no request
+  from this project has ever reached backblazeb2.com.
+- **Backup failure alerting.** Now shipped for the cases the application can see:
+  a stale or missing local archive, a failed or stale off-site copy, and a failed
+  or stale restore drill all email `ALERT_EMAIL` at most twice a day, with a
+  subject that distinguishes "backups are not running" from "backups are running
+  but the off-site copy is not". What is still NOT shipped is `OnFailure=` on the
+  systemd unit: a unit that fails before the application ever sees it — the timer
+  disabled, the host down — is invisible to an alerter running inside that host.
+  See §6.
