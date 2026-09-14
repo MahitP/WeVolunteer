@@ -39,12 +39,18 @@
 #   WEV_BACKUP_DIR        where to look for archives (default /var/backups/wevolunteer)
 #   WEV_BACKUP_TESTKEY    private key, required if the archive is encrypted
 #   WEV_PG_BIN            directory holding a version-compatible pg_restore
+#   WEV_OPENSSL           an OpenSSL 3 binary (default: `openssl` on PATH). Archives
+#                         from 2026-09-13 on are AES-256-GCM, which LibreSSL (macOS
+#                         /usr/bin/openssl) cannot read.
+#   WEV_RESTORE_RESULT    optional path; a JSON record of this drill is written there
 #   DATABASE_URL          if set, used ONLY to refuse to restore over it
 #
 set -euo pipefail
 
 DEST="${WEV_BACKUP_DIR:-/var/backups/wevolunteer}"
 SCRATCH_DB="wev_restore_drill_$$"
+OPENSSL="${WEV_OPENSSL:-openssl}"
+STARTED="$(date +%s)"
 
 log()  { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 fail() { log "FAILED: $*"; exit 1; }
@@ -91,6 +97,21 @@ log "verifying $ARCHIVE"
 
 MANIFEST="${ARCHIVE%.enc}"; MANIFEST="${MANIFEST%.dump}.manifest.json"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The bytes first. Manifests from 2026-09-13 on record the archive's SHA-256; a
+# mismatch means the file is not the one that was taken, and nothing after this
+# point could be trusted — so the drill stops here rather than reporting on it.
+M_SHA=""
+if [ -f "$MANIFEST" ]; then
+  M_SHA="$(sed -n 's/.*"archive_sha256": "\([0-9a-f]\{64\}\)".*/\1/p' "$MANIFEST")"
+fi
+if [ -n "$M_SHA" ]; then
+  A_SHA="$(sha256sum "$ARCHIVE" 2>/dev/null || shasum -a 256 "$ARCHIVE")"
+  A_SHA="${A_SHA%% *}"
+  [ "$A_SHA" = "$M_SHA" ] || fail "the archive's SHA-256 does not match its manifest — this is not the file that was backed up"
+  log "verified: archive SHA-256 matches the manifest"
+fi
+
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/wev-restore-XXXXXX")"
 cleanup() {
   rm -rf "$WORK"
@@ -108,8 +129,8 @@ case "$ARCHIVE" in
     [ -n "${WEV_BACKUP_TESTKEY:-}" ] || fail "the archive is encrypted but WEV_BACKUP_TESTKEY is not set"
     [ -f "$WEV_BACKUP_TESTKEY" ]     || fail "WEV_BACKUP_TESTKEY does not exist: $WEV_BACKUP_TESTKEY"
     log "decrypting"
-    openssl cms -decrypt -binary -inform DER -in "$ARCHIVE" -inkey "$WEV_BACKUP_TESTKEY" -out "$PLAIN" 2>/dev/null \
-      || fail "decryption failed — wrong key, or the archive is damaged"
+    "$OPENSSL" cms -decrypt -binary -inform DER -in "$ARCHIVE" -inkey "$WEV_BACKUP_TESTKEY" -out "$PLAIN" 2>"$WORK/err" \
+      || fail "decryption failed — wrong key, a damaged archive, or an OpenSSL that cannot read AES-256-GCM (set WEV_OPENSSL to OpenSSL 3): $(head -c 300 "$WORK/err")"
     ;;
   *) cp "$ARCHIVE" "$PLAIN" ;;
 esac
@@ -150,12 +171,23 @@ PY
 #
 # pg_trgm, pgcrypto and uuid-ossp are ordinary contrib extensions present in any
 # standard PostgreSQL installation; none of this requires provider software.
+# 3. Where the archive expects pg_trgm is a property of the SOURCE, not of this
+#    script: Supabase installs it in `extensions`, a self-hosted PostgreSQL (the
+#    local drill database, or any future non-Supabase host) in `public`. A drill
+#    on 2026-09-13 restoring a self-hosted archive failed with `operator class
+#    "public.gin_trgm_ops" does not exist`. So the archive is asked, and the
+#    restore runs in sections, so an extension that must live in `public` can be
+#    created after `public` itself is restored and before the indexes that use it.
+TRGM_SCHEMAS="$(pg_restore -f - --section=post-data "$PLAIN" 2>/dev/null | grep -oE '[a-z_]+\.gin_trgm_ops' | sed 's/\.gin_trgm_ops$//' | sort -u || true)"
+log "archive expects pg_trgm in: ${TRGM_SCHEMAS:-no schema (no trigram indexes)}"
+
 log "preparing the scratch database (drop empty public, create extensions schema)"
 psql -tAX -d "$SCRATCH_URL" -c "DROP SCHEMA IF EXISTS public CASCADE;" >/dev/null \
   || fail "could not drop the empty public schema on the scratch database"
 psql -tAX -d "$SCRATCH_URL" -c "CREATE SCHEMA IF NOT EXISTS extensions;" >/dev/null \
   || fail "could not create the extensions schema on the scratch database"
 for ext in pg_trgm pgcrypto "uuid-ossp"; do
+  [ "$ext" = "pg_trgm" ] && grep -qx public <<<"$TRGM_SCHEMAS" && continue
   psql -tAX -d "$SCRATCH_URL" -c "CREATE EXTENSION IF NOT EXISTS \"$ext\" WITH SCHEMA extensions;" >/dev/null 2>&1 \
     || log "  note: $ext unavailable on this target (only pg_trgm is load-bearing)"
 done
@@ -163,9 +195,17 @@ done
 log "restoring"
 # --exit-on-error: a restore that reports success while having skipped statements
 # is exactly the false green this whole exercise exists to eliminate.
-if ! pg_restore --no-owner --no-privileges --exit-on-error -d "$SCRATCH_URL" "$PLAIN" 2>"$WORK/err"; then
-  fail "pg_restore failed: $(head -c 1500 "$WORK/err")"
+restore_section() {
+  pg_restore --no-owner --no-privileges --exit-on-error --section="$1" -d "$SCRATCH_URL" "$PLAIN" 2>"$WORK/err" \
+    || fail "pg_restore ($1) failed: $(head -c 1500 "$WORK/err")"
+}
+restore_section pre-data
+if grep -qx public <<<"$TRGM_SCHEMAS"; then
+  psql -tAX -d "$SCRATCH_URL" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;" >/dev/null \
+    || fail "the archive's indexes need pg_trgm in public, and it could not be created"
 fi
+restore_section data
+restore_section post-data
 log "restore completed with no errors"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,14 +223,15 @@ for t in users events attendance certificates hours_ledger; do
 done
 log "verified: every table the platform cannot be reconstructed without is present"
 
-read -r R_USERS R_HOURS R_CERTS R_LEDGER <<EOF
+read -r R_USERS R_HOURS R_CERTS R_LEDGER R_MIGRATION <<EOF
 $(psql -tAX -F' ' -d "$SCRATCH_URL" -c "
   SELECT (SELECT COUNT(*) FROM users),
          (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present = 1),
          (SELECT COUNT(*) FROM certificates),
-         (SELECT COUNT(*) FROM hours_ledger);")
+         (SELECT COUNT(*) FROM hours_ledger),
+         (SELECT COALESCE(MAX(version), 0) FROM schema_migrations);")
 EOF
-log "restored: users=$R_USERS credited_hours=$R_HOURS certificates=$R_CERTS ledger=$R_LEDGER"
+log "restored: users=$R_USERS credited_hours=$R_HOURS certificates=$R_CERTS ledger=$R_LEDGER migration=$R_MIGRATION"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Compare against the manifest — the check that makes this a proof.
@@ -205,6 +246,13 @@ if [ -f "$MANIFEST" ]; then
   # Hours compared numerically: 3.50 and 3.5 are the same number and different
   # strings, and which one psql prints depends on the column type it came from.
   awk "BEGIN{exit !($R_HOURS==$M_HOURS)}" || MISMATCH="$MISMATCH credited_hours($M_HOURS->$R_HOURS)"
+  # The schema version: a restored database one migration behind the manifest is
+  # a different database, however well its counts line up. Older manifests do
+  # not record it, and are not failed for that.
+  M_MIGRATION="$(m migration_version)"
+  if [ -n "$M_MIGRATION" ]; then
+    [ "$R_MIGRATION" = "$M_MIGRATION" ] || MISMATCH="$MISMATCH migration_version($M_MIGRATION->$R_MIGRATION)"
+  fi
 
   [ -z "$MISMATCH" ] || fail "the restored database does not match the manifest:$MISMATCH
   The archive restored cleanly but does not contain what the live database held
@@ -234,4 +282,25 @@ log "  users:     $R_USERS"
 log "  hours:     $R_HOURS"
 log "  certs:     $R_CERTS"
 log "  ledger:    $R_LEDGER"
+log "  migration: $R_MIGRATION"
 log "  drilled:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+# A machine-readable record for bin/restore-drill-postgres.sh and the Owner
+# Center. Counts and names only — nothing that identifies a person.
+if [ -n "${WEV_RESTORE_RESULT:-}" ]; then
+  cat > "$WEV_RESTORE_RESULT" <<JSON
+{
+  "archive": "$(basename "$ARCHIVE")",
+  "sha256_verified": $([ -n "$M_SHA" ] && echo true || echo false),
+  "manifest_compared": $([ -f "$MANIFEST" ] && echo true || echo false),
+  "tables": $TABLES,
+  "foreign_keys": $FKS,
+  "indexes": $IDX,
+  "migration_version": ${R_MIGRATION:-0},
+  "users": $R_USERS,
+  "certificates": $R_CERTS,
+  "hours_ledger": $R_LEDGER,
+  "restore_seconds": $(( $(date +%s) - STARTED ))
+}
+JSON
+fi

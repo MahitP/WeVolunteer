@@ -35,7 +35,7 @@ This document describes the **merged release candidate** — `claude/release-can
                        encrypted (openssl cms)
                                 │
                                 ▼
-                       CLOUDFLARE R2  (Free)
+                      BACKBLAZE B2  (Free)
                           off-site copy
 ```
 
@@ -103,7 +103,7 @@ This is the single largest availability risk in the $0 architecture, and it is n
 | Oracle Compute | Always Free | **$0** | 2 OCPU / 12 GB, 200 GB disk, 10 TB egress | 1 VM, ~20 GB, <50 GB egress | Very large | **Yes if account is PAYG** — see below |
 | Cloudflare | Free | **$0** | Unlimited DNS/CDN/DDoS; WAF managed rules; 10 firewall rules | 3 records, ~5 rules | Large | No |
 | Supabase | Free | **$0** | 500 MB DB, 5 GB egress, 2 active projects | ~50 MB, <1 GB | Moderate | No — Free stops at the limit |
-| Cloudflare R2 | Free | **$0** | 10 GB, 1M Class A, 10M Class B, **no egress fee** | ~2 GB (14 dailies), ~30 writes/mo | Very large | Only past 10 GB |
+| Backblaze B2 | Free | **$0** | 10 GB free storage; Class A/B/C calls free; egress free to 3x stored | ~5.6 MB (28 dailies), ~60 writes/mo | ~1,800x | Only past 10 GB — and caps are **enforced**, so it refuses rather than bills |
 | Upstash Redis | Free | **$0** | 256 MB, **500K commands/month** | See note | **Tight** | Pay-as-you-go if enabled |
 | Pinecone | Starter | **$0** | 1 index, 2 GB, 2M write + 1M read units | Small | Large | No |
 | Better Stack | Free | **$0** | 10 monitors, 10 heartbeats, 1 status page | 4 + 3 | Adequate | No |
@@ -186,7 +186,9 @@ Cloudflare Pages was considered and **rejected**: it is also free, but it adds a
 
 ## Backups — implemented and proven
 
-`bin/backup-postgres.sh` → `bin/backup-upload.mjs` → R2, verified by `bin/verify-restore-postgres.sh`.
+`bin/backup-postgres.sh` → `bin/backup-offsite.mjs` → Backblaze B2, verified by
+`bin/verify-restore-postgres.sh` and the weekly drill. See
+[`offsite-backups.md`](offsite-backups.md).
 
 | Property | How |
 |---|---|
@@ -195,7 +197,7 @@ Cloudflare Pages was considered and **rejected**: it is also free, but it adds a
 | Encryption | `openssl cms`, **public key** — the host encrypts and cannot decrypt |
 | Integrity | `pg_restore --list` parses the archive before it is kept |
 | Completeness | invariant counts recorded from the live DB into a manifest |
-| Off-site | R2, independent of both Oracle and Supabase |
+| Off-site | Backblaze B2, independent of both Oracle and Supabase |
 | Retention | 14 days, pruned **only after** a successful new backup |
 | Failure detection | non-zero exit on every failure path |
 
@@ -229,7 +231,7 @@ And the guards were mutation-tested, because a check that cannot fail is not a c
 
 ### Free-tier arithmetic
 
-A compressed dump of the pilot database is ~1–5 MB (the 65-table schema with test data compressed to 176 KB). At 14 dailies that is well under 100 MB against R2's 10 GB. Roughly 30 Class A operations per month against 1,000,000. **Not close to any limit.**
+A compressed dump of the pilot database is ~1–5 MB (the 65-table schema with test data compressed to 176 KB); production measured ~200 KB encrypted. At 28 dailies that is ~5.6 MB against B2's 10 GB free tier. Class A, B and C transactions are free on pay-as-you-go. **Not close to any limit** — and unlike R2, a cap is enforced rather than merely alerted, so $0 can actually be guaranteed once the caps are set.
 
 ---
 
@@ -385,10 +387,10 @@ here.
 WEV_UPLOADS_DIR=/var/lib/wevolunteer/uploads     # REQUIRED — see above
 WEV_PRODUCTION_DB_FINGERPRINT=                   # from bin/db-fingerprint.mjs
 WEV_PG_BIN=/usr/lib/postgresql/17/bin            # must match the server major
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET=
+B2_S3_ENDPOINT=
+B2_BUCKET=
+B2_KEY_ID=
+B2_APPLICATION_KEY=
 WEV_BACKUP_PUBKEY=/etc/wevolunteer/backup-cert.pem
 TRUST_PROXY=1
 BIND_ADDRESS=127.0.0.1
@@ -440,7 +442,7 @@ expensive — 17 and 30 in particular.
 | 7 | Create Supabase project | HUMAN | **Leave the database empty** — do not run the baseline migration |
 | 8 | Create Upstash Redis database | HUMAN | Note the 500K commands/month ceiling |
 | 9 | Create the email account, verify sending subdomain | HUMAN | **Brevo recommended** (300/day vs Resend's 100) — see the cost audit. `mail.wevolunteers.org`; DKIM/SPF/DMARC as issued |
-| 10 | Create R2 bucket + scoped credentials | HUMAN | Object read/write on one bucket; nothing wider |
+| 10 | Create B2 bucket + three scoped keys, and **set the spending caps first** | HUMAN | See [`offsite-backups.md`](offsite-backups.md) §4 and §10; no key gets `deleteFiles` |
 | 11 | Generate the backup keypair **off the server** | HUMAN | Upload only the certificate; keep the private key elsewhere |
 | 12 | Write `/etc/wevolunteer/wevolunteer.env` (0600, owned by `wev`) | HUMAN | Template in §4 above |
 | 13 | Obtain the production DB fingerprint | BOTH | `node bin/db-fingerprint.mjs`, then set it in every **other** environment |
@@ -458,7 +460,7 @@ expensive — 17 and 30 in particular.
 | 25 | Verify API, authentication, 2FA | BOTH | Real login flow, not a direct URL |
 | 26 | Verify Socket.IO connects through Cloudflare | BOTH | Free plan closes idle proxied sockets ~100s |
 | 27 | Send a real transactional email | HUMAN | Check spam; a new domain lands there first |
-| 28 | Run `bin/backup-postgres.sh` and confirm the R2 object | BOTH | First real off-site copy |
+| 28 | Run `bin/backup-postgres.sh` and confirm the B2 object | BOTH | First real off-site copy |
 | 29 | **Reboot the VM** | HUMAN | The only way to prove systemd persistence |
 | 30 | Run the restore drill against the real backup | BOTH | `bin/verify-restore-postgres.sh` — **the launch gate** |
 | 31 | Run `node server/verifyHours.js` against production | BOTH | Proves ledger parity on the real database |
@@ -564,10 +566,10 @@ Grouped by what each item actually needs, so nothing here reads as a code defect
 | Restore drill against real production data | no production database exists |
 | First-boot schema creation on the real project | the guard is proven locally against three databases; the real one has not been created |
 
-### Requires Cloudflare / R2
+### Requires Cloudflare / Backblaze B2
 | Item | Why |
 |---|---|
-| Live R2 upload | no credentials. Proven against a local S3-compatible endpoint and AWS's published SigV4 derivation vector |
+| Live B2 upload | no credentials. Proven against a local S3-compatible server that recomputes SigV4 independently and refuses what B2 documents refusing, plus AWS's published SigV4 derivation vector |
 | Full (strict) TLS and real-IP restoration | needs the zone and the origin certificate |
 
 ### Requires the email provider

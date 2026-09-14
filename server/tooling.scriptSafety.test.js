@@ -483,10 +483,36 @@ describe('the safety gate cannot be skipped by a new tool', () => {
 
   // A static guard. The F-1 lesson is that hand-maintained parallel lists drift;
   // this makes the drift a test failure instead of a production incident.
+  /**
+   * Tests are not tools, and this scan is about tools.
+   *
+   * The subject of both checks below is a *script an operator can run against a
+   * real database* — that is what "the safety gate cannot be skipped by a new
+   * tool" means, and it is why the gate refuses a database with real people in
+   * it. A `.test.mjs` file is not that. It deletes its own `mkdtempSync`
+   * directory in an `afterEach`, has no database to be pointed at, and cannot be
+   * invoked by anybody as a tool.
+   *
+   * This is consistency rather than a loosening: the scan only ever read the top
+   * level of `bin/`, so `bin/lib/object-store.test.mjs` and the other tests one
+   * directory down were already outside it. Test files arriving beside the
+   * scripts they exercise — `bin/backup-offsite.test.mjs` — were reported purely
+   * because of where they sit.
+   *
+   * The obvious alternative, calling `guardDestructive()` in a test to silence
+   * the report, is the exact failure this file's own note warns about one check
+   * above: a meaningless gate on something that destroys nothing, teaching the
+   * next author that the gate is a formality. And it is refused for a stronger
+   * reason here — every real bin/ script remains scanned, so a genuinely
+   * destructive tool cannot hide by being named `*.test.mjs` unless somebody also
+   * makes it un-runnable as a tool.
+   */
+  const isTool = (name) => /\.(mjs|js)$/.test(name) && !/\.test\.(mjs|js)$/.test(name);
+
   it('every bin/ script that deletes a file imports the shared gate', () => {
     const offenders = [];
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
-      if (!/\.(mjs|js)$/.test(name)) continue;
+      if (!isTool(name)) continue;
       const code = codeOf(readFileSync(path.join(ROOT, 'bin', name), 'utf8'));
       if (DELETES.test(code) && !/db-safety\.mjs/.test(code)) offenders.push(name);
     }
@@ -512,6 +538,28 @@ describe('the safety gate cannot be skipped by a new tool', () => {
   });
 
   /**
+   * The test-file exclusion must exclude test files and nothing else.
+   *
+   * A filter added to silence a false positive is the easiest place for a real
+   * one to hide later — `reset-dev-db.mjs` renamed a shade differently, or a
+   * pattern loosened to `/test/` that swallows `bin/load-test.mjs`. So the filter
+   * is asserted in both directions on names rather than trusted.
+   */
+  it('excludes test files without excluding any real tool', () => {
+    for (const name of ['backup-offsite.test.mjs', 'object-store.test.mjs']) {
+      expect(isTool(name), `${name} is a test, not a tool`).toBe(false);
+    }
+    for (const name of ['reset-dev-db.mjs', 'backup-fetch.mjs', 'seed-pilot.js', 'load-test.mjs', 'migration-baseline.mjs']) {
+      expect(isTool(name), `${name} is a tool and must still be scanned`).toBe(true);
+    }
+    /* And the real directory still contains tools to scan — a filter that
+       excluded everything would leave both checks above vacuously passing. */
+    const tools = readdirSync(path.join(ROOT, 'bin')).filter(isTool);
+    expect(tools.length).toBeGreaterThan(20);
+    expect(tools).toContain('reset-dev-db.mjs');
+  });
+
+  /**
    * Importing the gate is not running the gate.
    *
    * `bin/reset-dev-db.mjs` imported `db-safety.mjs` and satisfied the check
@@ -532,7 +580,7 @@ describe('the safety gate cannot be skipped by a new tool', () => {
     let scanned = 0;
 
     for (const name of readdirSync(path.join(ROOT, 'bin'))) {
-      if (!/\.(mjs|js)$/.test(name)) continue;
+      if (!isTool(name)) continue;
       /* Comments are stripped before BOTH questions — "does this delete
          anything" and "does it run the check" — because these files document the
          gate at length and the prose names the very functions being searched

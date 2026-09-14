@@ -42,6 +42,10 @@
 #   WEV_BACKUP_PUBKEY       certificate holding the public key to encrypt to
 #   WEV_BACKUP_TESTKEY      optional private key, to prove the archive decrypts
 #   WEV_PG_BIN              directory holding a version-compatible pg_dump
+#   WEV_OPENSSL             an OpenSSL 3 binary (default: `openssl` on PATH)
+#   B2_S3_ENDPOINT, B2_BUCKET, B2_KEY_ID, B2_APPLICATION_KEY
+#                           the off-site copy — see bin/backup-offsite.mjs and
+#                           docs/operations/offsite-backups.md. All four, or none.
 #
 # ── Credentials ──
 #
@@ -57,11 +61,23 @@ set -euo pipefail
 
 DEST="${WEV_BACKUP_DIR:-/var/backups/wevolunteer}"
 KEEP_DAYS="${WEV_BACKUP_KEEP_DAYS:-14}"
+OPENSSL="${WEV_OPENSSL:-openssl}"
 
 log()  { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 fail() { log "FAILED: $*"; exit 1; }
 
 [ -n "${DATABASE_URL:-}" ] || fail "DATABASE_URL is not set"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Nothing unencrypted leaves this host — decided before any work is done.
+#
+# An off-site destination with no encryption key would ship every student's
+# record in readable form to a third party. bin/backup-offsite.mjs refuses a
+# plaintext archive too; this check makes the refusal happen before a dump is
+# taken, rather than after a night's work.
+if [ -n "${B2_S3_ENDPOINT:-}${B2_BUCKET:-}${B2_KEY_ID:-}${B2_APPLICATION_KEY:-}" ] && [ -z "${WEV_BACKUP_PUBKEY:-}" ]; then
+  fail "an off-site destination (B2_*) is configured but WEV_BACKUP_PUBKEY is not — refusing to produce an archive that could be sent unencrypted"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Locate a pg_dump that can actually dump this server.
@@ -103,6 +119,36 @@ log "client pg_dump major=$CLIENT_MAJOR against server major=$SERVER_MAJOR — c
 
 mkdir -p "$DEST" || fail "cannot create $DEST"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# One backup at a time.
+#
+# The timer cannot overlap itself, but an operator running this by hand while the
+# timer fires can — and two runs racing each other can prune the archive the other
+# is about to upload. flock is non-blocking: the second run fails and says why.
+# (flock is util-linux; a development Mac without it simply skips the lock.)
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$DEST/.backup.lock"
+  flock -n 9 || fail "another backup is already running (lock: $DEST/.backup.lock)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Disk space, before a partial dump can fill the disk the application needs.
+#
+# Three times the newest archive (dump, encrypted copy, headroom) plus 100 MB. A
+# pg_dump that runs out of space fails anyway; this fails first, clearly, and
+# without taking the host's last free megabytes with it. A here-string rather
+# than a pipe, for the SIGPIPE reason recorded further down.
+NEWEST="$(ls -1t "$DEST"/wevolunteer-*.dump.enc "$DEST"/wevolunteer-*.dump 2>/dev/null || true)"
+NEWEST="$(head -1 <<<"$NEWEST")"
+NEWEST_BYTES=0
+[ -n "$NEWEST" ] && NEWEST_BYTES="$(wc -c < "$NEWEST" | tr -d ' ')"
+NEED_KB=$(( NEWEST_BYTES * 3 / 1024 + 102400 ))
+DF_OUT="$(df -Pk "$DEST")"
+FREE_KB="$(awk 'NR==2 {print $4}' <<<"$DF_OUT")"
+if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt "$NEED_KB" ]; then
+  fail "only ${FREE_KB} KB free in $DEST; a backup needs about ${NEED_KB} KB. Nothing was pruned."
+fi
+
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT="$DEST/wevolunteer-$STAMP.dump"
 MANIFEST="$DEST/wevolunteer-$STAMP.manifest.json"
@@ -128,15 +174,16 @@ MANIFEST="$DEST/wevolunteer-$STAMP.manifest.json"
 # here worked against the baseline and failed against production with
 # "argument of WHERE must be type boolean, not type integer".
 log "recording invariants from the live database"
-read -r USERS HOURS CERTS LEDGER <<EOF
+read -r USERS HOURS CERTS LEDGER MIGRATION <<EOF
 $(psql -tAX -F' ' -d "$DATABASE_URL" -c "
   SELECT (SELECT COUNT(*) FROM users),
          (SELECT COALESCE(ROUND(SUM(hours_awarded)::numeric,2),0) FROM attendance WHERE present = 1),
          (SELECT COUNT(*) FROM certificates),
-         (SELECT COUNT(*) FROM hours_ledger);" 2>/dev/null || echo "ERR ERR ERR ERR")
+         (SELECT COUNT(*) FROM hours_ledger),
+         (SELECT COALESCE(MAX(version), 0) FROM schema_migrations);" 2>/dev/null || echo "ERR ERR ERR ERR ERR")
 EOF
 [ "$USERS" != "ERR" ] || fail "could not read the invariant counts — is this a WeVolunteer database?"
-log "live: users=$USERS credited_hours=$HOURS certificates=$CERTS ledger=$LEDGER"
+log "live: users=$USERS credited_hours=$HOURS certificates=$CERTS ledger=$LEDGER migration=$MIGRATION"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dump.
@@ -214,11 +261,92 @@ for t in users events attendance certificates; do
 done
 log "verified: archive parses and carries data for users, events, attendance, certificates"
 
+log "wrote $OUT ($(du -h "$OUT" | cut -f1))"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Encryption.
+#
+# What is in this file: every student's name, email address, school, year group,
+# service record, private messages, and every safety report ever filed. A public
+# key means the host can encrypt and cannot decrypt, so an attacker who reaches
+# the host reaches ciphertext. The private key lives with the operator, offline.
+#
+# ── AES-256-GCM with RSA-OAEP, not the AES-256-CBC this used until 2026-09-13 ──
+#
+# `openssl cms -encrypt -aes-256-cbc` produces CMS EnvelopedData: confidential,
+# but NOT authenticated. Measured, not assumed: flipping one byte in the middle of
+# a CBC archive still "decrypted" with exit 0, into a file that silently differed
+# from the original. For a backup that is the worst property there is — a
+# corrupted or tampered archive restores into subtly wrong data and nothing says
+# so. With `-aes-256-gcm` OpenSSL emits AuthEnvelopedData: a flipped byte, a
+# truncated file or the wrong key all fail with a non-zero exit and no output.
+# RSA-OAEP replaces PKCS#1 v1.5 for the key transport. Archives written before
+# this change stay readable — `openssl cms -decrypt` recognises both — so no
+# history is lost by upgrading.
+#
+# Requires OpenSSL 3 on both sides. macOS's /usr/bin/openssl is LibreSSL and
+# cannot read AuthEnvelopedData; the runbook says to use OpenSSL 3 for recovery.
+#
+# If a key is configured and encryption fails, the run FAILS and the plaintext is
+# deleted. Falling back to plaintext would be the worst outcome: the operator
+# believes the backups are encrypted and nothing says otherwise.
+ENCRYPTION="none"
+if [ -n "${WEV_BACKUP_PUBKEY:-}" ]; then
+  [ -f "$WEV_BACKUP_PUBKEY" ] || fail "WEV_BACKUP_PUBKEY is set but $WEV_BACKUP_PUBKEY does not exist"
+
+  if ! "$OPENSSL" cms -encrypt -binary -aes-256-gcm -outform DER -in "$OUT" -out "$OUT.enc" \
+       -recip "$WEV_BACKUP_PUBKEY" -keyopt rsa_padding_mode:oaep 2>/dev/null; then
+    rm -f "$OUT" "$OUT.enc"
+    fail "encryption failed (AES-256-GCM/RSA-OAEP needs OpenSSL 3; set WEV_OPENSSL) — refusing to leave an unencrypted backup behind"
+  fi
+
+  # Prove it decrypts to the same bytes before throwing the plaintext away.
+  if [ -n "${WEV_BACKUP_TESTKEY:-}" ] && [ -f "$WEV_BACKUP_TESTKEY" ]; then
+    if ! "$OPENSSL" cms -decrypt -binary -inform DER -in "$OUT.enc" \
+         -inkey "$WEV_BACKUP_TESTKEY" -out "$OUT.check" 2>/dev/null || ! cmp -s "$OUT.check" "$OUT"; then
+      rm -f "$OUT" "$OUT.enc" "$OUT.check"
+      fail "the encrypted backup did not decrypt back to the original"
+    fi
+    rm -f "$OUT.check"
+    log "verified: the encrypted archive decrypts to the original bytes"
+  fi
+
+  rm -f "$OUT"
+  ENCRYPTION="cms-authenveloped-aes-256-gcm-rsa-oaep"
+  log "encrypted to $OUT.enc ($(du -h "$OUT.enc" | cut -f1))"
+else
+  log "WARNING: WEV_BACKUP_PUBKEY is not set — this backup is NOT encrypted."
+  log "WARNING: it contains every student's personal data in readable form."
+fi
+
+UPLOAD_TARGET="$OUT"
+[ -f "$OUT.enc" ] && UPLOAD_TARGET="$OUT.enc"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The manifest, written LAST, so it can describe the archive that actually exists.
+#
+# `archive_sha256` is what makes every later check meaningful: the off-site
+# upload, the fetch in a disaster and the weekly drill all compare the bytes they
+# hold against it. The counts are what the restore drill compares a restored
+# database against. Nothing here identifies a person — counts, versions, a hash.
+ARCHIVE_SHA256="$(sha256sum "$UPLOAD_TARGET" 2>/dev/null || shasum -a 256 "$UPLOAD_TARGET")"
+ARCHIVE_SHA256="${ARCHIVE_SHA256%% *}"
+ARCHIVE_BYTES="$(wc -c < "$UPLOAD_TARGET" | tr -d ' ')"
+RELEASE="unknown"
+[ -f "$(dirname "$0")/../.deployed-sha" ] && RELEASE="$(tr -d ' \t\r\n' < "$(dirname "$0")/../.deployed-sha")"
 cat > "$MANIFEST" <<JSON
 {
+  "format_version": 2,
   "created_utc": "$STAMP",
+  "archive": "$(basename "$UPLOAD_TARGET")",
+  "archive_bytes": $ARCHIVE_BYTES,
+  "archive_sha256": "$ARCHIVE_SHA256",
+  "encryption": "$ENCRYPTION",
+  "dump": "pg_dump custom format, schema public, no owner or privileges",
   "server_major": $SERVER_MAJOR,
   "client_major": $CLIENT_MAJOR,
+  "migration_version": ${MIGRATION:-0},
+  "release": "$RELEASE",
   "invariants": {
     "users": $USERS,
     "credited_hours": $HOURS,
@@ -227,48 +355,10 @@ cat > "$MANIFEST" <<JSON
   }
 }
 JSON
-log "wrote $(basename "$MANIFEST")"
-log "wrote $OUT ($(du -h "$OUT" | cut -f1))"
+log "wrote $(basename "$MANIFEST") (sha256 ${ARCHIVE_SHA256:0:16}...)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Encryption — identical reasoning to bin/backup.sh, deliberately.
-#
-# What is in this file: every student's name, email address, school, year group,
-# service record, private messages, and every safety report ever filed. A public
-# key means the host can encrypt and cannot decrypt, so an attacker who reaches
-# the host reaches ciphertext. The private key lives with the operator, offline.
-#
-# If a key is configured and encryption fails, the run FAILS and the plaintext is
-# deleted. Falling back to plaintext would be the worst outcome: the operator
-# believes the backups are encrypted and nothing says otherwise.
-if [ -n "${WEV_BACKUP_PUBKEY:-}" ]; then
-  [ -f "$WEV_BACKUP_PUBKEY" ] || fail "WEV_BACKUP_PUBKEY is set but $WEV_BACKUP_PUBKEY does not exist"
-
-  if ! openssl cms -encrypt -binary -aes-256-cbc -in "$OUT" -out "$OUT.enc" \
-       -outform DER "$WEV_BACKUP_PUBKEY" 2>/dev/null; then
-    rm -f "$OUT" "$OUT.enc"
-    fail "encryption failed — refusing to leave an unencrypted backup behind"
-  fi
-
-  # Prove it decrypts to the same bytes before throwing the plaintext away.
-  if [ -n "${WEV_BACKUP_TESTKEY:-}" ] && [ -f "$WEV_BACKUP_TESTKEY" ]; then
-    if ! openssl cms -decrypt -binary -inform DER -in "$OUT.enc" \
-         -inkey "$WEV_BACKUP_TESTKEY" 2>/dev/null | cmp -s - "$OUT"; then
-      rm -f "$OUT" "$OUT.enc"
-      fail "the encrypted backup did not decrypt back to the original"
-    fi
-    log "verified: the encrypted archive decrypts to the original bytes"
-  fi
-
-  rm -f "$OUT"
-  log "encrypted to $OUT.enc ($(du -h "$OUT.enc" | cut -f1))"
-else
-  log "WARNING: WEV_BACKUP_PUBKEY is not set — this backup is NOT encrypted."
-  log "WARNING: it contains every student's personal data in readable form."
-fi
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Copy it off this host.
+# Copy it off this host, and prove the copy.
 #
 # Everything above produced a verified archive on the same machine the database
 # is reached from and, on the Oracle deployment, the same machine the
@@ -277,17 +367,17 @@ fi
 # tenancy, or losing access to the Supabase project — which are the scenarios a
 # restore is most often actually needed for.
 #
-# Non-fatal by design when nothing is configured: a local-only backup is worth
-# far more than no backup, and refusing to finish would discard the archive that
-# was just verified. It is fatal when a destination IS configured and the upload
-# fails, because that is the case where an operator believes off-site copies
-# exist. bin/backup-upload.mjs draws exactly that distinction in its exit code.
-UPLOAD_TARGET="$OUT"
-[ -f "$OUT.enc" ] && UPLOAD_TARGET="$OUT.enc"
-if ! node "$(dirname "$0")/backup-upload.mjs" "$UPLOAD_TARGET" "$MANIFEST"; then
-  fail "the off-site upload failed — the local archive is kept at $UPLOAD_TARGET"
+# bin/backup-offsite.mjs uploads to Backblaze B2, checks B2's own record of the
+# object, downloads it back and compares hashes, and records each level it
+# reached in status/offsite.json. Non-fatal when nothing is configured: a
+# local-only backup is worth far more than no backup. Fatal when a destination IS
+# configured and any level fails, because that is the case where an operator
+# believes off-site copies exist — and a failed run prunes nothing.
+if ! node "$(dirname "$0")/backup-offsite.mjs" "$UPLOAD_TARGET" "$MANIFEST"; then
+  fail "the off-site copy failed — the local archive is kept at $UPLOAD_TARGET and nothing was pruned"
 fi
 
+# ─────────────────────────────────────────────────────────────────────────────
 # Prune only after a successful new backup, so a run of failures can never age
 # out the last good copy. Manifests are pruned on the same schedule as the
 # archives they describe.

@@ -68,6 +68,13 @@ const SERVER_ONLY = [
   'BETTERSTACK_QUERY_PASSWORD', 'GOOGLE_CLIENT_SECRET', 'MICROSOFT_CLIENT_SECRET',
   'SMTP_PASS', 'ROUTING_API_KEY', 'R2_SECRET_ACCESS_KEY', 'R2_ACCESS_KEY_ID',
   'MAP_TILES_CARTO_KEY',
+  /* The off-site backup credential. Added with the B2 uploader rather than after
+     it, because a new secret that no scanner knows about is exactly the one that
+     reaches a bundle: the list is the only thing standing between a server-only
+     variable and a build that inlines it. The R2 pair above is kept — the names
+     no longer appear in the tree, and a scanner that stops looking for a retired
+     credential is how an old .env line survives a rename. */
+  'B2_APPLICATION_KEY', 'B2_KEY_ID',
 ];
 
 /**

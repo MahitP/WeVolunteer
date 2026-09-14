@@ -13,7 +13,7 @@ The PostgreSQL backup path, and the drill that proves it works.
 
 | Script | What it does |
 |---|---|
-| `bin/backup-postgres.sh` | Records the live invariants, dumps, **verifies the archive parses and carries data**, writes a manifest, encrypts if a public key is configured, uploads off-host if R2 is configured, prunes older generations only after a successful new one. |
+| `bin/backup-postgres.sh` | Records the live invariants, dumps, **verifies the archive parses and carries data**, writes a manifest, encrypts if a public key is configured, copies the archive off-host if B2 is configured **and proves the copy by downloading it back**, prunes older generations only after a successful new one. |
 | `bin/verify-restore-postgres.sh` | Restores an archive into a throwaway database, compares the restored counts against the manifest, and checks the schema, foreign keys and indexes came back. |
 
 `bin/backup.sh` is the SQLite original and **cannot back up a PostgreSQL
@@ -64,7 +64,7 @@ WEV_PG_BIN=/opt/homebrew/opt/postgresql@17/bin \
 | `WEV_BACKUP_KEEP_DAYS` | Prune age. Default 14. Pruning happens **only** after a verified new backup. |
 | `WEV_BACKUP_PUBKEY` | Path to an **X.509 certificate in PEM form** holding the public key to encrypt to. Without it the script warns loudly — an unencrypted archive contains every student's personal data in readable form. |
 | `WEV_BACKUP_TESTKEY` | Path to the matching **private key**. Optional on backup, where it makes the script prove the archive decrypts before keeping it; **required** to restore an encrypted archive. |
-| `R2_*` | Off-host destination. Without it the script warns that the backup exists only on the host it protects. |
+| `B2_*` | Off-host destination — Backblaze B2. All four (`B2_S3_ENDPOINT`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`) or none; a partial set is refused rather than skipped. Without them the script warns that the backup exists only on the host it protects. See [`offsite-backups.md`](offsite-backups.md). |
 
 Both warnings are deliberate and must not be silenced on a real deployment.
 
@@ -136,7 +136,7 @@ so a restored database will not try to re-run migrations it has already had.
 **What this drill did NOT prove**
 
 - Encryption round-trip: `WEV_BACKUP_PUBKEY` was unset. Warned about correctly.
-- Off-host upload: `R2_*` unset, so `bin/backup-upload.mjs` was not exercised.
+- Off-host upload: `B2_*` unset, so `bin/backup-offsite.mjs` was not exercised.
   Warned about correctly.
 - Scale: two users. The drill proves the mechanism, not the duration of a
   restore against a year of production data.
@@ -198,6 +198,18 @@ The plaintext dump is removed once encryption succeeds, so the only archive left
 on disk is the encrypted one.
 
 **Off-host upload — CLOSED as an integration test, NOT as a provider drill**
+
+> **Superseded on 2026-09-13; kept as the record of what was true on 2026-09-06.**
+> The off-site destination is now Backblaze B2, not Cloudflare R2 — R2 has no
+> spending cap, only notifications, which is not a budget control for a project
+> whose infrastructure budget is zero. `bin/backup-upload.mjs` and
+> `bin/lib/r2-upload.{mjs,test.mjs}` were removed with that change and live in git
+> history; `bin/backup-offsite.mjs` and `bin/lib/object-store.mjs` replace them,
+> and they verify the copy by downloading it back rather than trusting a 200.
+> The reasoning, the retention policy and the evidence are in
+> [`offsite-backups.md`](offsite-backups.md). The paragraph below is left intact
+> because the distinction it draws — a stub that speaks S3 is not a provider that
+> does — is still exactly right, and still unclosed.
 
 This distinction is the point, so it is stated before the evidence: no
 Cloudflare R2 credentials exist on this machine, and none were invented. The
