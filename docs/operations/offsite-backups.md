@@ -398,6 +398,51 @@ that, checks the timer and finds it running perfectly learns the alert is noise.
 A deliberate local-only deployment (no `B2_*` set) is muted and silent. It is a
 choice, not a fault — but it is never shown as an off-site copy that exists.
 
+### The heartbeat, which catches what none of the above can
+
+The three rows are read by the application, so they all share one blind spot: a
+failure that happens before the application sees anything. The timer disabled,
+the host down at 03:00, the unit killed — the archive directory simply stops
+changing, and an alerter running inside that host is not running either.
+
+`wevolunteer-backup.service` closes that from the other side:
+
+```
+OnFailure=wevolunteer-heartbeat-fail@%n.service     # the unit ran and failed
+ExecStartPost=/usr/local/sbin/wevolunteer-heartbeat.sh BACKUP ok   # it ran and worked
+```
+
+Better Stack raises an incident on the explicit failure **and** when the expected
+interval passes with no ping at all, which is the case nothing on the host can
+report about itself.
+
+**The heartbeat exists** — created 2026-09-14, `WeVolunteer nightly backup`,
+id `493230`. Its window is **24 h period + 2 h grace = 26 hours**, deliberately
+the same threshold as `BACKUP_STALE_HOURS` in `server/backupStatus.js` and the
+runbook's alerting table: three surfaces that each pick their own idea of "late"
+is how a dashboard comes to be green while the pager is going off. Two hours
+absorbs `RandomizedDelaySec=5m` and a `Persistent=true` catch-up run after a
+reboot, without absorbing a genuinely missed night.
+
+The URL carries the heartbeat's token, so it is not written down here. It lives
+in the Better Stack console, and `deploy/wevolunteer-heartbeat.sh` refuses any
+URL that is not `https://uptime.betterstack.com/api/v1/heartbeat/…`, so a pasted
+wrong value cannot send job output somewhere else.
+
+**Installing it** — on the host, as root:
+
+```bash
+printf 'HEARTBEAT_URL_BACKUP=%s\n' '<url from the Better Stack console>' \
+  >> /etc/wevolunteer/heartbeats.env
+chown root:wev /etc/wevolunteer/heartbeats.env && chmod 0640 /etc/wevolunteer/heartbeats.env
+systemctl start wevolunteer-backup.service     # the ping proves the whole path
+```
+
+Until that line exists, `wevolunteer-heartbeat.sh` logs that the job is
+unmonitored and **exits 0** — deliberately, because a heartbeat that could fail
+its parent would turn a monitoring outage into a failed backup. The backup still
+runs and the Owner Center still reports; nothing outside the host is watching.
+
 ### Runaway guards
 
 | Guard | Default | On breach |
@@ -515,6 +560,54 @@ free tier.
 8. Confirm the Owner Center shows all three rows green.
 
 ---
+
+## 11a. The three keys — console only, and why
+
+An application key cannot mint another one unless it holds `writeKeys`, and the
+key this deployment uses does not. That is not a limitation to work around; it is
+the correct shape, and `bin/b2-audit.mjs` reports `writeKeys` as over-privileged
+for exactly this reason — a backup writer that can create keys makes every other
+limit on it advisory.
+
+So replacing the current single key is done in the Backblaze console (or with the
+account master key), by a person. It was attempted from the application key and
+refused with `401 unauthorized`, which is the expected and desired answer.
+
+**App Keys → Add a New Application Key**, three times:
+
+| Key name | Bucket | File name prefix | Capabilities to tick |
+|---|---|---|---|
+| `wev-backup-writer` | `wevolunteer-bucket` | *(none)* | Read Files, Write Files |
+| `wev-backup-recovery` | `wevolunteer-bucket` | *(none)* | Read Files |
+| `wev-drill` | `wevolunteer-bucket` | `wevolunteer/backups/postgres/drills/` | Read Files, Write Files |
+
+Notes that matter more than they look:
+
+- **"Read Files" must include `readFileRetentions`** for the writer, or the
+  nightly job cannot see the Object Lock and reports `lock-not-observed` for
+  ever. The console grants it with the read group; `bin/b2-audit.mjs` checks.
+- **Do not tick Delete Files on any of them.** Expiry is the lifecycle rule's
+  job, and `bin/lib/object-store.mjs` implements no delete operation at all.
+- **Do not tick anything bucket-level** (Write Buckets, Write Bucket Retentions,
+  Write Bucket Lifecycle Rules). Those let the application switch off the two
+  controls that protect it.
+- The recovery key needs no write capability. `bin/backup-fetch.mjs` only lists
+  and reads; the negative tests assert it stays that way.
+- The drill key's prefix restriction is what keeps a compromised drill machine
+  from touching an archive: it can write its verdict and nothing else.
+
+Each key is shown **once**. Writer into `/etc/wevolunteer/wevolunteer.env` on the
+host; the other two into the password manager beside the backup private key —
+never into this repository, a ticket, or a chat window.
+
+Then, from a machine with the writer key:
+
+```bash
+node bin/b2-audit.mjs      # must exit 0
+```
+
+Until it does, the account has one key that can delete every backup and bypass
+the Object Lock while doing it.
 
 ## 12. What has been verified, and what has not
 
