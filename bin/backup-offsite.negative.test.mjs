@@ -497,3 +497,102 @@ describe('a failed new backup never destroys the last good one', () => {
     expect(check).toBeLessThan(sh.search(/^log "dumping/m));
   });
 });
+
+/* ── The drill's verdict has to cross machines ────────────────────────────── */
+
+describe('the restore drill reaches the host that cannot run it', () => {
+  let fake; let work;
+  beforeAll(async () => { fake = await startFakeB2(); });
+  afterAll(() => fake.close());
+  beforeEach(() => {
+    work = mkdtempSync(path.join(tmpdir(), 'wev-drill-pub-'));
+    fake.state.objects.clear();
+    fake.state.requests.length = 0;
+    fake.state.faults.length = 0;
+    return () => rmSync(work, { recursive: true, force: true });
+  });
+
+  const PUBLISH = path.join(ROOT, 'bin/backup-drill-publish.mjs');
+  const statusDir = () => path.join(work, 'status');
+  const env = (extra = {}) => ({ ...fake.env, WEV_BACKUP_STATUS_DIR: statusDir(), ...extra });
+  const drillRecord = (over = {}) => {
+    const p = path.join(work, 'restore-drill.json');
+    writeFileSync(p, JSON.stringify({
+      state: 'passed', at: '2026-09-12T04:00:00Z', source: 'offsite',
+      archive: `${NAME}.dump.enc`, elapsedSeconds: 41,
+      result: { tables: 48, foreign_keys: 61, migration_version: 67, users: 3 },
+      ...over,
+    }));
+    return p;
+  };
+
+  /**
+   * The round trip: the operator's machine publishes, the host picks it up on its
+   * next nightly run and records it where the Owner Center reads it.
+   */
+  it('publishes a pass on one machine and records it on the other', async () => {
+    expect((await run(PUBLISH, [drillRecord()], { ...fake.env, WEV_DRILL_LABEL: 'laptop' })).code).toBe(0);
+
+    const a = makeArchive(work);
+    const r = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
+    expect(r.code, r.out).toBe(0);
+
+    const recorded = JSON.parse(readFileSync(path.join(statusDir(), 'restore-drill.json'), 'utf8'));
+    expect(recorded).toMatchObject({ state: 'passed', source: 'offsite', drilledBy: 'laptop' });
+    expect(recorded.result).toMatchObject({ migration_version: 67 });
+  });
+
+  it('publishes a FAILED drill too — that is the one the host needs to hear', async () => {
+    expect((await run(PUBLISH, [drillRecord({ state: 'failed', stage: 'restore', error: 'pg_restore failed' })], fake.env)).code).toBe(0);
+    const a = makeArchive(work);
+    expect((await run(OFFSITE, [a.archivePath, a.manifestPath], env())).code).toBe(0);
+
+    const recorded = JSON.parse(readFileSync(path.join(statusDir(), 'restore-drill.json'), 'utf8'));
+    expect(recorded).toMatchObject({ state: 'failed', stage: 'restore' });
+  });
+
+  /**
+   * A drill run by hand on the host is more direct evidence than a published one,
+   * so the newer record wins rather than the remote one always overwriting.
+   */
+  it('never moves the recorded drill backwards in time', async () => {
+    const local = { state: 'passed', at: '2026-09-14T09:00:00Z', source: 'local' };
+    writeFileSync(path.join(work, 'seed.json'), '');
+    rmSync(statusDir(), { recursive: true, force: true });
+    const fs = await import('node:fs');
+    fs.mkdirSync(statusDir(), { recursive: true });
+    fs.writeFileSync(path.join(statusDir(), 'restore-drill.json'), JSON.stringify(local));
+
+    expect((await run(PUBLISH, [drillRecord({ at: '2026-09-12T04:00:00Z' })], fake.env)).code).toBe(0);
+    const a = makeArchive(work);
+    expect((await run(OFFSITE, [a.archivePath, a.manifestPath], env())).code).toBe(0);
+
+    expect(JSON.parse(readFileSync(path.join(statusDir(), 'restore-drill.json'), 'utf8')).at)
+      .toBe('2026-09-14T09:00:00Z');
+  });
+
+  it('publishes only the fields it decided to publish, never the whole record', async () => {
+    const p = drillRecord({ databaseUrl: 'postgresql://user:secret@host/db', notes: 'internal' });
+    expect((await run(PUBLISH, [p], fake.env)).code).toBe(0);
+
+    const key = 'wevolunteer/postgres/drills/latest.json';
+    const stored = JSON.parse(fake.state.objects.get(key).at(-1).body.toString('utf8'));
+    expect(stored).not.toHaveProperty('databaseUrl');
+    expect(stored).not.toHaveProperty('notes');
+    expect(JSON.stringify(stored)).not.toContain('secret');
+  });
+
+  it('leaves the nightly copy verified when no drill has ever been published', async () => {
+    const a = makeArchive(work);
+    const r = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
+    expect(r.code, r.out).toBe(0);
+    expect(JSON.parse(readFileSync(path.join(statusDir(), 'offsite.json'), 'utf8')).state).toBe('verified');
+    expect(existsSync(path.join(statusDir(), 'restore-drill.json'))).toBe(false);
+  });
+
+  it('exits 0 and says so when there is no bucket to publish to', async () => {
+    const r = await run(PUBLISH, [drillRecord()], { PATH: process.env.PATH });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/not configured/);
+  });
+});

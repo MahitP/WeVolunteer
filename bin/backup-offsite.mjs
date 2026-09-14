@@ -258,6 +258,35 @@ async function main() {
     warnings.push(`audit-unverifiable: ${err.message}`);
   }
 
+  /* ── The drill's verdict, collected on the way past ──────────────────── */
+  //
+  // The restore drill runs on the operator's machine, because it has to decrypt
+  // and this host deliberately holds no private key. Its verdict is published to
+  // the bucket (bin/backup-drill-publish.mjs) and picked up here, so the Owner
+  // Center on THIS host can say whether a restore has actually been demonstrated.
+  // Without it that row reads "Never drilled" for ever on a system that is being
+  // drilled every week, which is a false alarm, and a false alarm on the row that
+  // matters most is worse than no row at all.
+  //
+  // Entirely best effort: a bucket without a drill record yet, a key that cannot
+  // read it, or malformed JSON must not turn a verified off-site copy into a
+  // failed backup.
+  try {
+    const body = await getObject({ config, key: `${config.prefix}/drills/latest.json` });
+    const drill = JSON.parse(body.toString('utf8'));
+    if (drill && typeof drill.at === 'string' && ['passed', 'failed'].includes(drill.state)) {
+      const local = readStatus('restore-drill.json');
+      // Never move the record backwards: a drill run by hand on this host is more
+      // direct evidence than a published one, and whichever is newer is the truth.
+      if (!local?.at || Date.parse(drill.at) > Date.parse(local.at)) {
+        writeStatus('restore-drill.json', drill);
+        log(`recorded the published restore drill (${drill.state}, from the ${drill.source} copy, ${drill.at})`);
+      }
+    }
+  } catch (err) {
+    if (err?.status !== 404) warnings.push(`drill-record-unavailable: ${err.message}`);
+  }
+
   const prevBytes = lastVerified?.bytes;
   if (prevBytes && archive.length > 10 * 1024 * 1024 && archive.length > prevBytes * 5) {
     warnings.push(`size-jump: this archive is ${archive.length} bytes; the previous verified one was ${prevBytes}`);
