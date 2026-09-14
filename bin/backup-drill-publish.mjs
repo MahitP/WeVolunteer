@@ -41,8 +41,35 @@ const die = (m) => { console.error(`FAILED: ${m}`); process.exit(1); };
 
 if (!source) die('usage: backup-drill-publish.mjs <restore-drill.json>');
 
+/**
+ * Publishing uses its OWN credential, and that is the whole point of it.
+ *
+ * A Backblaze application key carries a single `namePrefix` that applies to every
+ * capability it holds — there is no per-capability prefix. So one key cannot both
+ * read archives under `…/daily/` and write only under `…/drills/`: restrict it to
+ * the drills prefix and it can no longer fetch the archive it is meant to drill;
+ * leave it unrestricted and a compromised drill machine can write anywhere under
+ * the backup prefix.
+ *
+ * The runbook's first draft of the key table asked for exactly that impossible
+ * key. The arrangement that works is two credentials on the drill machine: the
+ * read-only recovery key for `bin/backup-fetch.mjs`, and a separate write key —
+ * `B2_DRILL_*` — restricted to `…/drills/`, used only here.
+ *
+ * Falling back to `B2_*` keeps a single-key deployment working and is what the
+ * tests exercise; it is logged, because a deployment that believes it has split
+ * the credential and has not should be able to see that from the output.
+ */
+const drillEnv = { ...process.env };
+if (process.env.B2_DRILL_KEY_ID && process.env.B2_DRILL_APPLICATION_KEY) {
+  drillEnv.B2_KEY_ID = process.env.B2_DRILL_KEY_ID;
+  drillEnv.B2_APPLICATION_KEY = process.env.B2_DRILL_APPLICATION_KEY;
+} else if (process.env.B2_KEY_ID) {
+  console.error('note: B2_DRILL_* is not set — publishing with the general B2 credential.');
+}
+
 let config;
-try { config = b2ConfigFromEnv(process.env); } catch (err) { die(err.message); }
+try { config = b2ConfigFromEnv(drillEnv); } catch (err) { die(err.message); }
 if (!config) {
   console.error('B2 is not configured; the drill result stays on this machine only.');
   process.exit(0);

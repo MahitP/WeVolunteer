@@ -34,6 +34,48 @@ export const FORBIDDEN_CAPABILITIES = Object.freeze({
   deleteKeys: 'can revoke the recovery key',
 });
 
+/**
+ * The three credentials, and what each is allowed to be.
+ *
+ * Checked per role rather than against one list, because "least privilege" means
+ * something different for each: the writer must be able to write and must not be
+ * able to delete; the recovery key must not be able to write AT ALL, which is a
+ * stronger claim than the writer's budget; the drill publisher must be able to
+ * write and must be confined to the drills prefix.
+ *
+ * ── Why the drill key is a SECOND credential on the drill machine ──
+ *
+ * A Backblaze key carries one `namePrefix` covering every capability it holds.
+ * So a key restricted to `…/drills/` cannot read `…/daily/`, and a key that can
+ * read `…/daily/` cannot be confined to `…/drills/`. The first draft of the
+ * runbook asked for a single drill key that did both, which cannot exist. The
+ * drill machine therefore holds the read-only recovery key for fetching and this
+ * write-only key for publishing its verdict.
+ */
+export const ROLE_SPECS = Object.freeze({
+  writer: {
+    required: ['listFiles', 'readFiles', 'writeFiles', 'readFileRetentions'],
+    forbidden: [],
+    prefix: null,
+    note: 'the nightly backup: uploads, then reads back to prove the copy',
+  },
+  recovery: {
+    required: ['listFiles', 'readFiles'],
+    /* Beyond the shared list: a recovery key that can write is not a recovery
+       key. It exists to be used on the worst day, from a machine that may not be
+       trusted, and it must not be able to change what it is reading. */
+    forbidden: ['writeFiles'],
+    prefix: null,
+    note: 'rebuilding after the host is lost: list and read, nothing else',
+  },
+  drill: {
+    required: ['listFiles', 'readFiles', 'writeFiles'],
+    forbidden: [],
+    prefix: 'wevolunteer/backups/postgres/drills/',
+    note: 'publishing the weekly drill verdict, and nothing outside the drills prefix',
+  },
+});
+
 /** B2 expresses a lock period in days or years; the comparison needs one unit. */
 export const periodDays = (period) => {
   if (!period || !Number.isFinite(period.duration)) return null;
@@ -66,7 +108,7 @@ const trimSlash = (s) => String(s ?? '').replace(/\/+$/, '');
  * @param {number}   input.retentionDays  the policy window the code enforces
  * @returns {{findings: {id: string, detail: string}[], notes: {id: string, detail: string}[]}}
  */
-export function auditPolicy({ capabilities = [], keyScope = {}, bucket = null, files = null, config, retentionDays = 28, now = Date.now() }) {
+export function auditPolicy({ capabilities = [], keyScope = {}, bucket = null, files = null, config, retentionDays = 28, now = Date.now(), role = 'writer' }) {
   const findings = [];
   const notes = [];
   const fail = (id, detail) => findings.push({ id, detail });
@@ -75,18 +117,47 @@ export function auditPolicy({ capabilities = [], keyScope = {}, bucket = null, f
 
   /* ── The key ───────────────────────────────────────────────────────────── */
 
-  for (const c of REQUIRED_CAPABILITIES) {
-    if (!caps.has(c)) fail('key-missing-capability', `the key lacks ${c}, which the nightly backup needs`);
+  const spec = ROLE_SPECS[role];
+  if (!spec) {
+    fail('unknown-role', `"${role}" is not one of ${Object.keys(ROLE_SPECS).join(', ')}`);
+    return { findings, notes };
+  }
+  note('role', `${role} — ${spec.note}`);
+
+  for (const c of spec.required) {
+    if (!caps.has(c)) fail('key-missing-capability', `the ${role} key lacks ${c}, which it needs to do its job`);
   }
   for (const [c, why] of Object.entries(FORBIDDEN_CAPABILITIES)) {
-    if (caps.has(c)) fail('key-over-privileged', `the key holds ${c} — it ${why}`);
+    if (caps.has(c)) fail('key-over-privileged', `the ${role} key holds ${c} — it ${why}`);
   }
+  /* Per-role extras: a capability that is legitimate for one credential and
+     disqualifying for another. `writeFiles` on the recovery key is the case. */
+  for (const c of spec.forbidden) {
+    if (caps.has(c)) {
+      fail('key-over-privileged', `the ${role} key holds ${c}, which this role must not have — ${spec.note}`);
+    }
+  }
+  /* A capability nobody asked for is still a capability somebody can use. */
+  const extra = [...caps].filter((c) => !spec.required.includes(c)
+    && !Object.keys(FORBIDDEN_CAPABILITIES).includes(c) && !spec.forbidden.includes(c));
+  if (extra.length) note('key-extra-capabilities', `beyond this role's needs: ${extra.sort().join(', ')}`);
   if (!keyScope.bucketId) {
     fail('key-unrestricted-bucket', 'the key is not restricted to one bucket, so it reaches every bucket in the account');
   } else if (keyScope.bucketName && keyScope.bucketName !== config.bucket) {
     fail('key-wrong-bucket', `the key is restricted to "${keyScope.bucketName}" but B2_BUCKET is "${config.bucket}"`);
   }
-  if (keyScope.namePrefix) {
+  if (spec.prefix) {
+    /* This role is DEFINED by its confinement, so an unrestricted key fails. */
+    if (!keyScope.namePrefix) {
+      fail('key-prefix-missing',
+        `the ${role} key is not restricted by name prefix. It must be confined to "${spec.prefix}", `
+        + 'or a compromised drill machine can write anywhere under the backup prefix');
+    } else if (trimSlash(keyScope.namePrefix) !== trimSlash(spec.prefix)) {
+      fail('key-prefix-wrong', `the ${role} key is confined to "${keyScope.namePrefix}", expected "${spec.prefix}"`);
+    } else {
+      note('key-prefix-restricted', `confined to "${keyScope.namePrefix}"`);
+    }
+  } else if (keyScope.namePrefix) {
     note('key-prefix-restricted', `the key is restricted to the prefix "${keyScope.namePrefix}"`);
     if (!`${config.prefix}/`.startsWith(trimSlash(keyScope.namePrefix))) {
       fail('key-prefix-mismatch', `the key's prefix "${keyScope.namePrefix}" does not cover "${config.prefix}/"`);

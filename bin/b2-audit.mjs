@@ -33,13 +33,23 @@
  * rather than passing it, because an audit that reports a pass because it was
  * refused is worse than no audit.
  *
- * Usage:   node bin/b2-audit.mjs [--json]
+ * Usage:   node bin/b2-audit.mjs [--role=writer|recovery|drill] [--json]
  * Exit:    0 clean · 1 policy findings · 2 could not run
  */
 import { b2ConfigFromEnv } from './lib/object-store.mjs';
 import { auditPolicy } from './lib/b2-policy.mjs';
 
 const JSON_OUT = process.argv.includes('--json');
+/**
+ * Which credential is being audited.
+ *
+ * Defaults to `writer`, which is what the nightly host runs and what this tool
+ * checked before the three-key layout existed. `--role=recovery` and
+ * `--role=drill` check the other two against their own budgets — "least
+ * privilege" is a different set for each, and a recovery key that can write
+ * would pass a writer audit while being exactly wrong.
+ */
+const ROLE = (process.argv.find((a) => a.startsWith('--role='))?.split('=')[1]) || 'writer';
 const NATIVE_API = process.env.B2_NATIVE_API || 'https://api.backblazeb2.com';
 const die = (m) => { console.error(`FAILED: ${m}`); process.exit(2); };
 
@@ -91,18 +101,19 @@ const { findings, notes } = auditPolicy({
   files,
   config: { bucket: cfg.bucket, prefix: cfg.prefix },
   retentionDays: Number(process.env.WEV_OFFSITE_RETENTION_DAYS) || 28,
+  role: ROLE,
 });
 
 if (JSON_OUT) {
   console.log(JSON.stringify({
-    bucket: cfg.bucket, prefix: cfg.prefix, region: cfg.region,
+    bucket: cfg.bucket, prefix: cfg.prefix, region: cfg.region, role: ROLE,
     capabilities: [...(api.capabilities ?? [])].sort(),
     restrictedToBucket: api.bucketName ?? null,
     namePrefix: api.namePrefix ?? null,
     notes, findings, ok: findings.length === 0,
   }, null, 2));
 } else {
-  console.log(`bucket ${cfg.bucket} · prefix ${cfg.prefix}/ · region ${cfg.region}`);
+  console.log(`bucket ${cfg.bucket} · prefix ${cfg.prefix}/ · region ${cfg.region} · role ${ROLE}`);
   console.log(`key: ${(api.capabilities ?? []).length} capabilities, restricted to ${api.bucketName ?? 'EVERY BUCKET'}${api.namePrefix ? `, prefix ${api.namePrefix}` : ''}`);
   for (const n of notes) console.log(`  · ${n.id}: ${n.detail}`);
   if (findings.length === 0) console.log('\nOK — the bucket matches the policy the code assumes.');

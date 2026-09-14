@@ -229,3 +229,70 @@ describe('what is in the bucket', () => {
     expect(r.findings.length).toBeGreaterThan(0);
   });
 });
+
+describe('the three roles, each with its own budget', () => {
+  const withRole = (role, caps, scope = {}) => auditPolicy({
+    capabilities: caps,
+    keyScope: { bucketId: 'abc', bucketName: 'wevolunteer-bucket', namePrefix: null, expiresAt: null, ...scope },
+    bucket: goodBucket(), files: goodFiles(), config: CONFIG, retentionDays: 28, role,
+  });
+
+  it('accepts each role configured exactly as §11a specifies', () => {
+    expect(withRole('writer', ['listFiles', 'readFiles', 'writeFiles', 'readFileRetentions']).findings).toEqual([]);
+    expect(withRole('recovery', ['listFiles', 'readFiles']).findings).toEqual([]);
+    expect(withRole('drill', ['listFiles', 'readFiles', 'writeFiles'],
+      { namePrefix: 'wevolunteer/backups/postgres/drills/' }).findings).toEqual([]);
+  });
+
+  /**
+   * The case a single shared capability list cannot express.
+   *
+   * `writeFiles` is required for the writer and disqualifying for the recovery
+   * key. Audited against the writer's budget, a writable recovery key passes —
+   * which is exactly the credential you do not want on the machine used on the
+   * worst day.
+   */
+  it('rejects a recovery key that can write, though a writer audit would pass it', () => {
+    const caps = ['listFiles', 'readFiles', 'writeFiles'];
+    expect(withRole('writer', caps).findings.filter(f => f.id === 'key-over-privileged')).toEqual([]);
+    const bad = withRole('recovery', caps).findings;
+    expect(bad.map(f => f.id)).toContain('key-over-privileged');
+    expect(bad.find(f => f.id === 'key-over-privileged').detail).toMatch(/recovery key holds writeFiles/);
+  });
+
+  it('rejects any role holding a capability nobody may hold', () => {
+    for (const role of ['writer', 'recovery', 'drill']) {
+      const caps = ['listFiles', 'readFiles', 'writeFiles', 'readFileRetentions', 'deleteFiles'];
+      const scope = role === 'drill' ? { namePrefix: 'wevolunteer/backups/postgres/drills/' } : {};
+      expect(withRole(role, caps, scope).findings.map(f => f.id), role).toContain('key-over-privileged');
+    }
+  });
+
+  /**
+   * The drill key is defined by its confinement, so an unrestricted one fails
+   * even though every capability it holds is individually allowed.
+   */
+  it('requires the drill key to be confined, and to the right prefix', () => {
+    const caps = ['listFiles', 'readFiles', 'writeFiles'];
+    expect(withRole('drill', caps).findings.map(f => f.id)).toContain('key-prefix-missing');
+    expect(withRole('drill', caps, { namePrefix: 'wevolunteer/backups/postgres/' }).findings.map(f => f.id))
+      .toContain('key-prefix-wrong');
+    expect(withRole('drill', caps, { namePrefix: 'wevolunteer/backups/postgres/drills' }).findings).toEqual([]);
+  });
+
+  it('reports a role it does not know rather than passing it', () => {
+    const r = withRole('superuser', ['listFiles']);
+    expect(r.findings.map(f => f.id)).toContain('unknown-role');
+  });
+
+  it('notes capabilities beyond the role without failing on harmless ones', () => {
+    const r = withRole('writer', ['listFiles', 'readFiles', 'writeFiles', 'readFileRetentions', 'shareFiles']);
+    expect(r.findings).toEqual([]);
+    expect(r.notes.find(n => n.id === 'key-extra-capabilities').detail).toMatch(/shareFiles/);
+  });
+
+  it('still requires every role to be restricted to the bucket', () => {
+    expect(withRole('recovery', ['listFiles', 'readFiles'], { bucketId: null }).findings.map(f => f.id))
+      .toContain('key-unrestricted-bucket');
+  });
+});

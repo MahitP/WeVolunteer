@@ -569,17 +569,29 @@ the correct shape, and `bin/b2-audit.mjs` reports `writeKeys` as over-privileged
 for exactly this reason — a backup writer that can create keys makes every other
 limit on it advisory.
 
-So replacing the current single key is done in the Backblaze console (or with the
-account master key), by a person. It was attempted from the application key and
-refused with `401 unauthorized`, which is the expected and desired answer.
+So replacing keys is done in the Backblaze console (or with the account master
+key), by a person. It was attempted from the application key and refused with
+`401 unauthorized`, which is the expected and desired answer.
+
+> ### A correction — the first version of this table described a key that cannot exist
+>
+> It asked for a drill key restricted to `wevolunteer/backups/postgres/drills/`
+> and expected it to fetch archives from `…/daily/`. A Backblaze key carries **one
+> `namePrefix`, applying to every capability it holds** — there is no per-capability
+> prefix. Confine it to `drills/` and it cannot read the archive it is meant to
+> drill; let it read `daily/` and it is not confined at all.
+>
+> The arrangement that works puts **two** credentials on the drill machine: the
+> read-only recovery key for fetching, and a write key confined to `drills/` used
+> only by `bin/backup-drill-publish.mjs`, which reads `B2_DRILL_*`.
 
 **App Keys → Add a New Application Key**, three times:
 
-| Key name | Bucket | File name prefix | Capabilities to tick |
-|---|---|---|---|
-| `wev-backup-writer` | `wevolunteer-bucket` | *(none)* | Read Files, Write Files |
-| `wev-backup-recovery` | `wevolunteer-bucket` | *(none)* | Read Files |
-| `wev-drill` | `wevolunteer-bucket` | `wevolunteer/backups/postgres/drills/` | Read Files, Write Files |
+| Key name | Bucket | File name prefix | Capabilities | Lives |
+|---|---|---|---|---|
+| `wev-backup-writer` | `wevolunteer-bucket` | *(none)* | Read Files, Write Files | host env file |
+| `wev-backup-recovery` | `wevolunteer-bucket` | *(none)* | **Read Files only** | password manager, and the drill machine |
+| `wev-drill-publish` | `wevolunteer-bucket` | `wevolunteer/backups/postgres/drills/` | Read Files, Write Files | drill machine, as `B2_DRILL_*` |
 
 Notes that matter more than they look:
 
@@ -589,25 +601,28 @@ Notes that matter more than they look:
 - **Do not tick Delete Files on any of them.** Expiry is the lifecycle rule's
   job, and `bin/lib/object-store.mjs` implements no delete operation at all.
 - **Do not tick anything bucket-level** (Write Buckets, Write Bucket Retentions,
-  Write Bucket Lifecycle Rules). Those let the application switch off the two
-  controls that protect it.
-- The recovery key needs no write capability. `bin/backup-fetch.mjs` only lists
-  and reads; the negative tests assert it stays that way.
-- The drill key's prefix restriction is what keeps a compromised drill machine
-  from touching an archive: it can write its verdict and nothing else.
+  Write Bucket Lifecycle Rules) or key-level (Write/Delete Keys). Those let the
+  application switch off the two controls that protect it.
+- **The recovery key gets no write capability at all.** It is the credential used
+  on the worst day, from a machine that may not be trusted; it must not be able
+  to change what it is reading. This is stricter than the writer's budget, which
+  is why `b2-audit` checks each role against its own.
 
-Each key is shown **once**. Writer into `/etc/wevolunteer/wevolunteer.env` on the
-host; the other two into the password manager beside the backup private key —
-never into this repository, a ticket, or a chat window.
-
-Then, from a machine with the writer key:
+Verify each one — the audit knows all three budgets:
 
 ```bash
-node bin/b2-audit.mjs      # must exit 0
+node bin/b2-audit.mjs --role=writer      # with the writer credential
+node bin/b2-audit.mjs --role=recovery    # with the recovery credential
+node bin/b2-audit.mjs --role=drill       # with the drill-publish credential
 ```
 
-Until it does, the account has one key that can delete every backup and bypass
-the Object Lock while doing it.
+All three must exit 0. Until they do, assume the account still has a key that can
+delete every backup and bypass the Object Lock while doing it.
+
+**Then delete the key being replaced, and prove it is gone.** Creating
+replacements does not revoke anything: on 2026-09-14 three new keys were reported
+as created while the exposed one still authorized successfully with all 26
+capabilities. A rotation is not finished until the old key is refused.
 
 ## 12. What has been verified, and what has not
 
