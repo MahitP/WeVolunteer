@@ -33,7 +33,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     // Create an event with a past deadline to test the sweep
     const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
     const now = new Date().toISOString();
-    db.exec(`
+    await db.exec(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, auto_approve, created_at)
       VALUES ('event-sweep-test', 'Sweep Test', 'd', 'Other', 'loc', '${past}',
@@ -85,7 +85,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     const future = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
     const later = new Date(Date.now() + 8 * 24 * 3600 * 1000).toISOString();
 
-    db.exec(`
+    await db.exec(`
       INSERT INTO events (id, title, description, category, location, application_deadline,
                           organizer_id, status, auto_approve, created_at)
       VALUES ('event-future', 'Future Event', 'd', 'Other', 'loc', '${future}',
@@ -105,7 +105,7 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
     const now = new Date().toISOString();
 
     for (const [id, status] of [['event-cxl', 'cancelled'], ['event-done', 'completed']]) {
-      db.exec(`
+      await db.exec(`
         INSERT INTO events (id, title, description, category, location, application_deadline,
                             organizer_id, status, auto_approve, created_at)
         VALUES ('${id}', '${id}', 'd', 'Other', 'loc', '${past}', '${ORGANIZER}', '${status}', 0, '${now}');
@@ -126,8 +126,8 @@ describe('notification sweep: deadline passed with applicants waiting', () => {
   it('fires for a closed event that still has undecided applicants', async () => {
     // Closing sign-ups does not decide anyone. An organizer who closed the
     // event and then forgot is in exactly the situation this rule exists for.
-    db.exec("UPDATE events SET status = 'closed' WHERE id = 'event-future'");
-    db.exec(`UPDATE events SET application_deadline = '${new Date(Date.now() - 3600 * 1000).toISOString()}' WHERE id = 'event-future'`);
+    await db.exec("UPDATE events SET status = 'closed' WHERE id = 'event-future'");
+    await db.exec(`UPDATE events SET application_deadline = '${new Date(Date.now() - 3600 * 1000).toISOString()}' WHERE id = 'event-future'`);
 
     await runNotificationSweep();
     expect(await notificationsFor(ORGANIZER, 'awaiting-decision:event-future')).toHaveLength(1);
