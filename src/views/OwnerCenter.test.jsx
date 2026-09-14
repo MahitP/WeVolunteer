@@ -25,13 +25,25 @@ import { api } from '../utils/api';
  * Every case below is one of those three.
  */
 
-const health = (overrides = {}) => ({
+/**
+ * Backups are three facts, so the fixture is three facts.
+ *
+ * `backup` overrides MERGE rather than replace, because every existing case here
+ * overrides only `status` — the local archive — and a replace would silently blank
+ * the off-site and drill rows, turning each of those tests into an accidental test
+ * of "what happens when the server sends half an answer". The healthy defaults keep
+ * each case testing the one thing it names.
+ */
+const OFFSITE_OK = Object.freeze({ state: 'ok', ageHours: 3, archive: 'wevolunteer-20260902T030000Z.dump.enc', warnings: [] });
+const DRILL_OK = Object.freeze({ state: 'ok', ageDays: 2, source: 'offsite' });
+
+const health = ({ backup: backupOverride, ...overrides } = {}) => ({
   generatedAt: '2026-09-02T10:00:00.000Z',
   application: { state: 'ok', environment: 'production', uptimeSeconds: 7200, nodeVersion: 'v24.0.0', release: null },
   database: { state: 'ok', latencyMs: 3 },
   mail: { smtpConfigured: true, health: { successes: 4, failures: 0, queued: 0, permanentFailures: 0, providers: {} }, delivery: { configured: false } },
   notificationQueue: { pending: 0, processing: 0, failed: 0 },
-  backup: { status: 'ok', count: 3, ageHours: 2 },
+  backup: { status: 'ok', count: 3, ageHours: 2, offsite: OFFSITE_OK, drill: DRILL_OK, ...backupOverride },
   hoursLedger: { inParity: true, mismatchedUsers: 0 },
   errors: { last24h: 4, previous24h: 8, changePercent: -50, openGroups: 2, windowDays: 30 },
   ...overrides,
@@ -183,6 +195,76 @@ describe('the headline verdict', () => {
     /* Two: the database and the backups. A count derived from the cards is the
        only version that cannot disagree with them. */
     expect(await screen.findByText(/2 systems need attention/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The off-site false green, and the reason the single "Backups" row was split.
+   *
+   * A night where the dump, the encryption and the local archive all succeed and
+   * only the upload to Backblaze fails leaves a backup directory that looks
+   * perfect. Read from the directory alone — which is all this page used to do —
+   * that night reports "Backups: Current". The copy that survives losing the host
+   * was broken, and the page said everything was fine.
+   */
+  it('does not report healthy backups when only the off-site copy has failed', async () => {
+    stubApi({
+      h: health({
+        backup: {
+          status: 'ok',
+          count: 3,
+          ageHours: 2,
+          offsite: { state: 'failed', stage: 'upload', detail: 'The off-site copy failed at "upload".' },
+        },
+      }),
+    });
+    renderOwner();
+
+    const verdict = await screen.findByRole('status');
+    expect(verdict).toHaveTextContent(/needs attention/i);
+    expect(verdict).not.toHaveTextContent(/All systems operational/i);
+    /* The local row stays honestly green — it really did work — and the failure
+       is named on its own row rather than smeared across both. */
+    expect(await screen.findByText('Off-site copy')).toBeInTheDocument();
+    expect(await screen.findByText(/The off-site copy failed at "upload"\./i)).toBeInTheDocument();
+  });
+
+  /**
+   * A drill of the LOCAL archive is not evidence that the off-site copy restores,
+   * so the row says which copy was drilled rather than just "passed".
+   */
+  it('says which copy the restore drill actually restored from', async () => {
+    stubApi({ h: health({ backup: { drill: { state: 'ok', ageDays: 2, source: 'local' } } }) });
+    renderOwner();
+    expect(await screen.findByText(/From the local copy, 2 d ago/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Never drilled is not "not configured". Nothing has ever demonstrated that
+   * these archives restore, which is a gap rather than a deliberate choice — and
+   * a muted row would read as the latter.
+   */
+  it('treats a restore that has never been drilled as a gap, not a setting', async () => {
+    stubApi({ h: health({ backup: { drill: { state: 'never' } } }) });
+    renderOwner();
+
+    const verdict = await screen.findByRole('status');
+    expect(verdict).not.toHaveTextContent(/All systems operational/i);
+    expect(await screen.findByText(/Never drilled/i)).toBeInTheDocument();
+  });
+
+  /**
+   * Having no off-site destination is a choice an operator is allowed to make, so
+   * it is muted rather than red — but it is never presented as an off-site copy
+   * that exists.
+   */
+  it('shows a local-only deployment as inactive rather than verified', async () => {
+    stubApi({ h: health({ backup: { offsite: { state: 'unconfigured' } } }) });
+    renderOwner();
+
+    expect(await screen.findByText(/Local only/i)).toBeInTheDocument();
+    const verdict = await screen.findByRole('status');
+    expect(verdict).toHaveTextContent(/inactive/i);
+    expect(verdict).not.toHaveTextContent(/needs attention/i);
   });
 
   /**

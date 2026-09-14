@@ -114,7 +114,32 @@ export const BACKUP_ALERT_STATES = Object.freeze(['stale', 'none', 'unknown']);
 export function isBackupAlertable(status, env = process.env) {
   if (!status) return false;
   if (BACKUP_ALERT_STATES.includes(status.status)) return true;
-  return status.status === 'unconfigured' && env.NODE_ENV === 'production';
+  if (status.status === 'unconfigured' && env.NODE_ENV === 'production') return true;
+  return isCompanionAlertable(status, env);
+}
+
+/**
+ * The states of the off-site copy and the restore drill that are worth an email.
+ *
+ * `failed` on either is unconditional: a configured destination that refused, or
+ * a restore that did not restore, is an incident wherever it happens. Everything
+ * softer is production-only, because on a laptop "no drill has ever run" and "the
+ * off-site copy is three days old" are the normal state of a machine nobody
+ * intends to recover, and an alert that fires there teaches people to close it.
+ *
+ * `unconfigured` is never alertable here. `bin/backup-offsite.mjs` writes that
+ * state when B2_* is unset, which is a deliberate choice by the operator — the
+ * nightly log says loudly that the archive exists only on this host, and the
+ * Owner Center shows "Local only". Emailing about a decision somebody made on
+ * purpose, twice a day, is how a channel gets muted before the day it matters.
+ */
+export const OFFSITE_ALERT_STATES = Object.freeze(['failed']);
+export const OFFSITE_ALERT_STATES_PRODUCTION = Object.freeze(['failed', 'stale', 'never', 'unknown']);
+
+export function isCompanionAlertable(status, env = process.env) {
+  const production = env.NODE_ENV === 'production';
+  const states = production ? OFFSITE_ALERT_STATES_PRODUCTION : OFFSITE_ALERT_STATES;
+  return states.includes(status?.offsite?.state) || states.includes(status?.drill?.state);
 }
 
 /** Named in one place so the query, the email and the tests cannot disagree. */
@@ -269,21 +294,68 @@ export async function sendBackupAlert({ send, now = new Date(), appUrl, status }
             + 'writes somewhere this application is not looking.'
           : 'The backup directory could not be read.';
 
-    await send({
-      to: to.join(', '),
-      subject: '[WeVolunteer] Backups are not running',
-      text: [
-        detail,
+    /* Whether the LOCAL archive is the problem decides the whole email. An
+       off-site failure on a host whose nightly archive is perfect must not be
+       announced as "Backups are not running": an operator who reads that goes
+       looking at the timer, finds it running correctly, and concludes the alert
+       is noise — the precise outcome that makes the next real one ignored. */
+    const localBroken = BACKUP_ALERT_STATES.includes(status.status)
+      || (status.status === 'unconfigured' && (process.env.NODE_ENV === 'production'));
+
+    const offsite = status.offsite || {};
+    const drill = status.drill || {};
+    const companionLines = [];
+    if (!localBroken) {
+      companionLines.push(
+        'The nightly archive on this host is fine. What follows is about the copies that',
+        'exist so that losing this host is survivable.',
         '',
-        'This cannot tell you whether the timer is disabled or whether it ran and failed —',
-        'both look the same from here. Check both:',
-        '',
-        '  systemctl list-timers wevolunteer-backup.timer',
-        '  systemctl status wevolunteer-backup.service',
+      );
+    }
+    if (offsite.state && !['ok', 'unconfigured'].includes(offsite.state)) {
+      companionLines.push(
+        `Off-site copy (Backblaze B2): ${offsite.state.toUpperCase()} — ${offsite.detail ?? ''}`.trimEnd(),
+        offsite.error ? `  reported: ${offsite.error}` : '',
+        /* The last PROVEN off-site copy, not the last attempt. This is the number
+           that answers "how much would we lose if the host died right now". */
+        offsite.lastVerified?.at ? `  last verified off-site copy: ${offsite.lastVerified.at}` : '',
         '  journalctl -u wevolunteer-backup.service -n 50',
         '',
-        'The database holds every student\'s service record. Until this is fixed there is no',
-        'copy of it anywhere else.',
+      );
+    }
+    if (drill.state && drill.state !== 'ok') {
+      companionLines.push(
+        `Restore drill: ${drill.state.toUpperCase()} — ${drill.detail ?? ''}`.trimEnd(),
+        drill.error ? `  reported: ${drill.error}` : '',
+        '  journalctl -u wevolunteer-restore-drill.service -n 50',
+        '',
+        'A backup nobody has restored is a hypothesis. Until the drill passes again, the',
+        'archives are unproven rather than known-good.',
+        '',
+      );
+    }
+
+    await send({
+      to: to.join(', '),
+      subject: localBroken
+        ? '[WeVolunteer] Backups are not running'
+        : '[WeVolunteer] Backups are running, but the off-site copy or restore drill is not',
+      text: [
+        ...(localBroken ? [detail] : []),
+        ...(localBroken ? [
+          '',
+          'This cannot tell you whether the timer is disabled or whether it ran and failed —',
+          'both look the same from here. Check both:',
+          '',
+          '  systemctl list-timers wevolunteer-backup.timer',
+          '  systemctl status wevolunteer-backup.service',
+          '  journalctl -u wevolunteer-backup.service -n 50',
+          '',
+          'The database holds every student\'s service record. Until this is fixed there is no',
+          'copy of it anywhere else.',
+          '',
+        ] : []),
+        ...companionLines,
         /* `/admin/moderation`, not `/admin`. The bare prefix is not a declared
            route — it answered "Page not found" — and this is the email that
            fires when the database holding every student's service record has no

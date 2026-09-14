@@ -516,7 +516,7 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
     services.push({
       id: 'backup',
       icon: Database,
-      label: 'Backups',
+      label: 'Backups (this host)',
       ...(backup.status === 'ok'
         ? { tone: 'ok', state: 'Current', detail: `${backup.count} kept · newest ${backup.ageHours} h old` }
         : backup.status === 'unconfigured'
@@ -525,6 +525,62 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
             ? { tone: 'danger', state: 'Stale', detail: `Newest is ${backup.ageHours} h old` }
             : backup.status === 'none'
               ? { tone: 'danger', state: 'None taken' }
+              : { tone: 'warn', state: 'Unknown' }),
+    });
+
+    /**
+     * The off-site copy and the restore drill get their OWN rows, and that is the
+     * whole point of them.
+     *
+     * This grid used to carry a single "Backups" row fed only by the archive
+     * directory on this host. A night where the dump, the encryption and the local
+     * archive all succeeded and only the upload to Backblaze failed produced a
+     * green "Current" tick — a healthy report for the copy that protects against a
+     * bad migration, while the copy that protects against losing the host was
+     * broken. The operator would have found out on the day the host was gone.
+     *
+     * So: three rows for three facts that fail independently. The server decides
+     * each state (`server/backupStatus.js`); this only renders it, for the reason
+     * the row above already records — two surfaces that each decide what "healthy"
+     * means eventually disagree.
+     */
+    const offsite = backup.offsite || {};
+    services.push({
+      id: 'backup-offsite',
+      icon: Database,
+      label: 'Off-site copy',
+      ...(offsite.state === 'ok'
+        ? { tone: 'ok', state: 'Verified', detail: `Downloaded back and hashed ${offsite.ageHours} h ago` }
+        : offsite.state === 'warn'
+          ? { tone: 'warn', state: 'Verified, with warnings', detail: offsite.detail }
+          : offsite.state === 'unconfigured'
+            /* Muted, not green: a deliberate choice by the operator, but never a
+               claim that an off-site copy exists. */
+            ? { tone: 'muted', state: 'Local only', detail: 'No off-site destination is configured' }
+            : offsite.state === 'failed'
+              ? { tone: 'danger', state: 'Failed', detail: offsite.detail }
+              : offsite.state === 'stale'
+                ? { tone: 'danger', state: 'Stale', detail: offsite.detail }
+                : offsite.state === 'never'
+                  ? { tone: 'warn', state: 'Never run', detail: 'No off-site run has recorded a result' }
+                  : { tone: 'warn', state: 'Unknown' }),
+    });
+
+    const drill = backup.drill || {};
+    services.push({
+      id: 'backup-drill',
+      icon: Database,
+      label: 'Restore drill',
+      ...(drill.state === 'ok'
+        /* Which copy was drilled is load-bearing: a drill of the local archive is
+           not evidence that the off-site copy restores. */
+        ? { tone: 'ok', state: 'Passed', detail: `From the ${drill.source ?? 'unknown'} copy, ${drill.ageDays} d ago` }
+        : drill.state === 'failed'
+          ? { tone: 'danger', state: 'Failed', detail: drill.detail }
+          : drill.state === 'stale'
+            ? { tone: 'danger', state: 'Stale', detail: drill.detail }
+            : drill.state === 'never'
+              ? { tone: 'warn', state: 'Never drilled', detail: 'No restore has been demonstrated on this host' }
               : { tone: 'warn', state: 'Unknown' }),
     });
 
