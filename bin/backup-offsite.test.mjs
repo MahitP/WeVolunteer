@@ -98,12 +98,12 @@ describe('bin/backup-offsite.mjs', () => {
     const r = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
     expect(r.code, r.out).toBe(0);
 
-    const key = `wevolunteer/postgres/daily/2026/09/13/${NAME}.dump.enc`;
+    const key = `wevolunteer/backups/postgres/daily/2026/09/13/${NAME}.dump.enc`;
     const stored = fake.state.objects.get(key);
     expect(stored).toHaveLength(1);
     expect(Buffer.compare(stored[0].body, a.archive)).toBe(0);
     expect(stored[0].meta['x-amz-meta-sha256']).toBe(a.sha);
-    expect(fake.state.objects.has(`wevolunteer/postgres/daily/2026/09/13/${NAME}.manifest.json`)).toBe(true);
+    expect(fake.state.objects.has(`wevolunteer/backups/postgres/daily/2026/09/13/${NAME}.manifest.json`)).toBe(true);
 
     const s = status();
     expect(s.state).toBe('verified');
@@ -133,7 +133,7 @@ describe('bin/backup-offsite.mjs', () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toMatch(/already present, identical/);
     expect(puts()).toHaveLength(2);
-    expect(fake.state.objects.get(`wevolunteer/postgres/daily/2026/09/13/${NAME}.dump.enc`)).toHaveLength(1);
+    expect(fake.state.objects.get(`wevolunteer/backups/postgres/daily/2026/09/13/${NAME}.dump.enc`)).toHaveLength(1);
   });
 
   it('refuses to add a second, different version under an existing name — and keeps lastVerified', async () => {
@@ -204,7 +204,7 @@ describe('bin/backup-offsite.mjs', () => {
     const r0 = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
     expect(r0.code).toBe(0);
     // Tamper with what B2 holds; a re-run must notice rather than call it identical.
-    const stored = fake.state.objects.get(`wevolunteer/postgres/daily/2026/09/13/${NAME}.dump.enc`)[0];
+    const stored = fake.state.objects.get(`wevolunteer/backups/postgres/daily/2026/09/13/${NAME}.dump.enc`)[0];
     stored.meta['x-amz-meta-sha256'] = 'b'.repeat(64);
     const r = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
     expect(r.code).toBe(1);
@@ -254,7 +254,7 @@ describe('bin/backup-offsite.mjs', () => {
   it('warns — without failing the backup — when something outlives the retention window', async () => {
     const old = makeArchive(work, 'wevolunteer-20260801T030000Z');
     expect((await run(OFFSITE, [old.archivePath, old.manifestPath], env())).code).toBe(0);
-    fake.age('wevolunteer/postgres/daily/2026/08/01/wevolunteer-20260801T030000Z.dump.enc', 40);
+    fake.age('wevolunteer/backups/postgres/daily/2026/08/01/wevolunteer-20260801T030000Z.dump.enc', 40);
     const a = makeArchive(work);
     const r = await run(OFFSITE, [a.archivePath, a.manifestPath], env());
     expect(r.code).toBe(0);
@@ -267,7 +267,7 @@ describe('bin/backup-offsite.mjs', () => {
   it('the audit counts hidden (noncurrent) versions — they still hold data', async () => {
     const a = makeArchive(work);
     expect((await run(OFFSITE, [a.archivePath, a.manifestPath], env())).code).toBe(0);
-    const key = `wevolunteer/postgres/daily/2026/09/13/${NAME}.manifest.json`;
+    const key = `wevolunteer/backups/postgres/daily/2026/09/13/${NAME}.manifest.json`;
     fake.state.objects.get(key).push({ versionId: 'hide', deleteMarker: true, lastModified: new Date(), body: Buffer.alloc(0) });
     const b = makeArchive(work, 'wevolunteer-20260914T030000Z');
     const r = await run(OFFSITE, [b.archivePath, b.manifestPath], env());
@@ -385,7 +385,7 @@ describe('bin/backup-fetch.mjs — the recovery path', () => {
     const a = makeArchive(work, 'wevolunteer-20260914T030000Z');
     const r = await run(OFFSITE, [a.archivePath, a.manifestPath], { ...fake.env, WEV_BACKUP_STATUS_DIR: path.join(work, 'status') });
     expect(r.code).toBe(1);
-    expect(fake.state.objects.has('wevolunteer/postgres/daily/2026/09/14/wevolunteer-20260914T030000Z.dump.enc')).toBe(false);
+    expect(fake.state.objects.has('wevolunteer/backups/postgres/daily/2026/09/14/wevolunteer-20260914T030000Z.dump.enc')).toBe(false);
   });
 
   it('refuses a corrupted download and leaves nothing behind', async () => {
@@ -398,7 +398,7 @@ describe('bin/backup-fetch.mjs — the recovery path', () => {
   });
 
   it('refuses an archive whose manifest in the bucket disagrees with it', async () => {
-    const key = 'wevolunteer/postgres/daily/2026/09/12/wevolunteer-20260912T030000Z.manifest.json';
+    const key = 'wevolunteer/backups/postgres/daily/2026/09/12/wevolunteer-20260912T030000Z.manifest.json';
     const v = fake.state.objects.get(key)[0];
     const m = JSON.parse(v.body.toString());
     m.archive_sha256 = 'c'.repeat(64);

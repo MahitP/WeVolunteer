@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { startFakeB2 } from './lib/fake-b2.mjs';
-import { b2ConfigFromEnv, storeRequest, putObject, archiveKey, withRetry, ObjectStoreError } from './lib/object-store.mjs';
+import { b2ConfigFromEnv, storeRequest, putObject, archiveKey, withRetry, ObjectStoreError, DEFAULT_PREFIX } from './lib/object-store.mjs';
 
 /**
  * The ways the off-site copy is asked to fail.
@@ -202,7 +202,7 @@ describe('transport failures are classified as what they are', () => {
     const timeoutMs = 60_000 + body.length / 1024;      // 60200.0 — but not always integral
     expect(Number.isInteger(60_000 + 4097 / 1024)).toBe(false);   // the shape that broke it
     await expect(putObject({
-      config: config(), key: 'wevolunteer/postgres/daily/2026/09/13/x', body, timeoutMs: 60_000 + 4097 / 1024,
+      config: config(), key: 'wevolunteer/backups/postgres/daily/2026/09/13/x', body, timeoutMs: 60_000 + 4097 / 1024,
     })).resolves.toMatchObject({ bytes: body.length });
     expect(timeoutMs).toBeGreaterThan(0);
   });
@@ -289,7 +289,7 @@ describe('transport failures are classified as what they are', () => {
        rather than stored. */
     const cfg = config();
     const err = await storeRequest({
-      config: cfg, method: 'PUT', key: 'wevolunteer/postgres/daily/2026/09/13/x',
+      config: cfg, method: 'PUT', key: 'wevolunteer/backups/postgres/daily/2026/09/13/x',
       headers: { 'Content-Type': 'application/octet-stream', 'Content-MD5': createHash('md5').update('different').digest('base64') },
       body: Buffer.from('actual'),
     }).catch((e) => e);
@@ -298,7 +298,7 @@ describe('transport failures are classified as what they are', () => {
   });
 
   it('never sends the checksum header B2 rejects', async () => {
-    await putObject({ config: config(), key: 'wevolunteer/postgres/daily/2026/09/13/x', body: Buffer.from('hello') });
+    await putObject({ config: config(), key: 'wevolunteer/backups/postgres/daily/2026/09/13/x', body: Buffer.from('hello') });
     const put = fake.state.requests.find((r) => r.method === 'PUT');
     expect(Object.keys(put.headers).some((h) => h.startsWith('x-amz-checksum-'))).toBe(false);
     /* And the fake would have refused it, so this is a live check rather than an
@@ -308,7 +308,7 @@ describe('transport failures are classified as what they are', () => {
 
   it('signs every x-amz-* header it sends, so metadata cannot be altered in flight', async () => {
     await putObject({
-      config: config(), key: 'wevolunteer/postgres/daily/2026/09/13/y',
+      config: config(), key: 'wevolunteer/backups/postgres/daily/2026/09/13/y',
       body: Buffer.from('hi'), metadata: { sha256: 'abc', 'format-version': '2' },
     });
     const put = fake.state.requests.find((r) => r.path.endsWith('/y'));
@@ -362,7 +362,7 @@ describe('the recovery path never hands over an archive it cannot vouch for', ()
 
   it('refuses a truncated object and leaves nothing behind to be restored by mistake', async () => {
     const a = await upload();
-    const key = archiveKey('wevolunteer/postgres', `${NAME}.dump.enc`);
+    const key = archiveKey('wevolunteer/backups/postgres', `${NAME}.dump.enc`);
     const stored = fake.state.objects.get(key);
     stored[stored.length - 1].body = a.archive.subarray(0, a.archive.length - 64);
 
@@ -575,7 +575,7 @@ describe('the restore drill reaches the host that cannot run it', () => {
     const p = drillRecord({ databaseUrl: 'postgresql://user:secret@host/db', notes: 'internal' });
     expect((await run(PUBLISH, [p], fake.env)).code).toBe(0);
 
-    const key = 'wevolunteer/postgres/drills/latest.json';
+    const key = 'wevolunteer/backups/postgres/drills/latest.json';
     const stored = JSON.parse(fake.state.objects.get(key).at(-1).body.toString('utf8'));
     expect(stored).not.toHaveProperty('databaseUrl');
     expect(stored).not.toHaveProperty('notes');
@@ -594,5 +594,71 @@ describe('the restore drill reaches the host that cannot run it', () => {
     const r = await run(PUBLISH, [drillRecord()], { PATH: process.env.PATH });
     expect(r.code).toBe(0);
     expect(r.out).toMatch(/not configured/);
+  });
+});
+
+/* ── The prefix a recovery machine has to be able to guess ────────────────── */
+
+describe('the canonical prefix', () => {
+  /**
+   * Pinned, so a rename is a deliberate act rather than a diff nobody reviewed.
+   *
+   * Three things outside this repository are keyed on this exact string: the
+   * bucket's lifecycle rule (`fileNamePrefix`), the drill key's B2 `namePrefix`
+   * restriction, and the retention audit's own listing. Objects stranded under an
+   * abandoned prefix are invisible to the audit AND never expire, so a silent
+   * rename ends with deleted students' records kept indefinitely and nothing
+   * reporting it. Changing this line should mean changing the bucket too.
+   */
+  it('is wevolunteer/backups/postgres', () => {
+    expect(DEFAULT_PREFIX).toBe('wevolunteer/backups/postgres');
+  });
+
+  it('names which datastore, so a second one has somewhere to go', () => {
+    /* Not flattened to `wevolunteer/backups`. The uploaded files under
+       WEV_UPLOADS_DIR are a second datastore that is not copied off-host today;
+       if that gap closes it needs a home that is not beside the dumps. */
+    expect(DEFAULT_PREFIX.startsWith('wevolunteer/backups/')).toBe(true);
+    expect(DEFAULT_PREFIX.split('/')).toHaveLength(3);
+  });
+
+  /**
+   * The trap this arrangement exists to avoid.
+   *
+   * In a real disaster the operator has four credentials out of a password
+   * manager and a clean laptop. They do NOT have the host's environment file —
+   * the host is what was lost. So the prefix cannot live there: a host-only
+   * B2_PREFIX would leave the laptop listing somewhere else and reporting "the
+   * bucket holds no archives", which reads as "there is no backup" on the one day
+   * the sentence is taken literally.
+   */
+  it('is found by a machine holding nothing but the four credentials', () => {
+    const host = {
+      B2_S3_ENDPOINT: 'https://s3.us-west-004.backblazeb2.com',
+      B2_BUCKET: 'wev-backups-prod',
+      B2_KEY_ID: '004abcdefabcdef0000000001',
+      B2_APPLICATION_KEY: 'K004-not-a-real-application-key',
+    };
+    /* The recovery machine's environment IS the host's four variables and
+       nothing else — no prefix, no extra. Both must resolve the same key. */
+    const recovery = { ...host };
+    const name = 'wevolunteer-20260913T030356Z.dump.enc';
+    expect(archiveKey(b2ConfigFromEnv(recovery).prefix, name))
+      .toBe(archiveKey(b2ConfigFromEnv(host).prefix, name));
+    expect(archiveKey(b2ConfigFromEnv(recovery).prefix, name))
+      .toBe('wevolunteer/backups/postgres/daily/2026/09/13/' + name);
+  });
+
+  it('still honours B2_PREFIX as an explicit override, on both sides', () => {
+    const base = {
+      B2_S3_ENDPOINT: 'https://s3.us-west-004.backblazeb2.com',
+      B2_BUCKET: 'wev-backups-prod',
+      B2_KEY_ID: '004abcdefabcdef0000000001',
+      B2_APPLICATION_KEY: 'K004-not-a-real-application-key',
+    };
+    const c = b2ConfigFromEnv({ ...base, B2_PREFIX: 'second-deployment/postgres' });
+    expect(c.prefix).toBe('second-deployment/postgres');
+    expect(archiveKey(c.prefix, 'wevolunteer-20260913T030356Z.dump.enc'))
+      .toBe('second-deployment/postgres/daily/2026/09/13/wevolunteer-20260913T030356Z.dump.enc');
   });
 });

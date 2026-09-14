@@ -36,7 +36,36 @@
  */
 import { createHash, createHmac } from 'node:crypto';
 
-export const DEFAULT_PREFIX = 'wevolunteer/postgres';
+/**
+ * Where everything this project writes to the bucket lives.
+ *
+ * ── Why it is a constant and not a required variable ──
+ *
+ * This is the one setting a recovery machine cannot be told. In a real disaster
+ * the operator has four credentials out of a password manager and a clean laptop;
+ * they do not have the host's environment file, because the host is what was
+ * lost. bin/backup-fetch.mjs rebuilds object keys from this same value, so if the
+ * prefix lived only in `B2_PREFIX` on the host, that laptop would list the wrong
+ * place and print "the bucket holds no archives" — a false "there is no backup"
+ * on the one day the sentence is read literally.
+ *
+ * So the canonical prefix ships in the code, and `B2_PREFIX` is an override for a
+ * deliberately different bucket layout (a second deployment sharing one bucket, a
+ * migration). Do not set it on the host to express the normal layout.
+ *
+ * ── Why `backups/postgres` and not `postgres` ──
+ *
+ * Renamed 2026-09-13, before any object existed, which is the only free moment a
+ * prefix rename ever has: the lifecycle rule, the retention audit and the drill
+ * key's own prefix restriction are all keyed on this string, and objects stranded
+ * under an abandoned prefix are invisible to the audit AND never expire.
+ *
+ * The `postgres` segment is kept as a segment rather than flattened into
+ * `wevolunteer/backups/` because it names WHICH datastore. The uploaded files
+ * under WEV_UPLOADS_DIR are a second one that is not copied off-host today; if
+ * that gap closes, it has somewhere to go that is not beside the dumps.
+ */
+export const DEFAULT_PREFIX = 'wevolunteer/backups/postgres';
 
 const sha256Hex = (buf) => createHash('sha256').update(buf).digest('hex');
 const hmac = (key, str) => createHmac('sha256', key).update(str, 'utf8').digest();
@@ -127,7 +156,7 @@ export function b2ConfigFromEnv(env = process.env) {
 
   const prefix = (env.B2_PREFIX || DEFAULT_PREFIX).trim().replace(/^\/+|\/+$/g, '');
   if (!prefix || prefix.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
-    throw new Error('B2_PREFIX must be a relative path such as wevolunteer/postgres.');
+    throw new Error(`B2_PREFIX must be a relative path such as ${DEFAULT_PREFIX}.`);
   }
 
   return {

@@ -132,7 +132,7 @@ day  + daysFromHidingToDeleting  file deleted
 Total retention is the **sum**. For 28 days:
 
 ```json
-[{ "fileNamePrefix": "wevolunteer/postgres/",
+[{ "fileNamePrefix": "wevolunteer/backups/postgres/",
    "daysFromUploadingToHiding": 27,
    "daysFromHidingToDeleting": 1 }]
 ```
@@ -180,7 +180,7 @@ B2 application keys can be restricted to a bucket and to a name prefix. Use both
 |---|---|---|---|
 | `wev-backup-writer` | `listFiles`, `readFiles`, `writeFiles`, `readFileRetentions` | `/etc/wevolunteer/wevolunteer.env` on the host, mode 0600 | The nightly upload and its verification |
 | `wev-backup-recovery` | `listFiles`, `readFiles` | The operator's password manager **only** | Rebuilding after the host is lost |
-| `wev-drill` | `listFiles`, `readFiles`, plus `writeFiles` restricted to prefix `wevolunteer/postgres/drills/` | The operator's drill machine | The weekly drill and publishing its verdict |
+| `wev-drill` | `listFiles`, `readFiles`, plus `writeFiles` restricted to prefix `wevolunteer/backups/postgres/drills/` | The operator's drill machine | The weekly drill and publishing its verdict |
 
 **No key has `deleteFiles`.** Expiry is the lifecycle rule's job. An application
 that cannot delete cannot be made to delete, by a bug or by whoever reaches the
@@ -421,7 +421,7 @@ on a unix socket only — no TCP port at all — and deletes it afterwards. It n
 reads `DATABASE_URL`; it `unset`s it. That is the strongest form of "never restore
 over production" available.
 
-Its verdict is published to `wevolunteer/postgres/drills/latest.json` and picked
+Its verdict is published to `wevolunteer/backups/postgres/drills/latest.json` and picked
 up by the next nightly run, so the Owner Center on the host can show it. The
 object is rebuilt field by field rather than forwarded, so nothing added to the
 local record later is published without somebody deciding it should be. A failure
@@ -467,7 +467,7 @@ free tier.
 2. Create a **private** bucket, e.g. `wev-backups-prod`, with **Object Lock
    enabled at creation** — it cannot be added later — and a default governance
    retention of **7 days** (§3).
-3. Add the lifecycle rule from §2: prefix `wevolunteer/postgres/`, hide 27,
+3. Add the lifecycle rule from §2: prefix `wevolunteer/backups/postgres/`, hide 27,
    delete 1.
 4. Create the three application keys from §4. Each is shown **once**.
 5. Put the writer key on the host in `/etc/wevolunteer/wevolunteer.env`:
@@ -480,6 +480,17 @@ free tier.
    All four or none. A half-configured destination is refused rather than skipped,
    because silently skipping the upload is how an operator comes to believe
    off-site copies exist that do not.
+
+   **Four variables, and no fifth.** `B2_PREFIX` exists but must NOT be set here.
+   The canonical prefix ships in the code (`DEFAULT_PREFIX`) precisely so that a
+   recovery machine can find the archives with nothing but these four credentials
+   from the password manager — in a real disaster the host's environment file is
+   the thing that was lost. A `B2_PREFIX` set only on the host would leave
+   `bin/backup-fetch.mjs` on a clean laptop listing the wrong place and printing
+   `the bucket holds no archives`, which is a false "there is no backup" on the one
+   day that sentence is read literally. Use it only for a deliberately different
+   layout — a second deployment sharing one bucket, or a migration — and when you
+   do, put it on the recovery machine too.
 6. Put the other two keys in the password manager, with the backup private key.
 7. Run one backup by hand and read the log to the end. Then run the drill from
    §9 and see it pass from the `offsite` copy.
@@ -508,7 +519,7 @@ bin/backup-postgres.sh
   verified: archive parses and carries data for users, events, attendance, certificates
   wrote wevolunteer-20260914T012300Z.dump (196K)
   encrypted to wevolunteer-20260914T012300Z.dump.enc (200K)
-  uploaded wevolunteer/postgres/daily/2026/09/14/...dump.enc (201327 bytes)
+  uploaded wevolunteer/backups/postgres/daily/2026/09/14/...dump.enc (201327 bytes)
   verified: B2 reports the expected size and SHA-256
   verified: downloaded copy is byte-identical (SHA-256)
 
