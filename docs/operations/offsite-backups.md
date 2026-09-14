@@ -491,7 +491,74 @@ free tier.
 
 Honesty about this is the point of the document.
 
-**Verified, locally, against a server that refuses what B2 documents refusing**
+### The drill that was actually run — 2026-09-13
+
+Not a unit test: the real scripts, a real PostgreSQL 17 cluster, the real
+OpenSSL, a 70-table WeVolunteer schema at migration 67 with synthetic data, and
+the archive travelling through the object store before coming back.
+
+```
+source cluster    PostgreSQL 17.9, pg_trgm installed in `extensions`
+                  (Supabase-shaped on purpose — see §7)
+                  70 tables · 193 indexes · migration 67
+                  40 users · 300.00 credited hours · 25 certificates · 120 ledger rows
+
+bin/backup-postgres.sh
+  live: users=40 credited_hours=300.00 certificates=25 ledger=120 migration=67
+  verified: archive parses and carries data for users, events, attendance, certificates
+  wrote wevolunteer-20260914T012300Z.dump (196K)
+  encrypted to wevolunteer-20260914T012300Z.dump.enc (200K)
+  uploaded wevolunteer/postgres/daily/2026/09/14/...dump.enc (201327 bytes)
+  verified: B2 reports the expected size and SHA-256
+  verified: downloaded copy is byte-identical (SHA-256)
+
+bin/restore-drill-postgres.sh   (WEV_DRILL_SOURCE=offsite)
+  fetched ...dump.enc (201327 bytes), SHA-256 verified against manifest and B2 metadata
+  archive expects pg_trgm in: extensions
+  restore completed with no errors
+  restored: users=40 credited_hours=300.00 certificates=25 ledger=120 migration=67
+  verified: restored counts match the manifest exactly
+  verified: 96 foreign keys (all validated), 193 indexes
+  OK — restore drill passed from the offsite copy in 2s
+```
+
+All six levels, from the off-site copy, on a cluster that did not exist when the
+backup was taken. The ~200 KB figure in §10 is this measurement, not an estimate.
+
+**Then the same archive was attacked**, with the restore refusing each time:
+
+| Attack | Result |
+|---|---|
+| One byte flipped mid-ciphertext | refused — `SHA-256 does not match its manifest` |
+| The same flip, **with the manifest's SHA-256 rewritten to agree** | refused — `Error decrypting CMS structure` |
+| Truncated by 2 KB | refused — SHA-256 mismatch |
+| Wrong private key | refused — `Error decrypting CMS structure` |
+| Control: untouched archive | `OK — this archive is proven restorable` |
+
+The second row is the one that matters, and it is the whole case for format 2:
+the manifest hash was forged to match the tampered bytes, so only the AEAD tag
+stood between a corrupted archive and a "successful" restore — and it held. The
+same file in format 1 would have restored, exit 0, into silently altered data.
+
+**And the rule that outranks the rest was proven end to end.** With
+`WEV_BACKUP_KEEP_DAYS=0` and the only good archive dated 2025-01-01 — so any
+prune at all would have taken it — the destination was killed mid-run:
+
+```
+retrying listing (attempt 1 failed: ... ECONNREFUSED; waiting 177 ms)
+retrying listing (attempt 2 failed: ... ECONNREFUSED; waiting 1321 ms)
+retrying listing (attempt 3 failed: ... ECONNREFUSED; waiting 1919 ms)
+FAILED (list): GET failed before a response: ECONNREFUSED
+FAILED: the off-site copy failed — the local archive is kept at ... and nothing was pruned
+```
+
+Both archives survived, the retry was bounded at four attempts over ~4 seconds,
+`lastVerified` still named the last proven off-site copy, and the Owner Center
+read `local: ok · off-site: failed · overall: failed` — the exact case that used
+to report healthy backups.
+
+### Verified, locally, against a server that refuses what B2 documents refusing
+
 (`bin/lib/fake-b2.mjs` recomputes SigV4 independently, checks the payload hash and
 `Content-MD5`, enforces capabilities per operation, keeps versions, and refuses
 `x-amz-checksum-*`):
@@ -507,7 +574,7 @@ Honesty about this is the point of the document.
 - That the encryption change does what §5 claims — tested against real archives
   with a real key, including the CBC tamper case.
 
-**Not verified:**
+**Still not verified:**
 
 - **Anything against the real Backblaze.** No account exists yet. Everything in
   §§1–4 about B2's behaviour comes from Backblaze's documentation, and the client
