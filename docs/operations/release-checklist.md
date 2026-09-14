@@ -386,16 +386,28 @@ admits its edges:
 - **Auto Select scheduling.** There is still no scheduler; if an organizer forgets to
   run a draw, applicants stay pending and are never told. Run the runbook's
   "pending past deadline" query daily.
-- **Off-host backup automation.** Shipped as of 2026-09-13: `bin/backup-offsite.mjs`
-  uploads to Backblaze B2 and proves the copy by downloading it back. What is NOT
-  shipped is the account — the bucket, its lifecycle rule, its caps and its three
-  keys are still a human step (§6, and `offsite-backups.md` §11), and no request
-  from this project has ever reached backblazeb2.com.
-- **Backup failure alerting.** Now shipped for the cases the application can see:
-  a stale or missing local archive, a failed or stale off-site copy, and a failed
-  or stale restore drill all email `ALERT_EMAIL` at most twice a day, with a
-  subject that distinguishes "backups are not running" from "backups are running
-  but the off-site copy is not". What is still NOT shipped is `OnFailure=` on the
-  systemd unit: a unit that fails before the application ever sees it — the timer
-  disabled, the host down — is invisible to an alerter running inside that host.
-  See §6.
+- **Off-host backup automation.** Shipped, and verified against the real
+  Backblaze account on 2026-09-14: upload, download-verify, Object Lock, the
+  lifecycle rule, and a restore from the off-site copy. What remains a human step
+  is the key scoping — the account currently holds one key with every capability
+  (see §6) — and the spending caps.
+- **Backup failure alerting.** Shipped at both levels, which an earlier revision
+  of this list got wrong by claiming `OnFailure=` was missing. It is not:
+  `wevolunteer-backup.service` carries
+  `OnFailure=wevolunteer-heartbeat-fail@%n.service` and an `ExecStartPost` that
+  pings the BACKUP heartbeat on success, and `deploy/provision.sh` installs the
+  reporter, the failure template and `heartbeats.env`. Between them they cover the
+  case the application cannot see at all — the timer disabled, the host down at
+  03:00, the unit never started — because Better Stack raises an incident when a
+  day passes with no ping. Inside the application, a stale or missing local
+  archive, a failed or stale off-site copy and a failed or stale restore drill
+  each email `ALERT_EMAIL` at most twice a day, with a subject that distinguishes
+  "backups are not running" from "backups are running but the off-site copy is
+  not".
+
+  **The remaining limitation is configuration, not code:** provisioning writes
+  `heartbeats.env` with every URL unset and warns. Until `HEARTBEAT_URL_BACKUP`
+  is set, `wevolunteer-heartbeat.sh` logs that the job is unmonitored and exits 0
+  — deliberately, since a heartbeat that could fail its parent would turn a
+  monitoring outage into a failed backup. The backup still runs and the Owner
+  Center still reports; nothing outside the host is watching. See §6.

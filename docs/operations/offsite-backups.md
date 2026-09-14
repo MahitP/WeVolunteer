@@ -182,6 +182,24 @@ B2 application keys can be restricted to a bucket and to a name prefix. Use both
 | `wev-backup-recovery` | `listFiles`, `readFiles` | The operator's password manager **only** | Rebuilding after the host is lost |
 | `wev-drill` | `listFiles`, `readFiles`, plus `writeFiles` restricted to prefix `wevolunteer/backups/postgres/drills/` | The operator's drill machine | The weekly drill and publishing its verdict |
 
+> ### The live account does not match this table yet — 2026-09-14
+>
+> `wevolunteer-bucket` is reached by **one** application key (`wevolunteer-key`)
+> holding **all 26 capabilities**, including `deleteFiles`, `bypassGovernance`,
+> `writeBucketLifecycleRules`, `writeBucketRetentions` and `writeBuckets`. It is
+> restricted to the bucket, which is the one control that is right; it is not
+> restricted by prefix, and it is not restricted by capability.
+>
+> That is not a theoretical gap. It was demonstrated: a `b2_delete_file_version`
+> with `bypassGovernance: true` removed a governance-locked object outright. So
+> whoever reaches the production host can delete every backup, and Object Lock
+> will not stop them — which removes both of the two independent controls this
+> section exists to create.
+>
+> `bin/b2-audit.mjs` reports each of these, and it is the check to re-run after
+> fixing them. Fixing needs the account master key or the console: the current key
+> has no `writeKeys`, so it cannot mint the three scoped keys itself.
+
 **No key has `deleteFiles`.** Expiry is the lifecycle rule's job. An application
 that cannot delete cannot be made to delete, by a bug or by whoever reaches the
 host — and `bin/lib/object-store.mjs` implements no delete operation at all, so
@@ -304,8 +322,8 @@ here needs the old host, the Oracle tenancy, or a database URL.
 
 ```bash
 # 1. Credentials — the read-only recovery key, from the password manager.
-export B2_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com
-export B2_BUCKET=wev-backups-prod
+export B2_S3_ENDPOINT=https://s3.us-east-005.backblazeb2.com
+export B2_BUCKET=wevolunteer-bucket
 export B2_KEY_ID=...  B2_APPLICATION_KEY=...
 
 # 2. What is there.
@@ -464,7 +482,7 @@ free tier.
 ## 11. Setting it up, once
 
 1. Create the account. **Set the caps first** (§10).
-2. Create a **private** bucket, e.g. `wev-backups-prod`, with **Object Lock
+2. Create a **private** bucket — the live one is `wevolunteer-bucket` — with **Object Lock
    enabled at creation** — it cannot be added later — and a default governance
    retention of **7 days** (§3).
 3. Add the lifecycle rule from §2: prefix `wevolunteer/backups/postgres/`, hide 27,
@@ -472,8 +490,8 @@ free tier.
 4. Create the three application keys from §4. Each is shown **once**.
 5. Put the writer key on the host in `/etc/wevolunteer/wevolunteer.env`:
    ```
-   B2_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com
-   B2_BUCKET=wev-backups-prod
+   B2_S3_ENDPOINT=https://s3.us-east-005.backblazeb2.com
+   B2_BUCKET=wevolunteer-bucket
    B2_KEY_ID=...
    B2_APPLICATION_KEY=...
    ```
@@ -585,11 +603,45 @@ to report healthy backups.
 - That the encryption change does what §5 claims — tested against real archives
   with a real key, including the CBC tamper case.
 
+### Against the real Backblaze account — 2026-09-14
+
+The previous revision of this section said no request had ever reached
+`backblazeb2.com`. That is no longer true. Bucket `wevolunteer-bucket`,
+region `us-east-005`, one key:
+
+| Claim | How it was settled |
+|---|---|
+| Upload | `bin/backup-postgres.sh` end to end; 201,471 bytes at `wevolunteer/backups/postgres/daily/2026/09/14/…dump.enc` |
+| Download | fetched back and hashed; byte-identical to the local archive |
+| Restore | `bin/restore-drill-postgres.sh` with `WEV_DRILL_SOURCE=offsite` — decrypted, restored into a scratch PostgreSQL 17, **70 tables, 96 validated foreign keys, 193 indexes**, counts and migration version matching the manifest |
+| Recovery from nothing | `env -i` with only the four credentials listed and fetched the archive; SHA-256 matched the recorded one |
+| Object Lock, per object | archive **and** manifest both `governance`, `retainUntil` exactly **7.00 days** after upload, read back through Backblaze's own API rather than our S3 header parsing |
+| Object Lock, enforced | an ordinary `b2_delete_file_version` on a locked object was **refused** (`401 access_denied`) |
+| Object Lock, immutability | overwriting the key created a **new version**; the locked original survived with its bytes and its retention intact |
+| Lifecycle | rule present on `wevolunteer/backups/postgres/`, hide 27 + delete 1 = **28 days**, read back from `b2_list_buckets` |
+| Lock/lifecycle compatibility | lock 7 d < hide 27 d, so no expiry can be refused for being locked |
+| Failure behaviour | a real Backblaze refusal (`404 NoSuchBucket`) with `WEV_BACKUP_KEEP_DAYS=0` and the only good archive dated 2025-01-01: the run failed, **nothing was pruned**, `lastVerified` still named the last proven copy, and the Owner Center read local `ok` / off-site `failed` / overall `failed` |
+
+**Both bucket settings were absent when first inspected** — Object Lock enabled
+with a null default retention, and an empty lifecycle rule set. They were applied
+while the bucket was still empty, which is the only free moment either has. This
+is what `bin/b2-audit.mjs` now exists to catch.
+
 **Still not verified:**
 
-- **Anything against the real Backblaze.** No account exists yet. Everything in
-  §§1–4 about B2's behaviour comes from Backblaze's documentation, and the client
-  is written to it, but no request has ever reached `backblazeb2.com`. §11 step 7
-  is what settles it, and a report that has not run it must say so.
-- The lifecycle rule and Object Lock interaction, for the same reason.
-- Production timings at real scale; §10's figures are from a ~14 MB database.
+- **Key scoping.** One over-privileged key, not three scoped ones — see the box
+  in §4. `bin/b2-audit.mjs` reports five findings against it today.
+- **The spending caps.** There is no public API that reports them, so they cannot
+  be confirmed from here at all; the console is the only place. Until they are
+  set, "$0" is a forecast rather than the guarantee B2 was chosen to provide
+  (§10). Nothing in this verification exceeded the free tier: ~200 KB stored, and
+  Class A/B/C calls only, all free on pay-as-you-go.
+- **Lifecycle expiry actually happening.** The rule is confirmed present and
+  correctly shaped, and the semantics are Backblaze's documented ones, but no
+  object has yet reached 27 days. The first real expiry is 2026-10-12.
+- **Production timings at real scale;** §10's figures are from a ~14 MB database.
+- **A 28-day floor does not exist.** `daysFromUploadingToHiding` applies to the
+  current version too, so if backups stop, the newest one is deleted 28 days
+  later and the bucket empties. That is the policy working as specified, not a
+  bug — the mitigations are the local copy and the 26-hour staleness alert — but
+  it is worth knowing before reading "28-day retention" as "we always have one".
