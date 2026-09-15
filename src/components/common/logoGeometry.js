@@ -60,9 +60,11 @@ export const TILE_MARK_RATIO = 0.58;
 /**
  * The wordmark: the mark's own skeleton as the W, followed by "eVolunteer".
  *
- * The proposal sets the name in Familjen Grotesk SemiBold at -0.038em and names
- * redrawing that W "to the symbol's skeleton" as the next step. This is that
- * step, done without adding a font to the product:
+ * Not the proposal's phase-one lockup. That lockup is the tile beside the name
+ * typeset in Familjen Grotesk SemiBold at -0.038em. Its page 9 describes
+ * redrawing that W "to the symbol's skeleton" only as a possible phase two. The
+ * integrated W is used now by the project owner's separate decision, and it is
+ * drawn here without adding a font to the product:
  *
  *   - the letters are the proposal's own outlined "WeVolunteer" (its Typography
  *     plate), converted into the mark's coordinate space, so there is no webfont

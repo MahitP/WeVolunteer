@@ -47,10 +47,20 @@ content was extracted and measured:
 
 ## 3. The wordmark
 
-The proposal sets the name in type and says plainly that there is no custom
-lettering yet. It names the next step as redrawing the wordmark's W "to the
-symbol's skeleton". The product uses that redrawn wordmark, because a tile
-beside the typeset name would print the W twice.
+**This section is an owner decision, not something the proposal finalised.**
+
+- **Phase one in the proposal** is the horizontal lockup: the tile beside the name
+  typeset in Familjen Grotesk SemiBold. That is what it documents for the sidebar,
+  login, email header and certificates.
+- **Page 9 of the proposal** says there is no custom lettering yet, deliberately.
+  It describes redrawing the wordmark's W "to the symbol's skeleton" only as a
+  possible phase-two move.
+- **The product uses that integrated W now.** The project owner decided this
+  separately from the proposal. The proposal describes the idea but does not
+  specify its drawing, so the construction below is this implementation's own,
+  derived from the proposal's geometry.
+
+How it is drawn:
 
 - **The W is `MARK_PATH`, unchanged.** Same five points, same numbers.
 - **Its weight is the typeface's, not the symbol's: 10 units.** The plate's W has
@@ -93,6 +103,19 @@ beside the typeset name would print the W twice.
   proposal also moves primary buttons to Forest. That is an interface change, not a
   logo change, and it has not been made.
 
+`#0f6b45` is **not a leftover logo colour**. It is the interface's action green,
+and was audited where it remains:
+
+| Where | What it colours | Class |
+|---|---|---|
+| `src/index.css` `--green-600`, `--brand-translucent-soft` | `--primary` / `--brand`: buttons, links, tints | Interface colour |
+| `server/email.js` `brandColor` | The email call-to-action button and links | Interface colour (matches the app's buttons) |
+| `server/workers/notificationWorker.js` | The accent border on an event summary in notification email | Interface colour |
+| Comments in `src/index.css`, `src/textOpacity.test.js`, `src/noHardcodedColors.test.js`, `a11y/` | Recorded contrast measurements of the interface green | Documentation |
+| `docs/legal/03-ACCESSIBILITY-REPORT.md`, `docs/audits/`, `docs/history/`, `docs/plans/` | Contrast reports and historical records | Documentation |
+
+Nothing that draws the mark, the tile or the wordmark reads it.
+
 ## 6. Deliberate departures from the proposal
 
 1. **`MARK_VIEWBOX` is `8 -3 86 89`, not the drop-in's `8 -3 85 89`.** At the
@@ -104,15 +127,18 @@ beside the typeset name would print the W twice.
    is implemented.
 3. **Mark size in the tile follows the drop-in code (0.58), not the illustrations.**
    The Scale plate draws the mark at about 0.605 of the tile.
-4. **The wordmark W is redrawn** (§3). The proposal defers that to a second phase.
+4. **The wordmark W is redrawn** (§3), by owner decision. The proposal documents
+   the tile-plus-typeset lockup for phase one and names the redrawn W only as a
+   possible phase two.
 5. **No Familjen Grotesk is loaded.** The letters are outlines. The interface keeps
    Bricolage Grotesque and Public Sans.
 
 ## 7. What is not done
 
-- **The horizontal lockup** (tile beside the typeset name), which the proposal lists
-  as primary for the sidebar, login, email header and certificates. It is replaced
-  by the wordmark wherever the name is shown.
+- **The horizontal lockup** (tile beside the typeset name), which the proposal
+  documents as its phase-one primary for the sidebar, login, email header and
+  certificates. By owner decision, the integrated wordmark is used wherever the
+  name is shown instead (§3).
 - The certificate seal, Welly's second-V mark, the flat-cut icon set and the
   draw-on animation.
 - No raster icons: no `apple-touch-icon`, no PNG manifest icons, no Open Graph
