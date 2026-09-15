@@ -4,7 +4,7 @@ import { api } from '../utils/api';
 import { ShieldCheck, ShieldAlert, Loader2, Calendar, Search } from 'lucide-react';
 import { formatDay, formatHours } from '../utils/helpers';
 import { APP_NAME, SCHOOL_NAME } from '../config';
-import BrandMark from '../components/common/BrandMark';
+import Wordmark from '../components/common/Wordmark';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 
 /**
@@ -191,9 +191,8 @@ export default function CertificateVerification() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--surface-2)' }}>
       <header className="topbar" style={{ justifyContent: 'center' }}>
         <a className="brand" href="/" style={{ pointerEvents: 'none' }}>
-          <BrandMark />
           <span className="brand-text">
-            <span className="brand-name">{APP_NAME}</span>
+            <Wordmark />
             <span className="brand-sub">Verification</span>
           </span>
         </a>

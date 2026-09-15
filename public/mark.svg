@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="86" height="89" viewBox="8 -3 86 89" role="img" aria-label="WeVolunteer">
+  <!--
+    The WeVolunteer checkmark-W on its own, in Forest, with no tile.
+
+    Served as Safari's pinned-tab mask icon. That icon is a one-colour silhouette
+    of whatever the file draws, so the tiled favicon would pin as a plain square;
+    the bare mark pins as the mark.
+
+    A copy of src/components/common/logoGeometry.js, held to it by
+    src/logoAssets.test.jsx.
+  -->
+  <path d="M16 26 L33 78 L50 34 L67 78 L86 4" fill="none" stroke="#0f5a3a" stroke-width="12.5" stroke-linejoin="bevel" stroke-linecap="butt" stroke-miterlimit="1"/>
+</svg>

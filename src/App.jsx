@@ -6,6 +6,7 @@ import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
 import BrandMark from './components/common/BrandMark';
+import Wordmark from './components/common/Wordmark';
 import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
 import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
@@ -1773,9 +1774,11 @@ function AppShell({ toasts, addToast, removeToast }) {
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
         <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
+          {/* The tile is shown only on the tablet rail, where the wordmark does
+              not fit; see `.sidebar .brand` in index.css. */}
           <BrandMark />
           <span className="brand-text">
-            <span className="brand-name">{APP_NAME}</span>
+            <Wordmark />
             <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </a>

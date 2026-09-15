@@ -6,17 +6,16 @@
     <!--
       One mark, in every place the browser draws one.
 
-      `favicon.svg` is a #0f6b45 tile with white "WV" letters drawn as paths —
-      the same badge `.brand-mark` renders in the app and the same one
-      `server/email.js` builds into every transactional email header. The colour
-      is written literally in all three because none of those contexts can read
-      a CSS custom property: the tab icon is fetched outside the document, an
-      email client has no stylesheet of ours, and neither has a theme this
-      application controls. `--brand-mark-bg` in index.css is the in-app half of
-      that same pair, and it is deliberately not overridden in dark mode.
+      `favicon.svg` is the checkmark-W, white, on a #0f5a3a (Forest) tile — the
+      same badge `.brand-mark` renders in the app, drawn at the small-size stroke
+      weight a 16px tab needs. The colour is written literally because a tab icon
+      is fetched outside the document, where no CSS custom property is in scope.
+      `--brand-mark-bg` in index.css is the in-app half of that same pair, and it
+      is deliberately not overridden in dark mode.
 
-      `mask-icon` covers Safari's pinned tabs, which render a monochrome mask
-      and would otherwise fall back to a screenshot of the page.
+      `mask-icon` covers Safari's pinned tabs, which render a one-colour
+      silhouette. It points at the bare mark, not the tiled favicon, whose
+      silhouette is a plain square.
 
       There is deliberately NO apple-touch-icon and no Open Graph image. Both
       require a raster asset this repository does not carry, and Open Graph in
@@ -24,9 +23,9 @@
       which is not something to add to a platform whose members are children and
       whose profiles are gated behind a session for exactly that reason.
     -->
-    <link rel="mask-icon" href="/favicon.svg" color="#0f6b45" />
+    <link rel="mask-icon" href="/mark.svg" color="#0f5a3a" />
     <link rel="manifest" href="/site.webmanifest" />
-    <meta name="theme-color" content="#0f6b45" />
+    <meta name="theme-color" content="#0f5a3a" />
     <meta name="description" content="Volunteer scheduling and service-hour tracking for schools." />
     <!--
       viewport-fit=cover is what makes env(safe-area-inset-*) resolve to real

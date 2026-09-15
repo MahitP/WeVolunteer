@@ -5,17 +5,17 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0f6b45",
-  "theme_color": "#0f6b45",
+  "background_color": "#0f5a3a",
+  "theme_color": "#0f5a3a",
   "icons": [
     {
-      "src": "/favicon.svg",
+      "src": "/app-icon.svg",
       "type": "image/svg+xml",
       "sizes": "any",
       "purpose": "any"
     },
     {
-      "src": "/favicon.svg",
+      "src": "/app-icon-maskable.svg",
       "type": "image/svg+xml",
       "sizes": "any",
       "purpose": "maskable"

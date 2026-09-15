@@ -454,11 +454,12 @@ export function escapeHtml(value) {
  * sends. There is no second template, which is why branding is changed here and
  * only here.
  *
- * ── Why the logo is drawn rather than fetched ──
+ * ── Why the header is the name, and not the logo image ──
  *
- * The header mark is a table cell with a background colour and the letters "WV"
- * in it, beside the product name. It is deliberately NOT an `<img>`, and that is
- * a deliberate choice rather than an unfinished one:
+ * The header is the product name set in bold, in the brand's Forest green, with
+ * no tile and no image. It used to sit beside a coloured table cell reading
+ * "WV" — a monogram the WeVolunteer identity has retired — and the checkmark-W
+ * that replaced it is a drawing, which an email cannot carry reliably:
  *
  *   • Gmail, Outlook and Apple Mail block remote images by default for a sender
  *     the recipient has not corresponded with before — which is precisely the
@@ -470,11 +471,13 @@ export function escapeHtml(value) {
  *     `localhost` — an address that resolves, on the recipient's machine, to the
  *     recipient's machine.
  *   • Base64-embedding it instead is worse: Gmail strips `data:` URIs in
- *     `<img src>` outright.
+ *     `<img src>` outright, and inline SVG is stripped by most clients.
  *
- * A background-coloured cell renders identically in every one of those clients,
- * with images off, and costs nothing to download. It is the same green and the
- * same two letters as the application's own icon, so the two agree.
+ * Text renders identically in every one of those clients, with images off, and
+ * costs nothing to download. The identity's own guidance for email is the mark
+ * with the wordmark and no tile; the name alone is the part of that which
+ * survives an email client. `wordmarkColor` is Forest, the same hex as the
+ * favicon and the in-app wordmark, which `src/logoAssets.test.jsx` checks.
  *
  * ── What this canNOT do: the sender avatar ──
  *
@@ -499,6 +502,7 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
   const safeCtaUrl = escapeHtml(ctaUrl);
   const safeCtaText = escapeHtml(ctaText);
   const brandColor = '#0f6b45';
+  const wordmarkColor = '#0f5a3a';
   const paperColor = '#f7f7f5';
   const inkColor = '#14231c';
   const inkMuted = '#66736d';
@@ -576,21 +580,6 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
       padding: 32px 32px 0 32px;
       text-align: left;
     }
-    .brand-mark {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 48px;
-      height: 48px;
-      background: ${brandColor};
-      color: #ffffff;
-      border-radius: 8px;
-      font-family: 'Bricolage Grotesque', sans-serif;
-      font-weight: 700;
-      font-size: 20px;
-      letter-spacing: -0.5px;
-      text-decoration: none !important;
-    }
     .content {
       padding: 24px 32px 32px 32px;
       font-size: 16px;
@@ -629,9 +618,9 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
       .content h1, .content p {
         color: #eee !important;
       }
-      /* The wordmark is ink-on-white in the light theme and would vanish
-         against the dark card. The mark itself is white on the brand green and
-         needs no override. */
+      /* The name is Forest on white in the light theme and would all but vanish
+         against the dark card, so it goes light — monochrome, as the identity
+         draws its mark on a dark canvas, rather than a lighter green. */
       .brand-word {
         color: #eee !important;
       }
@@ -650,16 +639,7 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
             <table class="main" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
               <tr>
                 <td class="header">
-                  <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-                    <tr>
-                      <td style="background-color: ${brandColor}; border-radius: 8px; width: 48px; height: 48px; min-width: 48px; text-align: center; vertical-align: middle;">
-                        <span style="color: #ffffff; font-family: 'Arial', Helvetica, sans-serif; font-size: 20px; font-weight: bold; letter-spacing: -0.5px; line-height: 48px;">WV</span>
-                      </td>
-                      <td style="padding-left: 12px; vertical-align: middle;">
-                        <span class="brand-word" style="font-family: 'Arial', Helvetica, sans-serif; font-size: 18px; font-weight: bold; color: ${inkColor}; letter-spacing: -0.2px;">${escapeHtml(APP_NAME)}</span>
-                      </td>
-                    </tr>
-                  </table>
+                  <span class="brand-word" style="font-family: 'Arial', Helvetica, sans-serif; font-size: 22px; font-weight: bold; color: ${wordmarkColor}; letter-spacing: -0.8px;">${escapeHtml(APP_NAME)}</span>
                 </td>
               </tr>
               <tr>

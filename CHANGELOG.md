@@ -865,6 +865,16 @@ is that the list of reasons it must is short, evidenced and written down in
 
 ### Changed
 
+- **The WV monogram is replaced by the checkmark-W.** The logo follows the
+  September 2026 Identity Proposal: a W whose last stroke overshoots like a tick,
+  in Forest (`#0f5a3a`). Wherever the product name is shown it is now the
+  wordmark, whose W is the same drawing, and the tile is kept for the Welcome and
+  appeal screens and the tablet rail. The favicon, the manifest icons, the pinned-
+  tab icon and the recovery-code image all changed with it. The email header is
+  now the name alone, since an email cannot carry the drawing. Every copy of the
+  geometry is held to one source by `src/logoAssets.test.jsx`. What was taken from
+  the proposal, and where it was departed from, is in
+  [`docs/features/brand-identity.md`](docs/features/brand-identity.md).
 - **The Settings entry for the legal documents is now called "Legal Center".** It
   read "Terms, privacy and safety policies" — a list of contents standing in for
   a place. The page it opens has been a hub of ten documents with its own search

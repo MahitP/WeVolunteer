@@ -21,7 +21,7 @@ import { THEMES } from './themes/index.js';
 import { KINDS, SERIOUS, RETRYABLE, weightFor } from './kinds';
 import { COPY } from './errorCopy';
 import { resetSeed } from './selector';
-import BrandMark from '../../components/common/BrandMark';
+import Wordmark from '../../components/common/Wordmark';
 
 const at = (props) =>
   render(<MemoryRouter><ErrorExperience {...props} /></MemoryRouter>);
@@ -85,7 +85,7 @@ describe('every theme, for every kind it is eligible for', () => {
 
   it.each(PAIRS)('%s / %s names the product', (theme, kind) => {
     at({ theme, kind });
-    expect(screen.getByText('WeVolunteer')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'WeVolunteer' })).toBeInTheDocument();
   });
 });
 
@@ -170,16 +170,16 @@ describe('weight matches severity', () => {
 });
 
 describe('every experience is unmistakably WeVolunteer', () => {
-  it.each(PAIRS)('%s / %s carries the product mark beside the wordmark', (theme, kind) => {
+  it.each(PAIRS)('%s / %s carries the wordmark, named once', (theme, kind) => {
     const { container } = at({ theme, kind });
-    const mark = container.querySelector('.err-mark .brand-mark');
+    const mark = container.querySelector('.err-mark');
 
-    expect(mark, 'no brand mark — the screen does not say whose it is').toBeTruthy();
-    expect(mark.textContent).toBe('WV');
-    // The wordmark says the name already; announcing "WV" too is the same
-    // thing said twice in a worse voice.
-    expect(mark.getAttribute('aria-hidden')).toBe('true');
-    expect(container.querySelector('.err-mark').textContent).toContain('WeVolunteer');
+    expect(mark.querySelector('svg.wordmark'), 'no wordmark — the screen does not say whose it is').toBeTruthy();
+    // The wordmark's W is the mark. A tile beside it would print the W twice,
+    // and a second name would announce the product twice.
+    expect(mark.querySelector('.brand-mark')).toBeNull();
+    expect(mark.querySelectorAll('[role="img"], [aria-label]')).toHaveLength(1);
+    expect(mark.textContent).toBe('');
   });
 
   /**
@@ -188,11 +188,11 @@ describe('every experience is unmistakably WeVolunteer', () => {
    * the others change — and the error screens, which nobody opens on purpose,
    * are exactly the surface that gets forgotten.
    */
-  it('uses the shared mark rather than its own copy of the markup', () => {
-    const { container } = render(<MemoryRouter><BrandMark /></MemoryRouter>);
-    const shared = container.querySelector('.brand-mark');
+  it('uses the shared wordmark rather than its own copy of the markup', () => {
+    const { container } = render(<MemoryRouter><Wordmark /></MemoryRouter>);
+    const shared = container.querySelector('.wordmark');
     const { container: err } = at({ kind: '404', theme: 'board' });
-    const inError = err.querySelector('.err-mark .brand-mark');
+    const inError = err.querySelector('.err-mark .wordmark');
 
     expect(inError.outerHTML).toBe(shared.outerHTML);
   });

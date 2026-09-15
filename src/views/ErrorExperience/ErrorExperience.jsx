@@ -2,7 +2,7 @@ import React, { useEffect, useId, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCw, ArrowLeft } from 'lucide-react';
 import { APP_NAME } from '../../config';
-import BrandMark from '../../components/common/BrandMark';
+import Wordmark from '../../components/common/Wordmark';
 import { RETRYABLE, kindForError, weightFor } from './kinds';
 import { copyFor } from './errorCopy';
 import { denialDetail } from './denialDetail';
@@ -204,13 +204,12 @@ export default function ErrorExperience({
     >
       <div className="err-copy">
         {/* Branding: this is a landing moment and often the only thing on
-            screen, so it carries the same mark as the app shell and the
+            screen, so it carries the same wordmark as the app shell and the
             certificate page — the SAME component, not a copy of the markup, so
             the day the mark changes it cannot change everywhere but here.
             Quiet — the scene is still what should be remembered. */}
         <p className="err-mark">
-          <BrandMark />
-          <span className="err-mark-text">{APP_NAME}</span>
+          <Wordmark />
         </p>
 
         <p className="err-eyebrow">{eyebrow}</p>

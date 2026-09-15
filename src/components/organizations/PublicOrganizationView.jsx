@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Building2, CalendarDays } from 'lucide-react';
 import OrganizationMasthead from './OrganizationMasthead';
 import EmptyState from '../common/EmptyState';
-import BrandMark from '../common/BrandMark';
+import Wordmark from '../common/Wordmark';
 import { APP_NAME } from '../../config';
 import { formatDay } from '../../utils/helpers';
 import './OrganizationExperience.css';
@@ -93,11 +93,11 @@ export default function PublicOrganizationView({ organization, action, note, hea
  * uses.
  *
  * Somebody arriving here has followed a link from outside and may never have
- * seen this application. The mark and the wordmark are how they find out what
- * they are looking at before deciding whether to make an account, and `sub`
- * says which part of the product this is.
+ * seen this application. The wordmark is how they find out what they are
+ * looking at before deciding whether to make an account, and `sub` says which
+ * part of the product this is.
  *
- * The mark links home rather than being inert: unlike a certificate check,
+ * The wordmark links home rather than being inert: unlike a certificate check,
  * these pages are trying to interest somebody in the product, so the way out
  * should be the front door.
  */
@@ -105,9 +105,8 @@ export function PublicOrganizationTopbar({ sub }) {
   return (
     <header className="topbar invite-topbar">
       <Link className="brand" to="/welcome">
-        <BrandMark />
         <span className="brand-text">
-          <span className="brand-name">{APP_NAME}</span>
+          <Wordmark />
           <span className="brand-sub">{sub}</span>
         </span>
       </Link>

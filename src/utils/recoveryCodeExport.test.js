@@ -27,10 +27,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   recoveryCodesAsText, downloadRecoveryCodesTxt, downloadRecoveryCodesPng,
 } from './recoveryCodeExport';
+import { MARK_POINTS } from '../components/common/logoGeometry';
 
 const CODES = ['AAAA-1111', 'BBBB-2222', 'CCCC-3333'];
 
-let created, revoked, clicked, drawnText;
+let created, revoked, clicked, drawnText, pathCalls, strokes;
 
 /** Records every object URL the module makes, and every download it triggers. */
 function install({ withCanvas = false, contextIsNull = false } = {}) {
@@ -38,6 +39,8 @@ function install({ withCanvas = false, contextIsNull = false } = {}) {
   revoked = [];
   clicked = [];
   drawnText = [];
+  pathCalls = [];
+  strokes = [];
 
   global.URL.createObjectURL = vi.fn((blob) => {
     created.push(blob);
@@ -56,12 +59,19 @@ function install({ withCanvas = false, contextIsNull = false } = {}) {
     if (tag === 'canvas' && contextIsNull) {
       el.getContext = () => null;
     } else if (tag === 'canvas' && withCanvas) {
-      el.getContext = () => ({
-        scale: () => {}, fillRect: () => {}, beginPath: () => {}, fill: () => {},
-        roundRect: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => {},
+      const ctx = {
+        scale: () => {}, fillRect: () => {}, fill: () => {}, roundRect: () => {},
+        save: () => {}, restore: () => {},
+        beginPath: () => { pathCalls = []; },
+        moveTo: (x, y) => pathCalls.push(['M', x, y]),
+        lineTo: (x, y) => pathCalls.push(['L', x, y]),
+        stroke: () => strokes.push({
+          points: pathCalls, lineJoin: ctx.lineJoin, lineCap: ctx.lineCap, lineWidth: ctx.lineWidth,
+        }),
         fillText: (t) => drawnText.push(String(t)),
         set fillStyle(_v) {}, set font(_v) {}, set textBaseline(_v) {}, set strokeStyle(_v) {},
-      });
+      };
+      el.getContext = () => ctx;
       el.toBlob = (cb) => cb(new Blob(['png'], { type: 'image/png' }));
     }
     return el;
@@ -156,9 +166,32 @@ describe('the .png download', () => {
     await downloadRecoveryCodesPng(CODES);
     expect(drawnText.join('\n')).toContain('WeVolunteer recovery codes');
     expect(drawnText.join('\n')).toMatch(/ONCE/);
-    /* And the brand mark, drawn rather than fetched: this must work on a page
-       that has just told somebody to write something down offline. */
-    expect(drawnText).toContain('WV');
+  });
+
+  /* And the brand mark, drawn rather than fetched: this must work on a page
+     that has just told somebody to write something down offline. It is the
+     checkmark-W from logoGeometry.js — five points, bevel joins, butt caps — and
+     no longer the WV monogram, which the identity retires. */
+  it('draws the brand tile with the checkmark-W, not the WV monogram', async () => {
+    await downloadRecoveryCodesPng(CODES);
+    expect(drawnText).not.toContain('WV');
+
+    const mark = strokes.find(s => s.points.length === MARK_POINTS.length);
+    expect(mark, 'no five-point stroke — the mark was not drawn').toBeTruthy();
+    expect(mark.lineJoin).toBe('bevel');
+    expect(mark.lineCap).toBe('butt');
+    expect(mark.points.map(p => p[0]).join('')).toBe('MLLLL');
+
+    /* Same shape as the source: every point is the source point under one
+       uniform scale and offset. */
+    const [[, x0, y0], [, x1]] = mark.points;
+    const unit = (x1 - x0) / (MARK_POINTS[1][0] - MARK_POINTS[0][0]);
+    mark.points.forEach(([, x, y], i) => {
+      expect(x).toBeCloseTo(x0 + (MARK_POINTS[i][0] - MARK_POINTS[0][0]) * unit, 6);
+      expect(y).toBeCloseTo(y0 + (MARK_POINTS[i][1] - MARK_POINTS[0][1]) * unit, 6);
+    });
+    /* A 34px tile puts the mark under 32px, so it takes the small-size weight. */
+    expect(mark.lineWidth / unit).toBeCloseTo(15.5, 6);
   });
 
   /**

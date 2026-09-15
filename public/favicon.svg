@@ -1,52 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="WeVolunteer">
   <!--
-    WeVolunteer browser mark.
+    WeVolunteer browser tab icon: the checkmark-W, white, on the Forest tile.
 
-    Replaces a purple gradient glyph (#863bff / #7e14ff / #47bfff) left over from
-    another product: the tab icon shared neither the colour nor the form of
-    anything else here, so the one piece of WeVolunteer visible when a tab was not
-    focused was off brand.
+    This is the small-size drawing. A tab icon is rasterised at 16, 32 and 48
+    pixels, where the mark itself is 9 to 28 pixels tall, and the Identity
+    Proposal permits exactly one deviation there: the stroke thickens from 12.5 to
+    15.5 units so the mark does not grey out against the tile. Nothing else about
+    the drawing changes.
 
-    This is deliberately the SAME mark that already appears in two places, so all
-    three now agree:
-      the email header    #0f6b45 tile, white bold "WV" (server/email.js)
-      the Welcome screen  .welcome-mark, brand tile, white bold "WV"
+    The geometry is a copy of src/components/common/logoGeometry.js, because this
+    file is fetched by the browser chrome, outside the document, where no module
+    is in scope. The colour is written literally for the same reason: no custom
+    property reaches a tab icon. src/logoAssets.test.jsx fails the build if the
+    points, the stroke, the joins or the colour here stop matching the source.
 
-    #0f6b45 is written literally rather than as a CSS custom property, because
-    this file is fetched by the browser chrome, outside the document, where no
-    custom property is in scope. It is the resolved value of the green-600 token
-    that feeds the brand token, and it matches `brandColor` in server/email.js
-    exactly.
+    Tile: corner radius 0.2236 of the side, mark box 0.58 of the side, centred.
+    The mark is placed with a plain transform rather than a nested svg element:
+    some icon rasterisers outside the browser ignore a nested viewport.
 
-    One green tile for light and dark chrome alike: the mark is the brand's
-    constant, and a green dark enough to carry white text reads correctly against
-    either.
-
-    The letters are drawn as paths rather than as text. A favicon is rasterised at
-    16px by code that may not resolve font-family at all, so a text mark can
-    render in a fallback face or vanish; paths look identical everywhere.
-
-    Sizing is matched to the in-app mark rather than chosen.
-
-    The letters used to span 82% of the tile width and sit off centre, while
-    .brand-mark and .welcome-mark render "WV" in Bricolage Grotesque at roughly
-    59% — so the tab read as a heavier, wider, differently balanced badge than
-    the one on the Welcome screen and in the sidebar. The group below scales the
-    glyphs to a 17.5px cap height on a 64px tile and centres them, which is what
-    the app's own mark measures.
-
-    The letters stay PATHS. A favicon is rasterised outside the document, where
-    the webfont is not in scope, so text would render in whatever fallback the
-    chrome happened to have. Paths are the only form that looks the same
-    everywhere - which also makes this mark steadier than the in-app one, whose
-    letterforms change if Google Fonts is slow or blocked.
-
-    Note for future edits: XML comments may not contain a double hyphen, which is
-    why the token names above are written without their leading dashes.
+    Note for future edits: XML comments may not contain a double hyphen.
   -->
-  <rect width="64" height="64" rx="14" fill="#0f6b45"/>
-  <g fill="#ffffff" transform="translate(6.95 7.65) scale(0.76)">
-    <path d="M6.6 20.5h6.2l2.7 14.4 3.1-14.4h5.4l3.1 14.4 2.7-14.4h6.2l-5.7 23h-6.3l-2.7-13-2.7 13h-6.3z"/>
-    <path d="M38.2 20.5h6.6l3.9 15.3 3.9-15.3h6.6l-7 23h-6.9z"/>
-  </g>
+  <rect width="64" height="64" rx="14.31" fill="#0f5a3a"/>
+  <path transform="translate(10.729 14.691) scale(0.41708)" d="M16 26 L33 78 L50 34 L67 78 L86 4" fill="none" stroke="#ffffff" stroke-width="15.5" stroke-linejoin="bevel" stroke-linecap="butt" stroke-miterlimit="1"/>
 </svg>
