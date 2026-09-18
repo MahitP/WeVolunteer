@@ -244,10 +244,17 @@ animation; the reader's `data-motion='reduce'` setting holding the mark complete
 with zero animations; both themes and a theme switch mid-animation; 375/390/430/
 768/1280 with no overflow, no clipping and no console errors.
 
-**Source-verified:** the OS `prefers-reduced-motion` block — its 11 rules were read
-back from the live CSSOM (so they survived the bundler) but the environment cannot
-emulate the media query itself; the return and idle behaviours, which no product
-surface renders; the success behaviour's wiring, for the same reason.
+**Verified (OS reduced motion, infinite behaviours):** `npm run a11y` passes 64/64,
+and `a11y/sweep.media.spec.js`'s "nothing animates forever under
+prefers-reduced-motion" launches Chromium with `reducedMotion: 'reduce'`, walks
+every route and asserts no element animates infinitely. That exercises the
+signature and the loader — the two infinite behaviours — on the real routes.
+
+**Source-verified:** the OS block's effect on the *one-shot* behaviours (the lockup
+entrance and success), since that sweep only fails on infinite animations; its 11
+rules were read back from the live CSSOM, so they survive the bundler. Also the
+return and idle behaviours, and the success wiring, which no product surface
+renders.
 
 **Not verified:** browsers other than the Chromium used here; real devices;
 performance profiling.
