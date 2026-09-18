@@ -294,11 +294,48 @@ ENCRYPTION="none"
 if [ -n "${WEV_BACKUP_PUBKEY:-}" ]; then
   [ -f "$WEV_BACKUP_PUBKEY" ] || fail "WEV_BACKUP_PUBKEY is set but $WEV_BACKUP_PUBKEY does not exist"
 
+  # ── The exit status of `openssl cms -encrypt` is not evidence of encryption ──
+  #
+  # Measured on 2026-09-17: LibreSSL 3.3.6 (macOS /usr/bin/openssl) accepts
+  # `-aes-256-gcm`, exits 0, and writes a 520-byte EnvelopedData whose
+  # encryptedContent is EMPTY — for a 220 KB dump. Nothing can ever decrypt it.
+  # The round-trip check below would catch that, but it only runs where the
+  # private key is, and by design the production host does not have it. So
+  # without these checks a host with the wrong OpenSSL writes an undecryptable
+  # archive every night, hashes it into the manifest, uploads it, verifies the
+  # upload byte for byte, reports success — and prunes the last good archives
+  # fourteen days later.
+  #
+  # Two checks that need no key: refuse anything that is not OpenSSL 3 or later
+  # before encrypting, and afterwards require what AES-256-GCM must produce — a
+  # CMS AuthEnvelopedData (OID 1.2.840.113549.1.9.16.1.23) at least as large as
+  # the plaintext, since GCM ciphertext is exactly as long as its input.
+  OPENSSL_VERSION="$("$OPENSSL" version 2>/dev/null || true)"
+  if ! grep -Eq '^OpenSSL ([3-9]|[1-9][0-9])\.' <<<"$OPENSSL_VERSION"; then
+    rm -f "$OUT"
+    fail "'$OPENSSL' is ${OPENSSL_VERSION:-not runnable}, not OpenSSL 3+ — it cannot produce AES-256-GCM archives (set WEV_OPENSSL). Nothing was pruned."
+  fi
+
   if ! "$OPENSSL" cms -encrypt -binary -aes-256-gcm -outform DER -in "$OUT" -out "$OUT.enc" \
        -recip "$WEV_BACKUP_PUBKEY" -keyopt rsa_padding_mode:oaep 2>/dev/null; then
     rm -f "$OUT" "$OUT.enc"
     fail "encryption failed (AES-256-GCM/RSA-OAEP needs OpenSSL 3; set WEV_OPENSSL) — refusing to leave an unencrypted backup behind"
   fi
+
+  if ! node -e '
+    const fs = require("node:fs");
+    const [enc, plain] = process.argv.slice(1);
+    const head = fs.readFileSync(enc).subarray(0, 64);
+    const authEnveloped = Buffer.from("060b2a864886f70d0109100117", "hex");
+    if (!head.includes(authEnveloped)) { console.error("not CMS AuthEnvelopedData"); process.exit(1); }
+    const e = fs.statSync(enc).size, p = fs.statSync(plain).size;
+    if (e < p) { console.error(`encrypted file (${e} bytes) is smaller than the dump (${p} bytes)`); process.exit(1); }
+  ' "$OUT.enc" "$OUT" 2>"$OUT.encheck"; then
+    REASON="$(cat "$OUT.encheck")"
+    rm -f "$OUT" "$OUT.enc" "$OUT.encheck"
+    fail "the encrypted archive is malformed ($REASON) — it could never be decrypted. Refusing it; nothing was pruned."
+  fi
+  rm -f "$OUT.encheck"
 
   # Prove it decrypts to the same bytes before throwing the plaintext away.
   if [ -n "${WEV_BACKUP_TESTKEY:-}" ] && [ -f "$WEV_BACKUP_TESTKEY" ]; then

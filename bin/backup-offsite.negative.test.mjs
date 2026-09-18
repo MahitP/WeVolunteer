@@ -496,6 +496,49 @@ describe('a failed new backup never destroys the last good one', () => {
     expect(check).toBeGreaterThan(-1);
     expect(check).toBeLessThan(sh.search(/^log "dumping/m));
   });
+
+  /**
+   * An `openssl` that exits 0 is not an encrypted archive.
+   *
+   * Found by a drill on 2026-09-17: LibreSSL accepts `-aes-256-gcm`, exits 0 and
+   * writes a 520-byte EnvelopedData with EMPTY content for a 220 KB dump. The
+   * production host has no private key, so the round-trip check never runs there;
+   * without these two checks such a host would upload an undecryptable archive
+   * every night, verify it byte for byte, and prune the good ones.
+   */
+  it('gates the OpenSSL version before encrypting, and checks the envelope before anything describes it', () => {
+    const sh = readFileSync(path.join(ROOT, 'bin/backup-postgres.sh'), 'utf8')
+      .split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n');
+    const gate = sh.search(/grep -Eq '\^OpenSSL/);
+    const encrypt = sh.search(/cms -encrypt -binary -aes-256-gcm/);
+    const structure = sh.indexOf('060b2a864886f70d0109100117');
+    const manifest = sh.search(/cat > "\$MANIFEST"/);
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(encrypt);
+    expect(structure).toBeGreaterThan(encrypt);
+    expect(structure).toBeLessThan(manifest);
+  });
+
+  it("the envelope check refuses LibreSSL's empty EnvelopedData and a short archive, and accepts a real shape", async () => {
+    const sh = readFileSync(path.join(ROOT, 'bin/backup-postgres.sh'), 'utf8');
+    const script = sh.match(/node -e '([\s\S]*?)' "\$OUT\.enc" "\$OUT"/)?.[1];
+    expect(script, 'the envelope check was not found in the script').toBeTruthy();
+
+    const plain = path.join(work, 'plain.dump');
+    writeFileSync(plain, randomBytes(220_596));
+    const check = (bytes) => new Promise((resolve) => {
+      const enc = path.join(work, `enc-${Math.random()}`);
+      writeFileSync(enc, bytes);
+      execFile(process.execPath, ['-e', script, enc, plain], (error) => resolve(error ? 1 : 0));
+    });
+    const authEnvelopedHead = Buffer.from('3083035d8c060b2a864886f70d0109100117a083035d7d', 'hex');
+    const envelopedHead = Buffer.from('308202040609' + '2a864886f70d010703' + 'a08201f5', 'hex');
+
+    expect(await check(Buffer.concat([authEnvelopedHead, randomBytes(221_000)]))).toBe(0);
+    expect(await check(Buffer.concat([envelopedHead, randomBytes(515)]))).toBe(1);      // LibreSSL's 520 bytes
+    expect(await check(Buffer.concat([envelopedHead, randomBytes(221_000)]))).toBe(1);  // CBC-shaped, not GCM
+    expect(await check(Buffer.concat([authEnvelopedHead, randomBytes(400)]))).toBe(1);  // right type, content lost
+  });
 });
 
 /* ── The drill's verdict has to cross machines ────────────────────────────── */
