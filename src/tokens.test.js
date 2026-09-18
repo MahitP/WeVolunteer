@@ -22,9 +22,22 @@ import path from 'path';
 const SRC = path.join(process.cwd(), 'src');
 const CSS = path.join(SRC, 'index.css');
 
-/** Custom properties defined in index.css (`--name:` at a declaration site). */
+/**
+ * The stylesheets a token may be DEFINED in.
+ *
+ * `index.css` is the application's styling layer and still owns every app
+ * token. `wvMotion.css` is the brand's motion, kept beside the geometry it
+ * animates rather than in `index.css`, and it defines the `--wv-*` curves,
+ * durations and distances the frozen motion system is expressed in. Both are
+ * real stylesheets shipped by `main.jsx`, so a token defined in either is
+ * defined; a token defined in neither is still the silent-inheritance bug this
+ * guard exists to catch.
+ */
+const CSS_FILES = [CSS, path.join(SRC, 'components/common/wvMotion.css')];
+
+/** Custom properties defined in those stylesheets (`--name:` at a declaration site). */
 function definedTokens() {
-  const css = fs.readFileSync(CSS, 'utf8');
+  const css = CSS_FILES.map(file => fs.readFileSync(file, 'utf8')).join('\n');
   return new Set([...css.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map(m => m[1]));
 }
 

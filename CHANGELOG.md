@@ -865,6 +865,21 @@ is that the list of reasons it must is short, evidenced and written down in
 
 ### Changed
 
+- **The mark now moves, in three places and nowhere else.** The frozen WeVolunteer
+  Motion System ships as `src/components/common/wvMotion.css` — seven behaviours,
+  three curves, seven durations — imported once and attached to the sidebar brand
+  link (a 560ms pass on hover or keyboard focus), the Welcome screen (the
+  signature, once per browser session) and the OAuth callback's full-page wait
+  (the brand loader, replacing the old CSS spinner). Everything else stays
+  static on purpose, including empty states, the ~60 loading skeletons and every
+  toast. `BrandMark` and `Wordmark` take a `motion` prop; nothing animates below
+  32px, where the stroke weight itself changes. Reduced motion is honoured
+  through the app's existing preference and the OS setting, and holds every mark
+  complete rather than part-drawn. The reveal geometry was re-solved against the
+  real outlined wordmark — the lab's values were measured against a stand-in
+  typeface and would have left a sliver of the "e" beside the W. See
+  [`docs/features/brand-motion.md`](docs/features/brand-motion.md).
+
 - **The WV monogram is replaced by the checkmark-W.** The mark follows the
   September 2026 Identity Proposal: a W whose last stroke overshoots like a tick,
   in Forest (`#0f5a3a`). Wherever the product name is shown it is now a wordmark

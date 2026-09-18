@@ -23,7 +23,10 @@ import {
   WORDMARK_VIEWBOX, WORDMARK_W_STROKE, WORDMARK_LETTERS_PATH,
 } from './components/common/logoGeometry';
 import BrandMark from './components/common/BrandMark';
-import Wordmark from './components/common/Wordmark';
+import Wordmark, { WIPE_RECT, WIPE_RIGHT_EDGE } from './components/common/Wordmark';
+import {
+  BODY_PATH, MARK_PATH_LENGTH, MOTION_MIN_MARK_PX, TICK_PATH, TICK_PATH_LENGTH,
+} from './components/common/brandMotion';
 
 const ROOT = process.cwd();
 const read = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
@@ -231,5 +234,118 @@ describe('the components render the source', () => {
     expect(w.getAttribute('stroke-linecap')).toBe('butt');
     expect(letters.getAttribute('d')).toBe(WORDMARK_LETTERS_PATH);
     expect(container.querySelector('svg').getAttribute('viewBox')).toBe(WORDMARK_VIEWBOX);
+  });
+});
+
+/**
+ * The motion system animates this geometry, and depends on two things the
+ * drawing itself does not: the normalised `pathLength` every dash value is
+ * expressed in, and the lockup's lighter W. Both are easy to drop in a refactor
+ * and neither fails visibly — the mark simply animates wrongly at every size.
+ *
+ * The behaviours live in `wvMotion.css` (guarded by `wvMotionStyles.test.js`).
+ * These are the guards on the geometry the classes are attached to.
+ */
+describe('the animated mark keeps the geometry the dash system was solved against', () => {
+  it('normalises the animated path, so dash values are in mark units', () => {
+    const { container } = render(<BrandMark size="lg" motion="signature" />);
+    const p = container.querySelector('path');
+    expect(p.getAttribute('pathLength')).toBe(MARK_PATH_LENGTH);
+    expect(p.getAttribute('d')).toBe(MARK_PATH);
+    expect(p.getAttribute('stroke-width')).toBe(String(MARK_STROKE));
+    expect(p.getAttribute('stroke-linejoin')).toBe('bevel');
+    expect(p.getAttribute('stroke-linecap')).toBe('butt');
+    expect(p.getAttribute('stroke-miterlimit')).toBe('1');
+    expect(container.querySelector('svg').getAttribute('viewBox')).toBe(MARK_VIEWBOX);
+    expect(p.getAttribute('class')).toBe('wv-sig-line');
+  });
+
+  /**
+   * The floor is the mark's rendered height, not the tile's, because that is
+   * where `markStrokeFor()` changes the drawing: a 32px tile renders an 18.6px
+   * mark at stroke 15.5, which is not the geometry the frozen dash values
+   * describe. So the default tile must refuse every behaviour.
+   */
+  it('refuses to animate a mark drawn below the stroke-change threshold', () => {
+    expect(32 * TILE_MARK_RATIO).toBeLessThan(MOTION_MIN_MARK_PX);
+    for (const motion of ['signature', 'lockup', 'loader', 'micro', 'success']) {
+      const { container } = render(<BrandMark motion={motion} />);
+      const html = container.innerHTML;
+      expect(html, `${motion} animated a mark below ${MOTION_MIN_MARK_PX}px`).not.toMatch(/class="wv-/);
+      expect(html).not.toContain('pathLength');
+      expect(container.querySelector('path').getAttribute('stroke-width')).toBe(String(MARK_STROKE_SMALL));
+    }
+  });
+
+  it('splits success into the frozen body and tick, each normalised', () => {
+    const { container } = render(<BrandMark size="lg" motion="success" />);
+    const [body, tick] = container.querySelectorAll('path');
+    expect(body.getAttribute('d')).toBe(BODY_PATH);
+    expect(body.getAttribute('pathLength')).toBe(MARK_PATH_LENGTH);
+    expect(tick.getAttribute('d')).toBe(TICK_PATH);
+    expect(tick.getAttribute('pathLength')).toBe(TICK_PATH_LENGTH);
+    /* The two halves reassemble into the whole mark, in drawing order. */
+    expect(`${BODY_PATH} ${TICK_PATH}`.replace('M67 78', 'L67 78').replace(' L67 78 L67 78', ' L67 78'))
+      .toContain('M16 26 L33 78 L50 34 L67 78');
+  });
+
+  it('keeps the loader as a ghost plus one travelling segment', () => {
+    const { container } = render(<BrandMark size="lg" motion="loader" />);
+    const [ghost, comet] = container.querySelectorAll('path');
+    expect(ghost.getAttribute('class')).toBe('wv-load-ghost');
+    expect(comet.getAttribute('class')).toBe('wv-load-comet');
+    expect(comet.getAttribute('pathLength')).toBe(MARK_PATH_LENGTH);
+    expect(ghost.getAttribute('d')).toBe(MARK_PATH);
+    expect(comet.getAttribute('d')).toBe(MARK_PATH);
+  });
+
+  it('animates the lockup at the wordmark W weight, not the symbol weight', () => {
+    const { container } = render(<Wordmark motion="lockup" />);
+    const w = container.querySelector('path.wv-lock-line');
+    expect(w.getAttribute('stroke-width')).toBe(String(WORDMARK_W_STROKE));
+    expect(w.getAttribute('stroke-width')).not.toBe(String(MARK_STROKE));
+    expect(w.getAttribute('pathLength')).toBe(MARK_PATH_LENGTH);
+    expect(w.getAttribute('d')).toBe(MARK_PATH);
+    expect(container.querySelector('path.wv-lock-word').getAttribute('d')).toBe(WORDMARK_LETTERS_PATH);
+  });
+
+  /**
+   * The reveal edge, re-solved against the real outlined wordmark. The lab's 76
+   * was measured against a Bricolage stand-in; 92.5 (the audit's starting
+   * proposal) would park ~4 units of the "e" beside the W before the reveal,
+   * because the word is held at translateX(-9) until the wipe starts.
+   */
+  it('rests the reveal edge where no letter ink can show', () => {
+    const { container } = render(<Wordmark motion="lockup" />);
+    const rect = container.querySelector('clipPath rect');
+    expect(Number(rect.getAttribute('x')) + Number(rect.getAttribute('width'))).toBe(WIPE_RIGHT_EDGE);
+    expect(rect.getAttribute('class')).toBe('wv-wipe wv-lock-wipe');
+    expect(Number(rect.getAttribute('height'))).toBe(WIPE_RECT.height);
+    /* Solved in wvMotion.css §6: the binding "e" ink sits at x 85.17, y 50.48,
+       held 9 units left, against an edge skewed about the viewBox origin. */
+    const T = Math.tan((14.4 * Math.PI) / 180);
+    const edgeAtBindingY = WIPE_RIGHT_EDGE + T * 2.5 - T * 50.48;
+    expect(85.17 - 9).toBeGreaterThan(edgeAtBindingY);
+  });
+
+  it('gives every animated lockup its own clip, and static lockups none', () => {
+    const { container } = render(
+      <div><Wordmark motion="lockup" /><Wordmark motion="lockup" /><Wordmark /></div>,
+    );
+    const ids = [...container.querySelectorAll('clipPath')].map((c) => c.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size, 'two lockups share one clipPath id').toBe(2);
+    const uses = [...container.querySelectorAll('[clip-path]')].map((g) => g.getAttribute('clip-path'));
+    expect(uses).toEqual(ids.map((id) => `url(#${id})`));
+    /* The static one is unclipped: nothing may clip the resting logo. */
+    const staticSvg = container.querySelectorAll('svg')[2];
+    expect(staticSvg.querySelector('[clip-path]')).toBeNull();
+    expect(staticSvg.querySelector('clipPath')).toBeNull();
+  });
+
+  it('leaves the static components exactly as they were', () => {
+    const { container } = render(<div><BrandMark size="lg" /><Wordmark /></div>);
+    expect(container.innerHTML).not.toMatch(/wv-/);
+    expect(container.innerHTML).not.toContain('pathLength');
   });
 });

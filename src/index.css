@@ -6388,15 +6388,10 @@ input:disabled + .premium-slider {
 .auth-icon-danger { background: var(--danger-tint); color: var(--danger); }
 .auth-icon-warn { background: var(--warn-tint); color: var(--warn); }
 
-.auth-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--rule);
-  border-top-color: var(--brand);
-  border-radius: var(--r-full);
-  animation: authSpin 0.8s linear infinite;
-}
-@keyframes authSpin { to { transform: rotate(360deg); } }
+/* `.auth-spinner` and its `authSpin` keyframe are gone. Their only consumer was
+   the OAuth callback's full-page wait, which now shows the brand loader
+   (`BrandMark motion="loader"`, docs/features/brand-motion.md). A rule kept for
+   nobody is how a stylesheet grows a second, stale vocabulary. */
 
 /* "OR" rule between the provider buttons and the email form. */
 .auth-divider {
@@ -6644,7 +6639,6 @@ input:disabled + .premium-slider {
    reads as flicker to anyone sensitive to motion. */
 @media (prefers-reduced-motion: reduce) {
   .auth { animation: none; }
-  .auth-spinner { animation-duration: 2s; }
   .auth-strength-fill { transition: none; }
 }
 

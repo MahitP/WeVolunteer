@@ -6,6 +6,7 @@ import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
 import BrandMark from './components/common/BrandMark';
+import useBrandMicroPass from './components/common/useBrandMicroPass';
 import Wordmark from './components/common/Wordmark';
 import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
 import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
@@ -979,6 +980,8 @@ export default function App() {
 function AppShell({ toasts, addToast, removeToast }) {
   const online = useOnline();
   const navigate = useNavigate();
+  /* The brand link's one-shot micro-pass; see the hook and `.wv-micro`. */
+  const brandMicroPass = useBrandMicroPass();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1773,12 +1776,28 @@ function AppShell({ toasts, addToast, removeToast }) {
 
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
-        <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/'); }}>
+        {/* The brand's micro-pass: one 560ms pass of the gait through the
+            wordmark's W, static at rest. `useBrandMicroPass` carries the
+            `.wv-micro` class for exactly one pass rather than permanently —
+            see the hook for why a sustained hover otherwise leaves a gap
+            painted across the W. The pass is a gap in the surface colour, and
+            the sidebar is `--surface`, which is what `--wv-sweep` defaults to.
+            The rail's tile stays static: at 18.6px it would animate the
+            thickened small-size stroke rather than the frozen one. */}
+        <a
+          className="brand"
+          href="/"
+          ref={brandMicroPass.ref}
+          onPointerEnter={brandMicroPass.onPointerEnter}
+          onFocus={brandMicroPass.onFocus}
+          onBlur={brandMicroPass.onBlur}
+          onClick={(e) => { e.preventDefault(); navigate('/'); }}
+        >
           {/* The tile is shown only on the tablet rail, where the wordmark does
               not fit; see `.sidebar .brand` in index.css. */}
           <BrandMark />
           <span className="brand-text">
-            <Wordmark />
+            <Wordmark motion="micro" />
             <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </a>
