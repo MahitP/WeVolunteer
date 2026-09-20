@@ -76,6 +76,36 @@ export const ROLE_SPECS = Object.freeze({
   },
 });
 
+/**
+ * Findings that describe how much the credential CAN do, rather than whether the
+ * bucket is configured correctly.
+ *
+ * Separated because they are the only ones an owner can legitimately accept. A
+ * bucket with no lifecycle rule is wrong however you feel about it; a credential
+ * that holds more capability than the job needs is a risk somebody is entitled to
+ * take with their own account, provided it is taken knowingly and written down.
+ *
+ * Accepting them does NOT hide them. `bin/b2-audit.mjs` still prints every one,
+ * still says least privilege is not satisfied, and exits 3 rather than 0 — there
+ * is deliberately no combination of flags that makes a master key report as a
+ * clean pass, because a report nobody can distinguish from a real pass is how an
+ * accepted risk quietly becomes a forgotten one.
+ */
+export const PRIVILEGE_FINDINGS = Object.freeze(new Set([
+  'key-over-privileged',
+  'key-unrestricted-bucket',
+  'key-prefix-missing',
+  'key-prefix-wrong',
+]));
+
+/** Split findings into the ones an owner may accept and the ones nobody may. */
+export function partitionFindings(findings) {
+  return {
+    privilege: findings.filter((f) => PRIVILEGE_FINDINGS.has(f.id)),
+    mandatory: findings.filter((f) => !PRIVILEGE_FINDINGS.has(f.id)),
+  };
+}
+
 /** B2 expresses a lock period in days or years; the comparison needs one unit. */
 export const periodDays = (period) => {
   if (!period || !Number.isFinite(period.duration)) return null;

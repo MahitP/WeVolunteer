@@ -160,13 +160,21 @@ deleted students' records stay off-site indefinitely. The invariant is therefore
 `lock-blocks-expiry` when it is violated — checked first, because it is the
 direction that fails silently.
 
-**What the lock actually buys.** The primary control is already key scoping: the
-backup writer's key has no `deleteFiles`, so it cannot delete anything even if the
+**What the lock actually buys — and what it does not, on this deployment.** In
+the least-privilege design the primary control is key scoping: a writer key with
+no `deleteFiles` cannot delete anything even if the
 host is fully compromised. The lock is defence in depth against the narrower case
 — a key created later with more capability than it needed, or the master key used
 by accident. Seven days blocks a deletion during the window in which one would
 certainly be noticed (daily backups, a weekly drill), and governance rather than
 compliance means a genuine emergency purge is still possible with the master key.
+
+**On this deployment the lock is the only one of the two controls that holds.**
+The production credential carries both `deleteFiles` and `bypassGovernance`, so
+it can delete a locked object outright — measured, not assumed. The lock still
+stops a lifecycle misfire, an accident from a differently-scoped credential, and
+anyone who obtains a key without `bypassGovernance`; it does not stop whoever
+holds the production credential. §4 records why that trade was made.
 Compliance mode was rejected: it cannot be undone by anyone, so a misconfiguration
 is permanent, and that is a worse failure than the one it prevents.
 
@@ -182,25 +190,46 @@ B2 application keys can be restricted to a bucket and to a name prefix. Use both
 | `wev-backup-recovery` | `listFiles`, `readFiles` | The operator's password manager **only** | Rebuilding after the host is lost |
 | `wev-drill` | `listFiles`, `readFiles`, plus `writeFiles` restricted to prefix `wevolunteer/backups/postgres/drills/` | The operator's drill machine | The weekly drill and publishing its verdict |
 
-> ### The live account does not match this table yet — 2026-09-14
+> ### The owner has chosen a single privileged credential instead — 2026-09-20
 >
-> `wevolunteer-bucket` is reached by **one** application key (`wevolunteer-key`)
-> holding **all 26 capabilities**, including `deleteFiles`, `bypassGovernance`,
-> `writeBucketLifecycleRules`, `writeBucketRetentions` and `writeBuckets`. It is
-> restricted to the bucket, which is the one control that is right; it is not
-> restricted by prefix, and it is not restricted by capability.
+> **The three-key layout above is not what production runs, and that is a
+> decision rather than a gap.** WeVolunteer's owner has deliberately chosen to
+> operate the backup path with one highly privileged Backblaze application key.
+> The table above remains the least-privilege design and the thing `b2-audit`
+> measures against; this note records that the deviation is intentional, owned,
+> and not to be "fixed" by anyone who stumbles on it.
 >
-> That is not a theoretical gap. It was demonstrated: a `b2_delete_file_version`
-> with `bypassGovernance: true` removed a governance-locked object outright. So
-> whoever reaches the production host can delete every backup, and Object Lock
-> will not stop them — which removes both of the two independent controls this
-> section exists to create.
+> **What the decision costs, stated plainly so it can be revisited knowingly.**
+> A credential holding `deleteFiles` and `bypassGovernance` can delete backups
+> *and* bypass the Object Lock protecting them — demonstrated on 2026-09-14, when
+> a `b2_delete_file_version` with `bypassGovernance: true` removed a
+> governance-locked object outright. With `writeBucketLifecycleRules` and
+> `writeBucketRetentions` it can also switch off the retention policy and the lock
+> default. So the two independent controls in §2 and §3 protect the archives from
+> accident and from an outsider, but **not** from anyone who obtains this
+> credential. The residual risk of the production host being compromised is
+> therefore "every backup can be destroyed", not "the attacker reaches
+> ciphertext".
 >
-> `bin/b2-audit.mjs` reports each of these, and it is the check to re-run after
-> fixing them. Fixing needs the account master key or the console: the current key
-> has no `writeKeys`, so it cannot mint the three scoped keys itself.
+> **What still holds.** The bucket is private, Object Lock and the lifecycle rule
+> are configured and verified, the archives are encrypted to a public key the host
+> does not hold the private half of, and the local copy is independent of B2. The
+> encryption story is unaffected by this decision — a stolen credential yields
+> ciphertext, and destroying backups is loud rather than silent, because the
+> nightly audit and the Owner Center both report on what the bucket holds.
+>
+> **How `b2-audit` reports it.** It does not pass. Run with
+> `--accept-privileged` (or `WEV_B2_ACCEPT_PRIVILEGED_CREDENTIAL=1`) it still
+> prints every capability finding, still says `least privilege : NOT SATISFIED`,
+> and exits **3** — never 0. There is deliberately no flag that makes this
+> credential report as a clean pass, because a report nobody can tell apart from a
+> genuinely least-privileged one is how an accepted risk becomes a forgotten one.
+> Bucket findings are never acceptable and still exit 1.
 
-**No key has `deleteFiles`.** Expiry is the lifecycle rule's job. An application
+**In the least-privilege design, no key has `deleteFiles`** — and production
+deliberately departs from it (see the box above), so read the next paragraph as
+the design's reasoning rather than as a description of the live credential.
+Expiry is the lifecycle rule's job. An application
 that cannot delete cannot be made to delete, by a bug or by whoever reaches the
 host — and `bin/lib/object-store.mjs` implements no delete operation at all, so
 there is nothing to call.
@@ -561,31 +590,31 @@ free tier.
 
 ---
 
-## 11a. The three keys — console only, and why
+## 11a. Why there are not three keys
 
-An application key cannot mint another one unless it holds `writeKeys`, and the
-key this deployment uses does not. That is not a limitation to work around; it is
-the correct shape, and `bin/b2-audit.mjs` reports `writeKeys` as over-privileged
-for exactly this reason — a backup writer that can create keys makes every other
-limit on it advisory.
+**Superseded 2026-09-20 by an owner decision: production uses one highly
+privileged credential.** See the box in §4 for what that costs and what still
+holds. This section is kept because the reasoning below is what makes the
+decision a choice rather than an accident, and because it is the procedure to
+follow if the decision is ever revisited.
 
-So replacing keys is done in the Backblaze console (or with the account master
-key), by a person. It was attempted from the application key and refused with
-`401 unauthorized`, which is the expected and desired answer.
+An application key cannot mint another one unless it holds `writeKeys`. A scoped
+writer does not, which is why `b2-audit` lists `writeKeys` as over-privileged —
+a backup writer that can create keys makes every other limit on it advisory. So
+scoped keys are created in the Backblaze console, by a person.
 
-> ### A correction — the first version of this table described a key that cannot exist
->
-> It asked for a drill key restricted to `wevolunteer/backups/postgres/drills/`
-> and expected it to fetch archives from `…/daily/`. A Backblaze key carries **one
-> `namePrefix`, applying to every capability it holds** — there is no per-capability
-> prefix. Confine it to `drills/` and it cannot read the archive it is meant to
-> drill; let it read `daily/` and it is not confined at all.
->
-> The arrangement that works puts **two** credentials on the drill machine: the
-> read-only recovery key for fetching, and a write key confined to `drills/` used
-> only by `bin/backup-drill-publish.mjs`, which reads `B2_DRILL_*`.
+> **A correction worth keeping.** The first version of this section asked for a
+> drill key restricted to `wevolunteer/backups/postgres/drills/` and expected it
+> to fetch archives from `…/daily/`. A Backblaze key carries **one `namePrefix`,
+> applying to every capability it holds** — there is no per-capability prefix.
+> Confine it to `drills/` and it cannot read the archive it is meant to drill;
+> let it read `daily/` and it is not confined at all. The key as specified cannot
+> exist. Anyone following that table would have created it, watched the drill
+> fail, and widened the prefix until it worked — ending with exactly the
+> unrestricted key the section existed to prevent.
 
-**App Keys → Add a New Application Key**, three times:
+Were the three-key layout adopted, it would be **App Keys → Add a New
+Application Key**, three times:
 
 | Key name | Bucket | File name prefix | Capabilities | Lives |
 |---|---|---|---|---|
@@ -593,36 +622,18 @@ key), by a person. It was attempted from the application key and refused with
 | `wev-backup-recovery` | `wevolunteer-bucket` | *(none)* | **Read Files only** | password manager, and the drill machine |
 | `wev-drill-publish` | `wevolunteer-bucket` | `wevolunteer/backups/postgres/drills/` | Read Files, Write Files | drill machine, as `B2_DRILL_*` |
 
-Notes that matter more than they look:
+with `readFileRetentions` included in the writer's read group (or the nightly job
+cannot see the Object Lock and reports `lock-not-observed` for ever), no Delete
+Files on any of them, nothing bucket-level or key-level, and the drill machine
+holding the recovery key for fetching alongside its confined write key. Each
+would be verified by `node bin/b2-audit.mjs --role=writer|recovery|drill`.
 
-- **"Read Files" must include `readFileRetentions`** for the writer, or the
-  nightly job cannot see the Object Lock and reports `lock-not-observed` for
-  ever. The console grants it with the read group; `bin/b2-audit.mjs` checks.
-- **Do not tick Delete Files on any of them.** Expiry is the lifecycle rule's
-  job, and `bin/lib/object-store.mjs` implements no delete operation at all.
-- **Do not tick anything bucket-level** (Write Buckets, Write Bucket Retentions,
-  Write Bucket Lifecycle Rules) or key-level (Write/Delete Keys). Those let the
-  application switch off the two controls that protect it.
-- **The recovery key gets no write capability at all.** It is the credential used
-  on the worst day, from a machine that may not be trusted; it must not be able
-  to change what it is reading. This is stricter than the writer's budget, which
-  is why `b2-audit` checks each role against its own.
-
-Verify each one — the audit knows all three budgets:
-
-```bash
-node bin/b2-audit.mjs --role=writer      # with the writer credential
-node bin/b2-audit.mjs --role=recovery    # with the recovery credential
-node bin/b2-audit.mjs --role=drill       # with the drill-publish credential
-```
-
-All three must exit 0. Until they do, assume the account still has a key that can
-delete every backup and bypass the Object Lock while doing it.
-
-**Then delete the key being replaced, and prove it is gone.** Creating
-replacements does not revoke anything: on 2026-09-14 three new keys were reported
-as created while the exposed one still authorized successfully with all 26
-capabilities. A rotation is not finished until the old key is refused.
+**What is not optional either way:** deleting a credential that has been exposed.
+Creating replacements revokes nothing. On 2026-09-14 replacement keys were
+reported as created while the exposed one still authorized with all 26
+capabilities; it was confirmed deleted on 2026-09-20, when
+`b2_authorize_account` began answering `401 unauthorized`. A rotation is not
+finished until the old key is refused.
 
 ## 12. What has been verified, and what has not
 

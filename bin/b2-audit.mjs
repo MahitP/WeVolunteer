@@ -33,11 +33,27 @@
  * rather than passing it, because an audit that reports a pass because it was
  * refused is worse than no audit.
  *
- * Usage:   node bin/b2-audit.mjs [--role=writer|recovery|drill] [--json]
+ * ── When the credential is deliberately over-privileged ──
+ *
+ * WeVolunteer's owner has chosen to run the nightly backup with a single highly
+ * privileged Backblaze key rather than the three scoped ones. That is an
+ * owner-level decision about their own account, and this tool's job is to report
+ * it accurately, not to argue with it.
+ *
+ * `--accept-privileged` says the deviation is known and owned. It does NOT
+ * suppress anything: every capability finding is still printed, the summary still
+ * says least privilege is not satisfied, and the exit code is **3**, never 0.
+ * There is deliberately no flag combination that makes a master key report as a
+ * clean pass — a report nobody can tell apart from a real one is how an accepted
+ * risk becomes a forgotten one. Bucket findings are never acceptable and still
+ * exit 1 regardless.
+ *
+ * Usage:   node bin/b2-audit.mjs [--role=writer|recovery|drill] [--accept-privileged] [--json]
  * Exit:    0 clean · 1 policy findings · 2 could not run
+ *          3 bucket correct, credential privilege deviations ACCEPTED by the owner
  */
 import { b2ConfigFromEnv } from './lib/object-store.mjs';
-import { auditPolicy } from './lib/b2-policy.mjs';
+import { auditPolicy, partitionFindings } from './lib/b2-policy.mjs';
 
 const JSON_OUT = process.argv.includes('--json');
 /**
@@ -50,6 +66,9 @@ const JSON_OUT = process.argv.includes('--json');
  * would pass a writer audit while being exactly wrong.
  */
 const ROLE = (process.argv.find((a) => a.startsWith('--role='))?.split('=')[1]) || 'writer';
+/** See the header: acknowledges capability findings, hides none of them. */
+const ACCEPT_PRIVILEGED = process.argv.includes('--accept-privileged')
+  || process.env.WEV_B2_ACCEPT_PRIVILEGED_CREDENTIAL === '1';
 const NATIVE_API = process.env.B2_NATIVE_API || 'https://api.backblazeb2.com';
 const die = (m) => { console.error(`FAILED: ${m}`); process.exit(2); };
 
@@ -80,14 +99,29 @@ const call = async (name, body) => {
   return { ok: res.ok, status: res.status, json: await res.json().catch(() => ({})) };
 };
 
-const bucketsRes = api.bucketId
-  ? await call('b2_list_buckets', { accountId: auth.accountId, bucketId: api.bucketId })
-  : { ok: false, json: {} };
+/**
+ * Look the bucket up by id when the key is restricted to one, by NAME when it is
+ * not.
+ *
+ * An unrestricted key — a master key, or any key spanning the account — carries
+ * no `bucketId` in its authorize response. Keying the lookup on that id alone
+ * meant the bucket was never fetched for exactly those credentials, so the audit
+ * reported `bucket-unreadable` and "bucket configuration: NOT VERIFIED" for a
+ * bucket that was perfectly configured and perfectly readable. The Object Lock
+ * and lifecycle checks — the two this tool exists for — silently did not run on
+ * the one credential type that can see everything.
+ */
+const bucketQuery = api.bucketId
+  ? { accountId: auth.accountId, bucketId: api.bucketId }
+  : { accountId: auth.accountId, bucketName: cfg.bucket };
+const bucketsRes = await call('b2_list_buckets', bucketQuery);
 const bucket = bucketsRes.ok ? (bucketsRes.json.buckets ?? [])[0] ?? null : null;
 
 let files = null;
-if (api.bucketId) {
-  const listed = await call('b2_list_file_versions', { bucketId: api.bucketId, prefix: `${cfg.prefix}/`, maxFileCount: 1000 });
+/* The id from the lookup, so the file listing works for an unrestricted key too. */
+const bucketId = api.bucketId ?? bucket?.bucketId ?? null;
+if (bucketId) {
+  const listed = await call('b2_list_file_versions', { bucketId, prefix: `${cfg.prefix}/`, maxFileCount: 1000 });
   if (listed.ok) files = listed.json.files ?? [];
 }
 
@@ -104,22 +138,56 @@ const { findings, notes } = auditPolicy({
   role: ROLE,
 });
 
+const { privilege, mandatory } = partitionFindings(findings);
+const leastPrivilege = privilege.length === 0;
+/* 0 clean · 3 accepted deviations · 1 something nobody may accept. */
+const exitCode = mandatory.length > 0 ? 1
+  : privilege.length === 0 ? 0
+    : ACCEPT_PRIVILEGED ? 3 : 1;
+
 if (JSON_OUT) {
   console.log(JSON.stringify({
     bucket: cfg.bucket, prefix: cfg.prefix, region: cfg.region, role: ROLE,
     capabilities: [...(api.capabilities ?? [])].sort(),
     restrictedToBucket: api.bucketName ?? null,
     namePrefix: api.namePrefix ?? null,
-    notes, findings, ok: findings.length === 0,
+    notes,
+    findings,
+    /* Three separate claims, never collapsed into one boolean. */
+    bucketConfigurationOk: mandatory.length === 0,
+    leastPrivilege,
+    privilegeDeviationsAccepted: ACCEPT_PRIVILEGED && privilege.length > 0,
+    privilegeFindings: privilege,
+    mandatoryFindings: mandatory,
+    exitCode,
   }, null, 2));
 } else {
   console.log(`bucket ${cfg.bucket} · prefix ${cfg.prefix}/ · region ${cfg.region} · role ${ROLE}`);
   console.log(`key: ${(api.capabilities ?? []).length} capabilities, restricted to ${api.bucketName ?? 'EVERY BUCKET'}${api.namePrefix ? `, prefix ${api.namePrefix}` : ''}`);
-  for (const n of notes) console.log(`  · ${n.id}: ${n.detail}`);
-  if (findings.length === 0) console.log('\nOK — the bucket matches the policy the code assumes.');
-  else {
-    console.log(`\n${findings.length} finding(s):`);
-    for (const f of findings) console.log(`  ✗ ${f.id}\n      ${f.detail}`);
+  for (const n of notes) console.log(`  \u00b7 ${n.id}: ${n.detail}`);
+
+  if (mandatory.length > 0) {
+    console.log(`\n${mandatory.length} bucket/configuration finding(s) — these are not acceptable:`);
+    for (const f of mandatory) console.log(`  \u2717 ${f.id}\n      ${f.detail}`);
+  } else {
+    console.log('\nBucket configuration: OK (private, Object Lock, lifecycle, prefix).');
   }
+
+  if (privilege.length > 0) {
+    const header = ACCEPT_PRIVILEGED
+      ? `${privilege.length} credential-privilege finding(s) — ACCEPTED by the owner, NOT fixed:`
+      : `${privilege.length} credential-privilege finding(s):`;
+    console.log(`\n${header}`);
+    for (const f of privilege) console.log(`  ${ACCEPT_PRIVILEGED ? '!' : '\u2717'} ${f.id}\n      ${f.detail}`);
+  }
+
+  console.log('\n--------------------------------------------------------------');
+  console.log(`  bucket configuration : ${mandatory.length === 0 ? 'VERIFIED' : 'NOT VERIFIED'}`);
+  console.log(`  least privilege      : ${leastPrivilege ? 'SATISFIED' : 'NOT SATISFIED'}`);
+  if (!leastPrivilege) {
+    console.log(`  privilege deviation  : ${ACCEPT_PRIVILEGED ? 'ACCEPTED by the owner (residual risk retained)' : 'NOT accepted'}`);
+  }
+  console.log(`  exit                 : ${exitCode}${exitCode === 3 ? '  (not a pass \u2014 accepted deviations)' : ''}`);
+  console.log('--------------------------------------------------------------');
 }
-process.exit(findings.length === 0 ? 0 : 1);
+process.exit(exitCode);
