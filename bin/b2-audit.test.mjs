@@ -117,8 +117,8 @@ describe('a genuinely least-privileged writer', () => {
     state.capabilities = SCOPED_WRITER; state.restricted = true;
     const r = await audit();
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toMatch(/bucket configuration : VERIFIED/);
-    expect(r.out).toMatch(/least privilege {6}: SATISFIED/);
+    expect(r.out).toMatch(/bucket configuration\s+: VERIFIED/);
+    expect(r.out).toMatch(/least privilege\s+: SATISFIED/);
   });
 });
 
@@ -141,7 +141,7 @@ describe('the owner\'s privileged credential', () => {
     state.capabilities = MASTER; state.restricted = false;
     const r = await audit(['--accept-privileged']);
     expect(r.code).toBe(3);
-    expect(r.out).toMatch(/exit {17}: 3/);
+    expect(r.out).toMatch(/exit\s+: 3/);
     expect(r.out).toMatch(/not a pass/);
   });
 
@@ -154,7 +154,7 @@ describe('the owner\'s privileged credential', () => {
   it('still prints every capability finding, and still says NOT SATISFIED', async () => {
     state.capabilities = MASTER; state.restricted = false;
     const r = await audit(['--accept-privileged']);
-    expect(r.out).toMatch(/least privilege {6}: NOT SATISFIED/);
+    expect(r.out).toMatch(/least privilege\s+: NOT SATISFIED/);
     expect(r.out).toMatch(/ACCEPTED by the owner, NOT fixed/);
     expect(r.out).toMatch(/residual risk retained/);
     for (const cap of ['deleteFiles', 'bypassGovernance', 'writeBucketLifecycleRules', 'writeKeys']) {
@@ -189,7 +189,7 @@ describe('the owner\'s privileged credential', () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/these are not acceptable/);
     expect(r.out).toMatch(/lifecycle-missing/);
-    expect(r.out).toMatch(/bucket configuration : NOT VERIFIED/);
+    expect(r.out).toMatch(/bucket configuration\s+: NOT VERIFIED/);
     state.bucket = goodBucket();
   });
 
@@ -201,5 +201,58 @@ describe('the owner\'s privileged credential', () => {
       expect(r.out, `args=${args}`).not.toContain('not-a-real-application-key');
       expect(r.out, `args=${args}`).not.toContain('tok');
     }
+  });
+});
+
+describe('the four claims are reported separately', () => {
+  /**
+   * "The key works", "the key can see the bucket", "this deployment intends a
+   * privileged key" and "least privilege is satisfied" are four different
+   * questions. Collapsing any pair of them is how a privileged-credential
+   * deployment ends up reading as either broken or fine, when it is neither.
+   */
+  it('names authorization, bucket access, intended design and least privilege', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const r = await audit(['--accept-privileged']);
+    expect(r.out).toMatch(/1\. authorization\s+: VERIFIED/);
+    expect(r.out).toMatch(/2\. bucket access\s+: VERIFIED/);
+    expect(r.out).toMatch(/3\. intended design\s+: privileged-single-key \(owner decision\)/);
+    expect(r.out).toMatch(/4\. least privilege\s+: NOT SATISFIED/);
+    expect(r.out).toMatch(/INTENTIONAL owner decision/);
+  });
+
+  it('calls the design least-privilege when the deviation is not claimed as intentional', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const r = await audit();
+    expect(r.out).toMatch(/3\. intended design\s+: least-privilege/);
+    expect(r.out).toMatch(/NOT accepted — unexplained over-privilege/);
+    expect(r.code).toBe(1);
+  });
+
+  /**
+   * A credential that authorizes but cannot read the bucket leaves Object Lock
+   * and lifecycle UNCHECKED. That must never be reported as a pass, and must
+   * never be filed under "privilege" either — it is a different failure.
+   */
+  it('reports bucket access separately when the bucket cannot be read', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const keep = state.bucket;
+    state.bucket = null;
+    const r = await audit(['--accept-privileged']);
+    expect(r.out).toMatch(/2\. bucket access\s+: NOT VERIFIED/);
+    expect(r.out).toMatch(/lock and lifecycle UNCHECKED/);
+    expect(r.code).toBe(1);
+    state.bucket = keep;
+  });
+
+  it('exposes all four in --json', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const j = JSON.parse((await audit(['--accept-privileged', '--json'])).out);
+    expect(j.authorizationOk).toBe(true);
+    expect(j.bucketAccessOk).toBe(true);
+    expect(j.intendedDesign).toMatch(/privileged-single-key/);
+    expect(j.leastPrivilege).toBe(false);
+    expect(j.privilegeDeviationsAccepted).toBe(true);
+    expect(j.bucketConfigurationOk).toBe(true);
   });
 });

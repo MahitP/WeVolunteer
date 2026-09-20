@@ -89,6 +89,11 @@ const authRes = await fetch(`${NATIVE_API}/b2api/v3/b2_authorize_account`, {
 if (!authRes?.ok) die(`could not authorize against Backblaze (HTTP ${authRes?.status ?? 'no response'}).`);
 const auth = await authRes.json();
 const api = auth.apiInfo.storageApi;
+/* Reaching here means Backblaze accepted the credential. Reported as its own
+   fact because "the key works" and "the key is appropriately scoped" are
+   different questions, and a privileged-credential deployment needs the first
+   answered plainly without the second being implied. */
+const authorizationOk = true;
 
 const call = async (name, body) => {
   const res = await fetch(`${api.apiUrl}/b2api/v3/${name}`, {
@@ -140,6 +145,13 @@ const { findings, notes } = auditPolicy({
 
 const { privilege, mandatory } = partitionFindings(findings);
 const leastPrivilege = privilege.length === 0;
+/* Could we actually read what we came to check? A key that authorizes but cannot
+   see the bucket leaves Object Lock and lifecycle UNCHECKED, which must never be
+   reported as either a pass or a privilege question. */
+const bucketAccessOk = bucket !== null;
+/* What this deployment INTENDS, so the report distinguishes a deliberate
+   privileged credential from an accidental one. */
+const intendedDesign = ACCEPT_PRIVILEGED ? 'privileged-single-key (owner decision)' : 'least-privilege';
 /* 0 clean · 3 accepted deviations · 1 something nobody may accept. */
 const exitCode = mandatory.length > 0 ? 1
   : privilege.length === 0 ? 0
@@ -153,7 +165,10 @@ if (JSON_OUT) {
     namePrefix: api.namePrefix ?? null,
     notes,
     findings,
-    /* Three separate claims, never collapsed into one boolean. */
+    /* Four separate claims, never collapsed into one boolean. */
+    authorizationOk,
+    bucketAccessOk,
+    intendedDesign,
     bucketConfigurationOk: mandatory.length === 0,
     leastPrivilege,
     privilegeDeviationsAccepted: ACCEPT_PRIVILEGED && privilege.length > 0,
@@ -182,11 +197,16 @@ if (JSON_OUT) {
   }
 
   console.log('\n--------------------------------------------------------------');
-  console.log(`  bucket configuration : ${mandatory.length === 0 ? 'VERIFIED' : 'NOT VERIFIED'}`);
-  console.log(`  least privilege      : ${leastPrivilege ? 'SATISFIED' : 'NOT SATISFIED'}`);
+  console.log(`  1. authorization     : ${authorizationOk ? 'VERIFIED (Backblaze accepted the credential)' : 'NOT VERIFIED'}`);
+  console.log(`  2. bucket access     : ${bucketAccessOk ? 'VERIFIED (configuration readable)' : 'NOT VERIFIED \u2014 lock and lifecycle UNCHECKED'}`);
+  console.log(`  3. intended design   : ${intendedDesign}`);
+  console.log(`  4. least privilege   : ${leastPrivilege ? 'SATISFIED' : 'NOT SATISFIED'}`);
   if (!leastPrivilege) {
-    console.log(`  privilege deviation  : ${ACCEPT_PRIVILEGED ? 'ACCEPTED by the owner (residual risk retained)' : 'NOT accepted'}`);
+    console.log(`     \u21b3 deviation     : ${ACCEPT_PRIVILEGED
+      ? 'INTENTIONAL owner decision \u2014 accepted, residual risk retained'
+      : 'NOT accepted \u2014 unexplained over-privilege'}`);
   }
+  console.log(`  bucket configuration : ${mandatory.length === 0 ? 'VERIFIED' : 'NOT VERIFIED'}`);
   console.log(`  exit                 : ${exitCode}${exitCode === 3 ? '  (not a pass \u2014 accepted deviations)' : ''}`);
   console.log('--------------------------------------------------------------');
 }

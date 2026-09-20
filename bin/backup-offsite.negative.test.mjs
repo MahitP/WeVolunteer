@@ -760,3 +760,51 @@ describe('the drill publisher chooses its credential deliberately', () => {
     expect(r.out).not.toContain(fake.env.B2_KEY_ID);
   });
 });
+
+/* ── The version gate, as a predicate rather than a position ──────────────── */
+
+describe('the OpenSSL version gate', () => {
+  /**
+   * The structural test above pins WHERE the gate runs. This pins WHAT it
+   * accepts, which is the half that decides whether a host writes undecryptable
+   * archives every night.
+   *
+   * The strings are real `openssl version` output, including the one that caused
+   * the incident. Reproduced independently on 2026-09-20: LibreSSL 3.3.6 accepts
+   * `-aes-256-gcm`, exits 0 with no stderr, and writes **533 bytes** of
+   * `pkcs7-envelopedData` for a 220,596-byte dump — an artifact that neither
+   * OpenSSL 3 nor LibreSSL itself can decrypt afterwards. "3.3.6" also has a
+   * leading 3, which is exactly why the gate must anchor on the product name and
+   * not on the version number.
+   */
+  const gateAccepts = (version) => {
+    const sh = readFileSync(path.join(ROOT, 'bin/backup-postgres.sh'), 'utf8');
+    const pattern = sh.match(/grep -Eq '([^']+)'/)?.[1];
+    expect(pattern, 'the version gate pattern was not found').toBeTruthy();
+    /* POSIX ERE and JS agree on this pattern; ^ is anchored the same way. */
+    return new RegExp(pattern).test(version);
+  };
+
+  it('accepts OpenSSL 3 and later', () => {
+    for (const v of [
+      'OpenSSL 3.0.2 15 Mar 2022',
+      'OpenSSL 3.6.4 25 Aug 2026 (Library: OpenSSL 3.6.4 25 Aug 2026)',
+      'OpenSSL 4.0.0 1 Jan 2030',
+      'OpenSSL 10.1.0 1 Jan 2040',
+    ]) expect(gateAccepts(v), v).toBe(true);
+  });
+
+  it('refuses LibreSSL, whatever its version number looks like', () => {
+    for (const v of [
+      'LibreSSL 3.3.6',          // the one that caused the incident
+      'LibreSSL 4.0.0',          // a future LibreSSL must not slip through on "4."
+      'LibreSSL 2.8.3',
+    ]) expect(gateAccepts(v), v).toBe(false);
+  });
+
+  it('refuses OpenSSL 1.x, and an unreadable version', () => {
+    for (const v of ['OpenSSL 1.1.1w 11 Sep 2023', 'OpenSSL 0.9.8zh', '', 'not a version at all']) {
+      expect(gateAccepts(v), JSON.stringify(v)).toBe(false);
+    }
+  });
+});
