@@ -705,3 +705,58 @@ describe('the canonical prefix', () => {
       .toBe('second-deployment/postgres/daily/2026/09/13/wevolunteer-20260913T030356Z.dump.enc');
   });
 });
+
+/* ── Which credential publishes the drill verdict ─────────────────────────── */
+
+describe('the drill publisher chooses its credential deliberately', () => {
+  let fake; let work;
+  beforeAll(async () => { fake = await startFakeB2(); });
+  afterAll(() => fake.close());
+  beforeEach(() => {
+    work = mkdtempSync(path.join(tmpdir(), 'wev-drill-cred-'));
+    fake.state.objects.clear();
+    fake.state.requests.length = 0;
+    return () => rmSync(work, { recursive: true, force: true });
+  });
+
+  const PUBLISH = path.join(ROOT, 'bin/backup-drill-publish.mjs');
+  const record = () => {
+    const p = path.join(work, 'restore-drill.json');
+    writeFileSync(p, JSON.stringify({ state: 'passed', at: '2026-09-20T04:00:00Z', source: 'offsite' }));
+    return p;
+  };
+
+  /**
+   * WeVolunteer runs one credential by owner decision, so this is the live path,
+   * not a degraded one. It must work — and it must say which credential it used,
+   * because a deployment that believes it has split the drill credential and has
+   * not should be able to see that from the output rather than from the console.
+   */
+  it('falls back to the general credential, and says so', async () => {
+    const r = await run(PUBLISH, [record()], fake.env);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/B2_DRILL_\* is not set — publishing with the general B2 credential/);
+    expect(fake.state.objects.has('wevolunteer/backups/postgres/drills/latest.json')).toBe(true);
+  });
+
+  it('prefers B2_DRILL_* when a separate write credential exists', async () => {
+    const r = await run(PUBLISH, [record()], {
+      ...fake.env,
+      B2_DRILL_KEY_ID: fake.env.B2_KEY_ID,
+      B2_DRILL_APPLICATION_KEY: fake.env.B2_APPLICATION_KEY,
+      /* The general credential is wrong on purpose: if it were used, the fake
+         would refuse the signature and this would fail. */
+      B2_KEY_ID: 'not-the-drill-key',
+      B2_APPLICATION_KEY: 'not-the-drill-secret',
+    });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).not.toMatch(/is not set/);
+    expect(fake.state.objects.has('wevolunteer/backups/postgres/drills/latest.json')).toBe(true);
+  });
+
+  it('never prints either credential', async () => {
+    const r = await run(PUBLISH, [record()], { ...fake.env, B2_DRILL_KEY_ID: 'x', B2_DRILL_APPLICATION_KEY: 'y' });
+    expect(r.out).not.toContain(fake.env.B2_APPLICATION_KEY);
+    expect(r.out).not.toContain(fake.env.B2_KEY_ID);
+  });
+});
