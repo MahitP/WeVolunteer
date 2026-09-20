@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="WeVolunteer">
+  <!--
+    WeVolunteer app icon (web app manifest, purpose "any"): the checkmark-W,
+    white, on the Forest tile, at the full 12.5 weight. An installed icon is drawn
+    at 48 pixels and up, where the mark is at least 28 pixels tall and needs no
+    small-size thickening; the tab icon is public/favicon.svg.
+
+    A copy of src/components/common/logoGeometry.js, held to it by
+    src/logoAssets.test.jsx. Tile radius 0.2236 of the side, mark box 0.58 of the
+    side, centred, placed with a plain transform because some icon rasterisers
+    outside the browser ignore a nested svg viewport.
+  -->
+  <rect width="512" height="512" rx="114.48" fill="#0f5a3a"/>
+  <path transform="translate(85.832 117.530) scale(3.33663)" d="M16 26 L33 78 L50 34 L67 78 L86 4" fill="none" stroke="#ffffff" stroke-width="12.5" stroke-linejoin="bevel" stroke-linecap="butt" stroke-miterlimit="1"/>
+</svg>

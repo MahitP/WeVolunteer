@@ -1,0 +1,425 @@
+/* ============================================================
+   WeVolunteer — motion identity
+   The brand's own motion, beside the geometry it animates
+   (`logoGeometry.js`). Deliberately NOT in `index.css`: that file is
+   the application's styling layer, and this is the mark's.
+
+   PRINCIPLE: "one line, never lifted."
+   The mark is ONE unbroken stroke (M16 26 L33 78 L50 34 L67 78 L86 4).
+   Every behaviour here is that stroke given a tempo — "the gait".
+   Nothing is added to the drawing. No geometry is ever redrawn,
+   scaled, rotated or deformed.
+
+   REQUIREMENTS
+   - The animated path carries pathLength="225.4484", so every dash
+     value below is in mark units and is resolution-independent.
+   - Stroke colour is currentColor. Light and dark need no extra rules.
+   - Nothing animates below 32px: `markStrokeFor()` thickens the stroke
+     to 15.5 there, so an animated small mark would animate different
+     geometry than the frozen 12.5. `BrandMark` enforces this.
+
+   MEASUREMENTS (mark units, from logoGeometry.js — do not change)
+   arm lengths   54.7083 / 47.1699 / 47.1699 / 76.4003
+   cumulative    0 / 54.7083 / 101.8782 / 149.0481 / 225.4484
+   overreach     (67,78) -> (86,4); axis (0.2487, -0.9686); edge tilt -14.4deg
+
+   CONTENTS
+   1. Tokens
+   2. The gait          (signature draw + release)
+   3. The pull          (the signature overshoot)
+   4. The travel        (loader / micro / idle)
+   5. Success
+   6. The lockup        (wordmark emergence + return)
+   7. Application classes
+   8. Reduced motion
+   ============================================================ */
+
+/* ---- 1. TOKENS ------------------------------------------------ */
+
+:root {
+  /* Three curves. The whole system uses only these. Falls are eased in,
+     climbs eased out, arrivals settle. Do not add a fourth. */
+  --wv-fall:   cubic-bezier(0.40, 0, 0.72, 0.30);
+  --wv-climb:  cubic-bezier(0.22, 0.68, 0.52, 1);
+  --wv-settle: cubic-bezier(0.33, 1.12, 0.66, 1);
+
+  /* Canonical durations. Do not invent new ones. */
+  --wv-signature: 3600ms;
+  --wv-lockup:    4000ms;
+  --wv-return:    1800ms;
+  --wv-loader:    2200ms;
+  --wv-micro:      560ms;
+  --wv-success:    900ms;
+  --wv-idle:      9000ms;
+
+  /* The pull: 1.7 units along the overreach axis (0.2487, -0.9686). */
+  --wv-pull-x:  0.423px;
+  --wv-pull-y: -1.647px;
+
+  /* The surface the micro-pass paints its gap in. Declared here — rather than
+     left to the fallback in `.wv-micro-comet` — so it is a real token like every
+     other: `tokens.test.js` requires every `var(--…)` under src/ to be defined
+     somewhere, and an undeclared token is exactly the silent inheritance that
+     guard exists to catch. `--surface` is the app's card and sidebar surface,
+     which is where the mark sits today; a surface that differs sets its own
+     `--wv-sweep` locally. */
+  --wv-sweep: var(--surface);
+
+  /* Wordmark travel: 9 mark units. Deliberately small — the wordmark
+     is revealed, not flown in. */
+  --wv-word-travel: -9px;
+
+  /* How far the reveal edge must sweep to clear the wordmark.
+     RE-MEASURED against the real outlined wordmark — see section 6. The
+     lab's 348 was solved against a Bricolage Grotesque stand-in whose
+     letters ended at x≈373; the real ones end at x≈432.2. */
+  --wv-wipe-run: 365px;
+}
+
+/* THE TOUCHDOWN. The stroke is 12.5 units wide, so any dash shorter than
+   ~12.5 units paints as a square blob rather than a line. Every behaviour
+   that starts or ends at zero length therefore fades across its first and
+   last 80ms — the pen touching down and lifting, not a dot appearing.
+   80ms is the system value: 2.200% of 3600ms, 2.000% of 4000ms,
+   4.444% of 1800ms, 14.340% of the 558ms tick. */
+
+/* ---- 2. THE GAIT ---------------------------------------------
+   The head of the stroke walks the mark in drawing order, rests a
+   frame at each foot, and takes the overreach slowest — it is the
+   longest arm and receives 44% of the draw. Then the tail follows
+   the same gait forward, so the loop never reverses and has no
+   visible restart.
+
+   Phase shares of the draw: 15.0 / 4.2 / 20.8 / 12.8 / 3.0 / 44.2
+   ------------------------------------------------------------ */
+@keyframes wv-hero {
+  0%      { stroke-dasharray: 0 999;        stroke-dashoffset: 0;         opacity: 0; animation-timing-function: var(--wv-fall); }
+  2.200%  { opacity: 1; }
+  6.458%  { stroke-dasharray: 54.7083 999;  stroke-dashoffset: 0;         animation-timing-function: linear; }
+  8.266%  { stroke-dasharray: 54.7083 999;  stroke-dashoffset: 0;         animation-timing-function: var(--wv-climb); }
+  17.222% { stroke-dasharray: 101.8782 999; stroke-dashoffset: 0;         animation-timing-function: var(--wv-fall); }
+  22.733% { stroke-dasharray: 149.0481 999; stroke-dashoffset: 0;         animation-timing-function: linear; }
+  24.025% { stroke-dasharray: 149.0481 999; stroke-dashoffset: 0;         animation-timing-function: var(--wv-climb); }
+  43.056% { stroke-dasharray: 225.4484 999; stroke-dashoffset: 0;         animation-timing-function: linear; }
+  72.222% { stroke-dasharray: 225.4484 999; stroke-dashoffset: 0;         animation-timing-function: var(--wv-fall); }
+  76.389% { stroke-dasharray: 170.7401 999; stroke-dashoffset: -54.7083;  animation-timing-function: linear; }
+  77.556% { stroke-dasharray: 170.7401 999; stroke-dashoffset: -54.7083;  animation-timing-function: var(--wv-climb); }
+  83.333% { stroke-dasharray: 123.5702 999; stroke-dashoffset: -101.8782; animation-timing-function: var(--wv-fall); }
+  86.889% { stroke-dasharray: 76.4003 999;  stroke-dashoffset: -149.0481; animation-timing-function: linear; }
+  87.722% { stroke-dasharray: 76.4003 999;  stroke-dashoffset: -149.0481; animation-timing-function: var(--wv-climb); }
+  97.800% { opacity: 1; }
+  100%    { stroke-dasharray: 0 999;        stroke-dashoffset: -225.4484; opacity: 0; }
+}
+
+/* ---- 3. THE PULL --------------------------------------------
+   THE SIGNATURE. As the overreach climbs it tugs the whole mark
+   1.7 units along its own axis, then the mark settles back. This
+   is the single most protected value in the system.
+   ------------------------------------------------------------ */
+@keyframes wv-pull {
+  0%, 24.025%   { transform: translate(0, 0);                             animation-timing-function: var(--wv-climb); }
+  43.056%       { transform: translate(var(--wv-pull-x), var(--wv-pull-y)); animation-timing-function: var(--wv-settle); }
+  49.167%, 100% { transform: translate(0, 0); }
+}
+
+/* ---- 4. THE TRAVEL ------------------------------------------
+   The gait as an endless cycle: a segment of stroke walks the mark
+   at the same uneven tempo. One period is exactly one lap, so it is
+   seamless by construction. Loader, micro-pass, idle.
+   ------------------------------------------------------------ */
+@keyframes wv-travel {
+  0%    { stroke-dashoffset: 0;         animation-timing-function: var(--wv-fall); }
+  15.0% { stroke-dashoffset: -54.7083;  animation-timing-function: linear; }
+  19.2% { stroke-dashoffset: -54.7083;  animation-timing-function: var(--wv-climb); }
+  40.0% { stroke-dashoffset: -101.8782; animation-timing-function: var(--wv-fall); }
+  52.8% { stroke-dashoffset: -149.0481; animation-timing-function: linear; }
+  55.8% { stroke-dashoffset: -149.0481; animation-timing-function: var(--wv-climb); }
+  100%  { stroke-dashoffset: -225.4484; }
+}
+
+/* ---- 5. SUCCESS ---------------------------------------------
+   The overreach alone completes — the gesture of arriving — and the
+   rest of the mark rises behind it. One shot.
+   ------------------------------------------------------------ */
+@keyframes wv-tick {
+  0%   { stroke-dasharray: 0 999;       opacity: 0; animation-timing-function: var(--wv-climb); }
+  14.340% { opacity: 1; }
+  100% { stroke-dasharray: 76.4003 999; }
+}
+@keyframes wv-fill {
+  0%, 34% { opacity: 0.20; animation-timing-function: var(--wv-climb); }
+  100%    { opacity: 1; }
+}
+@keyframes wv-tickpull {
+  0%   { transform: translate(0, 0);                              animation-timing-function: var(--wv-climb); }
+  62%  { transform: translate(var(--wv-pull-x), var(--wv-pull-y)); animation-timing-function: var(--wv-settle); }
+  100% { transform: translate(0, 0); }
+}
+
+/* ---- 6. THE LOCKUP -----------------------------------------
+   Mark and wordmark live in ONE svg coordinate space, so their
+   optical relationship is fixed at every size.
+
+   The wordmark is not flown in. It is revealed by an edge that is
+   PARALLEL TO THE OVERREACH (tilt -14.4deg) and that begins at the
+   overreach's own right edge — the arm's gesture, continued. The
+   word then settles 9 units, finishing just after the reveal, so it
+   reads as having been drawn out of the mark rather than placed.
+
+   ENTRANCE (--wv-lockup, 4000ms)
+     0     - 1550ms  W draws (the gait)
+     1550  - 1770ms  pull settles
+     1770  - 1900ms  held beat
+     1900  - 2520ms  wordmark revealed by the angled edge
+     1900  - 2600ms  wordmark settles into place (lags the reveal)
+     2600  - 4000ms  complete lockup holds
+
+   RETURN (--wv-return, 1800ms)
+     0     -  620ms  wordmark retracts toward the mark, and is
+                     swallowed last at the arm
+      620  -  740ms  held beat — the return is visibly COMPLETE
+      740  - 1800ms  W releases through its own gait
+
+   The held beat is not decoration: it guarantees the W can never
+   begin retracting while the wordmark is still moving.
+
+   THE REVEAL EDGE, re-measured for the REAL wordmark
+   --------------------------------------------------
+   The wipe rect's right edge IS the reveal edge. It is skewed about
+   the viewBox origin, so its x position varies with y:
+
+       X(y) = R + travel + tan(14.4deg)*minY - tan(14.4deg)*y
+            = R + travel + 0.642 - 0.2568*y      (minY = 2.5)
+
+   Only the wordmark is clipped; the W is outside the clip, so the
+   edge's resting position is bounded by the LETTERS alone:
+
+   - Before the reveal the word is held at translateX(-9), which puts
+     the "e"'s leftmost ink at (85.17, 50.48) minus 9. Hiding it
+     requires R < 88.49. The lab's 76 satisfied this; the audit's
+     proposed 92.5 does NOT — it would park ~4 units of the "e" beside
+     the W exactly as the original sliver did. R = 86 keeps 2.49 units
+     of clearance and still starts the edge inside the arm.
+   - The run must clear the letters' right extent (432.16 at y 46.6):
+     R + run + 0.642 - 0.2568*y > x  =>  run > 357.48. 365 is used,
+     7.5 units of margin, and is the only other value the real
+     wordmark changed.
+
+   The rect's own x/width live with the markup in `Wordmark.jsx`
+   (x = R - 600 = -514, width 600), where `logoAssets.test.jsx` checks
+   them. Everything else — the tilt, the durations, the dash values,
+   the pull, the touchdown, the sequencing and the beat — is unchanged.
+   ------------------------------------------------------------ */
+
+/* W draw, scaled into the 4000ms lockup timeline (draw ends 38.75%) */
+@keyframes wv-lock-line {
+  0%      { stroke-dasharray: 0 999;        opacity: 0; animation-timing-function: var(--wv-fall); }
+  2.000%  { opacity: 1; }
+  5.813%  { stroke-dasharray: 54.7083 999;  animation-timing-function: linear; }
+  7.441%  { stroke-dasharray: 54.7083 999;  animation-timing-function: var(--wv-climb); }
+  15.500% { stroke-dasharray: 101.8782 999; animation-timing-function: var(--wv-fall); }
+  20.460% { stroke-dasharray: 149.0481 999; animation-timing-function: linear; }
+  21.622% { stroke-dasharray: 149.0481 999; animation-timing-function: var(--wv-climb); }
+  38.750%, 100% { stroke-dasharray: 225.4484 999; }
+}
+@keyframes wv-lock-pull {
+  0%, 22.500%   { transform: translate(0, 0);                             animation-timing-function: var(--wv-climb); }
+  38.750%       { transform: translate(var(--wv-pull-x), var(--wv-pull-y)); animation-timing-function: var(--wv-settle); }
+  44.250%, 100% { transform: translate(0, 0); }
+}
+/* The reveal edge. Skew is carried in every keyframe so the CSS
+   transform never drops it. */
+@keyframes wv-lock-wipe {
+  0%, 47.500% { transform: translateX(0) skewX(-14.4deg);                 animation-timing-function: var(--wv-climb); }
+  63.000%, 100% { transform: translateX(var(--wv-wipe-run)) skewX(-14.4deg); }
+}
+@keyframes wv-lock-word {
+  0%, 47.500% { transform: translateX(var(--wv-word-travel)); animation-timing-function: var(--wv-climb); }
+  65.000%, 100% { transform: translateX(0); }
+}
+
+/* Return: wordmark first, then a beat, then the W. */
+@keyframes wv-ret-wipe {
+  0%            { transform: translateX(var(--wv-wipe-run)) skewX(-14.4deg); animation-timing-function: var(--wv-fall); }
+  34.444%, 100% { transform: translateX(0) skewX(-14.4deg); }
+}
+@keyframes wv-ret-word {
+  0%            { transform: translateX(0); animation-timing-function: var(--wv-fall); }
+  34.444%, 100% { transform: translateX(var(--wv-word-travel)); }
+}
+@keyframes wv-ret-line {
+  0%, 41.111% { stroke-dasharray: 225.4484 999; stroke-dashoffset: 0; animation-timing-function: var(--wv-fall); }
+  67.139%     { stroke-dasharray: 149.0481 999; animation-timing-function: linear; }
+  68.906%     { stroke-dasharray: 149.0481 999; animation-timing-function: var(--wv-climb); }
+  76.444%     { stroke-dasharray: 101.8782 999; animation-timing-function: var(--wv-fall); }
+  88.693%     { stroke-dasharray: 54.7083 999;  animation-timing-function: linear; }
+  91.166%     { stroke-dasharray: 54.7083 999;  animation-timing-function: var(--wv-climb); }
+  95.556%     { opacity: 1; }
+  100%        { stroke-dasharray: 0 999;        stroke-dashoffset: 0; opacity: 0; }
+}
+
+/* ---- 7. APPLICATION ---------------------------------------- */
+
+/* Every animated path RESTS as the complete mark. If the animation
+   never runs — print, PNG export, background tab, no animation
+   support — the locked logo is simply present. */
+
+/* Signature (mark only) — hero, brand reveal, app launch. Loops. */
+.wv-sig-line {
+  stroke-dasharray: 225.4484 999;
+  animation: wv-hero var(--wv-signature) linear infinite;
+}
+.wv-sig-pull { animation: wv-pull var(--wv-signature) linear infinite; }
+
+/* Signature lockup — entrance. One shot; holds the full lockup. */
+.wv-lock-line { stroke-dasharray: 225.4484 999; animation: wv-lock-line var(--wv-lockup) linear 1 both; }
+.wv-lock-pull { animation: wv-lock-pull var(--wv-lockup) linear 1 both; }
+.wv-lock-word { animation: wv-lock-word var(--wv-lockup) linear 1 both; }
+.wv-wipe {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transform: translateX(var(--wv-wipe-run)) skewX(-14.4deg);
+}
+.wv-lock-wipe { animation: wv-lock-wipe var(--wv-lockup) linear 1 both; }
+
+/* Return lockup — wordmark retracts, beat, then the W releases.
+   Shipped as infrastructure: no production surface uses it yet, and the
+   frozen guidance is that the return is rare (never for route changes,
+   logouts or modal dismissals). It is here so the first real overlay
+   dismissal uses the frozen sequencing rather than inventing one. */
+.wv-ret-line { stroke-dasharray: 225.4484 999; animation: wv-ret-line var(--wv-return) linear 1 both; }
+.wv-ret-word { animation: wv-ret-word var(--wv-return) linear 1 both; }
+.wv-ret-wipe { animation: wv-ret-wipe var(--wv-return) linear 1 both; }
+
+/* Loader — ghost mark + one segment walking it. Seamless. */
+.wv-load-ghost { opacity: 0.16; }
+.wv-load-comet {
+  stroke-dasharray: 64 161.4484;
+  animation: wv-travel var(--wv-loader) linear infinite;
+}
+
+/* Idle / ambient — the same pass, barely there.
+   Documented and available; deliberately not applied to `EmptyState`,
+   whose lucide icons carry meaning about the empty thing. */
+.wv-idle-comet {
+  stroke-dasharray: 40 185.4484;
+  opacity: 0.5;
+  animation: wv-travel var(--wv-idle) linear infinite;
+}
+
+/* Micro-interaction — one pass on hover, focus or tap.
+   The mark is always full strength. The pass is a moving GAP painted
+   in the surface colour behind the mark, so the gait reads as the pen
+   travelling back through the stroke. Being a gap and not a lighten,
+   it is luminance-agnostic: one rule serves light and dark.
+   Set --wv-sweep to the surface the mark actually sits on; it defaults
+   to `--surface`, the app's card/sidebar surface token. */
+.wv-micro-comet {
+  stroke-dasharray: 52 173.4484;
+  stroke-dashoffset: 0;
+  opacity: 0;
+  stroke: var(--wv-sweep, var(--surface));
+}
+.wv-micro:hover .wv-micro-comet,
+.wv-micro:focus-visible .wv-micro-comet,
+.wv-micro[data-wv-fire] .wv-micro-comet {
+  opacity: 1;
+  animation: wv-travel var(--wv-micro) linear 1;
+}
+
+/* Success — hours credited, shift joined, certificate earned. */
+.wv-ok-body { opacity: 1; animation: wv-fill var(--wv-success) linear 1 forwards; }
+.wv-ok-tick { stroke-dasharray: 76.4003 999; animation: wv-tick calc(var(--wv-success) * 0.62) var(--wv-climb) 1 forwards; }
+.wv-ok-pull { animation: wv-tickpull var(--wv-success) linear 1 forwards; }
+
+/* ---- 8. REDUCED MOTION -------------------------------------
+   Not "slower". No geometry moves at all — no travel, no pull, no
+   wipe. Each behaviour resolves to its finished state; the only
+   permitted change is opacity.
+
+   TWO triggers, one set of rules, because the application already has
+   both and this must not become a third motion preference:
+
+     @media (prefers-reduced-motion: reduce)   the operating system
+     :root[data-motion='reduce']               the reader's own setting,
+        written pre-paint by `public/a11y-prefs.js` and owned by
+        `src/hooks/useAccessibilityPreferences.js`, where `motion:
+        'system'` means "whatever the OS says" and therefore needs no
+        rule of its own — the media query above already covers it.
+
+   `index.css` has a blanket `[data-motion='reduce']` rule that crushes
+   every animation to 0.001ms. That alone would leave the SIGNATURE
+   invisible: its last keyframe is zero-length and transparent, so an
+   instantly-finished loop rests on nothing. Hence these rules, which
+   hold each behaviour at its COMPLETE state rather than its final
+   frame. `src/wvMotionStyles.test.js` fails the build if an animated
+   `.wv-*` selector is missing from both blocks.
+   ------------------------------------------------------------ */
+@keyframes wv-rm-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wv-rm-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .wv-sig-line, .wv-sig-pull,
+  .wv-lock-line, .wv-lock-pull, .wv-lock-word, .wv-lock-wipe,
+  .wv-ret-line, .wv-ret-word, .wv-ret-wipe,
+  .wv-load-comet, .wv-idle-comet, .wv-micro-comet,
+  .wv-ok-tick, .wv-ok-body, .wv-ok-pull,
+  .wv-micro:hover .wv-micro-comet,
+  .wv-micro:focus-visible .wv-micro-comet,
+  .wv-micro[data-wv-fire] .wv-micro-comet {
+    animation: none !important;
+  }
+  .wv-sig-pull, .wv-lock-pull, .wv-ret-pull, .wv-ok-pull { transform: none !important; }
+  .wv-sig-line, .wv-lock-line, .wv-ret-line { stroke-dasharray: 225.4484 999 !important; stroke-dashoffset: 0 !important; }
+  .wv-ok-tick { stroke-dasharray: 76.4003 999 !important; }
+  .wv-sig-line { animation: wv-rm-in 240ms ease-out 1 !important; }
+  .wv-ok-body { opacity: 1 !important; }
+  /* The lockup is simply complete: wordmark in place, fully revealed. */
+  .wv-lock-word, .wv-ret-word { transform: none !important; }
+  .wv-lock-wipe, .wv-ret-wipe, .wv-wipe { transform: translateX(var(--wv-wipe-run)) skewX(-14.4deg) !important; }
+  /* Travel behaviours stop entirely; the loader breathes instead. */
+  .wv-load-comet, .wv-idle-comet, .wv-micro-comet { opacity: 0 !important; }
+  .wv-load-ghost { opacity: 1; }
+  .wv-load-wrap .wv-load-ghost { animation: wv-rm-breathe 1800ms ease-in-out infinite !important; }
+}
+
+/* The reader's own preference, in the application's existing attribute. */
+:root[data-motion='reduce'] .wv-sig-line,
+:root[data-motion='reduce'] .wv-sig-pull,
+:root[data-motion='reduce'] .wv-lock-line,
+:root[data-motion='reduce'] .wv-lock-pull,
+:root[data-motion='reduce'] .wv-lock-word,
+:root[data-motion='reduce'] .wv-lock-wipe,
+:root[data-motion='reduce'] .wv-ret-line,
+:root[data-motion='reduce'] .wv-ret-word,
+:root[data-motion='reduce'] .wv-ret-wipe,
+:root[data-motion='reduce'] .wv-load-comet,
+:root[data-motion='reduce'] .wv-idle-comet,
+:root[data-motion='reduce'] .wv-micro-comet,
+:root[data-motion='reduce'] .wv-ok-tick,
+:root[data-motion='reduce'] .wv-ok-body,
+:root[data-motion='reduce'] .wv-ok-pull,
+:root[data-motion='reduce'] .wv-micro:hover .wv-micro-comet,
+:root[data-motion='reduce'] .wv-micro:focus-visible .wv-micro-comet,
+:root[data-motion='reduce'] .wv-micro[data-wv-fire] .wv-micro-comet {
+  animation: none !important;
+}
+:root[data-motion='reduce'] .wv-sig-pull,
+:root[data-motion='reduce'] .wv-lock-pull,
+:root[data-motion='reduce'] .wv-ret-pull,
+:root[data-motion='reduce'] .wv-ok-pull { transform: none !important; }
+:root[data-motion='reduce'] .wv-sig-line,
+:root[data-motion='reduce'] .wv-lock-line,
+:root[data-motion='reduce'] .wv-ret-line { stroke-dasharray: 225.4484 999 !important; stroke-dashoffset: 0 !important; }
+:root[data-motion='reduce'] .wv-ok-tick { stroke-dasharray: 76.4003 999 !important; }
+:root[data-motion='reduce'] .wv-ok-body { opacity: 1 !important; }
+:root[data-motion='reduce'] .wv-lock-word,
+:root[data-motion='reduce'] .wv-ret-word { transform: none !important; }
+:root[data-motion='reduce'] .wv-lock-wipe,
+:root[data-motion='reduce'] .wv-ret-wipe,
+:root[data-motion='reduce'] .wv-wipe { transform: translateX(var(--wv-wipe-run)) skewX(-14.4deg) !important; }
+:root[data-motion='reduce'] .wv-load-comet,
+:root[data-motion='reduce'] .wv-idle-comet,
+:root[data-motion='reduce'] .wv-micro-comet { opacity: 0 !important; }
+:root[data-motion='reduce'] .wv-load-ghost { opacity: 1; }
+:root[data-motion='reduce'] .wv-load-wrap .wv-load-ghost { animation: wv-rm-breathe 1800ms ease-in-out infinite !important; }

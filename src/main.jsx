@@ -2,6 +2,10 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './index.css'
+/* The brand's own motion, after the app's stylesheet so it can override
+   app defaults and not the other way round. Imported once, here: every
+   `wv-*` class in the product resolves against this one file. */
+import './components/common/wvMotion.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { crashFallback } from './views/ErrorExperience/ErrorExperience.jsx'

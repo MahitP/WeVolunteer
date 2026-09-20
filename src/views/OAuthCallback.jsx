@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../utils/api';
 import { AlertCircle, ShieldCheck } from 'lucide-react';
 import { takePendingReauth, saveReadyGrant, clearReadyGrant } from '../utils/stepUp';
+import BrandMark from '../components/common/BrandMark';
 
 /**
  * Reads the provider out of the signed `state` the server issued.
@@ -234,7 +235,15 @@ export default function OAuthCallback({ onLoginSuccess, onLinked, addToast }) {
           <div className="auth-icon" aria-hidden="true">
             <ShieldCheck size={28} />
           </div>
-          <div className="auth-spinner" aria-hidden="true" />
+          {/* The one genuine full-page wait in the product, and the only
+              spinner replaced by the brand loader: a segment of the stroke
+              walks the mark over a ghost copy of it. The heading below is the
+              announced status, so the mark stays decorative. `size="lg"` is
+              required, not chosen — the mark must render at 32px or more to
+              animate the frozen 12.5 stroke rather than the small-size 15.5.
+              The app's skeletons and the inline location/weather spinners are
+              deliberately left alone. */}
+          <BrandMark size="lg" motion="loader" />
           <h1 className="auth-title">Completing sign-in…</h1>
           <p className="dim">Verifying your account with your provider. This only takes a moment.</p>
         </div>

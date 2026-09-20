@@ -13,11 +13,14 @@ invitation, the 2FA sign-in code, and every notification dispatched through
 
 There is no second template. Changing the header there changes all of them.
 
-The header is the brand mark (`WV`, white on `#0f6b45`) beside the product name.
+The header is the product name, bold, in Forest (`#0f5a3a`), with no tile. It
+used to follow a `WV` monogram tile; the WeVolunteer identity retires that
+monogram, and its replacement — the checkmark-W — is a drawing, which email
+cannot carry reliably. See [`docs/features/brand-identity.md`](features/brand-identity.md).
 
-### Why the mark is drawn, not an image
+### Why the header is text, not an image
 
-It is a table cell with a background colour, not an `<img>`. That is deliberate:
+It is text, not an `<img>`. That is deliberate:
 
 - **Remote images are blocked by default** in Gmail, Outlook and Apple Mail for
   senders the recipient has not corresponded with before. That is exactly the
@@ -28,10 +31,10 @@ It is a table cell with a background colour, not an `<img>`. That is deliberate:
   resolves on the *recipient's* machine to the recipient's machine.
 - **Base64 is worse.** Gmail strips `data:` URIs in `<img src>` outright.
 
-A coloured cell renders identically everywhere, with images off, and downloads
-nothing. If a raster logo is ever wanted instead, it needs a CDN origin that is
-independent of `APP_URL` and it should be added *beside* the drawn mark as a
-progressive enhancement, never as a replacement.
+Text renders identically everywhere, with images off, and downloads nothing. If a
+raster logo is ever wanted, it needs a CDN origin that is independent of `APP_URL`
+and it should be added as a progressive enhancement over the text name, never as a
+replacement for it.
 
 ## Sender identity
 

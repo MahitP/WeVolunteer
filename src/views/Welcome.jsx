@@ -30,8 +30,40 @@ const POINTS = [
   }
 ];
 
+/**
+ * The front door draws its mark once per browser session, not once per mount.
+ *
+ * `Welcome` remounts on every visit to `/welcome` — a back press, a cancelled
+ * signup, a sign-out — and the signature is a 3.6s gesture. Watching it a second
+ * time is the "page that performs" the motion system exists to avoid.
+ *
+ * `sessionStorage`, deliberately, and deliberately NOT the app's session model:
+ * this is a fact about one browser tab's viewing, not about who is signed in.
+ * The app's own session is a server cookie (`useSession`), and a signed-out
+ * front door has no account to hang a preference on; writing one would invent
+ * persistence the product does not have. A new tab is a new first impression,
+ * which is the right behaviour, and storage being unavailable (private mode, a
+ * blocked origin) simply means the mark renders static.
+ */
+const SEEN_KEY = 'wevol-welcome-signature';
+
+function useFirstVisitSignature() {
+  const [play] = React.useState(() => {
+    try {
+      if (sessionStorage.getItem(SEEN_KEY)) return false;
+      sessionStorage.setItem(SEEN_KEY, '1');
+      return true;
+    } catch {
+      /* No storage: never animate rather than animate on every mount. */
+      return false;
+    }
+  });
+  return play;
+}
+
 export default function Welcome() {
   const navigate = useNavigate();
+  const playSignature = useFirstVisitSignature();
 
   /**
    * SCHOOL_NAME defaults to "WeVolunteer Community" when a district has not
@@ -47,7 +79,11 @@ export default function Welcome() {
   return (
     <div className="auth">
       <main className="auth-form auth-centered" aria-labelledby="welcome-heading">
-        <BrandMark size="lg" />
+        {/* The frozen signature, on the tile this screen already shows: the
+            mark draws through its gait, pulls 1.7 units as the overreach
+            climbs, and releases. The composition is unchanged — same tile, same
+            size, same place. Reduced motion (either trigger) holds it complete. */}
+        <BrandMark size="lg" motion={playSignature ? 'signature' : 'none'} />
 
         <div className="auth-head" style={{ marginTop: 'var(--s6)' }}>
           <h1 id="welcome-heading" className="auth-title">Volunteering, organized.</h1>

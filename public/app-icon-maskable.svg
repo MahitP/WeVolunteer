@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="WeVolunteer">
+  <!--
+    WeVolunteer app icon (web app manifest, purpose "maskable").
+
+    Identical to public/app-icon.svg except that the Forest field is a full square
+    with no corner radius: a maskable icon is cut to the platform's own shape, so
+    rounded corners drawn here would show as a second, smaller shape inside it.
+
+    The mark stays inside the maskable safe zone, the centred circle of radius
+    0.4 of the side: its farthest ink corner is 0.37 of the side from the centre.
+
+    A copy of src/components/common/logoGeometry.js, held to it by
+    src/logoAssets.test.jsx.
+  -->
+  <rect width="512" height="512" fill="#0f5a3a"/>
+  <path transform="translate(85.832 117.530) scale(3.33663)" d="M16 26 L33 78 L50 34 L67 78 L86 4" fill="none" stroke="#ffffff" stroke-width="12.5" stroke-linejoin="bevel" stroke-linecap="butt" stroke-miterlimit="1"/>
+</svg>

@@ -21,6 +21,11 @@
  * `blob:` reference to local memory, and it is revoked immediately after use.
  */
 
+import {
+  MARK_POINTS, MARK_VIEWBOX, MARK_VIEWBOX_HEIGHT, MARK_VIEWBOX_WIDTH,
+  TILE_MARK_RATIO, TILE_RADIUS_RATIO, markStrokeFor,
+} from '../components/common/logoGeometry';
+
 /** Rendered at the top of both formats, so a file found later explains itself. */
 const HEADING = 'WeVolunteer recovery codes';
 
@@ -48,6 +53,55 @@ function saveBlob(blob, filename) {
   link.click();
   document.body.removeChild(link);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** The Forest tile colour. A literal for the reason given above `downloadRecoveryCodesPng`. */
+const BRAND_FOREST = '#0f5a3a';
+
+/**
+ * The brand tile — the checkmark-W, white on Forest — drawn at (x, y), `side`
+ * pixels square, from the same geometry `BrandMark` renders.
+ *
+ * Plain `moveTo`/`lineTo` rather than `Path2D` from the SVG string, for the same
+ * old-Safari reason as the `roundRect` fallback below.
+ */
+function drawBrandTile(ctx, x, y, side) {
+  /* Saved and restored: the separator rule drawn later sets only its colour, and
+     would otherwise inherit the mark's stroke width and joins. */
+  ctx.save();
+  ctx.fillStyle = BRAND_FOREST;
+  ctx.beginPath();
+  /**
+   * `roundRect` is Safari 16.4+ and Firefox 112+.
+   *
+   * Without the fallback a school iPad on iOS 15 threw `ctx.roundRect is not a
+   * function` inside this promise, so the only screen that ever shows recovery
+   * codes offered a Save button that produced an error toast and no file. A
+   * square corner on a decorative 34px tile is not worth a failed download.
+   */
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, side, side, side * TILE_RADIUS_RATIO);
+  else ctx.rect(x, y, side, side);
+  ctx.fill();
+
+  /* The mark's viewBox, fitted to 0.58 of the side and centred — as in the CSS. */
+  const boxHeight = side * TILE_MARK_RATIO;
+  const unit = boxHeight / MARK_VIEWBOX_HEIGHT;
+  const [viewX, viewY] = MARK_VIEWBOX.split(' ').map(Number);
+  const originX = x + (side - MARK_VIEWBOX_WIDTH * unit) / 2 - viewX * unit;
+  const originY = y + (side - boxHeight) / 2 - viewY * unit;
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = markStrokeFor(boxHeight) * unit;
+  ctx.lineJoin = 'bevel';
+  ctx.lineCap = 'butt';
+  ctx.miterLimit = 1;
+  ctx.beginPath();
+  MARK_POINTS.forEach(([px, py], i) => {
+    const method = i === 0 ? 'moveTo' : 'lineTo';
+    ctx[method](originX + px * unit, originY + py * unit);
+  });
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** `wevolunteer-recovery-codes-2026-08-09.txt` — dated, so two saves do not collide. */
@@ -114,23 +168,7 @@ export function downloadRecoveryCodesPng(codes) {
     /* The brand tile, drawn rather than loaded: an <img> would need a network
        fetch, and this function must work on a page that has just told the user
        to write something down offline. */
-    ctx.fillStyle = '#0f6b45';
-    ctx.beginPath();
-    /**
-     * `roundRect` is Safari 16.4+ and Firefox 112+.
-     *
-     * Without the fallback a school iPad on iOS 15 threw `ctx.roundRect is not a
-     * function` inside this promise, so the only screen that ever shows recovery
-     * codes offered a Save button that produced an error toast and no file. A
-     * square corner on a decorative 34px tile is not worth a failed download.
-     */
-    if (typeof ctx.roundRect === 'function') ctx.roundRect(PAD, PAD - 6, 34, 34, 8);
-    else ctx.rect(PAD, PAD - 6, 34, 34);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 15px Helvetica, Arial, sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('WV', PAD + 6, PAD + 11);
+    drawBrandTile(ctx, PAD, PAD - 6, 34);
 
     let y = PAD + 12;
     ctx.textBaseline = 'alphabetic';

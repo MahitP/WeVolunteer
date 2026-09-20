@@ -133,24 +133,36 @@
    *
    * `--brand` is a theme colour: #0f6b45 in light, a lighter #2fa873 in dark, so
    * that a green button and a green link stay legible against either paper. The
-   * WV tile was painted from it, and two more rules repainted it translucent on
+   * old WV tile was painted from it, and two more rules repainted it translucent on
    * the auth panel and the splash screen — so the logo had four appearances, and
    * which one you saw depended on your theme and which screen you were on.
    *
    * A logo is not a theme colour. It is the one thing on a page that must be the
    * same everywhere, and it already IS the same everywhere the app does not
-   * control: `public/favicon.svg` draws a #0f6b45 tile with white letters, and
-   * `server/email.js` builds the header from the identical pair, because neither
-   * a browser tab nor an email client has a theme this application can read.
+   * control: `public/favicon.svg` draws the same green tile with a white mark,
+   * because a browser tab has no theme this application can read.
    *
    * These two tokens are that pair, named, so the in-app mark agrees with the
-   * favicon and the emails instead of drifting from them. They are declared here
-   * and NOT overridden under `[data-theme='dark']` — that omission is the whole
-   * point. #0f6b45 is dark enough to carry white text and dark enough to sit on
-   * white paper, which is why one value serves both.
+   * favicon instead of drifting from it. They are declared here and NOT
+   * overridden under `[data-theme='dark']` — that omission is the whole point.
+   *
+   * `--brand-forest` is the Identity Proposal's "Forest" (#0f5a3a): "The brand.
+   * Mark, tiles, primary buttons." It is one step darker than `--green-600` so
+   * it holds its weight as a solid tile. White on it is 8.26:1, and so is it on
+   * white paper (8.04:1 on `--surface`). Only the mark and the wordmark read it; buttons and
+   * links still read `--brand`, which the proposal's colour change has not been
+   * applied to. `src/logoAssets.test.jsx` holds this value, the favicon, the app
+   * icons, the manifest, the recovery-code image and the email wordmark to the
+   * same hex.
    */
-  --brand-mark-bg: var(--green-600);
+  --brand-forest: #0f5a3a;
+  --brand-mark-bg: var(--brand-forest);
   --brand-mark-ink: #ffffff;
+  /* The wordmark's colour. Forest on light surfaces; overridden to white under
+     `[data-theme='dark']`, where Forest on the dark surfaces is 2.09-2.32:1. The
+     proposal's dark-mode green ("Signal") is for text and links, never the
+     mark, so the mark goes monochrome rather than lighter green. */
+  --brand-wordmark: var(--brand-forest);
 
   --brand-primary-light: var(--green-600);
   --brand-hover-light: var(--green-700);
@@ -421,6 +433,9 @@
   --brand-panel-bg: var(--brand-surface);
   --brand-panel-border: transparent;
   --brand: var(--brand-primary);
+  /* The wordmark in white, as the proposal draws the mark on its dark canvas.
+     See `--brand-wordmark` in `:root`. The tile needs no override. */
+  --brand-wordmark: var(--brand-mark-ink);
   /**
    * Dark mode is where `--brand` as ink and `--brand` as surface stop agreeing.
    *
@@ -789,16 +804,15 @@ time { font-variant-numeric: tabular-nums; }
 .brand-mark {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  /* The tile's corner is part of the mark, not of the interface's radius scale:
+     0.2236 of the side, at every size (logoGeometry.js). A percentage of a
+     square is a circular corner. */
+  border-radius: 22.36%;
   background: var(--brand-mark-bg);
   color: var(--brand-mark-ink);
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 0.9375rem;
-  letter-spacing: -0.02em;
 }
 
 /* The same mark at the size the Welcome and splash screens want it. A modifier
@@ -808,15 +822,43 @@ time { font-variant-numeric: tabular-nums; }
 .brand-mark-lg {
   width: 64px;
   height: 64px;
-  border-radius: var(--r-lg);
-  font-size: 1.5rem;
 }
+
+/* The checkmark-W inside the tile: a box 0.58 of the tile's side, in the mark's
+   86 x 89 viewBox proportion (0.58 x 86 / 89 = 56.04%). Both dimensions are set
+   so the size never depends on how a browser resolves an SVG's intrinsic ratio
+   inside a grid cell. */
+.brand-mark-glyph {
+  display: block;
+  width: 56.04%;
+  height: 58%;
+  overflow: visible;
+}
+
+/* The wordmark. A vector drawing, so its height is its size; the width follows
+   from the viewBox. `flex-shrink: 0` because squeezing it would distort the
+   letters rather than wrap them. */
+.wordmark {
+  display: block;
+  height: 18px;
+  width: auto;
+  aspect-ratio: 421.5 / 77.5;
+  flex-shrink: 0;
+  color: var(--brand-wordmark);
+}
+/* Inside the brand column the default stretch would widen the box to the
+   longest line beside it, and the drawing would float in the middle of it. */
+.brand-text .wordmark { align-self: flex-start; }
 
 .brand-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
+
+/* The sidebar carries the tile only for the tablet rail, where the wordmark does
+   not fit. Everywhere wider, the wordmark's W already is the mark. */
+.sidebar .brand > .brand-mark { display: none; }
 .brand-name {
   display: block;
   font-family: var(--font-display);
@@ -3305,7 +3347,7 @@ a.list-row:hover { text-decoration: none; }
    and a black wash again under `[data-theme='dark']` — so the sign-in screen
    showed a fourth version of the logo, and a different one per theme. A green
    tile on a green panel is quieter than a translucent one and it is the same
-   badge as the sidebar, the tab icon and every email. */
+   badge as the tablet rail and the tab icon. */
 
 
 
@@ -3870,7 +3912,18 @@ a.list-row:hover { text-decoration: none; }
 @media (max-width: 1024px) and (min-width: 701px) {
   .app { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
   .sidebar { padding-left: var(--s2); padding-right: var(--s2); align-items: center; }
-  .sidebar .brand-text,
+  .sidebar .brand > .brand-mark { display: grid; }
+  /* Visually hidden rather than `display: none`, so the rail's home link keeps
+     the wordmark's accessible name: the tile beside it is aria-hidden, and
+     removing both left a link with no name at all. Same technique as `.sr-only`. */
+  .sidebar .brand-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
   .sidebar .nav-item span,
   .sidebar .userchip-text,
   .sidebar .nav-count { display: none; }
@@ -6335,15 +6388,10 @@ input:disabled + .premium-slider {
 .auth-icon-danger { background: var(--danger-tint); color: var(--danger); }
 .auth-icon-warn { background: var(--warn-tint); color: var(--warn); }
 
-.auth-spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid var(--rule);
-  border-top-color: var(--brand);
-  border-radius: var(--r-full);
-  animation: authSpin 0.8s linear infinite;
-}
-@keyframes authSpin { to { transform: rotate(360deg); } }
+/* `.auth-spinner` and its `authSpin` keyframe are gone. Their only consumer was
+   the OAuth callback's full-page wait, which now shows the brand loader
+   (`BrandMark motion="loader"`, docs/features/brand-motion.md). A rule kept for
+   nobody is how a stylesheet grows a second, stale vocabulary. */
 
 /* "OR" rule between the provider buttons and the email form. */
 .auth-divider {
@@ -6591,7 +6639,6 @@ input:disabled + .premium-slider {
    reads as flicker to anyone sensitive to motion. */
 @media (prefers-reduced-motion: reduce) {
   .auth { animation: none; }
-  .auth-spinner { animation-duration: 2s; }
   .auth-strength-fill { transition: none; }
 }
 
@@ -7273,17 +7320,10 @@ input:disabled + .premium-slider {
   margin: 0;
 }
 
-/* The wordmark. The lettering lives on this span rather than on `.err-mark`
-   itself, because `.brand-mark` beside it must NOT inherit the uppercase
-   tracking — it is a badge with its own type, shared with the app shell. */
-.err-mark-text {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 0.8125rem;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--brand-primary);
-}
+/* The wordmark, a little larger than in the shell's chrome because it is often
+   the only thing on screen that says whose page this is. Its colour is the
+   shared `--brand-wordmark`, as everywhere else. */
+.err-mark .wordmark { height: 20px; }
 
 /* A chip, not a line of small caps. It gives the column a second anchor point
    so the headline is not the only thing holding the left edge. */
@@ -7425,14 +7465,11 @@ input:disabled + .premium-slider {
 }
 .err[data-error-weight='immersive'] .err-copy { gap: var(--s4); }
 
-/* The wordmark uses --brand-primary at the default weight, which reads as the
-   product's green inside the shell. At immersive weight the mark stands alone
-   on the page background, and coloured text on a near-black (or near-white)
-   field reads as an accent rather than as a name. --ink is the primary text
-   colour in both themes (near-white in dark, near-black in light), which is
-   what the user brief asks for. The medium weight keeps --brand-primary, since
-   it sits inside a shell that already carries the green identity. */
-.err[data-error-weight='immersive'] .err-mark-text { color: var(--ink); }
+/* No immersive override for the wordmark. It used to be an uppercase line of
+   text recoloured to `--ink` here, because green TEXT on the page background
+   read as an accent rather than a name. It is now the logo, and a logo is not
+   recoloured per screen: `--brand-wordmark` already gives it Forest on light
+   and white on dark. */
 
 /* ── Immersive wash tuning ──
    The base wash (.err::before) is sized and positioned for the default weight.
