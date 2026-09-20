@@ -184,7 +184,9 @@ account can be used. This is not a step to defer.
       what the bucket actually retains. All four or none — a half-configured
       destination is refused rather than silently skipped.
       Full procedure, including the bucket's lifecycle rule and Object Lock
-      settings, the three scoped keys, and why no key may have `deleteFiles`:
+      settings, and the credential decision recorded in §4 — production
+      deliberately uses one highly privileged key rather than the three scoped
+      ones, and `b2-audit` reports that without ever passing it:
       [`offsite-backups.md`](offsite-backups.md) §11.
       Do not skip this because everything else in this section passed.
 - [ ] **Spending caps set on the B2 account, before the first upload.** A new
@@ -389,8 +391,10 @@ admits its edges:
 - **Off-host backup automation.** Shipped, and verified against the real
   Backblaze account on 2026-09-14: upload, download-verify, Object Lock, the
   lifecycle rule, and a restore from the off-site copy. What remains a human step
-  is the key scoping — the account currently holds one key with every capability
-  (see §6) — and the spending caps.
+  is the spending caps. The credential is deliberately highly privileged — an
+  owner decision recorded in `offsite-backups.md` §4 — so `bin/b2-audit.mjs`
+  reports `least privilege : NOT SATISFIED` and exits 3 rather than 0. That is
+  the expected result here, not a failure to fix; treat exit 1 as the failure.
 - **Backup failure alerting.** Shipped at both levels, which an earlier revision
   of this list got wrong by claiming `OnFailure=` was missing. It is not:
   `wevolunteer-backup.service` carries
