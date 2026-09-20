@@ -4,9 +4,109 @@
 **Superseded:** 2026-09-06 — the work of every branch below reached `main`.
 **Corrected and closed:** 2026-09-09 at the release freeze.
 **Completed:** 2026-09-13 — the last branch holding unmerged work was carried to
-`main`. See the first section; that is the current record. The 2026-09-09
-section follows it; the 2026-09-06 header claimed the branches had been *deleted* and that
-`main` was the only ref, and that is not true of this clone.
+`main`. The 2026-09-09 section follows it; the 2026-09-06 header claimed the
+branches had been *deleted* and that `main` was the only ref, and that was not
+true of this clone at the time.
+**Finalised:** 2026-09-20 — the two brand branches merged, every surviving ref
+audited by content, and `main` left as the only branch. **That pass is the
+current record and it is the section immediately below.**
+
+---
+
+## 2026-09-20 — finalisation
+
+### The branch matrix, recomputed rather than trusted
+
+`git fetch --all --prune` first, then re-read. What existed:
+
+| Ref | Unique commits vs `main` | Outcome |
+|---|---|---|
+| `feature/checkmark-w-identity` | 2 | **Merged** — contained in `feature/brand-motion` |
+| `feature/brand-motion` | 5 (incl. the 2 above) | **Merged** into `main` at `6eb15bf` |
+| `origin/main` | 0 ahead, `main` 50 ahead | push pending |
+| worktree `…/c42d7a09-…/verify-wt` | — | Stale: the directory no longer exists and its commit `e0531ff` is an ancestor of `main` |
+
+The three `claude/*` branches named in the task list — `production-architecture-89e97f`,
+`owner-center-certificate-upgrade-7eef59`, `perf-scaling-ad3613` — **do not exist**,
+locally or on the remote. The 2026-09-13 and 2026-09-09 sections below record them
+as merged and deleted. That claim was re-verified here by content rather than
+accepted, using the backup tags that pin each pre-deletion tip.
+
+### Verifying deleted branches by content, not by commit identity
+
+`git log main..<tag>` reports commits for refs whose work is already present,
+because `main`'s history diverged — the cherry false-positive this repository has
+been bitten by before. The reliable question is whether any FILE exists in the tag
+that `main` lacks:
+
+| Backup tag | Files in the tag but not in `main` | Verdict |
+|---|---|---|
+| `backup/trunk-security-port-before-delete-20260916` | none | superseded |
+| `backup/pre-delete-fix-trunk-security-port-integration-20260919` | none (0 commits, 0 files) | superseded |
+| `backup/pre-delete-release-candidate-20260917` | `bin/backup-upload.mjs`, `bin/lib/r2-upload.{mjs,test.mjs}` | **intentionally removed** on 2026-09-13 with the move to B2 |
+| `backup/pre-integration/main` | `CertificateModal`, `LegalUpdateModal`, `LocationDisplay.jsx` | July-era files, **refactored** into `CertificateDocument`/`CertificateShareDialog`, `legal/LegalAcceptanceModal`/`LegalUpdateNotice`, `location/LocationCard` |
+| `backup/main-pre-consolidation-2026-07-31` | `CertificateModal.jsx` | same refactor |
+
+Spot-checked further on the only tag with functional code: `trunk-security-port`
+adds nine files against the merge base, and each is already in `main` —
+`server/apiCacheIsolation.test.js` present, the `no-store` middleware at
+`server/app.js:267`, the nginx change comments-only, and `main`'s copy of the
+`$0 infrastructure` audit is a **superset** (767 lines against 749) carrying a
+status note the branch version does not have.
+
+`LocationDisplay.css` survives without `LocationDisplay.jsx` and is **not** dead:
+five components import it and three tests assert against it. The stylesheet
+outlived the component whose name it carries.
+
+### The three former `claude/*` branches, checked by artifact
+
+Commit ancestry proves nothing here — work was cherry-picked and renumbered, so
+hashes and even FILENAMES differ. Each branch was therefore checked against the
+artifacts it was supposed to have contributed.
+
+| Former branch | Pinned by | Verdict |
+|---|---|---|
+| `claude/wevolunteer-perf-scaling-ad3613` | `preintegration/perf`, `preintegration/round2-perf` | **ALL USEFUL WORK PRESENT** |
+| `claude/wevolunteer-production-architecture-89e97f` | `backup/pre-delete-release-candidate-20260917` | **ALL USEFUL WORK PRESENT** |
+| `claude/owner-center-certificate-upgrade-7eef59` | same | **ALL USEFUL WORK PRESENT** |
+
+**The one that looked missing, and was not.** The perf tags carry
+`server/migrations/061_scheduler_leases.js`, and `main` has no migration 061 by
+that name — its 061 is `061_resync_unaccepted_legal_hashes_again.js`. The
+migration was **renumbered to `065_scheduler_leases.js`** on integration. Its DDL
+is identical; `server/schedulerLease.js`, `schedulerLease.test.js`, the
+`postgresSchema.js` entry, and the call sites in `server.js:241` and
+`workers/retentionWorker.js:510` are all present, and 17 tests pass. A
+filename-only check would have reported a missing migration; a content check
+reports the truth.
+
+Artifacts confirmed for the other two: `OwnerCenter.jsx`, `ownerRoutes.js`,
+`CertificateDocument`, `CertificateShareDialog`, `CertificateVerification`,
+`CertificateView`, `certificateRoutes.js`; `productionDatabaseGuard.js`,
+`schemaSourceGuard.js`, `backup-postgres.sh`, `verify-restore-postgres.sh`,
+`scan-bundle-secrets.mjs`, and `/health`, `/live`, `/ready` in `server/app.js`.
+
+**Nothing was ported from a backup tag**, because nothing needed to be. No backup
+tag was deleted or moved.
+
+### The brand merge
+
+`feature/brand-motion` carries `feature/checkmark-w-identity` plus the motion
+system, so one merge took both. No file was touched on both sides since the merge
+base — the brand work is confined to `src/`, `public/` and `index.html`, and
+`main`'s recent commits are `bin/`, `docs/` and `server/` — so it merged clean
+rather than resolved. `backup/pre-brand-integration-20260920` pins the tip before it.
+
+The identity's drift guard was mutation-tested here rather than taken from its
+commit message. Seven mutations of `public/favicon.svg` — a path coordinate, the
+asymmetric final point, the small-size stroke, the join, the cap, the Forest hex
+and the tile radius — were **each caught** by `src/logoAssets.test.jsx`.
+
+> **An owner decision, recorded because it is easy to lose.** The integrated
+> wordmark is not the Identity Proposal's phase one; page 9 offers redrawing the W
+> to the symbol's skeleton only as a possible phase two. It ships because the owner
+> chose it separately. `docs/features/brand-identity.md`, the CHANGELOG entry and
+> `logoGeometry.js` all say so.
 
 ---
 
