@@ -247,8 +247,23 @@ with zero animations; both themes and a theme switch mid-animation; 375/390/430/
 **Verified (OS reduced motion, infinite behaviours):** `npm run a11y` passes 64/64,
 and `a11y/sweep.media.spec.js`'s "nothing animates forever under
 prefers-reduced-motion" launches Chromium with `reducedMotion: 'reduce'`, walks
-every route and asserts no element animates infinitely. That exercises the
-signature and the loader — the two infinite behaviours — on the real routes.
+every route **the route table declares** and asserts no element animates
+infinitely. That exercises the signature on its real route.
+
+**It does NOT exercise the loader on its real route**, and an earlier revision of
+this paragraph said it did. `a11y/harness/routes.mjs` derives the walk from
+`src/routes/index.jsx` — deliberately, so a route added tomorrow is swept the day
+it is added rather than the day somebody remembers the harness. `/oauth/callback`
+is **not in that table and must never be**: it is handled above the session gate
+with `/reset-password` so it still works while a stale session is in memory,
+which is what keeps account recovery working for the people who need it. A manual
+entry in the harness would reintroduce exactly the hand-maintained second list
+the derivation exists to avoid.
+
+So the loader's reduced-motion behaviour is source-verified like the one-shots,
+not swept. The route's own logic has nine passing cases in
+`src/App.authRoutes.test.jsx`; what is unswept is the rendered accessibility of
+that one transient screen.
 
 **Source-verified:** the OS block's effect on the *one-shot* behaviours (the lockup
 entrance and success), since that sweep only fails on infinite animations; its 11
