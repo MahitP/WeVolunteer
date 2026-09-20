@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import path from 'node:path';
+import { startFakeB2 } from './lib/fake-b2.mjs';
 
 /**
  * What the audit REPORTS, not just what it decides.
@@ -60,9 +61,13 @@ const goodFiles = () => ([
   { fileName: 'wevolunteer/backups/postgres/daily/2026/09/20/wevolunteer-20260920T030000Z.dump.enc', action: 'upload', fileRetention: { value: { mode: 'governance' } } },
 ]);
 
-let server; let origin; let state;
+let server; let origin; let state; let fakeS3;
 
 beforeAll(async () => {
+  /* The audit now probes the S3 API as well as the native one, because a
+     credential that authorizes against one and not the other cannot take a
+     backup. Both stand-ins are local: no test may reach backblazeb2.com. */
+  fakeS3 = await startFakeB2({ bucket: 'wevolunteer-bucket' });
   state = { capabilities: SCOPED_WRITER, restricted: true, bucket: goodBucket(), files: goodFiles() };
   server = createServer((req, res) => {
     let body = '';
@@ -94,17 +99,20 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${server.address().port}`;
 });
 
-afterAll(() => new Promise((r) => server.close(r)));
+afterAll(async () => { await new Promise((r) => server.close(r)); await fakeS3.close(); });
 
 const audit = (args = [], extraEnv = {}) => new Promise((resolve) => {
   execFile(process.execPath, [AUDIT, ...args], {
     env: {
       PATH: process.env.PATH,
       B2_NATIVE_API: origin,
-      B2_S3_ENDPOINT: 'https://s3.us-east-005.backblazeb2.com',
+      /* The fake S3 server, so the probe resolves locally. Its own credentials,
+         since it verifies SigV4 for real. */
+      B2_S3_ENDPOINT: fakeS3.env.B2_S3_ENDPOINT,
+      B2_REGION: fakeS3.env.B2_REGION,
       B2_BUCKET: 'wevolunteer-bucket',
-      B2_KEY_ID: 'not-a-real-key-id',
-      B2_APPLICATION_KEY: 'not-a-real-application-key',
+      B2_KEY_ID: fakeS3.env.B2_KEY_ID,
+      B2_APPLICATION_KEY: fakeS3.env.B2_APPLICATION_KEY,
       ...extraEnv,
     },
   }, (err, stdout, stderr) => {
@@ -197,8 +205,8 @@ describe('the owner\'s privileged credential', () => {
     state.capabilities = MASTER; state.restricted = false;
     for (const args of [[], ['--accept-privileged'], ['--accept-privileged', '--json']]) {
       const r = await audit(args);
-      expect(r.out, `args=${args}`).not.toContain('not-a-real-key-id');
-      expect(r.out, `args=${args}`).not.toContain('not-a-real-application-key');
+      expect(r.out, `args=${args}`).not.toContain(fakeS3.env.B2_KEY_ID);
+      expect(r.out, `args=${args}`).not.toContain(fakeS3.env.B2_APPLICATION_KEY);
       expect(r.out, `args=${args}`).not.toContain('tok');
     }
   });
@@ -254,5 +262,52 @@ describe('the four claims are reported separately', () => {
     expect(j.leastPrivilege).toBe(false);
     expect(j.privilegeDeviationsAccepted).toBe(true);
     expect(j.bucketConfigurationOk).toBe(true);
+  });
+});
+
+describe('a credential the S3 API will not accept', () => {
+  /**
+   * The case that made this check exist. Backblaze's account MASTER application
+   * key authorizes perfectly against the native API and is refused by the S3 API
+   * — which is the only one the backup path speaks.
+   *
+   * Measured on 2026-09-20: the audit reported "authorization: VERIFIED" and
+   * exited 3 as designed, and the nightly backup then failed at its first S3 call
+   * with `403 InvalidAccessKeyId — Malformed Access Key Id`. A green
+   * authorization line for a credential that cannot take a backup is the exact
+   * false pass this file exists to prevent.
+   */
+  it('reports the credential as unusable, and does not blame the bucket', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const r = await audit(['--accept-privileged'], {
+      /* Right shape, wrong secret: the fake verifies SigV4, so this is refused
+         exactly as Backblaze refuses a master key over S3. */
+      B2_APPLICATION_KEY: 'wrong-secret-so-sigv4-fails',
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/S3 API: NOT USABLE/);
+    expect(r.out).toMatch(/s3-api-unusable/);
+    expect(r.out).toMatch(/the backup cannot run at all/);
+    /* The bucket is fine and must still be reported as fine. */
+    expect(r.out).toMatch(/bucket configuration\s+: VERIFIED/);
+    expect(r.out).toMatch(/Bucket configuration: OK/);
+  });
+
+  it('names the remedy, which is an application key rather than three scoped ones', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const r = await audit(['--accept-privileged'], { B2_APPLICATION_KEY: 'wrong-secret-so-sigv4-fails' });
+    expect(r.out).toMatch(/does not support the account MASTER application key over S3/);
+    expect(r.out).toMatch(/create an application key instead \(it may still hold every capability\)/);
+  });
+
+  it('exposes S3 usability separately in --json', async () => {
+    state.capabilities = MASTER; state.restricted = false;
+    const bad = JSON.parse((await audit(['--accept-privileged', '--json'], { B2_APPLICATION_KEY: 'wrong-secret-so-sigv4-fails' })).out);
+    expect(bad.authorizationOk).toBe(true);        // the native API accepted it
+    expect(bad.s3ApiUsable).toBe(false);           // and the one that matters did not
+    expect(bad.bucketConfigurationOk).toBe(true);  // the bucket is not at fault
+
+    const good = JSON.parse((await audit(['--accept-privileged', '--json'])).out);
+    expect(good.s3ApiUsable).toBe(true);
   });
 });

@@ -190,6 +190,32 @@ B2 application keys can be restricted to a bucket and to a name prefix. Use both
 | `wev-backup-recovery` | `listFiles`, `readFiles` | The operator's password manager **only** | Rebuilding after the host is lost |
 | `wev-drill` | `listFiles`, `readFiles`, plus `writeFiles` restricted to prefix `wevolunteer/backups/postgres/drills/` | The operator's drill machine | The weekly drill and publishing its verdict |
 
+> ### The credential must be an APPLICATION key, not the account master key — 2026-09-20
+>
+> This is a platform limitation, not a policy one, and it is invisible until the
+> first upload. **Backblaze does not support the account master application key
+> over the S3-compatible API** — and the S3 API is the only one the backup path
+> speaks. The master key authorizes against the *native* API perfectly, so every
+> capability and bucket check passes, and then the nightly run fails at its first
+> S3 call:
+>
+> ```
+> FAILED (list): GET refused: HTTP 403 InvalidAccessKeyId — Malformed Access Key Id
+> ```
+>
+> Measured on 2026-09-20 with a real master key. The two APIs take different
+> credentials; a master key's id is the 12-character account id, and the S3
+> endpoint rejects it as malformed.
+>
+> **This does not conflict with the decision below.** One privileged credential is
+> still one credential — it simply has to be created under **App Keys → Add a New
+> Application Key** rather than being the master key the account came with. It may
+> hold every capability and span every bucket if that is what is wanted.
+>
+> `bin/b2-audit.mjs` now probes both APIs, because reporting "authorization:
+> VERIFIED" for a credential that cannot take a backup is the same false pass
+> everything else here is built to avoid.
+
 > ### The owner has chosen a single privileged credential instead — 2026-09-20
 >
 > **The three-key layout above is not what production runs, and that is a

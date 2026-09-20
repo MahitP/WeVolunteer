@@ -52,7 +52,7 @@
  * Exit:    0 clean · 1 policy findings · 2 could not run
  *          3 bucket correct, credential privilege deviations ACCEPTED by the owner
  */
-import { b2ConfigFromEnv } from './lib/object-store.mjs';
+import { b2ConfigFromEnv, headObject } from './lib/object-store.mjs';
 import { auditPolicy, partitionFindings } from './lib/b2-policy.mjs';
 
 const JSON_OUT = process.argv.includes('--json');
@@ -143,6 +143,41 @@ const { findings, notes } = auditPolicy({
   role: ROLE,
 });
 
+/**
+ * Can the credential actually be used by the code that does the backup?
+ *
+ * Backblaze exposes two APIs and this tool was only exercising one of them. The
+ * native API reports capabilities and bucket settings; the ENTIRE backup path —
+ * upload, verify, fetch, drill — speaks S3. They do not accept the same
+ * credentials: Backblaze's own documentation says the account master application
+ * key "is not supported in the S3-Compatible API".
+ *
+ * Measured on 2026-09-20. A master key authorized against the native API
+ * perfectly, so this tool printed "authorization: VERIFIED" and exited 3 as
+ * designed — and the nightly backup then failed at its first S3 call with
+ * `403 InvalidAccessKeyId — Malformed Access Key Id`. A green authorization line
+ * for a credential that cannot take a backup is exactly the false pass the rest
+ * of this file exists to prevent, so authorization now means BOTH APIs.
+ *
+ * The probe is a HEAD on a key that does not exist: a 404 proves the signature
+ * was accepted, costs one free Class B call, and touches nothing.
+ */
+let s3Ok = false;
+let s3Detail = '';
+try {
+  await headObject({ config: cfg, key: `${cfg.prefix}/.audit-probe-${Date.now()}`, timeoutMs: 30_000 });
+  s3Ok = true;                       // 404 resolves to null; only a refusal throws
+} catch (err) {
+  s3Detail = err?.message ?? String(err);
+  findings.push({
+    id: 's3-api-unusable',
+    detail: `the credential authorizes against the native API but the S3 API refuses it — ${s3Detail}. `
+      + 'The whole backup path speaks S3, so nothing can be uploaded, verified, fetched or drilled with '
+      + 'this credential. Backblaze does not support the account MASTER application key over S3: create an '
+      + 'application key instead (it may still hold every capability).',
+  });
+}
+
 const { privilege, mandatory } = partitionFindings(findings);
 const leastPrivilege = privilege.length === 0;
 /* Could we actually read what we came to check? A key that authorizes but cannot
@@ -167,9 +202,10 @@ if (JSON_OUT) {
     findings,
     /* Four separate claims, never collapsed into one boolean. */
     authorizationOk,
+    s3ApiUsable: s3Ok,
     bucketAccessOk,
     intendedDesign,
-    bucketConfigurationOk: mandatory.length === 0,
+    bucketConfigurationOk: mandatory.filter((f) => f.id !== 's3-api-unusable').length === 0,
     leastPrivilege,
     privilegeDeviationsAccepted: ACCEPT_PRIVILEGED && privilege.length > 0,
     privilegeFindings: privilege,
@@ -181,9 +217,19 @@ if (JSON_OUT) {
   console.log(`key: ${(api.capabilities ?? []).length} capabilities, restricted to ${api.bucketName ?? 'EVERY BUCKET'}${api.namePrefix ? `, prefix ${api.namePrefix}` : ''}`);
   for (const n of notes) console.log(`  \u00b7 ${n.id}: ${n.detail}`);
 
-  if (mandatory.length > 0) {
-    console.log(`\n${mandatory.length} bucket/configuration finding(s) — these are not acceptable:`);
-    for (const f of mandatory) console.log(`  \u2717 ${f.id}\n      ${f.detail}`);
+  /* The S3 refusal is a credential-usability fault, not a bucket fault. Filing it
+     under "bucket configuration" would report a correctly configured bucket as
+     misconfigured and send an operator to change settings that are already right. */
+  const bucketFindings = mandatory.filter((f) => f.id !== 's3-api-unusable');
+  const s3Finding = mandatory.find((f) => f.id === 's3-api-unusable');
+
+  if (s3Finding) {
+    console.log('\n1 credential-usability finding — the backup cannot run at all:');
+    console.log(`  \u2717 ${s3Finding.id}\n      ${s3Finding.detail}`);
+  }
+  if (bucketFindings.length > 0) {
+    console.log(`\n${bucketFindings.length} bucket/configuration finding(s) — these are not acceptable:`);
+    for (const f of bucketFindings) console.log(`  \u2717 ${f.id}\n      ${f.detail}`);
   } else {
     console.log('\nBucket configuration: OK (private, Object Lock, lifecycle, prefix).');
   }
@@ -197,7 +243,8 @@ if (JSON_OUT) {
   }
 
   console.log('\n--------------------------------------------------------------');
-  console.log(`  1. authorization     : ${authorizationOk ? 'VERIFIED (Backblaze accepted the credential)' : 'NOT VERIFIED'}`);
+  console.log(`  1. authorization     : ${authorizationOk ? 'VERIFIED (native API)' : 'NOT VERIFIED'}`
+    + `${s3Ok ? ' + VERIFIED (S3 API — the path the backup uses)' : '  /  S3 API: NOT USABLE'}`);
   console.log(`  2. bucket access     : ${bucketAccessOk ? 'VERIFIED (configuration readable)' : 'NOT VERIFIED \u2014 lock and lifecycle UNCHECKED'}`);
   console.log(`  3. intended design   : ${intendedDesign}`);
   console.log(`  4. least privilege   : ${leastPrivilege ? 'SATISFIED' : 'NOT SATISFIED'}`);
@@ -206,7 +253,7 @@ if (JSON_OUT) {
       ? 'INTENTIONAL owner decision \u2014 accepted, residual risk retained'
       : 'NOT accepted \u2014 unexplained over-privilege'}`);
   }
-  console.log(`  bucket configuration : ${mandatory.length === 0 ? 'VERIFIED' : 'NOT VERIFIED'}`);
+  console.log(`  bucket configuration : ${bucketFindings.length === 0 ? 'VERIFIED' : 'NOT VERIFIED'}`);
   console.log(`  exit                 : ${exitCode}${exitCode === 3 ? '  (not a pass \u2014 accepted deviations)' : ''}`);
   console.log('--------------------------------------------------------------');
 }
