@@ -18,15 +18,42 @@ are a **lower bound**. Supabase adds round-trip latency per query on top.
 Everything the pilot will do is comfortably fast. One query has a scaling limit
 worth knowing about, and it is not the one that looks slow.
 
-| rows (users / events / slots / applications) | default browse p95 |
-|---|---|
-| 2,000 / 1,000 / 2,000 / 8,000 | **11.5 ms** |
-| 20,000 / 10,000 / 20,000 / 80,000 | **112.9 ms** |
-| 100,000 / 50,000 / 100,000 / 400,000 | **571.6 ms** |
+| rows (users / events / slots / applications) | default browse p95 (original) | **re-measured 2026-09-20** |
+|---|---|---|
+| 2,000 / 1,000 / 2,000 / 8,000 | 11.5 ms | **6.4 ms** |
+| 20,000 / 10,000 / 20,000 / 80,000 | 112.9 ms | **56.6 ms** |
+| 100,000 / 50,000 / 100,000 / 400,000 | 571.6 ms | not re-measured |
 
-Roughly linear in event count, crossing 100 ms at about **10,000 events**. The
-pilot is nowhere near that, so this is a documented ceiling rather than a
+Roughly linear in event count. The original run crossed 100 ms at about 10,000
+events; the re-measurement does not — it is **56.6 ms** there. The pilot is
+nowhere near either figure, so this remains a documented ceiling rather than a
 launch blocker.
+
+### The 2026-09-20 re-measurement, and what it does not establish
+
+Same probe, same parameters, `bin/scale-probe.mjs 20000 10000`. Both scales came
+back about **twice as fast**, consistently.
+
+**What changed is not established by this run, and the difference is not claimed
+as a code improvement.** Two candidates, and nothing here separates them:
+
+- migrations `066_event_slot_summary` and `067_search_trigram_indexes` landed
+  after the original measurement;
+- the original was taken on different hardware.
+
+Re-running the original tree on this machine would settle it. Until somebody
+does, these are *a fresh measurement on this machine*, not evidence that the
+query got faster.
+
+**The plan also changed, and in the direction the section below does not
+predict.** "No index is warranted" records that at 10,000 events the real query's
+plan contained no sequential scans. It now contains three — `slots` (20,000
+rows), `events` (10,000) and `organizations` (500) — while being half the
+latency. That is coherent rather than alarming: the cost is the unfiltered fold,
+the planner is choosing a scan over an index for a fold that touches the whole
+table anyway, and it is choosing correctly. The section's conclusion still holds
+— an index does not make a full aggregate cheaper — but its supporting sentence
+about the plan is now false and is corrected here rather than left to mislead.
 
 ## Why measuring this correctly is not obvious
 
@@ -54,8 +81,11 @@ measures both shapes side by side so this stays visible.
 
 ## No index is warranted
 
-At 10,000 events the plan for the real query contains **no sequential scans** —
-it is already using indexes. The cost is the unfiltered fold itself, and an
+At 10,000 events the plan for the real query contained **no sequential scans**
+when this was written — it was already using indexes. **That is no longer true**
+(see the 2026-09-20 re-measurement above): the plan now scans `slots`, `events`
+and `organizations`, and is twice as fast. The conclusion below is unaffected,
+because it never rested on the scan count. The cost is the unfiltered fold itself, and an
 index cannot make a full aggregate cheaper. Adding one here would be
 speculative, would slow every write to `events` and `slots`, and would not move
 the number.
