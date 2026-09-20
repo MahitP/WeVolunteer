@@ -442,7 +442,7 @@ expensive — 17 and 30 in particular.
 | 7 | Create Supabase project | HUMAN | **Leave the database empty** — do not run the baseline migration |
 | 8 | Create Upstash Redis database | HUMAN | Note the 500K commands/month ceiling |
 | 9 | Create the email account, verify sending subdomain | HUMAN | **Brevo recommended** (300/day vs Resend's 100) — see the cost audit. `mail.wevolunteers.org`; DKIM/SPF/DMARC as issued |
-| 10 | Create B2 bucket + three scoped keys, and **set the spending caps first** | HUMAN | See [`offsite-backups.md`](offsite-backups.md) §4 and §10; no key gets `deleteFiles` |
+| 10 | Create B2 bucket + its credential, and **set the spending caps first** | HUMAN | See [`offsite-backups.md`](offsite-backups.md) §4 and §10. Production deliberately uses ONE highly privileged key, not the three scoped ones — an owner decision, with the residual risk recorded in §4 |
 | 11 | Generate the backup keypair **off the server** | HUMAN | Upload only the certificate; keep the private key elsewhere |
 | 12 | Write `/etc/wevolunteer/wevolunteer.env` (0600, owned by `wev`) | HUMAN | Template in §4 above |
 | 13 | Obtain the production DB fingerprint | BOTH | `node bin/db-fingerprint.mjs`, then set it in every **other** environment |
