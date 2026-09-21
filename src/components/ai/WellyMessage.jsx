@@ -84,22 +84,53 @@ const INLINE = [
   { name: 'strong', re: /\*\*(\S(?:[^*\n]*\S)?)\*\*/ },
   { name: 'em', re: /\*(\S(?:[^*\n]*\S)?)\*/ },
   { name: 'em', re: /(?<![\w\\_])_(?!_)(\S(?:[^_\n]*\S)?)_(?!_|\w)/ },
-  { name: 'link', re: /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/ },
-  { name: 'url', re: /(?<![("[])\b(https?:\/\/[^\s<>)\]]+)/ },
 ];
 
-/** A link Welly produced is still a link to somewhere we did not choose. */
-function SafeLink({ href, children }) {
-  const external = !href.startsWith(window.location.origin);
-  return (
-    <a
-      href={href}
-      {...(external ? { target: '_blank', rel: 'noopener noreferrer nofollow' } : {})}
-    >
-      {children}
-    </a>
-  );
-}
+/**
+ * ── Why there is no link pattern here ──
+ *
+ * This renderer used to turn `[text](https://…)` and bare URLs into anchors,
+ * and that was the whole of a phishing vector aimed at minors.
+ *
+ * Welly never legitimately emits a link. Verified three ways rather than
+ * assumed: no answer-producing source in `src/ai/` contains an `https://`
+ * literal; `isUsableReply` REJECTS any model reply that `containsLink` matches
+ * (`prompts/welly.js`), so a link is already a disqualifying property of
+ * generated text; and this component has exactly one consumer, the Welly
+ * transcript.
+ *
+ * So every anchor this renderer could ever draw came from user-authored content
+ * interpolated into one of Welly's own deterministic sentences — an organizer's
+ * event title reaching `summarise('event_details')` in `assistant.js`, and the
+ * same for shift names, waitlist titles and the rest.
+ *
+ * `plainValue` is the function that makes such a value safe to speak in Welly's
+ * voice, and its comment delegates exactly this concern: "This is not
+ * sanitisation and must not become it — `containsLink` in `prompts/welly.js` is
+ * what stops the model turning any of it into somewhere to go." That delegation
+ * was broken. `containsLink` runs inside `isUsableReply`, `isUsableReply` runs
+ * only on model output, and a deterministic sentence never passes through
+ * either. An event titled
+ *
+ *     Food Drive [claim your hours here](https://evil.example/phish)
+ *
+ * — 62 characters, and titles are free text to 200 with no character rules —
+ * rendered as a live external anchor inside the assistant the product tells
+ * minors to trust.
+ *
+ * `prompts/welly.js` states the threat model exactly: "a link is the single
+ * most valuable thing an attacker can get Welly to say — more valuable than a
+ * false fact, because it moves the reader somewhere the platform no longer
+ * protects them."
+ *
+ * Removing the patterns is the fix rather than escaping them, because there is
+ * nothing legitimate to escape. Link syntax now renders as the literal
+ * characters the author typed, which is both inert and visible — a reader sees
+ * the brackets and the address rather than a friendly label over a hidden
+ * destination. If Welly is ever given a real reason to point somewhere, it
+ * should do it through a card in `AssistantCard`, where the destination is
+ * chosen by this application rather than parsed out of prose.
+ */
 
 /**
  * One line of text into an array of nodes.
@@ -135,8 +166,6 @@ function parseInline(text, keyPrefix) {
     if (name === 'code') out.push(<code key={key}>{m[1]}</code>);
     else if (name === 'strong') out.push(<strong key={key}>{m[1]}</strong>);
     else if (name === 'em') out.push(<em key={key}>{m[1]}</em>);
-    else if (name === 'link') out.push(<SafeLink key={key} href={m[2]}>{m[1]}</SafeLink>);
-    else if (name === 'url') out.push(<SafeLink key={key} href={m[1]}>{m[1]}</SafeLink>);
 
     rest = rest.slice(m.index + m[0].length);
   }

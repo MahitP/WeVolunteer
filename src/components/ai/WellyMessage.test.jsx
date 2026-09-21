@@ -94,16 +94,37 @@ describe('WellyMessage inline formatting', () => {
     expect(el.textContent).toBe('Run a * b and then stop.');
   });
 
-  it('renders markdown links and bare URLs, opening external ones safely', () => {
+  it('never renders an anchor, whatever link syntax the text contains', () => {
+    /**
+     * Welly has no legitimate link to emit — `isUsableReply` rejects any model
+     * reply containing one, and no answer-producing source holds a URL literal.
+     * So an anchor here could only ever have come from user-authored content
+     * interpolated into one of Welly's deterministic sentences, which is the
+     * phishing vector this renderer used to complete. See the reasoning block
+     * beside INLINE in the component.
+     */
     const el = html('See [the guide](https://example.org/guide) or https://example.org/raw');
-    const links = [...el.querySelectorAll('a')];
-    expect(links.map(a => a.getAttribute('href')))
-      .toEqual(['https://example.org/guide', 'https://example.org/raw']);
-    expect(links[0].textContent).toBe('the guide');
-    for (const a of links) {
-      expect(a).toHaveAttribute('target', '_blank');
-      expect(a.getAttribute('rel')).toContain('noopener');
-    }
+    expect(el.querySelector('a'), 'the transcript rendered a live link').toBeNull();
+    /* Inert AND visible: the reader sees the real address rather than a
+       friendly label over a hidden destination. */
+    expect(el.textContent)
+      .toBe('See [the guide](https://example.org/guide) or https://example.org/raw');
+  });
+
+  it('renders an injected event title as inert text, brackets and all', () => {
+    /**
+     * The exact reachable payload. An organizer names an event
+     * `Food Drive [claim your hours here](https://evil.example/phish)` — 62
+     * characters against a 200-character free-text limit with no character
+     * rules — a student asks Welly about that event, and
+     * `summarise('event_details')` speaks the title in Welly's own voice.
+     */
+    const title = 'Food Drive [claim your hours here](https://evil.example/phish)';
+    const el = html(`Details for ${title}: 2 shifts available.`);
+
+    expect(el.querySelector('a'), 'an injected title became a live link').toBeNull();
+    expect(el.textContent).toContain('https://evil.example/phish');
+    expect(el.textContent).toBe(`Details for ${title}: 2 shifts available.`);
   });
 
   it('leaves snake_case identifiers alone', () => {
