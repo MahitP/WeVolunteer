@@ -209,7 +209,10 @@ function meetsCriteria(badge, stats) {
      * `criteria_value` is a whole-number percentage (90), compared against the
      * canonical recency-weighted, smoothed score rather than a raw ratio.
      *
-     * Strictly greater than, because the badge says "over 90%". And gated on
+     * Strictly greater than. The badge's description deliberately carries no
+     * percentage — see the reasoning beside its definition in
+     * `scripts/seed_badges.js`, which is where the old "at least 90%" promise
+     * was found to be unkeepable against this comparison. And gated on
      * `hasEnoughEvidence` first: a perfect record of three commitments is not
      * evidence of a habit, and awarding on it is how a badge stops meaning
      * anything.

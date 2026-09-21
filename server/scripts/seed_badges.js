@@ -155,8 +155,38 @@ export const CONFERRED_CATALOGUE = Object.freeze([
     criteria_value: 250,
   },
   {
+    /**
+     * ── Why this description carries no percentage ──
+     *
+     * It read "Turned up for at least 90% of the shifts you signed up for", and
+     * that sentence was wrong three times over against the thing that awards it
+     * (`badgeService.meetsCriteria`, `criteria_type: 'attendance_rate'`):
+     *
+     *   · "at least 90%" vs a strictly-greater-than test;
+     *   · a raw ratio vs `reliability.summarise()`, which is recency-weighted
+     *     and shrunk toward a prior of 0.85 with weight 5;
+     *   · "shifts" vs a model whose unit is the distinct EVENT.
+     *
+     * The first two compound into a promise that cannot be kept at all. The
+     * smoothing gives `(0.9n + 4.25) / (n + 5)`, which is below 0.9 for every
+     * `n`, because 4.25 < 4.5 — so a volunteer whose weighted attendance sits
+     * at exactly 90% can NEVER earn the badge that offers them 90%, at any
+     * history length. The gap narrows as `n` grows and never closes.
+     *
+     * `reliability.js` already names this: it records the description as "a
+     * promise the raw ratio behind it did not keep". That module fixed the
+     * computation — it is deliberate, it is right, and it is what the product
+     * wants, weighting recent behaviour and refusing to judge below four
+     * commitments. Only the sentence beside it was left saying the old thing.
+     *
+     * So the number goes rather than the algorithm. Any figure printed here
+     * would have to describe a smoothed, recency-weighted score, and a number
+     * that needs a paragraph to be true is worse on a badge card than no
+     * number. The threshold still lives in `criteria_value` where the evaluator
+     * reads it.
+     */
     name: 'Reliable Volunteer',
-    description: 'Turned up for at least 90% of the shifts you signed up for.',
+    description: 'Turned up for almost every event you signed up for.',
     icon: '⭐',
     category: 'Participation',
     criteria_type: 'attendance_rate',

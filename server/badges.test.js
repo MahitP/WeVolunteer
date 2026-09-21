@@ -147,6 +147,34 @@ describe('the criteria vocabulary has one definition', () => {
       .filter(t => !BADGE_CRITERIA_TYPES.includes(t));
     expect(unknown).toEqual([]);
   });
+
+  /**
+   * ── Defect: a badge promising a threshold its evaluator cannot reach ──
+   *
+   * "Reliable Volunteer" read "Turned up for at least 90% of the shifts you
+   * signed up for" while `meetsCriteria` tested
+   * `reliability.score * 100 > criteria_value` — a strictly-greater-than
+   * comparison against a recency-weighted score shrunk toward a prior of 0.85
+   * with weight 5, over distinct EVENTS rather than shifts.
+   *
+   * Those compound into a promise that cannot be kept at any history length:
+   * the smoothing gives `(0.9n + 4.25) / (n + 5)`, below 0.9 for every `n`
+   * because 4.25 < 4.5. A volunteer attending exactly 90% of what they sign up
+   * for reads the offer, meets it, and is never awarded.
+   *
+   * The algorithm is right and stays. The sentence beside it carries no
+   * percentage, and this is what stops one being put back.
+   */
+  it('states no percentage on a badge judged by the smoothed score', async () => {
+    const row = await db.prepare(
+      "SELECT name, description FROM badges WHERE criteria_type = 'attendance_rate' AND active = 1"
+    ).get();
+    expect(row, 'no active attendance_rate badge to check').toBeTruthy();
+    expect(
+      row.description,
+      `"${row.name}" states a percentage its smoothed evaluator cannot honour`,
+    ).not.toMatch(/\d\s*%|\bper ?cent/i);
+  });
 });
 
 // ── Defect: awarding, and the UNIQUE(user_id, badge_id) constraint ─────────

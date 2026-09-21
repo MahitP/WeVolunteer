@@ -19,6 +19,12 @@ import { PRIOR_RATE, PRIOR_WEIGHT, smoothedShowUpRate } from './weighting.js';
  * description — "turned up for at least 90% of the shifts you signed up for" —
  * was a promise the raw ratio behind it did not keep.
  *
+ * That description outlived this fix by some months, and was a promise THIS
+ * module could not keep either: shrinking toward a prior of 0.85 puts a steady
+ * 90% attender permanently below a strictly-greater-than 90% test. It now
+ * carries no percentage; the reasoning is beside the definition in
+ * `scripts/seed_badges.js`.
+ *
  * Everything now derives from `summarise()` below.
  *
  * ── The problem a plain percentage cannot solve ──
