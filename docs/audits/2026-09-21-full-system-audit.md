@@ -223,7 +223,7 @@ tests) pass.
 ### 1.2 Certificates — the holder cannot open a certificate the world can verify
 
 **Grade: Verified. Severity: High. Category: C (product inconsistency).
-Status: fix pending.**
+Status: FIXED — `d3175e3`.**
 
 `getCertificateForOwner` excludes a cancelled event
 (`server/certificates.js:334`, `AND e.status <> 'cancelled'`), so both
@@ -252,6 +252,14 @@ person who holds it while the platform keeps vouching for it to everyone else.
 The certificate **list** excluding cancelled events is separately reasoned and
 correct — the list mirrors the transcript. The viewer is a different surface,
 reached with a code already in hand.
+
+**Fix.** The viewer's exclusion is removed. Showing the document silently would
+have traded one contradiction for the opposite one — 6 hours on the paper, 0 on
+the profile, no explanation — so the route returns `eventCancelled` and the
+viewer says the hours are not counted in the service totals, `no-print`, because
+the certificate is not void. Mutation-checked: restoring the clause fails the
+three owner-facing cases while the public-verify and list-exclusion cases keep
+passing, which is exactly the scoping claimed.
 
 ---
 
@@ -296,7 +304,7 @@ imply. Scheduled as its own piece of work with its own tests.
 ### 1.4 Reliable Volunteer — the badge promises a threshold it can never award
 
 **Grade: Verified (by algebra over the implemented formula). Severity: High.
-Category: C. Status: fix pending.**
+Category: C. Status: FIXED — `c2f5fff`.**
 
 The badge reads *"Turned up for at least 90% of the shifts you signed up for"*
 (`server/scripts/seed_badges.js:159`). It is awarded on
@@ -318,8 +326,14 @@ the repository does not contain.
 **The algorithm itself matches the intended product and should not change.** It
 weights recent behaviour, decays old no-shows, permits recovery, and refuses to
 judge below four commitments (`MIN_EVIDENCE`, `server/reliability.js:79`) — every
-property the brief asks for. It is the promise printed next to it that is
-wrong, and the fix belongs in the description.
+property the brief asks for. It is the promise printed next to it that is wrong.
+
+**Fix.** The number goes rather than the algorithm; the description now carries
+none, because any figure would have to describe a smoothed, recency-weighted
+score and a number needing a paragraph to be true is worse on a badge card than
+no number. `reconcileBadgeCatalogue` matches by name and rewrites descriptions
+on boot, so existing databases converge. A guard refuses a percentage on any
+active `attendance_rate` badge; mutation-checked.
 
 ---
 
@@ -421,3 +435,64 @@ default target of every privileged command. The comment was describing the
 opposite of the current, safer arrangement on the most dangerous object in the
 repository. Corrected, with the removal's reasoning preserved.
 
+
+---
+
+## Phase 1 — verification status
+
+### Regression baseline
+
+| Run | Result |
+|---|---|
+| Phase 0 baseline | 633 files, **10,742 passed**, 0 failed, 176 skipped |
+| After the five fixes | 633 files, **10,753 passed**, 0 failed, 176 skipped |
+
+The delta is exactly the net new tests: +2 renderer (one replaced, so +1 net),
++1 route, +5 certificate viewer (server), +3 certificate viewer (client),
++1 badge guard — eleven. `npm run lint` is clean.
+
+**One flake observed, not yet identified.** An intermediate full run reported
+`1 failed | 10,743 passed` and the immediately following run was clean at the
+expected count. The output was truncated before the failing name was captured,
+so the test is unknown. This is recorded rather than dismissed: the known
+mechanism in this repository is `db.js` opening its connection at module scope,
+which makes suites that do not set `WEV_DB_PATH` share a real file. Every future
+run in this engagement captures full output.
+
+### Fixed so far
+
+| Commit | Finding |
+|---|---|
+| `02480a6` | Welly could speak a phishing link in its own voice |
+| `b4a1e11` | A Student Organizer was shown check-in and then refused it |
+| `d3175e3` | The holder could not open a certificate the world could verify |
+| `c2f5fff` | Reliable Volunteer promised a threshold it can never award |
+| `3346317` | The ledger, and a stale comment on the development database path |
+
+### Promoted to Verified, fix designed but not yet written
+
+**N-1 and N-2 share one root cause.** Confirmed by reading the chain:
+`FRIEND_SIGNED_UP` and `ORGANIZATION_EVENT_POSTED`
+(`server/services/notificationContent.js:1204-1218`) emit `link: event:<id>`;
+`src/views/Notifications.jsx:93` routes that to `openEventById`
+(`src/App.jsx:1299`), which resolves a **string** id only against `events` or
+`seenEvents`. `events` is fetched with `{mine: 'true'}` for anybody without
+`event.moderate` (`src/session/SessionProvider.jsx:100`). Both notifications are
+*by definition* about an event the recipient is not part of — "There may still
+be places", "is open for applications" — so from a cold load the answer is
+**"That event is no longer available."** for a live, open event. The email CTA
+`${APP_URL}/?event=<id>` (`server/workers/notificationWorker.js:396`) hits the
+same resolution and renders nothing at all.
+
+The fix is not a one-liner, which is why it is scoped rather than rushed:
+
+- `GET /api/events/:id` **cannot** be used. It is staff-only and answers 403 to
+  a student (`server/routes/eventRoutes.js:751-755`).
+- `parseEventFilters` (`server/eventQuery.js:76`) has no `id` filter, so the
+  browse list cannot be narrowed to one event either.
+
+So the shape is: add an `id` filter to the browse query — which keeps the
+existing server-side visibility filtering, including withholding arrival
+instructions from non-attendees — and have `openEventById` ask the server before
+it says an event is gone. That repairs the in-app path and the email path
+together.
