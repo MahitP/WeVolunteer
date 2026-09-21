@@ -39,15 +39,25 @@ const __dirname = path.dirname(__filename);
  * A relative WEV_DB_PATH means a different file from every working directory,
  * and SQLite resolves it silently against `process.cwd()` — so the mistake
  * produces a working server attached to the wrong database rather than an error.
- * This deployment has a live instance of that trap: `.env` carries
- * `WEV_DB_PATH=../pilot.db`, which is correct because `npm run dev:server` runs
- * with the workspace directory as its cwd. Run the same server from the
- * repository root and `../pilot.db` resolves one level higher, onto a stale
- * database that still has fourteen accounts and fifteen migrations — plausible
+ * This deployment had a live instance of that trap: `.env` carried
+ * `WEV_DB_PATH=../pilot.db`, which was correct only because `npm run dev:server`
+ * runs with the workspace directory as its cwd. Run the same server from the
+ * repository root and `../pilot.db` resolved one level higher, onto a stale
+ * database that still had fourteen accounts and fifteen migrations — plausible
  * enough to work, wrong enough to lose every write made against it.
  *
- * So: resolve explicitly, print the absolute result at startup, and refuse the
- * ambiguous form outright where being wrong is unrecoverable.
+ * That setting has since been removed from `.env`, for a second and larger
+ * reason recorded there: every `bin/` script reads the same file, so the
+ * relative path also made the real pilot database — minors' service records —
+ * the default target of every privileged command, guarded only by whatever
+ * check each command had thought to add for itself. Unset, both this file and
+ * `bin/resolveDb.mjs` fall back to `server/wevolunteer.db`, which is
+ * disposable; a privileged command names its database explicitly.
+ *
+ * The resolution logic below stays regardless, because the trap belongs to the
+ * relative form rather than to that one value: resolve explicitly, print the
+ * absolute result at startup, and refuse the ambiguous form outright where
+ * being wrong is unrecoverable.
  */
 const rawDbPath = process.env.WEV_DB_PATH;
 
