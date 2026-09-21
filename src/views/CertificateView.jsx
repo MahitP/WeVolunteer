@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, Printer, Share2, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Download, FileText, Printer, Share2, ShieldCheck, Info } from 'lucide-react';
 import { ApiError, api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
@@ -215,6 +215,29 @@ export default function CertificateView({ currentUser, addToast }) {
           Anyone can check it at <span className="tnum">{certificate.verifyLabel}</span>.
         </span>
       </p>
+
+      {/**
+        * Both halves are true at once, and saying only one of them is how this
+        * screen used to be wrong in the opposite direction — it answered "no
+        * such certificate" to the student while the public check answered
+        * `valid` to anyone else.
+        *
+        * `no-print`, like the note above it: the printed artefact is the
+        * certificate, and the certificate is not void. This is the context the
+        * holder needs for the difference they will otherwise notice on their
+        * own profile and have no explanation for.
+        */}
+      {certificate.eventCancelled && (
+        <p className="small dim row no-print certificate-note">
+          <Info size={14} aria-hidden="true" />
+          <span>
+            This event was called off after your hours were confirmed. The
+            certificate stays valid and anyone can still check it — but the
+            hours are not counted in your service totals, so you will not find
+            them on your transcript.
+          </span>
+        </p>
+      )}
 
       {sharing && (
         <CertificateShareDialog

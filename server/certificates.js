@@ -292,9 +292,33 @@ export async function backfillCertificates(db) {
  * cannot. Every function in this file already takes `db`; the route that calls
  * this one holds the global only to hand it on.
  *
- * Returns `null` for: no such code, somebody else's code, an event that was
- * called off, and a certificate whose attendance rows have gone. The caller
- * answers all four identically.
+ * Returns `null` for: no such code, somebody else's code, and a certificate
+ * whose attendance rows have gone. The caller answers all three identically.
+ *
+ * ── Why a called-off event is NOT among them ──
+ *
+ * It used to be, and that made this the one surface that took a certificate
+ * away from the person holding it. `getOrCreateCertificateCode` above never
+ * revokes — "There is no option to void a certificate" is a sentence in a
+ * hash-pinned policy — and the public verification endpoint has no such
+ * exclusion either, so `GET /api/certificates/verify/:code` answered
+ * `{valid: true}` with the hours while this function answered 404 to the
+ * student named on the document.
+ *
+ * Reachable, and not hypothetically: cancelling is refused once an event is
+ * `completed`, so the door is an event with credited attendance that never got
+ * there — one volunteer finalized, others outstanding, status still `open`.
+ * Viewing the certificates list mints the code; the organizer then cancels.
+ * The certificate now exists, verifies to a college, and 404s for its owner.
+ *
+ * The LIST keeping its exclusion is correct and is a different question: the
+ * list mirrors the transcript, and a called-off event is not part of a service
+ * record. This is the viewer, reached with a code already in hand.
+ *
+ * `e.status` is returned so the caller can say so. The hours on the paper are
+ * real and the platform still stands behind them; they are simply not counted
+ * in the totals, and a viewer that showed the document without that sentence
+ * would trade one contradiction for another.
  */
 export async function getCertificateForOwner(db, code, userId) {
   const cert = await db.prepare(
@@ -304,8 +328,8 @@ export async function getCertificateForOwner(db, code, userId) {
 
   /**
    * The same aggregate `GET /api/certificates` computes for the whole list,
-   * narrowed to one event — same joins, same `present = 1`, same exclusion of a
-   * cancelled event.
+   * narrowed to one event — same joins, same `present = 1`. It deliberately
+   * does NOT carry that list's exclusion of a cancelled event; see the header.
    *
    * Written out rather than shared with that handler because the two differ in
    * exactly the way that matters (one groups over every event, one is scoped to
@@ -330,7 +354,7 @@ export async function getCertificateForOwner(db, code, userId) {
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
       LEFT JOIN organizations o ON o.id = e.organization_id
-     WHERE at.user_id = ? AND at.event_id = ? AND at.present = 1 AND e.status <> 'cancelled'
+     WHERE at.user_id = ? AND at.event_id = ? AND at.present = 1
      GROUP BY e.id, u.id, o.id
   `).get(userId, cert.event_id);
   if (!row) return null;

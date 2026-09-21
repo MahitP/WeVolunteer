@@ -110,6 +110,50 @@ describe('the document', () => {
     expect(within(document_).queryByRole('button')).toBeNull();
     expect(within(document_).queryByRole('link')).toBeNull();
   });
+
+  /**
+   * ── The event that was called off after the hours were confirmed ──
+   *
+   * Two things are true at once, and this page used to say neither. It carried
+   * the certificate LIST's exclusion of a cancelled event, so the student named
+   * on the document got "no such certificate" while the public verification
+   * endpoint went on answering `valid` with the hours to anyone holding the
+   * code. "There is no option to void a certificate" is a sentence in a
+   * hash-pinned policy.
+   *
+   * So the document is shown — and the difference the reader will otherwise
+   * notice on their own profile is explained rather than left to them.
+   */
+  it('explains a called-off event instead of hiding the certificate', async () => {
+    vi.spyOn(api, 'fetchCertificate').mockResolvedValue(certificate({ eventCancelled: true }));
+    renderViewer();
+    await screen.findByText('Certificate of Community Service');
+
+    expect(screen.getByText(/not counted in your service totals/i)).toBeInTheDocument();
+  });
+
+  it('says nothing of the sort for an ordinary certificate', async () => {
+    /* The control. Without it this passes just as happily against a page that
+       shows the notice to everybody. */
+    vi.spyOn(api, 'fetchCertificate').mockResolvedValue(certificate());
+    renderViewer();
+    await screen.findByText('Certificate of Community Service');
+
+    expect(screen.queryByText(/not counted in your service totals/i)).toBeNull();
+  });
+
+  it('keeps the explanation off the paper', async () => {
+    /* It is context for the holder, not a mark on the document — the
+       certificate is not void. Same rule as the chrome above. */
+    vi.spyOn(api, 'fetchCertificate').mockResolvedValue(certificate({ eventCancelled: true }));
+    const { container } = renderViewer();
+    await screen.findByText('Certificate of Community Service');
+
+    const document_ = container.querySelector('.certificate');
+    expect(within(document_).queryByText(/not counted in your service totals/i)).toBeNull();
+    expect(screen.getByText(/not counted in your service totals/i).closest('.no-print'))
+      .not.toBeNull();
+  });
 });
 
 describe('when it cannot be opened', () => {

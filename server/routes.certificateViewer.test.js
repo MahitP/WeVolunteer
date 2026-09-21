@@ -206,4 +206,82 @@ describe('one certificate, for the person who earned it', () => {
       expect(res.body.grade).toBeUndefined();
     });
   });
+
+  /**
+   * ── The certificate whose event was called off afterwards ──
+   *
+   * `certificates.cancelled.test.js` pins the issuing rule: never issue for a
+   * called-off event, and never revoke one already issued — "There is no option
+   * to void a certificate" is a sentence in a hash-pinned policy, and a case in
+   * that file is named for a printout continuing to verify.
+   *
+   * This viewer was the one surface that broke it. `getCertificateForOwner`
+   * carried the certificate LIST's exclusion of a cancelled event, so the
+   * public check answered `valid` with the hours to anybody holding the code,
+   * while the student named on the document got 404 from their own application.
+   */
+  /**
+   * ── The certificate whose event was called off afterwards ──
+   *
+   * `certificates.cancelled.test.js` pins the issuing rule: never issue for a
+   * called-off event, and never revoke one already issued — "There is no option
+   * to void a certificate" is a sentence in a hash-pinned policy, and a case in
+   * that file is named for a printout continuing to verify.
+   *
+   * This viewer was the one surface that broke it. `getCertificateForOwner`
+   * carried the certificate LIST's exclusion of a cancelled event, so the
+   * public check answered `valid` with the hours to anybody holding the code,
+   * while the student named on the document got 404 from their own application.
+   *
+   * Declared LAST in the file and on the SHARED server, deliberately. Calling
+   * `startTestServer()` a second time here is refused by its own guard — db.js
+   * opens its connection at module scope, so the second instance would bind to
+   * a real database file. Cancelling mutates seed state, so nothing may run
+   * after this block.
+   */
+  describe('an event called off after the certificate was issued', () => {
+    beforeAll(async () => {
+      const list = await srv.call('GET', '/api/certificates', undefined, owner);
+      const mine = list.body.find(c => c.code === code);
+      expect(mine?.eventId, 'the certificate under test has no event').toBeTruthy();
+
+      const { db } = await import('./db.js');
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(mine.eventId);
+    }, 60000);
+
+    it('is still readable by the person named on it', async () => {
+      const res = await srv.call('GET', `/api/certificates/${code}`, undefined, owner);
+      expect(res.status, 'the holder was refused their own certificate').toBe(200);
+      expect(res.body.code).toBe(code);
+      expect(res.body.hours).toBeGreaterThan(0);
+    });
+
+    it('says so, rather than showing the document with no explanation', async () => {
+      /* The hours are real and still verify; they are simply not in the
+         student's totals. A viewer that showed one without the other would
+         trade one contradiction for the opposite one. */
+      const res = await srv.call('GET', `/api/certificates/${code}`, undefined, owner);
+      expect(res.body.eventCancelled).toBe(true);
+    });
+
+    it('is still downloadable as the same PDF', async () => {
+      const res = await srv.call('GET', `/api/certificates/${code}/pdf`, undefined, owner);
+      expect(res.status).toBe(200);
+    });
+
+    it('still verifies for a stranger holding the code, exactly as before', async () => {
+      /* The other half of the published position. Nothing here may turn into a
+         revocation by the back door. */
+      const res = await srv.call('GET', `/api/certificates/verify/${code}`);
+      expect(res.status).toBe(200);
+      expect(res.body.valid).toBe(true);
+    });
+
+    it('still keeps it off the certificates list, which mirrors the transcript', async () => {
+      /* The list's exclusion is correct and separate: a called-off event is not
+         part of a service record. Only the viewer changed. */
+      const list = await srv.call('GET', '/api/certificates', undefined, owner);
+      expect(list.body.some(c => c.code === code)).toBe(false);
+    });
+  });
 });

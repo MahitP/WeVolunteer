@@ -139,6 +139,11 @@ router.get('/api/certificates/:code', authenticateToken, async (req, res) => {
       organizerVerified: row.organizer_verified === 1,
       organizationName: row.organization_name ?? null,
       organizationSlug: row.organization_slug ?? null,
+      /* The certificate stands; the hours are not in the student's totals.
+         Both halves are true at once when an event is called off after a
+         certificate was issued, and the viewer says so. See the header of
+         `getCertificateForOwner`. */
+      eventCancelled: row.status === 'cancelled',
       volunteer: {
         name: volunteer?.name ?? null,
         grade: volunteer?.grade ?? null,
