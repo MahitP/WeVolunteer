@@ -203,7 +203,34 @@ export const APP_ROUTES = [
     requiresVerified: true,
   },
   { path: '/events/:id/edit', element: <RedirectToEvent /> },
-  { path: '/checkin/:eventId', element: <CheckInView />, requiredCap: 'attendance.mark' },
+  /**
+   * `requiredCapAny`, mirroring the endpoints this page calls.
+   *
+   * It was `requiredCap: 'attendance.mark'`, which made this route table the
+   * strictest of the three gates on one feature — and the only one that a
+   * Student Organizer failed:
+   *
+   *   button   EventModal.jsx      attendance.mark OR organization.event.manage.own
+   *   server   attendanceRoutes.js requireCapAny([attendance.mark, organization.event.manage.own])
+   *                                and requireCapAny([attendance.view, …]) on the GET
+   *   route    here                attendance.mark
+   *
+   * `STUDENT_ORGANIZER_CAPABILITIES` (server/organizationRoles.js) grants
+   * `organization.event.manage.own` and not `attendance.mark`. So a student
+   * running their own club's event was shown the Check-in button on their own
+   * event, pressed it, and got the full-screen 403 takeover — `deniedRoute`
+   * refuses before the shell is built — for an API that would have accepted
+   * them. The feature was finished; only this line kept the role it was built
+   * for out of it.
+   *
+   * Declared as `requiredCapAny` rather than by dropping the gate, for the same
+   * reason `/events/new` above is: a plain student with no grant must still be
+   * refused here.
+   */
+  {
+    path: '/checkin/:eventId', element: <CheckInView />,
+    requiredCapAny: ['attendance.mark', 'organization.event.manage.own'],
+  },
   { path: '/calendar', element: <CalendarView />, requiredCap: 'event.view' },
   { path: '/notifications', element: <Notifications /> },
   { path: '/messages', element: <Messages />, requiredCap: 'message.send' },

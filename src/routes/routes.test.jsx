@@ -99,6 +99,30 @@ describe('route table', () => {
     expect(caps.some(c => can(helper, c))).toBe(true);
     expect(caps.some(c => can({ id: 'x', role: 'student', grants: [] }, c))).toBe(false);
   });
+
+  it('opens /checkin to a Student Organizer, exactly as the server does', () => {
+    /**
+     * This route table used to be stricter than both the affordance and the
+     * API. `EventModal` shows Check-in on
+     * `attendance.mark || organization.event.manage.own`, and
+     * `attendanceRoutes.js` gates the endpoints with `requireCapAny` over the
+     * same pair — while this entry required `attendance.mark` alone.
+     *
+     * A Student Organizer holds `organization.event.manage.own` and not
+     * `attendance.mark`, so running their own club's event meant pressing a
+     * button they had been shown and receiving a full-screen 403 for a request
+     * the server would have allowed.
+     */
+    const checkin = ROUTES.find(r => r.path === '/checkin/:eventId');
+    const caps = capsOf(checkin);
+    const helper = { id: 'x', role: 'student', grants: ['organization.event.manage.own'] };
+
+    expect(caps.some(c => can(helper, c)), 'a Student Organizer is refused check-in').toBe(true);
+    /* Still gated: a student with no grant has no business here. */
+    expect(caps.some(c => can({ id: 'x', role: 'student', grants: [] }, c))).toBe(false);
+    /* And the role the page was originally written for is unaffected. */
+    expect(caps.some(c => can({ id: 'x', role: 'organizer' }, c))).toBe(true);
+  });
 });
 
 describe('withProps', () => {
