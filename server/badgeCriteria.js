@@ -70,9 +70,23 @@ export function isKnownCriteriaType(type) {
  * against a percentage. Guessing wrong produces a badge that is either trivial
  * or unearnable, and the symptom of both is silence.
  *
- * `threshold: false` means the type takes no number: `manual` is given by hand,
- * and `early_adopter` is decided by when somebody joined rather than by how
- * much they have done.
+ * `threshold: false` means the type takes no number, and `manual` is the only
+ * one: it is given by hand, and `meetsCriteria` answers `null` for it rather
+ * than comparing anything.
+ *
+ * `early_adopter` used to be marked that way too, on the reading that it is
+ * "decided by when somebody joined rather than by how much they have done".
+ * True of the QUESTION and false of the definition: the threshold is the size
+ * of the early cohort — the seeded Early Supporter carries 250 — and
+ * `badgeService.meetsCriteria` requires it to be positive, deliberately, so an
+ * un-reconciled database fails closed rather than awarding the badge to every
+ * account that evaluates.
+ *
+ * With the field hidden the form saved 0, so an administrator defining a new
+ * early-adopter badge got one that validated, saved, appeared in the catalogue
+ * and could never be earned by anybody — the second of the two outcomes named
+ * above, whose symptom is silence. `badges.test.js` now refuses any type that
+ * hides a threshold the evaluator will not award without.
  */
 export const BADGE_CRITERIA_META = Object.freeze({
   hours: {
@@ -108,9 +122,11 @@ export const BADGE_CRITERIA_META = Object.freeze({
   },
   early_adopter: {
     label: 'Early adopter',
-    threshold: false,
-    unit: null,
-    help: 'Decided by when the account joined. Takes no threshold.',
+    threshold: true,
+    unit: 'accounts',
+    help: 'Earned by the first N accounts to join, counted by signup order. '
+      + 'The threshold is the size of that group — the seeded Early Supporter '
+      + 'badge uses 250. Nobody qualifies at 0.',
   },
   manual: {
     label: 'Awarded by hand',

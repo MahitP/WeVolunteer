@@ -165,6 +165,56 @@ describe('the criteria vocabulary has one definition', () => {
    * The algorithm is right and stays. The sentence beside it carries no
    * percentage, and this is what stops one being put back.
    */
+  /**
+   * ── Defect: the form hides a threshold the evaluator insists on ──
+   *
+   * `BADGE_CRITERIA_META` marks a type `threshold: false` to mean "takes no
+   * number", and `AdminBadges` then omits the input entirely — so the
+   * definition is saved with `criteria_value` 0. That is correct for `manual`,
+   * which `meetsCriteria` answers `null` for and never awards automatically.
+   *
+   * It was wrong for `early_adopter`. The threshold IS the cohort size there —
+   * the seeded Early Supporter carries 250 — and `meetsCriteria` requires
+   * `threshold > 0`, deliberately, so that an un-reconciled database fails
+   * closed instead of awarding the badge to every account that evaluates. With
+   * the field hidden, an administrator defining a new early-adopter badge got
+   * one that validated, saved, appeared in the catalogue, and could never be
+   * earned by anybody.
+   *
+   * `badgeCriteria.js` names this outcome in its own header: guessing the unit
+   * wrong "produces a badge that is either trivial or unearnable, and the
+   * symptom of both is silence."
+   *
+   * Written against the metadata rather than against `early_adopter` alone, so
+   * a future type that hides its threshold has to answer the same question.
+   */
+  it('never hides a threshold the evaluator cannot award without', async () => {
+    const { BADGE_CRITERIA_META } = await import('./badgeCriteria.js');
+
+    /* Somebody who qualifies for everything a threshold could ask about, so a
+       `false` can only mean the missing threshold refused them. */
+    const generous = {
+      totalHours: 10000, eventsAttended: 500, eventsCreated: 500,
+      shiftsAttended: 500, streakMonths: 120, joinRank: 1,
+      completedCommitments: 500,
+      reliability: { hasEnoughEvidence: true, score: 1 },
+    };
+
+    for (const [type, meta] of Object.entries(BADGE_CRITERIA_META)) {
+      if (meta.threshold !== false) continue;
+      const verdict = badgeService.meetsCriteria(
+        { criteria_type: type, criteria_value: 0 }, generous,
+      );
+      expect(
+        verdict,
+        `"${type}" hides its threshold in the form, so it saves as 0 — and at 0 `
+        + 'the evaluator refuses somebody who qualifies for everything else. '
+        + 'Either the type needs `threshold: true`, or the evaluator must not '
+        + 'require a positive one.',
+      ).not.toBe(false);
+    }
+  });
+
   it('states no percentage on a badge judged by the smoothed score', async () => {
     const row = await db.prepare(
       "SELECT name, description FROM badges WHERE criteria_type = 'attendance_rate' AND active = 1"
