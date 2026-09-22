@@ -698,3 +698,109 @@ throughout, so the seed's own history cannot make a case pass for the wrong
 reason. Three cases pin behaviour that was already correct (the dashboard,
 `record.hoursCredited`, and the non-vacuity guard), and one pins the milestone
 decision as-is.
+
+---
+
+## Pass 5 — notification coverage, and Welly
+
+### Re-verification of the cancelled-hours fix (requested)
+
+`df4e815` touched five files, none of them a protected module. Every changed
+function was traced to its consumers: `monthlyHours` in `adminRoutes.js` is a
+separate local query, not the shared one. Behaviourally, 17 protected suites
+pass — ledger parity, backfill, certificates (×4), audit log, admin audit
+explorer, moderation audit coverage, transaction audit, retention, deleted
+account visibility, export durability and download, admin stats.
+
+Parity was additionally proven at runtime on a synthetic `:memory:` database,
+because reading is weaker evidence than running:
+
+```
+before cancellation : {"ok":true,"mismatches":[],"usersChecked":1}
+after  cancellation : {"ok":true,"mismatches":[],"usersChecked":1}
+counterfactual      : ledger=11 filteredAttendance=4 -> would MISMATCH
+```
+
+The counterfactual is the point: filtering the attendance side *would* break
+parity, which is why `verifyLedgerParity` stays raw. **No regression; no change
+made.**
+
+### 5.1 Welly sent the exact device position — **Verified defect. High. FIXED `5f5d369`**
+
+`views/BrowseEvents.jsx` rounded every coordinate to ~1.1 km before it reached
+`GET /api/events`. Welly reached the same endpoint with none:
+`WellyView.jsx:219` built `{lat, lng}` from `LocationContext`, which stores
+`position.coords` verbatim, and `assistant.js:1383` copied them into the tool
+arguments, which `tools.js:389` sends.
+
+Three authorities agree this was wrong, none of them a matter of taste:
+
+- **Privacy Policy**, "Your device location": coordinates "do reach our
+  servers, **blurred** … rounded to about a kilometre to sort a list by
+  distance".
+- **`EventModal.jsx:120`**: "the volunteer's exact position never leaves the
+  device. The browse filter sends a coordinate coarsened to about a kilometre."
+- **`api.js` on `fetchRecommendations`**: "the same 2-decimal-place centre the
+  browse filter sends — enough for 'is this nearby', not enough to place
+  somebody."
+
+`coarsen` now lives in `utils/coarsePosition.js` and is applied at the boundary.
+The exact position still never leaves the device and is still used there.
+
+### 5.2 Two privacy claims that overstated — **Verified defect. Medium. FIXED `5f5d369`**
+
+The location offer said "It stays on your device" **at the consent moment** —
+the exact sentence `WellyView.disclaimer.test.jsx` already forbids in the
+composer footer, for the reason it records: it "is the exact sentence a future
+edit would reach for".
+
+`identity_self` and `identityAnswer` said "nothing you type here is sent
+anywhere". True of inference, false of the feature: `searchTopic` keeps the
+residual words of a typed question and `tools.js` sends them as `q`.
+`WellyView.jsx:1376-1388` had already reasoned this out about this very
+sentence. The on-device claim is kept; the absolute one is gone.
+
+### 5.3 Notification dispatch — **Coverage gap, not a defect. Closed `c4b7de9`**
+
+Read both components rather than assuming. The existing `resolveEvent` and
+App-level tests do **not** protect the dispatch itself, and both components
+carry it byte-for-byte. `groupNotifications` had no tests at all and routes the
+grouped object — it preserves `link` via `{...item}`, verified.
+
+**Verified negative worth keeping:** every link the server can emit is
+`event:<id>` or `/`-prefixed. The three kinds passing `payload.link` through
+supply `/messages?conversation=…` and `/settings…`; the default arm falls back
+to `/settings`. No shape is silently ignored.
+
+### 5.4 Welly items classified, not changed
+
+| Item | Classification | Evidence |
+|---|---|---|
+| On-device inference | **Intentional, true** | No server AI route; `@wllama/wllama` in a worker behind `VITE_LOCAL_AI` |
+| Placeholder events ("Community Service Event", "Community Center", 10 spots) | **Verified fixed** | No production default; every hit is a comment, a fixture or history. `tools.js` returns `failed('missing_event_fields')` rather than inventing values |
+| Link rendering in the transcript | **Verified still fixed** (`02480a6`) | No link/url pattern, no `SafeLink` |
+| Location: never asks in chat | **Intentional, correct** | `needsLocation` states a limitation; the remedy is a permission button; `asksForPersonalInfo` rejects model replies asking for an address |
+| iOS `isIOS` reason branch | **Verified defect, Low — not fixed** | `fitsDevice` rejects non-conversational models; `fast` (105 MB) is the only one under `IOS_MAX_MODEL_BYTES` (200 MB) and is non-conversational, so `fits` is always empty and the branch is unreachable. Harm is to the next reader, not a user |
+| `summarise('profile')` omits `plainValue` | **Verified defect, Low — not fixed** | Self-targeting only (`resourceScope: 'own'`, `api.getMe`); name validation is `trim()` + length only, so a control character could reach replayed history |
+| Cold-load location race | **Harmless limitation** | `maximumAge: 300000` makes the window sub-second; the permission button is present |
+| Model switch leaves old weights | **Reported — not verified** | |
+| Welly-created events lack coordinates | **Reported — not verified** | |
+| `explainInvalidEvent(null)` latent throw | **Reported — not verified** | |
+| Streaming UI for a non-streaming runtime | **Reported — not verified** | |
+| `prefs` missing from `send` deps | **Reported — not verified** | |
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused | 102 client suites / 1,887 passed |
+| Full suite | **639 files, 10,813 passed, 0 failed, 176 skipped**, exit 0 |
+| Output preserved | `/tmp/wev-pass5-20260921-232458.txt` |
+| Lint / build / bundle scan | clean |
+| Mutation checks | **8** across three fixes, each failing only its own case |
+
+One mutation check earned its keep: restoring the old claim in
+`FIXED.identity_self` left the suite **green**, because the first version of the
+case used a loaded runtime and exercised only the dynamic string. The no-model
+fallback is now covered. A regression test is not protection until the mutation
+proves it.
