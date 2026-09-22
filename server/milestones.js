@@ -55,7 +55,15 @@
  *      where its neighbours use `>=`.
  */
 
-/** The metrics a milestone may be a function of. Both come from `attendance`. */
+/**
+ * The metrics a milestone may be a function of.
+ *
+ * They are no longer the same derivation. `hours` is CREDITED hours, which
+ * excludes a cancelled event; `events` is participation, which counts one.
+ * `volunteerInsights` feeds each from its own query and says why — owner
+ * decision 3 of the 2026-09-21 audit. A caller passing one figure for both is
+ * the defect that decision removed.
+ */
 export const MILESTONE_METRICS = Object.freeze(['hours', 'events']);
 
 /**
@@ -70,14 +78,23 @@ export const MILESTONE_METRICS = Object.freeze(['hours', 'events']);
  * This used to say "and there is no streak", which is no longer true — see
  * `buildStreak` in volunteerInsights.js. The distinction it was drawing still
  * holds, though, and is worth restating: a milestone is a threshold crossed by
- * service already completed, and nothing about it can be lost. A streak is a
+ * service already completed. It is derived on every read rather than conferred,
+ * so it follows the record — an HOURS tier is lost if the event behind it is
+ * cancelled, because the hours stop being credited. (A closed-out event cannot
+ * be cancelled, so hours that were made permanent cannot be lost this way.) The
+ * earlier "nothing about it can be lost" was written when both metrics ignored
+ * cancellation and is no longer true of the hours half. A streak is a
  * separate, non-punitive continuity signal, counted in whole months so that an
  * exam week, a holiday or an illness cannot break it, and hidden entirely below
  * two months so it never reads as a scoreboard opening in front of somebody who
  * has volunteered once.
  *
- * `hours` is credited hours — `SUM(hours_awarded) WHERE present = 1`, the same
- * derivation as everywhere else (INV-001). `events` is DISTINCT events, not
+ * `hours` is credited hours — `SUM(hours_awarded) WHERE present = 1` with
+ * cancelled events excluded, which is `creditedHoursFor`, the same derivation as
+ * every other figure the product presents as credited service (INV-001). The
+ * cancelled clause used to be missing here AND in the query behind it, so this
+ * sentence described the intent rather than the code. `events` is DISTINCT
+ * events, not
  * shifts: two shifts at one event is one commitment, and counting it as two
  * would turn a breadth measure into an attendance measure. `badgeService`'s
  * `collectStats` had exactly that bug and it was fixed for the same reason.

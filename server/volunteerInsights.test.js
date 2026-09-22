@@ -297,14 +297,52 @@ describe('milestones after an event is cancelled', () => {
     twentyOneAndACancelledFour();
     const insights = await volunteerInsights(db, 'u1', { now: NOW });
 
-    /* Four events, one of them called off. `first-shift` is the events tier
-       with the lowest threshold; the volunteer turned up to all four. */
     const firstShift = insights.milestones.find(m => m.id === 'first-shift');
     expect(firstShift.metric).toBe('events');
     expect(firstShift.earned).toBe(true);
 
     const tenHours = insights.milestones.find(m => m.id === 'ten-hours');
     expect(tenHours.earned, '21 credited hours clears the 10-hour tier').toBe(true);
+  });
+
+  /**
+   * The case where the cancelled event is the ONLY evidence.
+   *
+   * The case above cannot tell the two derivations apart: three live events
+   * clear a threshold of one on either. A mutation swapping `inputs.events` for
+   * `credited.events` — which is the whole participation half of this decision
+   * going the other way — left the suite green.
+   *
+   * A volunteer whose single event was called off is the sharp version. They
+   * turned up and did the work; "First shift" is a statement about that, and it
+   * is the statement `milestoneInputs` was written to make: "counts a cancelled
+   * event, because the service still happened."
+   *
+   * Found by the post-implementation audit of owner decision 3.
+   */
+  it('earns the first participation tier on a cancelled event alone', async () => {
+    credit('u1', '2026-07-23T15:00:00.000Z', { hours: 4, status: 'cancelled' });
+    const insights = await volunteerInsights(db, 'u1', { now: NOW });
+
+    expect(insights.record.hoursCredited, 'the hours are not credited').toBe(0);
+    expect(
+      insights.milestones.find(m => m.id === 'first-shift').earned,
+      'the volunteer turned up, and the participation tier stopped saying so'
+    ).toBe(true);
+    /* And no hours tier, on the same payload — which is the split itself. */
+    expect(insights.milestones.find(m => m.id === 'ten-hours').earned).toBe(false);
+  });
+
+  it('earns a higher participation tier the cancelled event completes', async () => {
+    /* Five events, one called off: threshold 5 is reached only if the cancelled
+       one counts. */
+    for (const day of ['02', '09', '16', '20']) {
+      credit('u1', `2026-07-${day}T15:00:00.000Z`, { hours: 1 });
+    }
+    credit('u1', '2026-07-23T15:00:00.000Z', { hours: 1, status: 'cancelled' });
+
+    const insights = await volunteerInsights(db, 'u1', { now: NOW });
+    expect(insights.milestones.find(m => m.id === 'five-events').earned).toBe(true);
   });
 
   it('awards the hours tier once the credited hours actually reach it', async () => {
