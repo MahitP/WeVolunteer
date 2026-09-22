@@ -277,11 +277,39 @@ describe('one certificate, for the person who earned it', () => {
       expect(res.body.valid).toBe(true);
     });
 
-    it('still keeps it off the certificates list, which mirrors the transcript', async () => {
-      /* The list's exclusion is correct and separate: a called-off event is not
-         part of a service record. Only the viewer changed. */
+    /**
+     * Updated deliberately, not relaxed.
+     *
+     * This case read "still keeps it off the certificates list, which mirrors
+     * the transcript" and asserted the certificate was absent. Owner decision 2
+     * of the 2026-09-21 audit reversed that: the list enumerates certificates,
+     * not the transcript, and hiding the document from the person named on it
+     * while the public list and the verify endpoint both showed it was the same
+     * fault this viewer had been corrected for one level down.
+     *
+     * The intent behind the old assertion is kept and made explicit instead —
+     * the transcript must not gain the event — and is now checked against the
+     * surface that actually is the transcript. That makes this strictly
+     * stronger than what it replaced: it pins both halves rather than using
+     * the list as a proxy for the record.
+     */
+    it('appears in the certificates list, flagged, without entering the record', async () => {
       const list = await srv.call('GET', '/api/certificates', undefined, owner);
-      expect(list.body.some(c => c.code === code)).toBe(false);
+      const mine = list.body.find(c => c.code === code);
+      expect(mine, 'the person named on the certificate cannot see it').toBeTruthy();
+      expect(mine.eventCancelled).toBe(true);
+
+      /* And the credited total still excludes it, which is the thing the old
+         assertion was really protecting. */
+      const me = (await srv.call('GET', '/api/auth/me', undefined, owner)).body;
+      const { db } = await import('./db.js');
+      const credited = await db.prepare(`
+        SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+        FROM attendance a JOIN events e ON e.id = a.event_id
+        WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
+      `).get(me.id);
+      expect(Number(me.volunteeredHours)).toBe(Number(credited.h));
+      expect(mine.hours).toBeGreaterThan(0);
     });
   });
 });

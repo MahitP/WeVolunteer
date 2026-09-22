@@ -135,6 +135,22 @@ export default function CertificatesPage() {
                 <span className="person-meta truncate tnum">
                   {formatDay(c.endDatetime)} · {formatHours(c.hours)}
                 </span>
+                {/**
+                  * The event was called off after these hours were confirmed.
+                  *
+                  * The row is here at all because this list enumerates
+                  * certificates rather than the transcript — see the endpoint.
+                  * Saying so is the other half of that: the document is real
+                  * and still verifies, and the hours behind it are not in the
+                  * totals on `/hours` or the portfolio. `CertificateView` says
+                  * the same thing in full on the document itself; this is the
+                  * short form, so a reader is not surprised when they open it.
+                  */}
+                {c.eventCancelled && (
+                  <span className="small dim truncate">
+                    Event cancelled · still valid, not counted in your totals
+                  </span>
+                )}
               </span>
               <span className="small dim nowrap">View</span>
             </Link>

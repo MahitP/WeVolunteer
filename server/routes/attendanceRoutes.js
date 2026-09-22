@@ -423,7 +423,7 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
 router.get('/api/certificates', authenticateToken, async (req, res) => {
   try {
     const rows = await db.prepare(`
-      SELECT e.id as event_id, e.title, e.category, e.location,
+      SELECT e.id as event_id, e.title, e.category, e.location, e.status,
              u.name as organizer_name, u.verified as organizer_verified,
              COALESCE(SUM(at.hours_awarded), 0) as hours,
              COUNT(*) as shifts,
@@ -439,11 +439,39 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
       LEFT JOIN organizations o ON o.id = e.organization_id
-      /* A called-off event is not completed service, so it has no certificate
-         to list - the same rule the transcript and the hours figures follow.
-         An already-issued certificate is never revoked; see the note in
-         certificates.js. */
-      WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
+      /**
+       * This list enumerates CERTIFICATES, so the rule is whether one exists.
+       *
+       * No backticks anywhere in this comment: it lives inside a template
+       * literal and one would end the string mid-SQL. The same note is on the
+       * organization-totals query in profileSerializer.js, for the same reason.
+       *
+       * It used to exclude a cancelled event outright, on the reasoning that
+       * the list mirrors the transcript. That made the owner the one person
+       * the product hid their own document from: the code still resolves, the
+       * public list still showed it, and the verify endpoint still answered
+       * valid:true to a college. CertificateView was already corrected for
+       * exactly this - it shows the document and says what became of the
+       * event - and the same correction belongs one level up.
+       *
+       * The transcript has its own surfaces (/hours, the portfolio) and they
+       * still exclude the event entirely. Nothing about credited hours moves.
+       *
+       * A cancelled event appears ONLY when its certificate was issued before
+       * the cancellation: getOrCreateCertificateCode refuses to mint a new
+       * one, so without the EXISTS this would list rows whose code is null and
+       * whose row on the page is a link to nowhere.
+       *
+       * Decided during the 2026-09-21 audit (owner decision 2).
+       */
+      WHERE at.user_id = ? AND at.present = 1
+        AND (
+          e.status <> 'cancelled'
+          OR EXISTS (
+            SELECT 1 FROM certificates c2
+             WHERE c2.user_id = at.user_id AND c2.event_id = e.id
+          )
+        )
       /* The joined tables' keys are grouped too, not just the event's.
          PostgreSQL lets an aggregate query select a column it did not group by
          only when that column is functionally dependent on a grouped PRIMARY
@@ -477,7 +505,10 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
       organizationId: r.organization_id ?? null,
       organizationName: r.organization_name ?? null,
       organizationSlug: r.organization_slug ?? null,
-      code: codes.get(r.event_id) ?? null
+      code: codes.get(r.event_id) ?? null,
+      /* So the row can carry the sentence `CertificateView` carries: the
+         document stays valid and its hours are not in the totals. */
+      eventCancelled: r.status === 'cancelled',
     })));
   } catch (err) {
     console.error('Certificates error:', err);
@@ -527,7 +558,7 @@ router.get('/api/users/:id/certificates', authenticateToken, requireCap('directo
     }
 
     const rows = await db.prepare(`
-      SELECT e.id as event_id, e.title, e.category,
+      SELECT e.id as event_id, e.title, e.category, e.status,
              u.name as organizer_name, u.verified as organizer_verified,
              COALESCE(SUM(at.hours_awarded), 0) as hours,
              COUNT(*) as shifts,
@@ -537,7 +568,26 @@ router.get('/api/users/:id/certificates', authenticateToken, requireCap('directo
       JOIN slots s ON at.slot_id = s.id
       JOIN events e ON at.event_id = e.id
       JOIN users u ON e.organizer_id = u.id
+      /**
+       * Same predicate as the owner's list above, and it corrects the mirror
+       * fault. No backticks in this comment - see the note on that query.
+       *
+       * This is an aggregate over attendance, not over certificates, and it
+       * carried no status predicate at all. So a cancelled event that never
+       * had a certificate - and can never get one, since minting refuses a
+       * called-off event - was listed here as a certificate, to a reader who
+       * is not the person it describes.
+       *
+       * Decided during the 2026-09-21 audit (owner decision 2).
+       */
       WHERE at.user_id = ? AND at.present = 1
+        AND (
+          e.status <> 'cancelled'
+          OR EXISTS (
+            SELECT 1 FROM certificates c2
+             WHERE c2.user_id = at.user_id AND c2.event_id = e.id
+          )
+        )
       /* u.id as well as e.id — see the note on the same shape above. */
       GROUP BY e.id, u.id
       ORDER BY last_end DESC
@@ -556,6 +606,10 @@ router.get('/api/users/:id/certificates', authenticateToken, requireCap('directo
         shifts: r.shifts,
         startDatetime: r.first_start,
         endDatetime: r.last_end,
+        /* The same flag the owner's list carries, so both surfaces can say the
+           same thing about the same document rather than one of them quietly
+           presenting it as ordinary completed service. */
+        eventCancelled: r.status === 'cancelled',
         /* No `code`, and no `location`. The code is a bearer credential; the
            location is where a named minor physically was on a given date, which
            the itemised service record is already gated on and which a

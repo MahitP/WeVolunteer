@@ -130,6 +130,15 @@ export default function PublicCertificates({ currentUser }) {
                     {formatDay(c.endDatetime)} · {formatHours(c.hours)}
                     {c.organizerName ? ` · ${c.organizerName}` : ''}
                   </span>
+                  {/* Worded for a reader who is not the person described, so
+                      "your totals" would be wrong here. The certificate is
+                      real; the service it records is not part of the record
+                      this platform counts. */}
+                  {c.eventCancelled && (
+                    <span className="small dim truncate">
+                      Event cancelled · still valid, not counted in service totals
+                    </span>
+                  )}
                 </span>
               </li>
             ))}

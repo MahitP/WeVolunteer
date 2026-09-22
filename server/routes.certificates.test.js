@@ -115,4 +115,143 @@ describe('certificates', () => {
     const second = await backfillCertificates(db);
     expect(second.inserted).toBe(0);
   });
+
+  /**
+   * A certificate list lists CERTIFICATES.
+   *
+   * ── The two faults, which are the same fault ──
+   *
+   * `GET /api/certificates` excluded a cancelled event outright, so a student
+   * holding a certificate issued before the organizer called the event off
+   * could not see it in their own list — while `GET /api/users/:id/certificates`
+   * showed it to anybody who opened their profile, and
+   * `/api/certificates/verify/:code` answered `valid: true` to a college. The
+   * owner was the one person the product hid the document from.
+   *
+   * The public list had the mirror fault. It is an aggregate over `attendance`,
+   * not over `certificates`, so it listed a cancelled event that never had a
+   * certificate at all — `getOrCreateCertificateCode` refuses to mint one — and
+   * called it a certificate.
+   *
+   * ── The model ──
+   *
+   * Both lists enumerate certificates that exist. A cancelled event appears
+   * only if its certificate was issued before the cancellation, and it is
+   * flagged so both surfaces can carry the sentence `CertificateView` already
+   * carries: the document stays valid, and its hours are not in the totals.
+   * The service RECORD is a different thing with its own surfaces — `/hours`
+   * and the portfolio — and it still excludes the event entirely.
+   *
+   * Decided during the 2026-09-21 audit (owner decision 2).
+   */
+  describe('a certificate whose event was cancelled afterwards', () => {
+    const EVENT = 'event-cert-then-cancelled';
+    let priyaId;
+
+    beforeAll(async () => {
+      priyaId = (await db.prepare('SELECT id FROM users WHERE email = ?')
+        .get('priya.patel@example.com')).id;
+
+      /* Credited attendance at an event that is still open, so a certificate
+         can legitimately be minted — cancelling is refused once an event is
+         `completed`, which is exactly how this state is reached in production:
+         one volunteer finalised, others outstanding, status still open. */
+      await db.prepare(`
+        INSERT INTO events (id, title, description, category, location,
+                            application_deadline, organizer_id, status, created_at)
+        VALUES (?, ?, ?, 'Donation Drive', ?, ?, ?, 'open', ?)
+      `).run(EVENT, 'Winter Coat Drive', 'Synthetic fixture.', 'Springfield',
+        '2026-07-20T00:00:00.000Z', priyaId, '2026-07-01T00:00:00.000Z');
+      await db.prepare(`
+        INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+        VALUES (?, ?, 'Afternoon', 'Synthetic fixture.', ?, ?, 5)
+      `).run('slot-cert-then-cancelled', EVENT,
+        '2026-07-23T13:00:00.000Z', '2026-07-23T17:00:00.000Z');
+      await db.prepare(`
+        INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+        VALUES (?, ?, ?, 1, 4)
+      `).run(EVENT, 'slot-cert-then-cancelled', priyaId);
+
+      /* Viewing the list mints the code. Then the organizer calls it off. */
+      await srv.call('GET', '/api/certificates', undefined, priyaToken);
+      await db.prepare("UPDATE events SET status = 'cancelled' WHERE id = ?").run(EVENT);
+    });
+
+    it('was actually issued before the cancellation', async () => {
+      const row = await db.prepare(
+        'SELECT code FROM certificates WHERE user_id = ? AND event_id = ?'
+      ).get(priyaId, EVENT);
+      expect(row?.code, 'the fixture never minted a certificate; the cases below would prove nothing')
+        .toMatch(CODE_FORMAT);
+    });
+
+    it('stays in the owner\u2019s own list, flagged', async () => {
+      const res = await srv.call('GET', '/api/certificates', undefined, priyaToken);
+      const cert = res.body.find(c => c.eventId === EVENT);
+      expect(cert, 'the student cannot see a certificate that verifies to a college').toBeTruthy();
+      expect(cert.eventCancelled).toBe(true);
+      expect(cert.code).toMatch(CODE_FORMAT);
+    });
+
+    it('leaves every other row unflagged', async () => {
+      const res = await srv.call('GET', '/api/certificates', undefined, priyaToken);
+      const live = res.body.find(c => c.eventId === 'event-pantry-past');
+      expect(live.eventCancelled).toBe(false);
+    });
+
+    it('is flagged on the public list too', async () => {
+      const res = await srv.call('GET', `/api/users/${priyaId}/certificates`, undefined, priyaToken);
+      const cert = res.body.certificates.find(c => c.eventId === EVENT);
+      expect(cert).toBeTruthy();
+      expect(cert.eventCancelled).toBe(true);
+    });
+
+    it('does not put a cancelled event with no certificate on the public list', async () => {
+      /* The mirror fault: the public list aggregates attendance, so it named a
+         document that was never issued and can never be issued. */
+      const PHANTOM = 'event-cancelled-no-cert';
+      await db.prepare(`
+        INSERT INTO events (id, title, description, category, location,
+                            application_deadline, organizer_id, status, created_at)
+        VALUES (?, ?, ?, 'Donation Drive', ?, ?, ?, 'cancelled', ?)
+      `).run(PHANTOM, 'Never issued', 'Synthetic fixture.', 'Springfield',
+        '2026-07-20T00:00:00.000Z', priyaId, '2026-07-01T00:00:00.000Z');
+      await db.prepare(`
+        INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+        VALUES (?, ?, 'Afternoon', 'Synthetic fixture.', ?, ?, 5)
+      `).run('slot-phantom', PHANTOM, '2026-07-24T13:00:00.000Z', '2026-07-24T17:00:00.000Z');
+      await db.prepare(`
+        INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+        VALUES (?, ?, ?, 1, 4)
+      `).run(PHANTOM, 'slot-phantom', priyaId);
+
+      expect(await db.prepare('SELECT 1 AS x FROM certificates WHERE user_id = ? AND event_id = ?')
+        .get(priyaId, PHANTOM)).toBeFalsy();
+
+      const pub = await srv.call('GET', `/api/users/${priyaId}/certificates`, undefined, priyaToken);
+      expect(pub.body.certificates.some(c => c.eventId === PHANTOM)).toBe(false);
+
+      const own = await srv.call('GET', '/api/certificates', undefined, priyaToken);
+      expect(own.body.some(c => c.eventId === PHANTOM)).toBe(false);
+    });
+
+    it('still keeps the hours out of the credited total', async () => {
+      /* The record and the document are different things, and this is the half
+         that must not move: `/api/auth/me` is `creditedHoursFor`. */
+      const me = (await srv.call('GET', '/api/auth/me', undefined, priyaToken)).body;
+      const fromCancelled = await db.prepare(`
+        SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+        FROM attendance a JOIN events e ON e.id = a.event_id
+        WHERE a.user_id = ? AND a.present = 1 AND e.status = 'cancelled'
+      `).get(me.id);
+      expect(Number(fromCancelled.h)).toBeGreaterThan(0);
+
+      const credited = await db.prepare(`
+        SELECT COALESCE(SUM(a.hours_awarded), 0) AS h
+        FROM attendance a JOIN events e ON e.id = a.event_id
+        WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
+      `).get(me.id);
+      expect(Number(me.volunteeredHours)).toBe(Number(credited.h));
+    });
+  });
 });
