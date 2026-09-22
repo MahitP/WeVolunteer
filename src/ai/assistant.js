@@ -194,7 +194,15 @@ function summarise(kind, data) {
       if (!data.total) return 'You have no recent notifications.';
       return `You have ${data.total} recent ${data.total === 1 ? 'notification' : 'notifications'}.`;
     case 'profile':
-      return `Profile for ${data.name || 'you'} (${data.role || 'volunteer'}) with ${data.hours || 0} verified hours.`;
+      /* `plainValue`, like every other user-authored value in this switch. It
+         was the one branch interpolating a name raw — self-targeting only,
+         since this tool reads `api.getMe()`, but `accountValidation` checks a
+         name for length and trims it and nothing else, so a control character
+         could reach the history `sanitizeHistory` replays into the next
+         prompt. That is precisely what `plainValue` exists to strip, and the
+         defence is worth applying uniformly rather than in six of seven
+         places. */
+      return `Profile for ${plainValue(data.name) || 'you'} (${plainValue(data.role) || 'volunteer'}) with ${data.hours || 0} verified hours.`;
     case 'event_details':
       return `Details for ${plainValue(data.title)}: ${data.slots?.length || 0} shifts available.`;
     case 'event_roster':
