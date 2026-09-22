@@ -1894,7 +1894,15 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
        * why this is two calls rather than one with a per-recipient clause.
        *
        * The dedupe key is unchanged and shared, so the two sets cannot overlap
-       * into a double send even if the queries ever did.
+       * into a double send even if the queries ever did — which makes the
+       * `filter` below belt-and-braces for the COUNT and load-bearing for the
+       * CONTENT. Characterised by mutation during the post-implementation
+       * audit: removing the filter alone changes nothing, because the credited
+       * dispatch runs first and the duplicate is deduped; removing it AND
+       * swapping the two calls hands the credited volunteer the plain body and
+       * loses the hour impact. So the filter is what makes the outcome
+       * independent of the order these two lines happen to be written in, and
+       * the order is not something to rely on silently.
        *
        * Decided during the 2026-09-21 audit (owner decision 4B).
        */
