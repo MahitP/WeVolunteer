@@ -451,6 +451,98 @@ describe('hours are final once the organizer closes them out', () => {
     });
 
     /**
+     * ...and that record is then as final as every other one.
+     *
+     * The other half of the rule above, and it was asserted nowhere: the suite
+     * covered "no record, so creditable" and "record, so locked" separately and
+     * never in sequence. Nothing in the code distinguishes a late credit from
+     * an original one — the lock reads `prior`, not when the row appeared — but
+     * the POLICY that permanence covers late credits too (owner decision 1,
+     * permanent lock) had no test standing behind it, so a future change that
+     * exempted rows created after close-out would have been free.
+     *
+     * Found by the post-implementation audit of that decision.
+     */
+    it('locks the late credit it just allowed', async () => {
+      const { eventId, apps } = await closedOut({ hours: 4 });
+      const now = new Date().toISOString();
+      const lateAppId = `app-late-then-locked-${Math.random().toString(36).slice(2)}`;
+      await db.prepare(`
+        INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+        VALUES (?, ?, ?, ?, 'accepted', ?)
+      `).run(lateAppId, otherStudentId, eventId, apps[0].slotId, now);
+
+      const first = await finalise(eventId, { attendanceMap: { [lateAppId]: true } }, organizer);
+      expect(first.status, 'the late credit itself was refused').toBe(200);
+
+      /* Same organizer, same event, immediately afterwards: the row that did
+         not exist a moment ago is now a credited record like any other. */
+      const second = await finalise(eventId, {
+        attendanceMap: { [lateAppId]: true },
+        hoursMap: { [lateAppId]: 2 },
+        reason: 'They only did half the shift.',
+      }, organizer);
+
+      expect(second.status).toBe(409);
+      expect(second.body.code).toBe('hours_locked');
+      expect((await creditedTo(apps[0].slotId, otherStudentId)).hours_awarded).toBe(4);
+    });
+
+    /**
+     * The lock answers first, even when the submission is also malformed.
+     *
+     * `finalizeAttendance` checks `hours_locked` ahead of `reason_required`,
+     * `invalid_hours`, `slot_unpriceable` and `shift_not_ended`, and the file
+     * says why: on a locked record none of those questions bears on the
+     * outcome, and naming one "is an invitation to try a smaller number".
+     *
+     * Unpinned until now, and demonstrably free to regress: changing the
+     * predicate to `eventClosedOut && prior && reason` left all 28 cases green,
+     * because every locked case in the suite happened to supply a reason. That
+     * mutation writes nothing — the submission still fails `reason_required` —
+     * so it is an ordering defect rather than a correctness one, which is
+     * exactly the kind a green suite hides.
+     *
+     * Found by the post-implementation audit of owner decision 1.
+     */
+    it('answers hours_locked, not reason_required, when a change carries no reason', async () => {
+      const { eventId, apps } = await closedOut({ hours: 4 });
+
+      const res = await finalise(eventId, {
+        attendanceMap: { [apps[0].appId]: false },
+      }, organizer);
+
+      expect(res.status).toBe(409);
+      expect(
+        res.body.code,
+        'the refusal invited them to supply a reason and try again, on a record nothing can change'
+      ).toBe('hours_locked');
+      expect((await creditedTo(apps[0].slotId, apps[0].userId)).present).toBe(1);
+    });
+
+    it('locks it against an administrator too', async () => {
+      const { eventId, apps } = await closedOut({ hours: 4 });
+      const now = new Date().toISOString();
+      const lateAppId = `app-late-admin-${Math.random().toString(36).slice(2)}`;
+      await db.prepare(`
+        INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+        VALUES (?, ?, ?, ?, 'accepted', ?)
+      `).run(lateAppId, otherStudentId, eventId, apps[0].slotId, now);
+
+      expect((await finalise(eventId, { attendanceMap: { [lateAppId]: true } }, organizer)).status)
+        .toBe(200);
+
+      const res = await finalise(eventId, {
+        attendanceMap: { [lateAppId]: false },
+        reason: 'Administrative correction.',
+      }, admin);
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('hours_locked');
+      expect((await creditedTo(apps[0].slotId, otherStudentId)).present).toBe(1);
+    });
+
+    /**
      * The lock is a property of the RECORD, not of who is asking. An
      * administrator holds `attendance.mark` on every event on the platform, and
      * that is what makes this worth asserting: the one account that can reach
