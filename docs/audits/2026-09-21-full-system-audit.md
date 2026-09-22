@@ -2498,6 +2498,35 @@ reconciliation.
 - **Client-state-dependent destinations.** `?profile=&type=` resolves from the
   server on a cold load, as `?event=` now does.
 
+### 17.1 Adversarial pass — one more weak test, and three that held
+
+Run after the fixes above, asking of each decision: what is the smallest
+mutation that restores the defect while leaving the suite green?
+
+| Mutation | Result |
+|---|---|
+| Certificate `EXISTS` unscoped from the user (`c2.user_id = at.user_id` dropped) | **Survived** → pinned, `efcd531` |
+| Badge re-evaluation UNION reduced to the applications half | 4 failures |
+| Cancellation dedupe key made unique per dispatch | 3 failures |
+| `creditedTotalsFor`'s cancelled filter dropped | 1 failure |
+
+The survivor was worth having. Unscoped, one attendee's certificate admits a
+cancelled event for every other attendee of it — who have none and can never be
+issued one, so the row arrives with `code: null` and `CertificatesPage` renders
+a link to `/certificates/null`. It is the phantom row the predicate was added to
+remove, reintroduced one volunteer at a time. Pinned with two volunteers at one
+cancelled event, only one holding a certificate; fails under the mutation on
+both engines.
+
+### Final verification
+
+Full suite **664 files, 10,935 passed, 0 failed, 178 skipped**, exit 0, output
+preserved. Lint exit 0, build exit 0, bundle scan 164 chunks with 0
+server-only-string hits, `bin/legal-hashes.mjs` 13 ok and 0 drift.
+PostgreSQL: **570 tests across 13 files** on a scratch database created and
+dropped. Tree clean, nothing pushed, no production database opened and no
+deployment made at any point in this run.
+
 ### Status after this pass
 
 | ID | Final status | Evidence |
