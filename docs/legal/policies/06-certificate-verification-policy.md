@@ -162,6 +162,10 @@ See the [Data Deletion Policy](/legal/data-deletion-policy).
 Tell the organizer first — they recorded the attendance and can correct it. If that does not
 work, email **support@wevolunteers.org**.
 
+Do this promptly. Once the organizer has **closed the hours out** on an event, the credited
+record behind the certificate is final and nobody can change it — see the
+[Volunteer Record Policy](/legal/volunteer-record-policy).
+
 Note that hours are a **snapshot**: once credited, they keep the value they had when you earned
 them, even if the event is edited afterwards. That is deliberate, so that nobody's completed
 record changes underneath them.

@@ -85,13 +85,34 @@ already-credited hours do not move.
 This is deliberate. A record of what you did should not change months later because somebody
 edited a form.
 
+## When an event's hours are closed out, they are final
+
+After every confirmed volunteer on an event has been accounted for, the organizer can **close
+the hours out**. It is a deliberate act — a button they press, not something that happens on a
+date — and it is recorded.
+
+Once the hours are closed out:
+
+- **No credited record on that event can be changed again, by anyone.** Not the organizer, not
+  an administrator, not us. If you and the organizer both agree a number is wrong, it still
+  cannot be changed.
+- **Somebody who has no record on that event yet can still be credited.** If you worked a shift
+  but were accepted late, so the organizer never confirmed your attendance, they can still do
+  it — and once they have, that record is final too.
+
+Closing out cannot be undone, and there is no way to reopen an event.
+
+**So the time to check your hours is before the hours are closed out.** If a number looks wrong
+on an event you have just volunteered at, say so straight away rather than at the end of the
+year. The section below is about that window.
+
 ## Who can change what
 
 | Who | Can |
 |---|---|
 | **You** | Apply, withdraw, view your record, download it. **You cannot change your own hours** |
-| **The organizer of that event** | Mark attendance and credit hours **for their own events only** |
-| **Administrators** | Correct records, with every action written to an audit log |
+| **The organizer of that event** | Mark attendance and credit hours **for their own events only**, until the hours are closed out |
+| **Administrators** | Correct records, with every action written to an audit log — **and they are subject to the close-out rule above like everybody else** |
 | **Anyone else** | Nothing |
 
 An organizer cannot see or touch a record from someone else's event.
@@ -99,7 +120,9 @@ An organizer cannot see or touch a record from someone else's event.
 ## If your record is wrong
 
 **Step 1 — Tell the organizer.** They recorded it and they can fix it. Most problems are a
-forgotten confirmation and take a minute.
+forgotten confirmation and take a minute. **Do this before the event's hours are closed out** —
+afterwards a credited record cannot be changed by anyone, and the steps below cannot get round
+that.
 
 **Step 2 — If that does not work**, email **support@wevolunteers.org** with the event, the date, and
 what you think is wrong. We will look at the recorded attendance and the ledger.
@@ -111,6 +134,11 @@ If we correct a record, the correction is logged. We do not silently edit histor
 
 **We will not add hours you did not work**, even if you ask nicely, and even if the organizer
 asks. That is the whole point of the record being worth something.
+
+**And we will not change hours that have been closed out**, even when everybody agrees they are
+wrong. Permanence is what makes a closed-out record worth something to a school; a correction
+route that survives it would be a way round the rule rather than an exception to it. What we can
+still do is tell you what the record says and why, and show you the ledger entry behind it.
 
 ## How volunteers get chosen
 

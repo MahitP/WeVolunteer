@@ -373,7 +373,14 @@ export const LEGAL_DOCUMENTS = [
     summary: 'What a WeVolunteer certificate proves, what it does not, and how anyone can check whether one is real.',
     effectiveAt: '2026-08-06',
     file: '06-certificate-verification-policy.md',
-    contentHash: 'd02414f03a876749d4c57e90f98284feab4dedc112e9626a8208d9f290889f68',
+    /* Re-pinned for the close-out sentence added under "If your certificate is
+       wrong". The section told a student to ask the organizer and named no point
+       after which that stops working, while `finalizeAttendance` has refused every
+       correction on a closed-out event since 32e6880. Version left at 1.0 on the
+       same grounds as the record policy below: `notice`, no acceptance collected,
+       nothing published to a reader yet, so this is a correction before first
+       publication. Decided during the 2026-09-21 audit (owner decision 1). */
+    contentHash: '9484d1789dcf5869aaf83e22f673df3b96228033aad81ae486de6d80a351f012',
     bundledWith: null,
   },
   {
@@ -391,7 +398,13 @@ export const LEGAL_DOCUMENTS = [
        `notice` (no acceptance is collected) and nothing here has been published
        to a reader yet, so this is a correction before first publication rather
        than a revision of something somebody read. */
-    contentHash: '1abd5562b9752eb2553e9865aa8d563d5307f5f805eb0455ce2dba37327fd23f',
+    /* Re-pinned again for the close-out section. The document predates close-out
+       by three weeks (d79a984, 2026-08-05 vs 32e6880, 2026-08-26) and was never
+       revisited, so "Who can change what" offered an administrator correction the
+       software has always refused after close-out, and the disputes path named no
+       end. Same reasoning as above for leaving the version at 1.0. Decided during
+       the 2026-09-21 audit (owner decision 1). */
+    contentHash: '4b0f6565fd97f95fb237bbc58b2a84234429b81cfcd23dffbda216189ddc8275',
     bundledWith: null,
   },
   {
