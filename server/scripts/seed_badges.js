@@ -86,7 +86,11 @@ import { fileURLToPath } from 'node:url';
  * The same underlying fact can honestly produce both, for different audiences,
  * the way a school report and a certificate can both mention the same exam.
  * What must never happen is the two DISAGREEING, which is why both derive from
- * `SUM(hours_awarded) WHERE present = 1` and neither restates a number.
+ * credited hours — `SUM(hours_awarded) WHERE present = 1`, cancelled events
+ * excluded — and neither restates a number. The cancelled clause is part of
+ * the definition, not a filter on one query: `collectStats` and the hours
+ * milestones both carry it, and a shorthand that omits it is how the two came
+ * to disagree once already.
  *
  * ── Why these thresholds ──
  *

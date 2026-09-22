@@ -41,10 +41,12 @@ Each of these is a record-keeping problem, and record-keeping problems get worse
 WeVolunteer treats the service record as the primary artifact. Hours are never entered by hand and never stored as a number on a user account. They are derived, every time they are displayed, from confirmed attendance:
 
 ```sql
-SUM(hours_awarded) WHERE present = 1
+SUM(hours_awarded) WHERE present = 1 AND event.status <> 'cancelled'
 ```
 
 That single constraint is why the figure can be trusted everywhere it appears. An organizer cannot inflate it, a student cannot edit it, and a certificate cannot claim hours that no attendance record supports. Every change to credited hours is additionally written to an append-only ledger recording who changed it, when, and why.
+
+The cancelled clause is part of the definition rather than a filter bolted on to one query: a called-off event is not completed service, so it contributes to no total the product presents. The attendance record and the ledger entry both survive — nothing is deleted — and a certificate already issued stays valid and keeps verifying. What changes is that the event stops being part of the record. Volunteers who were actually credited are told when it happens.
 
 ## Who it is for
 
@@ -85,6 +87,8 @@ The mechanism is built to be auditable rather than merely fair-sounding. Draws a
 Check-in and hours confirmation are deliberately separate operations. Check-in is a working note taken during an event and credits nothing. Confirmation writes the permanent record and is only possible once a shift has ended.
 
 Attendance only ever touches the volunteers named in a request, so a partial or stale submission cannot silently mark anyone absent. An existing credit keeps its original value permanently — hours are a snapshot, never re-priced when a slot is later edited. Correcting a confirmed record requires a typed reason and is attributed to the person making the change.
+
+Corrections end when the organizer **closes the hours out**, which is a deliberate act rather than a date. After it no credited record on that event can be changed by anyone, including an administrator, and there is no way to reopen it. Somebody who has no record on that event yet can still be credited, because refusing that would mean a volunteer who worked the shift could never be credited for it at all.
 
 ### Certificates
 

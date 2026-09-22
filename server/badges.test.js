@@ -769,9 +769,10 @@ describe('the award notification goes through notificationService', () => {
  *
  * A school report and a certificate can both mention one exam. What must never
  * happen is the two DISAGREEING, so the replacement rule is not "no overlap" —
- * it is that neither restates a number. Both derive from
- * `SUM(hours_awarded) WHERE present = 1`, and every hour badge threshold comes
- * from the published tier list rather than being written out beside it.
+ * it is that neither restates a number. Both derive from credited hours —
+ * `SUM(hours_awarded) WHERE present = 1`, cancelled events excluded — and
+ * every hour badge threshold comes from the published tier list rather than
+ * being written out beside it.
  */
 describe('milestones and badges never restate a number', () => {
   it('generates every hour badge from the published tier list', async () => {

@@ -5,8 +5,9 @@
  *
  * `attendance` remains the single source of truth for a volunteer's hours.
  * Every existing total in the product is still derived the same way it always
- * was: SUM(hours_awarded) WHERE present = 1. Nothing in this module changes
- * that, and nothing here is read by any hours calculation.
+ * was: SUM(hours_awarded) WHERE present = 1, with cancelled events excluded --
+ * see creditedHoursFor, which is the canonical definition. Nothing in this
+ * module changes that, and nothing here is read by any hours calculation.
  *
  * This table records *what changed, when, and who changed it* — the one
  * question the schema could not previously answer. When a parent asks why a
