@@ -3,6 +3,7 @@ import { db } from '../db.js';
 import { notificationService } from './notificationService.js';
 import { reliabilityOf } from '../reliability.js';
 import { buildStreak, attendanceMonths } from '../volunteerInsights.js';
+import { recordAudit } from '../auditLog.js';
 
 /**
  * Badges: recognition that is CONFERRED, as opposed to milestones, which are
@@ -286,7 +287,7 @@ function meetsCriteria(badge, stats) {
  *
  * @returns {{awarded: string[], withdrawn: string[]}} badge ids that changed
  */
-async function evaluateBadges(userId) {
+async function evaluateBadges(userId, { actorId = null, reason = null } = {}) {
   const result = { awarded: [], withdrawn: [] };
 
   try {
@@ -316,6 +317,40 @@ async function evaluateBadges(userId) {
       if (!earned && badge.user_badge_id && badge.awarded_by === null) {
         await db.prepare('DELETE FROM user_badges WHERE id = ?').run(badge.user_badge_id);
         result.withdrawn.push(badge.id);
+
+        /**
+         * A withdrawal leaves a record, matching the only other path that takes
+         * a badge away.
+         *
+         * `DELETE /api/admin/users/:userId/badges/:badgeId` writes
+         * `BADGE_REVOKED` and sends nothing; this is the automatic sibling and
+         * follows it rather than inventing a `BADGE_LOST` notification. The
+         * causing fact usually reaches the volunteer already — the attendance
+         * route dispatches `HOURS_ADJUSTED` in the same breath — and what was
+         * missing was not a message but any answer at all to "why did my badge
+         * go", for the person supporting them.
+         *
+         * Only when an actor is known. `recordAudit` requires one and inventing
+         * a system identity to satisfy it would put a fictional principal in the
+         * most consequential table in the schema. Every path that can withdraw
+         * has a real actor: the organizer or administrator marking attendance,
+         * and the person who cancelled the event.
+         *
+         * Best-effort, inside the surrounding try: badge evaluation already runs
+         * after the thing that caused it has committed, and a failure here must
+         * not look to the caller like that failed.
+         *
+         * Decided during the 2026-09-21 audit (owner decision 5B).
+         */
+        if (actorId) {
+          await recordAudit(db, {
+            adminId: actorId,
+            action: 'BADGE_WITHDRAWN',
+            targetUserId: userId,
+            details: `Withdrew "${badge.name}" automatically`
+              + (reason ? ` — ${reason}` : ' — the criteria no longer hold'),
+          });
+        }
       }
     }
   } catch (err) {

@@ -60,6 +60,12 @@ const ACTIONS = {
      child's page, which they should have to put their name to. */
   BADGE_AWARDED:            ['Badge awarded', TONES.ROUTINE],
   BADGE_REVOKED:            ['Badge revoked', TONES.ROUTINE],
+  /* The automatic sibling of the row above. ROUTINE for the same reason: a
+     criterion stopped holding, which is the evaluator doing its job — the row
+     exists so that "why did my badge go" has an answer, not because the act is
+     alarming. Distinct from BADGE_REVOKED so a reader can tell a person's
+     decision from a recomputation. */
+  BADGE_WITHDRAWN:          ['Badge withdrawn automatically', TONES.ROUTINE],
   ADMIN_PROMOTED:           ['Administrator promoted', TONES.GRAVE],
   /* Invitations. `ADMIN_INVITED` is grave because a pending invitation is
      administrator authority awaiting collection — the offer is the consequential

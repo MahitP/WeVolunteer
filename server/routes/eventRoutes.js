@@ -1785,7 +1785,48 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
      * The event's own organizer, not the actor: an administrator cancelling
      * somebody else's event changes THAT organizer's count, not their own.
      */
-    await badgeService.evaluateBadges(event.organizer_id);
+    await badgeService.evaluateBadges(event.organizer_id, {
+      actorId: req.user.id,
+      reason: `event ${status}`,
+    });
+
+    /**
+     * And the volunteers, which this route never did.
+     *
+     * `collectStats` excludes cancelled events from a volunteer's hours and
+     * event counts — that is settled and documented. Applying it only to the
+     * organizer meant an attendee kept an hours badge the evaluator would no
+     * longer award, until some unrelated action of their own triggered a
+     * re-evaluation, which might be next week or never. Two students with
+     * identical records could hold different badges depending on whether they
+     * happened to volunteer again.
+     *
+     * The argument is the one already made ten lines up for the organizer:
+     * "the criterion is the current count of non-cancelled events, so a badge
+     * that only ever moves upwards is not reporting that count."
+     *
+     * Runs for EVERY status change, not only cancellations, because
+     * `cancelled -> open` is a legal transition and a re-evaluation that only
+     * ever removed would be the same one-directional fault mirrored.
+     *
+     * Scoped to credited attendance: those are the only people whose stats this
+     * event contributes to, so it is bounded by who turned up rather than by who
+     * signed up. Sequential, like the attendance route's own loop over its
+     * revoked list.
+     *
+     * Decided during the 2026-09-21 audit (owner decision 5A).
+     */
+    const affected = await db.prepare(`
+      SELECT DISTINCT user_id FROM attendance
+       WHERE event_id = ? AND present = 1
+    `).all(eventId);
+    for (const row of affected) {
+      if (row.user_id === event.organizer_id) continue; // already done, above
+      await badgeService.evaluateBadges(row.user_id, {
+        actorId: req.user.id,
+        reason: `event ${status}`,
+      });
+    }
 
     /**
      * Calling off an event is the change confirmed volunteers most need to
