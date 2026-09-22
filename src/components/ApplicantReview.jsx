@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Check, Clock4, Ban, ArrowUpDown, Sparkles, AlertCircle } from 'lucide-react';
 import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
 import { organizerBadges } from '../utils/badgeOrder';
+import { MIN_EVIDENCE } from '../reliabilityEvidence';
 
 /**
  * The screen where an organizer decides who gets a spot.
@@ -115,8 +116,31 @@ export default function ApplicantReview({
          * honest thing to show an organizer is that there is no record yet, not
          * a ratio they cannot help reading as a verdict.
          */
+        /**
+         * CONFIRMED commitments, against the model's own floor.
+         *
+         * This read `eventsSignedUp` against a hardcoded 3, and both halves
+         * were wrong. `reliability.js` abolished the three-commitment floor by
+         * name — "three numbers answering one question, in three files,
+         * disagreeing … `MIN_EVIDENCE` is the one that remains, and every
+         * surface reads it" — and this surface went on not reading it.
+         *
+         * The quantity mattered more than the number. `eventsSignedUp` counts
+         * every commitment whose shift has ENDED, confirmed or not, so four
+         * shifts nobody had got round to recording read as four shifts missed:
+         * the row said "0 of 4 attended" about a volunteer with no record
+         * either way. `eventsAwaitingRecord` is published in this payload
+         * precisely to keep those apart, "because reading the second as the
+         * first is the specific unfairness this whole set of definitions exists
+         * to prevent."
+         *
+         * Attended plus absent is what the server's `reliability.recorded`
+         * counts, arrived at from the two fields the payload already carries
+         * rather than by adding a third.
+         */
+        const confirmedCommitments = (v.eventsAttended ?? 0) + (v.eventsAbsent ?? 0);
         const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
-        const isNew = completedCommitments < 3;
+        const isNew = confirmedCommitments < MIN_EVIDENCE;
         /* A first-timer's row is a status line, so it carries no badges — an
            Early Supporter chip beside "First event" would read as experience
            they do not have. */

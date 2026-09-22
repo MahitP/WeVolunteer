@@ -120,7 +120,14 @@ describe('when somebody last served', () => {
      * organizer fills in themselves, and the likeliest guess is the unkindest
      * one.
      */
-    draw([applicant({}, { lastVolunteeredDate: null, eventsSignedUp: 4, eventsAttended: 0, eventsAbsent: 0, eventsAwaitingRecord: 4 })]);
+    /* Four commitments all RECORDED as absences: enough confirmed evidence to
+       be past the "new volunteer" floor, and still nothing attended — which is
+       the state this case is about. The fixture used to leave all four
+       unconfirmed, which since the evidence floor became MIN_EVIDENCE over
+       CONFIRMED commitments is a row that legitimately reads "New volunteer"
+       instead. Changing the fixture rather than the assertion keeps the case
+       testing what its name says. */
+    draw([applicant({}, { lastVolunteeredDate: null, eventsSignedUp: 4, eventsAttended: 0, eventsAbsent: 4, eventsAwaitingRecord: 0 })]);
 
     expect(screen.getByText('no confirmed shifts yet')).toBeInTheDocument();
     expect(screen.queryByText('last —')).not.toBeInTheDocument();
@@ -150,9 +157,55 @@ describe('too little history to say anything', () => {
     expect(screen.queryByText('0 of 1 attended')).not.toBeInTheDocument();
   });
 
-  it('shows the counts once there are three completed commitments', () => {
-    draw([applicant({}, { eventsSignedUp: 3, eventsAttended: 3, completedEvents: 3 })]);
-    expect(screen.getByText('3 of 3 attended')).toBeInTheDocument();
+  /**
+   * ── The floor is MIN_EVIDENCE, and it counts CONFIRMED commitments ──
+   *
+   * This case used to read "once there are three completed commitments", and
+   * three was one of the numbers `reliability.js` was written to abolish: "the
+   * badge's five-signup floor, the applicant row's three-commitment floor, and
+   * the smoother's prior weight of five — three numbers answering one question,
+   * in three files, disagreeing. `MIN_EVIDENCE` is the one that remains, and
+   * every surface reads it." This surface did not.
+   *
+   * The quantity was wrong as well as the number. The gate read
+   * `eventsSignedUp`, which counts every commitment whose shift has ENDED
+   * whether or not an organizer ever confirmed it; the model's floor is on
+   * commitments with a recorded outcome. `eventsAwaitingRecord` exists in this
+   * very payload to keep those apart, "because reading the second as the first
+   * is the specific unfairness this whole set of definitions exists to
+   * prevent."
+   */
+  it('shows the counts once there are MIN_EVIDENCE confirmed commitments', () => {
+    draw([applicant({}, {
+      eventsSignedUp: 4, eventsAttended: 3, eventsAbsent: 1,
+      eventsAwaitingRecord: 0, completedEvents: 3,
+    })]);
+    expect(screen.getByText('3 of 4 attended')).toBeInTheDocument();
+  });
+
+  it('still says "New volunteer" at three confirmed, one short of the floor', () => {
+    const { container } = draw([applicant({}, {
+      eventsSignedUp: 3, eventsAttended: 2, eventsAbsent: 1,
+      eventsAwaitingRecord: 0, completedEvents: 2,
+    })]);
+    expect(container.querySelector('.tag-brand').textContent).toMatch(/New volunteer/);
+    expect(screen.queryByText('2 of 3 attended')).not.toBeInTheDocument();
+  });
+
+  it('does not read unconfirmed commitments as evidence', () => {
+    /**
+     * The case the old gate got wrong in the direction that matters. Four
+     * commitments whose shifts have ended and which NOBODY has confirmed is no
+     * evidence at all — but `eventsSignedUp` counted them, so the row showed
+     * "0 of 4 attended" about a volunteer whose organizers had simply not
+     * finished their paperwork.
+     */
+    const { container } = draw([applicant({}, {
+      eventsSignedUp: 4, eventsAttended: 0, eventsAbsent: 0,
+      eventsAwaitingRecord: 4, completedEvents: 0,
+    })]);
+    expect(container.querySelector('.tag-brand').textContent).toMatch(/New volunteer|First event/);
+    expect(screen.queryByText('0 of 4 attended')).not.toBeInTheDocument();
   });
 
   it('shows no badges for a first-timer, because the row is a status line', () => {
