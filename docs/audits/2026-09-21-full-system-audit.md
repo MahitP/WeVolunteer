@@ -804,3 +804,125 @@ One mutation check earned its keep: restoring the old claim in
 case used a loaded runtime and exercised only the dynamic string. The no-model
 fallback is now covered. A regression test is not protection until the mutation
 proves it.
+
+---
+
+## Pass 6 — the close-out invariant (R-2, R-3)
+
+### The invariant, reconstructed
+
+> **Close-out makes existing credited records final. It does not close the
+> roster.**
+
+`events.hours_closed_out_at` is the authority, and migration 058 argues at
+length for why it is not `events.status`: `completed` "is not a decision" —
+`computeEventCompletion` writes it the instant the last accepted volunteer has
+a record — and `PUT /api/events/:id` already promises "*Attendance can still be
+corrected*" after completion. NULL means "still correctable". The column is set
+once, by a one-way CAS, and **nothing in the codebase ever clears it**.
+
+### Lifecycle
+
+```
+open ──finalise──▶ (computeEventCompletion) ──▶ completed ──close-out──▶ frozen
+  │                     corrections allowed, with a reason
+  └──cancel──▶ cancelled     (refuses finalisation; hours stop counting)
+```
+
+`finalizeAttendance` is the **only production writer to `attendance`** —
+verified by enumerating every `INSERT/UPDATE/DELETE` against the table: the
+remaining hits are the demo seed, `bin/` tooling, and tests. Its own comment
+claims this ("a guard in the route is a guard on one caller. This is the
+floor"), and the claim holds.
+
+### R-2 — **DISPROVEN as a defect**
+
+The report was that a closed-out event "still accepts brand-new credited
+records, unbounded, with no reason required". The behaviour is real. It is also
+**deliberate, documented and already tested**:
+
+- `attendance.js`, the note below the loop: "A volunteer with NO record is
+  deliberately still creditable. Completion is computed from the accepted roster
+  at the moment it was reached, so somebody accepted afterwards has never been
+  finalised at all; refusing them would mean a student who worked the shift can
+  never be credited for it by anyone. **Awarding them nothing is not 'no
+  takebacksies', it is a different loss.**"
+- `attendance.closedOut.test.js` already asserts it: *"still lets a volunteer
+  with no record at all be credited"*.
+- No reason is required because `corrections = planned.filter(p => p.prior !==
+  null)` — a first credit is not a change, and the reason exists to justify a
+  change.
+
+**No code was added.** The earlier report was misleading because it read the
+lock's condition (`eventClosedOut && prior`) without the note that explains the
+second half of it.
+
+### R-2's second half — **CONFIRMED, and an owner decision**
+
+Reproduced on synthetic data through the real HTTP route:
+
+```
+first credit  : 200  {"present":1,"hours_awarded":6}   ← no reason required
+organizer fix : 409  hours_locked
+admin fix     : 409  hours_locked
+stored after  : {"present":1,"hours_awarded":6}        ← permanent
+ledger rows   : 2, both "credited", reason: null
+```
+
+A volunteer credited after close-out gets **one irreversible shot**: the second
+save has a `prior`, so the record-level lock fires and nobody — organizer or
+administrator — can correct it. `admin_correction` exists in the ledger enum
+with **no production writer**, and `hours_closed_out_at` is never cleared, so
+there is no override and no un-close-out.
+
+This is the acknowledged consequence of two deliberate decisions, and
+`attendance.js` says so: the refusal "deliberately does not promise a way round
+it. There is no administrator override path today … a refusal that names a
+remedy which does not exist sends an organizer to ask for something nobody can
+do."
+
+**Open question for the owner.** Should a post-close-out credit be correctable —
+by an administrator override, or by a short window — or is one-shot-final
+acceptable? The design intent ("somebody accepted afterwards has never been
+finalised at all") reads as though they should get the same correctable
+treatment as anyone before close-out; what they actually get is a single
+permanent write that requires no justification. Nothing in the repository
+settles it, so it is not settled here.
+
+### R-3 — **CONFIRMED, independently reproduced, FIXED `593f281`**
+
+A separate defect from R-2, and real. Measured on real PostgreSQL with two
+connections issuing this application's own statements:
+
+| Re-read | Close-out timing | Commit order | Verdict |
+|---|---|---|---|
+| plain `SELECT` (as written) | during the window | close-out → correction | **VIOLATED** |
+| `FOR UPDATE` | during the window | correction → close-out | held — close-out blocked until the finalisation committed |
+| `FOR UPDATE` | already committed | — | held — the read returns the timestamp and the submission is refused |
+
+The in-transaction re-read narrowed the window but did not close it: a
+statement's snapshot says nothing about what commits afterwards, and the
+transaction held no lock on `events`. `forUpdate(db)` is empty on SQLite, where
+the engine serialises writers, so the fix changes nothing there — production is
+on SQLite today, which makes this **latent rather than live, and exactly the
+class of defect that appears at cutover**.
+
+The regression test (`attendance.closeOutRace.postgres.test.js`,
+`skipIf(!RUNNING_ON_POSTGRES)`) asserts the mechanism — that a concurrent
+close-out cannot commit while a finalisation is open — because the race needs a
+commit inside a window no test can open. Mutation-checked: without `FOR UPDATE`
+it reports "committed" instead of "blocked".
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused, SQLite | 5 files passed, 1 skipped; 120 passed |
+| Focused, PostgreSQL | 4 files, 94 passed |
+| **Full suite, SQLite** | **639 files, 10,813 passed, 0 failed**, 178 skipped, exit 0 |
+| **Full suite, PostgreSQL** | **412 files, 7,197 passed, 0 failed**, 41 skipped, exit 0 |
+| Output preserved | `/tmp/wev-r3-sqlite-20260922-002241.txt`, `/tmp/wev-r3-postgres-20260922-002459.txt` |
+| Lint / build / bundle scan | clean |
+| Mutation checks | 1, failing on the intended assertion |
+
+Scratch databases were created and dropped; no production database was touched.
