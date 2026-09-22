@@ -389,6 +389,17 @@ export default function VolunteerProfile({
                         <span className="person-meta truncate tnum">
                           {formatDay(c.endDatetime)} · {formatHours(c.hours)}
                         </span>
+                        {/* The service record opposite excludes a cancelled
+                            event, and this list does not — it enumerates issued
+                            documents. Unmarked, that put a certificate and its
+                            hours beside a record that omits the event, on the
+                            one screen showing both. Same sentence as the
+                            certificates page. */}
+                        {c.eventCancelled && (
+                          <span className="small dim truncate">
+                            Event cancelled · still valid, not counted in your totals
+                          </span>
+                        )}
                       </span>
                       <span className="small dim nowrap">View</span>
                     </Link>

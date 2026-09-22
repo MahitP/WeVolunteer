@@ -69,6 +69,7 @@ export default function AssistantCard({ card, onAction }) {
               <span className="strong">{c.eventTitle}</span>
               <span className="dim small ai-card-meta">
                 {c.hours} hours · {c.code}
+                {c.eventCancelled && ' · event cancelled, not counted in your totals'}
               </span>
             </li>
           ))}

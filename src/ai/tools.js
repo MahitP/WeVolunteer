@@ -253,6 +253,11 @@ export const TOOLS = {
             eventTitle: c.title || c.eventTitle || c.event_title,
             hours: c.hours,
             issuedAt: localDay(c.endDatetime || c.createdAt || c.created_at),
+            /* The endpoint lists issued documents, so a cancelled event's
+               certificate is in here and its hours are not in any total. The
+               card says so rather than printing "4 hours" beside a figure the
+               hours tool reports without them. */
+            eventCancelled: c.eventCancelled === true,
           })),
         });
       } catch (err) {
