@@ -676,7 +676,38 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
      * Only when the reader has actually chosen Welly AI. With it off, the
      * promise resolved at mount and there is nothing to wait for.
      */
-    if (!runtimeRef.current && prefs.enabled && prefs.modelId) {
+    /**
+     * Read fresh, not from the `prefs` closure.
+     *
+     * `send` is a `useCallback` over `[busy, messages, position, currentUser,
+     * navigate]`, and `prefs` is not among them — deliberately, since adding it
+     * would rebuild the callback on every preference change. That is harmless
+     * for everything `send` does EXCEPT this test, which is the one place the
+     * value decides behaviour rather than presentation.
+     *
+     * On an empty conversation nothing in that array changes when the mode
+     * control is used: `messages` is still empty and `busy` is still false. So
+     * a reader who switched from Welly Chat to Welly AI and typed before the
+     * model arrived was served by a closure that still said Welly AI was off —
+     * the wait below was skipped, `ask` got a null runtime, and Chat answered
+     * "I can't help with that one" under a pill reading "Welly AI · Running on
+     * this device". That is precisely the defect the block below was written to
+     * remove, reintroduced through the mode-switch path rather than the reload
+     * path.
+     *
+     * `readPreferences()` is the source of truth that `prefs` mirrors, and
+     * `selectMode` already reads it this way for the same reason. It is also
+     * correct across tabs, where the `storage` listener has not necessarily
+     * run yet.
+     *
+     * The `enabled` half of the test is defensive rather than load-bearing, and
+     * that was established by mutation rather than assumed: dropping it leaves
+     * every suite green, because `loadRuntime` returns early when Welly AI is
+     * off, so `loadingRef.current` is already settled and awaiting it costs a
+     * microtask. It stays because it says what the wait is for.
+     */
+    const livePrefs = readPreferences();
+    if (!runtimeRef.current && livePrefs.enabled && livePrefs.modelId) {
       setLiveStatus('Starting Welly AI');
       await loadingRef.current;
       /* `busy` is already true, so nothing else could have started meanwhile —
