@@ -2169,10 +2169,16 @@ Pass 15's table is otherwise accurate.
 run** and are carried forward unchanged. §1.7's "none acted on yet" has been
 corrected in place to say so.
 
+Four intake rows each carried two claims that resolved differently, so they are
+split here rather than given a compound label. A row reading "fixed in part" is
+a row whose other part nobody can look up: each half now carries exactly one
+status and its own evidence. The original identifiers stay valid as the pair.
+
 | ID | Final status | Evidence |
 |---|---|---|
 | R-1 | **DISPROVEN** | Pass 7 — the ledger model, cancellation writes no ledger row because it removes nothing |
-| R-2 | **DISPROVEN** (central claim); second half **OWNER-DECIDED** as D1 | Pass 6; `d776b72` |
+| R-2a | **DISPROVEN** | Pass 6 — the central claim, that close-out leaves credited records mutable |
+| R-2b | **OWNER-DECIDED** | The second half, that a late credit is then uncorrectable → D1 (1A); `d776b72` |
 | R-3 | **FIXED** | `593f281` — `FOR UPDATE` on the close-out re-read, reproduced on PostgreSQL first |
 | R-4 | **DISPROVEN** | Pass 7 |
 | R-5 | **FIXED** | `e57a2bb` — four trigger sites added |
@@ -2185,7 +2191,8 @@ corrected in place to say so.
 |---|---|---|
 | N-1, N-2 | **FIXED** | `ece14c6`, with `c4b7de9` pinning the destination |
 | N-3 | **FIXED** | `23988c5`; the guard that should have caught it, `af08856` |
-| N-4 | **OWNER-DECIDED** (admin) / **FIXED** (partner title) | Pass 10; D6A and D6B, `dfd0eb0` |
+| N-4a | **OWNER-DECIDED** | The admin half — who the calendar is for → D6A (6A-2); no gate changed, `dfd0eb0` |
+| N-4b | **FIXED** | The partner half — an untitled page → D6B (6B-3), `dfd0eb0` |
 | N-5 | **DISPROVEN** | `922bd23` — a documented unfinished role, not a dead end |
 | N-6 | **FIXED** | `e18a010` |
 | N-7 | **DISPROVEN** | Pass 12 — the overlay is URL-backed; no privacy difference |
@@ -2193,10 +2200,12 @@ corrected in place to say so.
 | N-10 | **FIXED** | `e84957d` |
 | N-11 | **FIXED** | `503c3c8` |
 | N-12 | **FIXED** | `d3402f9` |
-| N-13 | **FIXED** in part | `0fe739d`; items 2–4 classified (D) optional |
+| N-13a | **FIXED** | "Browse organizations" named two pages, and one page had two labels; `0fe739d` |
+| N-13b | **DISPROVEN as a defect** | The other three terminology claims — four labels for `/events/new`, the application/sign-up split, five names for the record — classified (D) optional under the standing rule, so not work. Pass 12 |
 | N-14 | **DISPROVEN** | Pass 12 — one click behind Discover, gated on the route's own capability |
 | N-15 | **DISPROVEN** | Pass 12 — a recorded decision in `accountMenu.js` |
-| N-16 | **FIXED** in part | `883f06d`; the date-input half declined with reasons |
+| N-16a | **FIXED** | Two empty states named an action and offered no control; `883f06d` |
+| N-16b | **DISPROVEN as a defect** | The four raw date inputs — all correctly bounded, one documented as deliberate, one additionally refused a future date server-side. Polish, not correctness. Pass 12 |
 | N-17 | **FIXED** | `af08856` |
 
 Findings surfaced and fixed outside the two intake tables: the Welly link
