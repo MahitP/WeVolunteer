@@ -235,6 +235,53 @@ describe('certificates', () => {
       expect(own.body.some(c => c.eventId === PHANTOM)).toBe(false);
     });
 
+
+    /**
+     * The EXISTS is scoped to the PERSON, and that is load-bearing.
+     *
+     * Both lists admit a cancelled event only when a certificate for it exists.
+     * Dropping `c2.user_id = at.user_id` from that subquery leaves the whole
+     * suite green — found by mutation during the post-closeout adversarial
+     * pass — and reintroduces the phantom row the predicate was added to
+     * remove, one volunteer at a time: one attendee's certificate would admit
+     * the event for every other attendee, who has none and can never be issued
+     * one, because minting refuses a called-off event.
+     *
+     * The visible cost is not abstract. `CertificatesPage` renders each row as
+     * a link to `/certificates/{code}`, and those rows carry `code: null`.
+     */
+    it('does not let one volunteer\u2019s certificate admit the event for another', async () => {
+      const other = (await db.prepare('SELECT id FROM users WHERE email = ?')
+        .get('leo.chen@example.com')).id;
+
+      /* Same cancelled event, same slot, credited — and no certificate, because
+         nothing ever minted one for them and nothing can now. */
+      await db.prepare(`
+        INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+        VALUES (?, 'slot-cert-then-cancelled', ?, 1, 4)
+      `).run(EVENT, other);
+
+      expect(
+        await db.prepare('SELECT 1 AS x FROM certificates WHERE user_id = ? AND event_id = ?')
+          .get(other, EVENT),
+        'the fixture minted a certificate; the case would prove nothing',
+      ).toBeFalsy();
+
+      const otherToken = await srv.login('leo.chen@example.com');
+      const own = await srv.call('GET', '/api/certificates', undefined, otherToken);
+      expect(
+        own.body.some(c => c.eventId === EVENT),
+        'a certificate that belongs to somebody else put the event on this list',
+      ).toBe(false);
+
+      const pub = await srv.call('GET', `/api/users/${other}/certificates`, undefined, otherToken);
+      expect(pub.body.certificates.some(c => c.eventId === EVENT)).toBe(false);
+
+      /* And the person who does hold one still sees it. */
+      const mine = await srv.call('GET', '/api/certificates', undefined, priyaToken);
+      expect(mine.body.some(c => c.eventId === EVENT)).toBe(true);
+    });
+
     it('still keeps the hours out of the credited total', async () => {
       /* The record and the document are different things, and this is the half
          that must not move: `/api/auth/me` is `creditedHoursFor`. */
