@@ -41,6 +41,7 @@ import { DistinctionTag } from '../components/profile/Distinction';
 import OrgAvatar from '../components/common/OrgAvatar';
 import { CATEGORY_GROUPS } from '../eventCategories';
 import { organizationPath } from '../utils/organizationUrl';
+import { coarsen } from '../utils/coarsePosition';
 /**
  * The category filter is a grouped select, not a row of chips.
  *
@@ -57,13 +58,11 @@ import { organizationPath } from '../utils/organizationUrl';
  */
 const ALL_CATEGORIES = 'All';
 
-/**
- * A coordinate rounded to the neighbourhood before it leaves the device.
- *
- * Two decimal places, about 1.1km. See the call site for why the filter can
- * afford it and why the displayed distance is computed separately.
- */
-const coarsen = (deg) => Math.round(deg * 100) / 100;
+/* A coordinate rounded to the neighbourhood before it leaves the device — two
+   decimal places, about 1.1 km. Defined in `utils/coarsePosition.js` rather
+   than here since Welly reached the same endpoint without it and sent a
+   full-precision fix; see that file. The call sites below say why the filter
+   can afford the blur and why a displayed distance is computed separately. */
 
 /**
  * A suggestion's reason, in words.

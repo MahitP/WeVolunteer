@@ -1252,9 +1252,28 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
 
                     {m.needsLocation && locationCtx && (
                       <div className="welly-location-offer">
+                        {/**
+                          * What this says is measured against a published
+                          * promise, not chosen for tone.
+                          *
+                          * It read "It stays on your device, and nothing is
+                          * saved." The second half is true; the first is not. A
+                          * proximity search sends a coordinate to
+                          * `GET /api/events` — the Privacy Policy's "Your
+                          * device location" section says so plainly, and says
+                          * what protects it: "rounded to about a kilometre to
+                          * sort a list by distance".
+                          *
+                          * `WellyView.disclaimer.test.jsx` already forbids that
+                          * sentence in the composer footer a few lines down,
+                          * and gives the reason — it "is the exact sentence a
+                          * future edit would reach for". This is the moment a
+                          * reader decides whether to grant the permission, so
+                          * it is the worst place in the product to overstate.
+                          */}
                         <p className="dim small">
-                          Sorting by distance needs your location. It stays on your device,
-                          and nothing is saved.
+                          Sorting by distance needs your location. It is blurred to about a
+                          kilometre before it is sent, and never stored.
                         </p>
                         <button
                           type="button"

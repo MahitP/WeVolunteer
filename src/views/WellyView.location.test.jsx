@@ -124,6 +124,42 @@ describe('a proximity search with no location', () => {
     expect(log).not.toMatch(/your address|zip ?code|postcode|where do you live|what city are you/i);
   });
 
+  /**
+   * ── The offer must not overstate, for the same reason the footer must not ──
+   *
+   * `WellyView.disclaimer.test.jsx` already forbids "stays on your device" in
+   * the composer footer, and says why: "an unconditional 'nothing leaves your
+   * device' here would be false — and it is the exact sentence a future edit
+   * would reach for." This offer said exactly that sentence, at the moment a
+   * reader decides whether to grant location access.
+   *
+   * It is also false in the specific: a "near me" search sends a coordinate to
+   * `GET /api/events`. What the Privacy Policy promises is that it is BLURRED
+   * first — "rounded to about a kilometre to sort a list by distance" — and
+   * never stored, which is what this now says.
+   */
+  it('does not claim the position stays on the device', async () => {
+    show();
+    askNearby();
+    await screen.findByRole('button', { name: /use my location/i });
+
+    const log = document.body.textContent;
+    expect(
+      log,
+      'the location offer claims the position never leaves, at the consent moment',
+    ).not.toMatch(/stays on your device|never leaves|nothing leaves/i);
+  });
+
+  it('says what actually happens: blurred before sending, never stored', async () => {
+    show();
+    askNearby();
+    await screen.findByRole('button', { name: /use my location/i });
+
+    const log = document.body.textContent;
+    expect(log).toMatch(/blurred|rounded/i);
+    expect(log).toMatch(/never stored|not stored|nothing is stored/i);
+  });
+
   it('says what to do when the browser is the one refusing', async () => {
     ctx.permissionDenied = true;
     show();

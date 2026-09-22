@@ -45,6 +45,7 @@ import {
 } from './eventDraft.js';
 import { can } from '../authz.js';
 import { api } from '../utils/api.js';
+import { coarsePosition } from '../utils/coarsePosition.js';
 
 /** Replies are comfortably sized to prevent cutting off sentences mid-thought. */
 const MAX_REPLY_TOKENS = 512;
@@ -98,11 +99,34 @@ const FIXED = {
    * Welly what it was and was told the name of the other one. This is the
    * fallback for when nothing is loaded and there is no model to name.
    */
+  /**
+   * ── Why this does not say "nothing you type here is sent anywhere" ──
+   *
+   * It used to, and that was the one place Welly overstated itself. The
+   * sentence is true of INFERENCE and false of the feature: a search question
+   * reaches `search_opportunities`, whose `query` slot is the residual of the
+   * typed sentence — `searchTopic` strips certificate codes, tags, time
+   * phrases and asking-words and keeps the rest — and `tools.js` sends it as
+   * `q` to `GET /api/events`, where `shouldUseSemantic` may hand it to Pinecone
+   * to be embedded server-side.
+   *
+   * The product had already reached this conclusion about this very sentence.
+   * `WellyView.jsx`, beside the composer footer: "Nothing leaves your device …
+   * is not true of the whole feature … Saying the stronger thing here would
+   * make the assistant's one privacy claim the one place it overstates itself."
+   * The footer follows that reasoning; this answer did not.
+   *
+   * The on-device claim stays, because it is true and it is the point. What
+   * replaces the absolute half is the other thing the footer already says: a
+   * lookup is answered by WeVolunteer's server, exactly as the rest of the app
+   * is. That is a smaller promise and a keepable one.
+   */
   identity_self:
     'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
     + 'I am software, not a person. When Welly AI is switched on I run a small open '
-    + 'language model entirely on your own device — nothing you type here is sent '
-    + 'anywhere. Otherwise I answer straight from your WeVolunteer records.',
+    + 'language model entirely on your own device, so your words are not sent to any '
+    + 'AI service. Looking something up — your hours, your shifts, opportunities to '
+    + "join — is answered by WeVolunteer's server, the same as the rest of the app.",
 
   identity_platform:
     'This is WeVolunteer — the app schools use to post volunteer events, sign students '
@@ -350,10 +374,14 @@ function identityAnswer(runtime) {
     || model.parameters
     || model.label;
 
+  /* Same wording as `FIXED.identity_self`, and for the same reason — see the
+     note there. The two must not drift: this one is what anybody with a model
+     loaded actually reads. */
   return 'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
     + 'I am software, not a person. Right now I am running a small open language model '
-    + `(${name}) entirely on your own device — nothing you type here is sent anywhere. `
-    + 'Otherwise I answer straight from your WeVolunteer records.';
+    + `(${name}) entirely on your own device, so your words are not sent to any AI `
+    + 'service. Looking something up — your hours, your shifts, opportunities to join — '
+    + "is answered by WeVolunteer's server, the same as the rest of the app.";
 }
 
 /** "The deadline must…" → "the deadline must…", for use inside a sentence. */
@@ -1353,8 +1381,27 @@ export async function ask(
   /* ── 8. Read Tool Execution ──────────────────────────────────────────────── */
   const args = { ...slots };
   if (slots.wantsNearby && position) {
-    args.lat = position.lat;
-    args.lng = position.lng;
+    /**
+     * Blurred at the boundary, because this pair is about to cross to the
+     * server.
+     *
+     * It used to be `position.lat` verbatim, and `LocationContext` stores
+     * `position.coords` as the browser gives them — so Welly sent a
+     * full-precision GPS fix to `GET /api/events`, the same endpoint
+     * `BrowseEvents` deliberately sends a ~1.1 km centre to. The Privacy Policy
+     * promises the blurred one ("rounded to about a kilometre to sort a list by
+     * distance"), and the offer that asks for the permission says the position
+     * stays on the device.
+     *
+     * The exact position is untouched and still used on the device —
+     * `distance_to_event` computes the miles a reader sees from it, for the
+     * same reason `EventModal` does.
+     */
+    const coarse = coarsePosition(position);
+    if (coarse) {
+      args.lat = coarse.lat;
+      args.lng = coarse.lng;
+    }
   }
   /**
    * ── "Near me" with nothing to be near ──

@@ -89,6 +89,64 @@ describe('what Welly is', () => {
   });
 
   /**
+   * ── The one privacy claim must not be the one place Welly overstates ──
+   *
+   * This answer said "nothing you type here is sent anywhere". True of
+   * inference, and false of the feature: `search_opportunities` takes the
+   * residual words of the typed sentence — `searchTopic` in `router.js` strips
+   * codes, tags, time phrases and asking-words and KEEPS the rest — and sends
+   * them as `q` to `GET /api/events` (`tools.js`), where `shouldUseSemantic`
+   * may hand them to Pinecone to be embedded server-side.
+   *
+   * The product had already decided not to say this. `WellyView.jsx` records
+   * it beside the composer footer, about the very sentence: "Nothing leaves
+   * your device … is not true of the whole feature … Saying the stronger thing
+   * here would make the assistant's one privacy claim the one place it
+   * overstates itself." The footer follows that; this answer did not.
+   *
+   * So: keep the on-device claim, which is true and is the point, and drop the
+   * absolute one.
+   */
+  it('does not claim that nothing typed is ever sent anywhere', async () => {
+    const rt = await loudRuntime('irrelevant');
+    const res = await ask('who trained you?', { runtime: rt, user: STUDENT });
+
+    expect(
+      res.answer,
+      'Welly claims nothing typed is sent anywhere, which a search question disproves',
+    ).not.toMatch(/nothing you type[^.]*sent anywhere/i);
+  });
+
+  it('says where a lookup actually goes, rather than leaving it out', async () => {
+    const rt = await loudRuntime('irrelevant');
+    const res = await ask('who trained you?', { runtime: rt, user: STUDENT });
+
+    /* The honest half the footer already tells people: a lookup is answered by
+       WeVolunteer's server, exactly as the rest of the app is. */
+    expect(res.answer).toMatch(/WeVolunteer'?s server|answered by WeVolunteer/i);
+  });
+
+  /**
+   * With NO model loaded, which is a different string.
+   *
+   * `identityAnswer` falls back to `FIXED.identity_self` whenever the runtime
+   * is not READY — Welly Chat, a model still downloading, a device that cannot
+   * run one at all. The first version of the case above used a loaded runtime
+   * only, so restoring the old claim in `FIXED.identity_self` left the suite
+   * green: the mutation check caught that, and this is the half it was missing.
+   */
+  it('makes the same narrowed claim with no model loaded', async () => {
+    const res = await ask('who trained you?', { user: STUDENT });
+
+    expect(res.answer).toMatch(/on your own device/i);
+    expect(
+      res.answer,
+      'the no-model fallback still claims nothing typed is sent anywhere',
+    ).not.toMatch(/nothing you type[^.]*sent anywhere/i);
+    expect(res.answer).toMatch(/WeVolunteer'?s server|answered by WeVolunteer/i);
+  });
+
+  /**
    * ── Naming the model that is running, not a model ──
    *
    * The sentence said "Qwen2.5 0.5B" whatever was loaded. Somebody who had
