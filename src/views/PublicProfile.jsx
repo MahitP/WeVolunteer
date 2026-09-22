@@ -428,6 +428,18 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
                   See certificates
                 </Link>
               )}
+              {/* Unconditional, unlike certificates above.
+                  `/users/:handle/badges` exists and its route comment gives the
+                  reason it belongs here — "reading somebody's badges is reading
+                  their profile" — and it was the one fuller page this profile
+                  never named. It needs no visibility check because badges have
+                  no visibility setting: `GET /api/users/:userId/badges` gates on
+                  `directory.read` alone, which any reader of this page already
+                  holds, so the link cannot lead to the refusal the note above
+                  is guarding against. */}
+              <Link to={`/users/@${profile.username}/badges`} className="btn btn-secondary btn-sm">
+                See badges
+              </Link>
             </div>
           )}
           </>)}
