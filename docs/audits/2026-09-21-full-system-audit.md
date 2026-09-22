@@ -409,6 +409,11 @@ The reported findings, **none yet independently verified or acted on**:
 | N-16 | Four raw `<input type="date">` remain against the shared `DatePicker`; eight hand-rolled empty states remain against `EmptyState`, and the missing `action` slot is the direct cause of a dead end | Medium | C |
 | N-17 | `serverLinks.test.js` cannot read multi-line ternaries, so it reports coverage it does not have on exactly the links carrying query strings and fragments | Medium | B |
 
+*The table is the intake record, written before any of it was checked. Every row
+is adjudicated later in this document: N-1/N-2 in pass 5, N-3 in pass 9, N-4 in
+pass 10, N-5 in pass 11, and N-6 … N-17 in pass 12. Six of the seventeen did not
+survive verification.*
+
 ---
 
 ### 1.7 Findings reported and awaiting verification
@@ -1457,3 +1462,309 @@ output at `/tmp/wev-n5-20260922-015633.txt`. Lint, build and bundle scan clean.
 **None.** The partner product being unfinished is already recorded as a decision
 in `authz.js`, and the N-4 question ("who is the calendar for?") remains the
 open one that touches this role.
+
+---
+
+## Pass 12 — N-6 … N-17, and the two low-severity items
+
+Worked in one unattended run. Each item was reconfirmed against the repository
+before anything was changed, and six of the twelve turned out not to be defects.
+Every fix is its own commit, so the item that caused it is identifiable from
+`git log` alone.
+
+### N-6 — **DEFECT. High. FIXED `e18a010`**
+
+Three actions that destroy other people's records were gated on
+`window.confirm`: denying an organizer (which removes their account), and
+removing an event from either dashboard (which removes every sign-up under it).
+
+The intent was documented rather than inferred. The stabilization report lists
+it at P2 — "`window.confirm` remains in 7 non-auth places; `ConfirmDialog`
+exists to replace them" — and the deployment runbook records the cost at L5,
+roadmap P2-7: "Unstyled, poor on mobile, and with no room to explain
+consequences ('this will remove 12 sign-ups')."
+
+That last clause was the substance of it. `OrganizerDashboard` had **already
+computed the count** and pushed `${signups} volunteer sign-ups will be removed
+with it` through a `\n\n` that the browser typeset. The number now reads as a
+sentence, emphasised, in the place the decision is taken.
+
+Scoped to those three. `ConfirmDialog`'s own header scopes its argument to the
+two security actions it was written for, so this is not a claim that every
+`window.confirm` must go — the six remaining (comments, announcements, Welly's
+local history, a volunteer withdrawing their own application) are left alone.
+
+Each dialog is rendered at the component root rather than beside its button:
+both admin controls sit inside tables that re-render on every `loadData`, and a
+dialog mounted in a row unmounts underneath the reader when the queue refreshes.
+Authorization is untouched — `eventPermissions().canDelete` still gates the
+control, the server still refuses an event with attendance, and the 409
+evidence-hold explanation still lands on both dashboards.
+
+Mutation-checked four ways: each control wired straight back to its action, and
+the sign-up count removed. Every case failed only its own assertions.
+
+### N-7 — **DISPROVEN in two of three parts; the third is intentional**
+
+The claim was that `PublicProfile` and `VolunteerProfile` differ in content,
+**addressability** and **back behaviour**.
+
+- *Addressability* — **false**. `VolunteerProfile` is not a state overlay. It is
+  backed by search params: `profileId`/`profileType` are read from the URL
+  (`src/App.jsx:1167-1169`) and `setViewingProfileState` writes and clears
+  `?profile=&type=` through `setSearchParams` (`src/App.jsx:1295-1307`). So it
+  survives a reload and a copied link, exactly as the event modal does.
+- *Back behaviour* — follows from the above: the browser Back button dismisses
+  it, and the view draws its own back control besides.
+- *Content* — true, and deliberate. The two answer different questions, each
+  stated in its own header: `PublicProfile.jsx:1-25` is "who somebody is … not
+  an information dump about an account", `VolunteerProfile.jsx:13-19` is "a
+  volunteer's record of service". `/profile` picks between them by
+  `selfProfileFor` (`src/App.jsx:215-218`) for a reason recorded above it — the
+  cascade used to send an account that both runs the platform and volunteers to
+  a page that showed a total and nothing else.
+
+No privacy difference, which was the one thing that would have made this a
+defect rather than a shape: both routes gate on `directory.read`
+(`server/routes/userRoutes.js:52`, `server/routes/directoryRoutes.js:128`), both
+put PII behind `canSeeContact`, and both honour the subject's service-visibility
+setting (`canSeeHours` on one, `visibilityState` via `profileSerializer.js:328`
+on the other).
+
+**Observation, not acted on.** Two reachable views of the same person, with no
+link between them. Adding one is a product decision about which is "the" member
+page, not a navigation fix.
+
+### N-8, N-9 — **Latent, not live. No change.**
+
+Both depend on a non-staff account holding `analytics.impact`, `appeal.review`
+or `event.moderate`. None can:
+
+- `capability.grant` is registered (`server/authz.js:327`) and **no route
+  requires it** — the grep over `server/routes` returns nothing.
+- The only caller of `grantCapability` outside its own module is
+  `syncOrganizerCapabilities` (`server/organizationRoles.js:107`), which writes
+  exactly `STUDENT_ORGANIZER_CAPABILITIES` (`server/organizationRoles.js:48-53`):
+  four organization-scoped capabilities, none of the three above.
+- The only other writer of `user_capabilities` outside that path is a `DELETE`
+  in the admin reset (`server/routes/adminRoutes.js:2401`).
+
+`analytics.impact`'s own comment does contemplate an administrator extending the
+figures "to one account through `capability.grant`" (`server/authz.js:417`), so
+the design intends this to become reachable. Until a route exists, the hub
+gating is not reachable-and-wrong; it is unbuilt. Recorded so that whoever adds
+the grant route knows these two tiles are waiting behind it.
+
+### N-10 — **DEFECT. Medium. FIXED `e84957d`**
+
+`/users/:handle/badges` exists, is gated on `directory.read`, and its route
+comment gives the reason it is a profile route: "reading somebody's badges is
+reading their profile." The profile linked service history and certificates and
+not badges, so the one page whose whole subject is this person's recognitions
+was reachable only by typing the URL.
+
+The link is **unconditional**, unlike the certificates link beside it. That one
+is conditional because a student can set `serviceVisibility.certificates =
+'private'`, and the note there says a link to a page that will refuse "is an
+invitation to discover the setting". Badges carry no such setting —
+`GET /api/users/:userId/badges` gates on `directory.read` alone, which any
+reader of this page already holds — so the link cannot lead to a refusal, and
+making it conditional would withhold it for nothing. That distinction is
+asserted rather than assumed: one case sets certificates private and checks that
+badges survive while certificates go. Mutation-checked by removing the link.
+
+### N-11 — **DEFECT. Medium. FIXED `503c3c8`**
+
+Welly's `applications` destination emitted `/discover?find=applications`. `find`
+is a **scope**: `BrowseEvents` accepts `all | events | people | organizations`
+and falls back to `all` for anything else, in silence. So Welly announced
+"Navigating to Your Applications" and delivered the generic Discover page.
+
+Reachable through any explicit phrasing — measured, all five of "take me to my
+applications", "open my sign-ups", "go to the applications page" and two others
+resolved to that path. It survived because the ordinary phrasing "show my
+applications" routes to the `my_applications` **tool** and answers with data,
+never consulting the destination table at all; the common case was always fine.
+(I initially had this backwards mid-investigation and corrected it by probing
+the router rather than reading it.)
+
+There is no applications page to point at. A student's pending and confirmed
+applications are sections of the volunteer dashboard — "Waiting on a reply" and
+"Confirmed shifts" — so the dashboard is the honest destination, and the label
+still describes what they asked for.
+
+The existing pin asserted the old path under the name "canonical app routes",
+which is the one thing it was not, so it was updated deliberately rather than
+relaxed. The new guard is written over the **whole** destination table: every
+path must be one `server/clientRoutes.js` serves, and any `find` it carries must
+be a scope Discover accepts. Two false positives were found and corrected while
+writing it — `/profile` and `/` are served but absent from `APP_ROUTES`, and
+`?section=` is a key Settings genuinely reads — so it validates `find` alone
+rather than re-implementing other pages' parsing.
+
+### N-12 — **DEFECT. Medium. FIXED `d3402f9`**
+
+Archiving a club, and cancelling its creation, both exited to `/directory` — a
+redirect to `/discover?find=people`. So archiving a club left the manager in a
+search for students, and pressing Cancel on "create organization" answered a
+question about clubs with a list of people.
+
+`/organizations` is right for both: it lists "You manage" and "You belong to",
+and it is where `OrganizationsHome` links to the create form from. It cannot
+refuse them either — checked rather than assumed: `organization.create` is held
+by organizer and admin, and both also hold `organization.join`, which is what
+`/organizations` requires. Cancel while **editing** already returned to the club
+and is untouched; that distinction is asserted, and mutation-checked by
+flattening both exits into one, which fails the editing case alone.
+
+### N-13 — **One part a defect (FIXED `0fe739d`); the rest is terminology, deliberately not touched**
+
+The item bundled four claims. Only one is a wrong destination:
+
+1. **"Browse organizations" pointed at two different pages — FIXED.** The
+   not-found screen's button went to `/organizations`, the clubs the reader is
+   already in, while `OrganizationsHome` uses the same phrase for the
+   platform-wide search — and Discover's action row calls `/organizations`
+   "Your organizations" (`src/views/BrowseEvents.jsx:679-683`). One label, two
+   pages; one page, two labels. Repointed at `/discover?find=organizations`,
+   which is also better on its own terms: somebody whose club link no longer
+   resolves is trying to find a club. Same capability either way — both require
+   `directory.read`. Added `src/labelDestinations.test.jsx`, a source-level
+   guard that a label naming a destination resolves to exactly one route.
+2. **Four labels for `/events/new`** — left alone. "Create event", "New event",
+   "Post an opportunity" and "New opportunity" are a copy decision across four
+   surfaces with different readers, not a broken link, and the page title is
+   already the canonical one.
+3. **application / sign-up along the role line** — left alone. The split is
+   consistent and intentional: a volunteer *applies*, an organizer reads
+   *sign-ups*. Collapsing it is a vocabulary decision with no defect behind it.
+4. **Five names for the service-hours record** — see N-15, where the same five
+   destinations already carry a recorded decision.
+
+Items 2-4 are (D) optional, and under the standing rule only A/B/C become work.
+
+### N-14 — **Not a defect. No change.**
+
+`/organizations` has no menu entry, and that is a structure rather than an
+omission. It sits one click behind the rail's first destination: Discover
+carries a labelled "Your organizations" action (`src/views/BrowseEvents.jsx:679-683`),
+whose gate is `can(currentUser, 'organization.join')` (`:599`) — **exactly** the
+capability the route requires (`src/routes/index.jsx:282`). So no role holds the
+page without a path to it, and none is shown a link that would refuse. The
+primary tier is capped at six on purpose, which `src/accountMenu.js:61-63`
+records in the course of declining the rail for `/hours` for the same reason.
+
+The comparison with `/welly` does not survive contact either: the rail entry for
+Discover exists partly *because* clubs live behind it — "a reader who wanted a
+club had no way to tell from the rail that this was where clubs live"
+(`src/App.jsx:306-315`).
+
+### N-15 — **DISPROVEN. A recorded decision, not a missing hub.**
+
+The five destinations are named exactly, in `src/accountMenu.js:43-69`, and one
+of them is promoted into the account menu with the reasoning stated: "`/hours`
+is the right one of the five to promote: it is the whole record, WeVolunteer and
+self-reported together, and the other four are linked from it or from the
+profile beside it. **Promoting all five would move the problem into the menu.**"
+The same comment declines the rail for it, and gates the entry on
+`portfolio.write` so three roles are not offered a page that answers 403.
+
+That is the hub question asked and answered. A reader who wants their record has
+a menu entry; the other four hang off it.
+
+### N-16 — **Half a defect (FIXED `883f06d`); half polish, declined**
+
+Two empty states named an action and offered nothing to take it with: the
+unverified-organizer screen — the *whole dashboard* for every organizer between
+registering and being approved — said "You can browse opportunities in the
+meantime" and carried no control, and the calendar's empty day said "Pick
+another date, or browse opportunities to fill it" and carried none either. Both
+are recoverable, since Discover is in the rail for everybody who can reach
+either screen, which is what makes this a broken promise rather than a trap.
+
+Scoped to those two. The other four hand-rolled empty states state a condition
+and name no action — "No confirmed volunteers yet", "Nothing scheduled", "No
+pending applications", "No past shifts yet" — and an empty state is not required
+to offer an action, only not to promise one it withholds.
+
+Not converted to `EmptyState`: swapping either card wholesale would move custom
+content (the organizer card carries the demo-bar notice inside it) for a styling
+gain this finding did not ask for. The item's other half — four raw
+`<input type="date">` against the shared `DatePicker` — is declined for a
+stronger reason: all are correctly bounded, `LegalEditor` documents its native
+input as deliberate, and `LogExternalHours` is additionally refused a future
+date server-side. That is polish, not correctness. Mutation-checked by removing
+each control in turn.
+
+### N-17 — **DEFECT in the guard itself. Medium. FIXED `af08856`**
+
+`serverLinks.test.js` reads one line at a time, so a `link:` ternary spanning
+three lines matched nothing — neither arm sits on the `link:` line. Two links
+are written that way, and they are exactly the two carrying a query string and a
+fragment, which is to say the two most likely to be wrong.
+
+One of them was. `ORGANIZATION_JOIN_REQUEST_RECEIVED` pointed at `#requests`, an
+id that existed nowhere (that is N-3, fixed at `23988c5`), and the guard whose
+entire job is to catch a destination that goes nowhere reported coverage it did
+not have.
+
+A second whole-file pass rather than widening the per-line loop: those patterns
+use `$` anchors and per-line `continue`s that mean what they say only on one
+line, and widening them would change what every existing case matches in order
+to fix a case none was written for. The line number is derived from the match
+offset, so a failure still points at the `link:`.
+
+Proven two ways: removing the pass fails the new case, and with the pass in
+place a planted dead multi-line link is caught and reported at
+`notificationContent.js:693` — which is the behaviour that was missing, not just
+the absence of a false pass.
+
+### Low item 1 — iOS capability reason — **Unreachable, annotated not deleted. `a521eb9`**
+
+`detectCapability`'s `if (isIOS)` branch explains that only the smallest model is
+offered on iPhone and iPad. No iOS reader sees it: reaching it needs `fits`
+non-empty, `fitsDevice` rejects a model that is not `conversational`, and the
+only model under the 200 MB `IOS_MAX_MODEL_BYTES` is the 105 MB `fast` tier,
+which is withheld from conversation. Every iOS device takes the
+`fits.length === 0` return above and is told the assistant is unavailable here.
+
+Left in place — it is defensive, not dead, and becomes both reachable and
+correct the day the ceiling rises or a small conversational model is added.
+Annotated so nobody reads it as a description of what iOS shows today. Comment
+only; no behaviour change, and therefore no regression test.
+
+### Low item 2 — `summarise('profile')` — **DEFECT. Low. FIXED `7729f70`**
+
+`summarise()` flattens every user-authored value it interpolates through
+`plainValue`, so a value cannot forge a turn boundary in the history
+`sanitizeHistory` replays into the next prompt. `case 'profile'` was the one
+exception: it took `name` and `role` from `api.getMe()` unflattened.
+
+Self-targeting — the only name it can carry is the reader's own — so this was a
+hole in a defence, not a route to anyone else's data. Closed anyway, because
+`accountValidation` checks a name for length and trims it and nothing else,
+which leaves exactly the control characters `plainValue` exists to remove.
+Applying a defence in six of seven branches is how the seventh gets forgotten.
+
+The regression goes through `ask()` rather than the unexported `summarise`, and
+holds both halves: no line structure survives, and the words do — this flattens,
+it does not censor. Reverting either `plainValue` call fails both hostile cases
+and leaves the ordinary-profile case green.
+
+### Verification
+
+Full suite: **648 files, 10,866 passed, 0 failed, 178 skipped**, exit 0.
+Complete untruncated output at
+`…/scratchpad/wev-full-20260922-final.txt`. `npm run lint` clean, `npm run
+build` exit 0, and a bundle scan over all 164 emitted chunks for eight
+server-only strings (`pilot.db`, `WEV_DB_PATH`, `node:sqlite`, `JWT_SECRET`,
+`process.env.DATABASE`, `SUPER_ONLY`, `hours_ledger`, `bcrypt`) returned zero
+hits. Working tree clean.
+
+No production database was opened, no production deployment was made, and no
+real service-hour data entered a fixture or a log at any point in this pass.
+
+### New owner decisions
+
+**None.** N-8/N-9 record a dependency on unbuilt work rather than a question,
+and the N-13 terminology items are (D) optional by the standing classification.
