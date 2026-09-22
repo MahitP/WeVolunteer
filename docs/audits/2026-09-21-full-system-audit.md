@@ -273,8 +273,8 @@ passing, which is exactly the scoping claimed.
 
 ### 1.3 Cancelled events — the hours rule is stated everywhere and enforced in six places
 
-**Grade: Verified (the inconsistency). Severity: High. Category: C.
-Status: fix pending — scoped, not yet executed.**
+**Grade: Verified. Severity: High. Category: C. Status: FIXED — `df4e815`,
+with two questions referred to the owner (below).**
 
 The platform's documented rule is explicit: a called-off event counts as zero
 hours and stays off the transcript (`server/certificates.js:110-115`). Six
@@ -576,3 +576,125 @@ build` and `npm run scan:bundle` all clean.
 `src/views/Notifications.jsx` or `src/components/NotificationsBell.jsx` — the
 two components that dispatch `event:` links. Recorded rather than fixed, to keep
 this change to one concern.
+
+---
+
+## The cancelled-hours invariant, established 2026-09-21
+
+### The rule, and where it comes from
+
+> **Attendance is a record; credited service is a presentation of it.**
+> Cancelling an event never alters the stored row. It removes that row from
+> every figure the platform *presents as credited service*.
+
+Evidence, in the order it settles the question:
+
+| Source | What it establishes |
+|---|---|
+| `server/volunteerStats.js` — `creditedHoursFor` header | "the canonical definition behind every total in the product"; the function joins `events` and excludes `cancelled` |
+| Commit `b8cfb09` | Names the scope: "the platform-wide 'cancelled events count for nothing' rule was applied everywhere hours are presented as **credited service**" |
+| Commit `b8cfb09` | Settles that this is not a policy choice: "The code disagreed with published policy rather than implementing a different intent, so no policy text changes" |
+| `docs/legal/policies/07-volunteer-record-policy.md` | Publishes Auto Select's input as "total credited hours" and states the principle for the neighbouring term — "neither is an event that was **cancelled**" |
+| `server/certificates.js` | "The platform now counts that event as zero hours and keeps it off the transcript" |
+| `server/routes/userRoutes.js` — `completed[]` | "A cancelled event is not completed service … Same rule as `volunteerStats.hoursCredited` and every figure in `organizationHours.js`" |
+
+**INV-001 does not cover this.** `docs/spec/01-engineering-foundation.md:388`
+is about hours being *derived rather than stored*; it says nothing about
+cancellation. `impact.js`'s header citing "the same rule as credited hours
+(INV-001)" is therefore citing the derivation property, not the exclusion — it
+is not self-contradicting, it simply never addressed cancellation.
+
+**The snapshot promise is not in tension with this.** "Credited hours are a
+snapshot" (policy §79) is about an hours value not being *re-priced* when a slot
+is edited. The stored `attendance.hours_awarded` is untouched by cancellation.
+Only the read-time presentation changes.
+
+### Call-site inventory
+
+Every non-test query in `server/` matching `present = 1` was read and
+classified. Categorised rather than listed row by row.
+
+**A · Presents credited service — must exclude. Now does.**
+
+| Location | Consumer | Before |
+|---|---|---|
+| `volunteerStats.js` `creditedHoursFor` | dashboard `volunteeredHours`, `record.hoursCredited` | already correct |
+| `volunteerStats.js` `participationCountsFor` | profile counts | already correct |
+| `userRoutes.js` `completed[]` | transcript list | already correct |
+| `attendanceRoutes.js:446` | own certificates list | already correct |
+| `eventRoutes.js:1515` | event-scoped hours | already correct |
+| `volunteerInsights.js:130` | `eventsAttended` | already correct |
+| `certificates.js:333` | certificate viewer | fixed earlier, `d3175e3` |
+| `organizationHours.js` ×4 | per-club hours | already correct |
+| `autoSelect.js` ×3 | draw weighting | already correct (`b8cfb09`) |
+| **`volunteerInsights.js` `creditedTotalsFor`** | **profile `stats.hours`/`eventsCompleted`/`shiftsCompleted`, `record.shiftsWorked`** | **NEW — was unfiltered** |
+| **`volunteerInsights.js` `monthlyHours`** | **the chart under the credited total** | **fixed** |
+| **`volunteerInsights.js` `firstVolunteeredAt`** | **"volunteering since"** | **fixed** |
+| **`volunteerInsights.js` `kindsOfService`** | **`record.kindsOfService`** | **fixed** |
+| **`volunteerStats.js` `lastVolunteeredAt`** | **public "still active" signal** | **fixed** |
+| **`userRoutes.js` `byCategory`** | **hours breakdown, must sum to `stats.hours`** | **fixed** |
+| **`badgeService.js` `collectStats`** | **hours/events/shifts behind every automatic badge** | **fixed** |
+
+**B · Intentionally unfiltered — verified, not assumed.**
+
+| Location | Why it must stay raw |
+|---|---|
+| `hoursLedger.js:273` `verifyLedgerParity` | Compares `SUM(hours_ledger.delta)` to raw attendance. Cancelling writes **no ledger row**, so filtering the attendance side would report a false mismatch for every user with a cancelled event, on every boot. Read and confirmed. |
+| `hoursLedger.js:358` backfill | Same reconciliation, same reason. |
+| `verifyHours.js:99-104` | The operator CLI twin of the parity check; labels itself "source of truth — attendance". |
+| `attendanceRoutes.js:602` public verify | An issued certificate is never voided — a hash-pinned policy, pinned by `certificates.cancelled.test.js`. |
+| `accountRoutes.js:109-118` | The certificate snapshot frozen at account deletion, tied to the same never-void rule. |
+| `db.js:303` | A one-time duplicate-email repair heuristic choosing which account has more real activity. Not a presentation. |
+| `volunteerInsights.js` `milestoneInputs` | A recorded decision — see the open question below. |
+
+**C · Not decided here — referred to the owner.** See below.
+
+### Open question 1 — milestones
+
+`milestoneInputs` deliberately counts a cancelled event.
+`volunteerInsights.test.js`: *"counts a cancelled event, because the service
+still happened"*, explicitly *"deliberately different from
+`volunteerStats().eventsAttended`"*. Commit `93756e4` made the same choice
+knowingly.
+
+**Left exactly as it was**, and the existing test still passes. It is raised
+rather than resolved because the reasoning that protects it does not obviously
+hold: a milestone is **recomputed on every read**, so unlike a streak badge
+(awarded on the *longest* run, never withdrawn) or an issued certificate (never
+voided), it is not actually protected from changing — revoking attendance
+already removes a tier. So a student can now see a milestone tier beside an
+hours total that no longer supports it.
+
+Either answer is defensible and both are one-line changes. **This is a product
+decision about recognition, not an implementation one.**
+
+### Open question 2 — the public certificates list
+
+Newly verified while building the inventory, **not acted on**:
+`GET /api/users/:id/certificates` (`attendanceRoutes.js:540`, the public
+profile) has **no** cancelled filter, while `GET /api/certificates`
+(`:446`, the student's own list) has one. So a cancelled event's certificate is
+hidden from the student's own list and shown on their public profile.
+
+Genuinely ambiguous rather than simply wrong: the list comment says a called-off
+event "has no certificate to list" because the list mirrors the transcript,
+while the never-void policy says an issued certificate is a credential the
+holder keeps. Which rule owns the *public* list is an owner call.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused | 12 suites, 220 passed |
+| Full suite | **637 files, 10,796 passed, 0 failed, 176 skipped**, exit 0 |
+| Output preserved | `/tmp/wev-cancelled-hours-20260921-223659.txt` |
+| Lint / build / bundle scan | clean |
+| Mutation checks | **7**, each failing only its own case, all restored |
+
+New tests: `server/hours.cancelledEvent.test.js`, 15 cases. It credits a
+controlled event, records every figure while it is live, cancels it, and asserts
+each figure moves by exactly the credited amount — relative comparisons
+throughout, so the seed's own history cannot make a case pass for the wrong
+reason. Three cases pin behaviour that was already correct (the dashboard,
+`record.hoursCredited`, and the non-vacuity guard), and one pins the milestone
+decision as-is.
