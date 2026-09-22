@@ -32,7 +32,23 @@ export const DESTINATIONS = Object.freeze({
     patterns: [/\bdashboard\b/i, /\bhome (page|screen)\b/i],
   },
   applications: {
-    path: '/discover?find=applications',
+    /**
+     * The dashboard, because that is where a student's applications are.
+     *
+     * This was `/discover?find=applications`, and `find` is a SCOPE:
+     * `BrowseEvents` accepts `all | events | people | organizations` and
+     * silently falls back to `all` for anything else. So Welly said
+     * "Navigating to Your Applications" and delivered the generic Discover
+     * page — reachable through any explicit phrasing ("take me to my
+     * applications", "open my sign-ups"), which is what the `navigate` intent
+     * matches on.
+     *
+     * There is no applications page to point at instead. A student's pending
+     * and confirmed applications are sections of the volunteer dashboard
+     * ("Waiting on a reply", "Confirmed shifts"), so the dashboard is the
+     * honest destination. The label still describes what they asked for.
+     */
+    path: '/',
     label: 'Your Applications',
     capability: null,
     patterns: [/\b(my\s+)?applications?\b/i, /\b(my\s+)?sign-?ups?\b/i, /\bwhat i applied to\b/i],

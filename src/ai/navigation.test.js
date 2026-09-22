@@ -8,7 +8,21 @@ const admin = { id: 'a1', role: 'admin' };
 
 describe('navigation resolution and role gating', () => {
   it('resolves common destination requests to canonical app routes', () => {
-    expect(resolveNavigation('take me to my applications', student)?.path).toBe('/discover?find=applications');
+    /**
+     * The dashboard, and this pin was updated deliberately rather than relaxed.
+     *
+     * It read `/discover?find=applications`, under the name "canonical app
+     * routes" — and that is the one thing the path was not. `find` is a scope,
+     * `BrowseEvents` accepts `all | events | people | organizations`, and
+     * anything else falls back to `all` in silence. So Welly announced
+     * "Navigating to Your Applications" and delivered generic Discover.
+     *
+     * There is no applications page to name instead: a student's pending and
+     * confirmed applications are sections of the volunteer dashboard. See the
+     * note on the destination, and `navigationDestinations.test.js`, which
+     * refuses any `find` value Discover does not accept.
+     */
+    expect(resolveNavigation('take me to my applications', student)?.path).toBe('/');
     expect(resolveNavigation('open settings', student)?.path).toBe('/settings');
     expect(resolveNavigation('go to calendar', student)?.path).toBe('/calendar');
     expect(resolveNavigation('take me to my profile', student)?.path).toBe('/profile');
@@ -35,9 +49,9 @@ describe('navigation resolution and role gating', () => {
   it('returns structured navigation cards from ask()', async () => {
     const res = await ask('take me to my applications', { user: student });
     expect(res.intent).toBe('navigate');
-    expect(res.navigate).toBe('/discover?find=applications');
+    expect(res.navigate).toBe('/');
     expect(res.card?.kind).toBe('navigate');
-    expect(res.card?.data?.path).toBe('/discover?find=applications');
+    expect(res.card?.data?.path).toBe('/');
   });
 
   it('refuses navigation to pages the user cannot access', async () => {
