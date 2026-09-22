@@ -8,7 +8,7 @@ import { can } from '../authz.js';
    duplicated byte-for-byte in utils.js where nothing imported it. See
    server/milestones.js for the badge/milestone boundary this sits on. */
 import { buildMilestones } from '../milestones.js';
-import { milestoneInputs } from '../volunteerInsights.js';
+import { milestoneInputs, creditedTotalsFor } from '../volunteerInsights.js';
 import { db } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
 import { validateProfilePatch } from '../accountValidation.js';
@@ -150,6 +150,28 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
      */
     const totals = await milestoneInputs(db, req.params.id);
 
+    /**
+     * The HOURS figures, which are a different question from the tier above.
+     *
+     * `stats.hours` published `milestoneInputs().hours`, which counts a
+     * cancelled event — while `completed[]` below carries
+     * `AND e.status <> 'cancelled'` and says "Same rule as
+     * volunteerStats.hoursCredited". So this response could show a student
+     * seven hours beside an empty list of the events that produced them, and
+     * `/api/auth/me` reported a different total for the same student on the
+     * same afternoon.
+     *
+     * `git show 93756e4` shows this was never a decision: the query here was
+     * already unfiltered when the milestone extraction moved it into
+     * `volunteerInsights`. The extraction shared a derivation; it did not pick
+     * one for the totals.
+     *
+     * `milestones` deliberately keeps the other derivation — that IS a recorded
+     * decision ("because the service still happened"), and it is not this
+     * route's to overturn.
+     */
+    const credited = await creditedTotalsFor(db, req.params.id);
+
     // Completed service, newest first
     const completed = await db.prepare(`
       SELECT e.id as event_id, e.title, e.category, e.location, u.name as organizer_name,
@@ -193,12 +215,15 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
       WHERE user_id = ? AND status IN ('pending', 'waitlisted')
     `).get(req.params.id)).c;
 
-    // Hours by category — what kind of volunteer someone is
+    /* Hours by category — what kind of volunteer someone is.
+       Cancelled excluded, so this breakdown sums to `stats.hours` and to the
+       `completed` list above rather than to a third number. The join was
+       already here for `e.category`; only the predicate was missing. */
     const byCategory = await db.prepare(`
       SELECT e.category, COALESCE(SUM(at.hours_awarded), 0) as hours
       FROM attendance at
       JOIN events e ON at.event_id = e.id
-      WHERE at.user_id = ? AND at.present = 1
+      WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
       GROUP BY e.category ORDER BY hours DESC
     `).all(req.params.id);
 
@@ -220,9 +245,9 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
          is reported alongside so the page can say why the figures are absent. */
       hoursVisible,
       stats: {
-        hours: hoursVisible ? (Number(totals.hours) || 0) : null,
-        eventsCompleted: hoursVisible ? (totals.events || 0) : null,
-        shiftsCompleted: hoursVisible ? (totals.shifts || 0) : null,
+        hours: hoursVisible ? (Number(credited.hours) || 0) : null,
+        eventsCompleted: hoursVisible ? (credited.events || 0) : null,
+        shiftsCompleted: hoursVisible ? (credited.shifts || 0) : null,
         // The count alone carries no whereabouts, so staff who legitimately
         // see contact info may see it too — the array itself (event location,
         // exact times) is self-only, below.

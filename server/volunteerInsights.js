@@ -147,6 +147,21 @@ export async function attendanceMonths(db, userId) {
  *
  * So both callers now derive it here. `routes.volunteerInsights.test.js` asserts
  * the two agree, because that is the failure this exists to prevent.
+ *
+ * ── Why this one does NOT exclude a cancelled event ──
+ *
+ * Every figure the product presents as credited service does exclude it —
+ * `creditedHoursFor` is the canonical definition and b8cfb09 states the scope
+ * as "everywhere hours are presented as credited service". A milestone TIER is
+ * deliberately outside that scope, and the decision is recorded in
+ * `volunteerInsights.test.js` as "counts a cancelled event, because the service
+ * still happened", explicitly "deliberately different from
+ * `volunteerStats().eventsAttended`".
+ *
+ * That is an owner decision about recognition rather than about a total, so it
+ * is left exactly as it was. It is NOT a licence for the totals beside it: use
+ * `creditedTotalsFor` below for anything presented as an hours figure, which is
+ * what the profile's `stats.hours` should have been using all along.
  */
 export async function milestoneInputs(db, userId) {
   const row = await db.prepare(`
@@ -154,6 +169,39 @@ export async function milestoneInputs(db, userId) {
            COUNT(DISTINCT event_id) AS events,
            COUNT(*) AS shifts
     FROM attendance WHERE user_id = ? AND present = 1
+  `).get(userId) ?? {};
+  return { hours: row.hours ?? 0, events: row.events ?? 0, shifts: row.shifts ?? 0 };
+}
+
+/**
+ * The same three counts, as CREDITED SERVICE — cancelled events excluded.
+ *
+ * ── Why this is a second function and not a flag ──
+ *
+ * The two numbers answer different questions and the difference is invisible at
+ * the call site, which is how the defect happened. `GET /api/users/:id/profile`
+ * published `milestoneInputs().hours` as `stats.hours`, beside a `completed[]`
+ * list that carries `AND e.status <> 'cancelled'` and a comment saying "Same
+ * rule as volunteerStats.hoursCredited". So one response could show hours next
+ * to an empty list of the events that produced them, and `record.hoursCredited`
+ * in the neighbouring endpoint reported a different total for the same student.
+ *
+ * `git show 93756e4` settles that this was never intended: the profile's query
+ * was already unfiltered before the milestone extraction moved it here. The
+ * extraction shared an existing derivation; it did not choose one for the
+ * totals.
+ *
+ * A boolean argument would have put the decision back at the call site under a
+ * name that does not say which answer is correct. Two names do.
+ */
+export async function creditedTotalsFor(db, userId) {
+  const row = await db.prepare(`
+    SELECT COALESCE(SUM(a.hours_awarded), 0) AS hours,
+           COUNT(DISTINCT a.event_id) AS events,
+           COUNT(*) AS shifts
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
   `).get(userId) ?? {};
   return { hours: row.hours ?? 0, events: row.events ?? 0, shifts: row.shifts ?? 0 };
 }
@@ -177,12 +225,16 @@ export async function milestoneInputs(db, userId) {
 export async function monthlyHours(db, userId, { now = new Date(), months = 6 } = {}) {
   const keys = monthKeys(now, months);
 
+  /* The chart sits directly under the credited total, so it carries the same
+     exclusion; a column the total does not account for reads as a discrepancy
+     in the one place a student is most likely to check the arithmetic. */
   const rows = await db.prepare(`
     SELECT substr(s.end_datetime, 1, 7) AS month,
            SUM(a.hours_awarded) AS hours
     FROM attendance a
     JOIN slots s ON a.slot_id = s.id
-    WHERE a.user_id = ? AND a.present = 1
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
       AND substr(s.end_datetime, 1, 7) >= ?
     GROUP BY month
   `).all(userId, keys[0]);
@@ -191,23 +243,35 @@ export async function monthlyHours(db, userId, { now = new Date(), months = 6 } 
   return keys.map(month => ({ month, hours: byMonth.get(month) ?? 0 }));
 }
 
-/** The first credited shift's end, the mirror of `lastVolunteeredAt`. */
+/**
+ * The first credited shift's end, the mirror of `lastVolunteeredAt`.
+ *
+ * Cancelled events excluded, as in that mirror: "volunteering since March" is a
+ * claim about service, and a called-off event is not service the platform will
+ * stand behind anywhere else.
+ */
 export async function firstVolunteeredAt(db, userId) {
   return (await db.prepare(`
     SELECT MIN(s.end_datetime) AS t
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
-    WHERE at.user_id = ? AND at.present = 1
+    JOIN events e ON e.id = at.event_id
+    WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
   `).get(userId))?.t ?? null;
 }
 
-/** How many of the category enum's values this volunteer has served in. */
+/**
+ * How many of the category enum's values this volunteer has served in.
+ *
+ * The join was already here for `e.category`; only the predicate was missing,
+ * which is the easiest form of this defect to introduce and the hardest to see.
+ */
 export async function kindsOfService(db, userId) {
   return (await db.prepare(`
     SELECT COUNT(DISTINCT e.category) AS n
     FROM attendance a
     JOIN events e ON e.id = a.event_id
-    WHERE a.user_id = ? AND a.present = 1
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
   `).get(userId))?.n ?? 0;
 }
 
@@ -240,6 +304,10 @@ export async function volunteerInsights(db, userId, { now = new Date(), months =
   const nowIso = new Date(now).toISOString();
   const stats = await volunteerStats(db, userId, { now: nowIso });
   const inputs = await milestoneInputs(db, userId);
+  /* `record` is the totals block — it carries `hoursCredited`, which excludes
+     cancelled events — so `shiftsWorked` beside it must too. `milestones` below
+     keeps the other derivation, deliberately; see `milestoneInputs`. */
+  const credited = await creditedTotalsFor(db, userId);
 
   return {
     monthlyHours: await monthlyHours(db, userId, { now, months }),
@@ -252,7 +320,7 @@ export async function volunteerInsights(db, userId, { now = new Date(), months =
       lastVolunteeredAt: stats.lastVolunteeredAt,
       firstVolunteeredAt: await firstVolunteeredAt(db, userId),
       kindsOfService: await kindsOfService(db, userId),
-      shiftsWorked: inputs.shifts,
+      shiftsWorked: credited.shifts,
     },
     milestones: buildMilestones(inputs.hours, inputs.events),
     streak: buildStreak(await attendanceMonths(db, userId), now),

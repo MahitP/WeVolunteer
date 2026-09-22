@@ -91,12 +91,25 @@ async function collectStats(userId) {
    * `COUNT(DISTINCT event_id)` two lines away. The profile and the badge
    * disagreed about the same word, and the profile was right.
    */
+  /**
+   * Cancelled events excluded, like the two queries below it.
+   *
+   * `organizing` already says `status != 'cancelled'`, and the reliability
+   * block below records that the old per-shift query "included cancelled
+   * events" while the draw's did not — "two denominators for one question, so
+   * the badge and the draw could disagree about the same volunteer on the same
+   * afternoon". This query was the last one in the file still counting them, so
+   * an hour badge could be earned on hours `record.hoursCredited` reports as
+   * zero. Same argument as the one made two comments up about `eventsAttended`:
+   * the profile and the badge must not disagree about the same word.
+   */
   const service = await db.prepare(`
-    SELECT COALESCE(SUM(hours_awarded), 0) AS total_hours,
-           COUNT(DISTINCT event_id)        AS events_attended,
-           COUNT(*)                        AS shifts_attended
-    FROM attendance
-    WHERE user_id = ? AND present = 1
+    SELECT COALESCE(SUM(a.hours_awarded), 0) AS total_hours,
+           COUNT(DISTINCT a.event_id)        AS events_attended,
+           COUNT(*)                          AS shifts_attended
+    FROM attendance a
+    JOIN events e ON e.id = a.event_id
+    WHERE a.user_id = ? AND a.present = 1 AND e.status <> 'cancelled'
   `).get(userId);
 
   /**

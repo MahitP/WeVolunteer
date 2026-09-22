@@ -209,11 +209,15 @@ export async function volunteerStats(db, userId, { now = new Date().toISOString(
  * complete personal history belongs.
  */
 export async function lastVolunteeredAt(db, userId) {
+  /* Cancelled excluded, like `hoursCredited` above it on the same profile: this
+     figure is read as evidence that somebody is still active, and a called-off
+     event is not evidence of anything. */
   return (await db.prepare(`
     SELECT MAX(s.end_datetime) AS t
     FROM attendance at
     JOIN slots s ON s.id = at.slot_id
-    WHERE at.user_id = ? AND at.present = 1
+    JOIN events e ON e.id = at.event_id
+    WHERE at.user_id = ? AND at.present = 1 AND e.status <> 'cancelled'
   `).get(userId))?.t ?? null;
 }
 
