@@ -172,7 +172,11 @@ export default function OrganizationForm({ addToast }) {
     try {
       await api.updateOrganization(key, { status: 'archived' });
       addToast?.('Organization archived.', 'success');
-      navigate('/directory');
+      /* `/organizations`, not `/directory`. That path is a redirect to
+         `/discover?find=people`, so archiving a club used to land the manager
+         in a search for PEOPLE. This is the page listing the clubs they manage
+         and belong to — the one the club just left. */
+      navigate('/organizations');
     } catch (err) {
       addToast?.(err.message, 'error');
     } finally {
@@ -471,7 +475,11 @@ export default function OrganizationForm({ addToast }) {
                  `organizationPath('org-abc123')` produces
                  `/organizations/@org-abc123`, which resolves to nothing.
                  `loadedHandle` is the slug the server sent back. */
-              to={editing ? organizationPath(loadedHandle || key) : '/directory'}>Cancel</Link>
+              /* Creating: back to `/organizations`, which is where
+                 `OrganizationsHome` linked here from. It was `/directory` — a
+                 redirect to a PEOPLE search — so cancelling out of "create a
+                 club" answered with a list of students. */
+              to={editing ? organizationPath(loadedHandle || key) : '/organizations'}>Cancel</Link>
           <div className="row org-actions">
             {editing && (
               <button type="button" className="btn btn-danger" disabled={submitting}
