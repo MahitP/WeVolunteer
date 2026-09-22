@@ -402,7 +402,18 @@ export default function OrganizationPage({ addToast, currentUser }) {
           icon={Building2}
           title="No organization here"
           message="That organization does not exist, or its link has changed since it was shared."
-          action={<Link className="btn btn-secondary" to="/organizations">Browse organizations</Link>}
+          /* `/discover?find=organizations`, the platform-wide search — not
+             `/organizations`, which is the clubs this reader is already in.
+             Two reasons, and they agree. "Browse organizations" already means
+             the search in `OrganizationsHome`, while `/organizations` is
+             already called "Your organizations" on Discover's action row, so
+             pointing this at `/organizations` gave one label two pages and one
+             page two labels. And the destination is better on its own terms:
+             somebody who followed a club link that no longer resolves wants to
+             find a club, not a list of the ones they have already joined.
+             Same capability either way — this screen and that scope both
+             require `directory.read`. */
+          action={<Link className="btn btn-secondary" to="/discover?find=organizations">Browse organizations</Link>}
         />
       </div>
     );
