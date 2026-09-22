@@ -1987,3 +1987,120 @@ one, and every claim in this document cites a file, a line, or a command that
 was run. If the §57 material arrives it folds in as a new source and may
 reopen items recorded here as intentional; if it does not, this gap stays
 recorded as a gap.
+
+---
+
+## Pass 15 — the six owner decisions, answered and implemented
+
+Answered on repository evidence during this audit, not deferred. Each is
+recorded here with the option chosen, the evidence that chose it, and the commit
+that implemented it. Where two principles conflicted, the conflict is named.
+
+| # | Decision | Chosen | Commit |
+|---|---|---|---|
+| 1 | Post-close-out corrections | **Permanent lock (1A)** | `d776b72` (docs only) |
+| 2 | Cancelled-event certificate visibility | **Separate document from record (2D)** | `7fce206` |
+| 3 | Cancelled events and milestones | **Separate the dimensions (3C)** | `83c9f68` |
+| 4A | Cancellation notice mandatory? | **Category-controlled (4A-1)** | `adfe591` (no behaviour change) |
+| 4B | What cancellation communicates | **Impact only where credit exists (4B-3)** | `a905997` |
+| 5A | Attendee badge re-evaluation | **Immediate, on any status change** | `7c01dfe` |
+| 5B | Automatic badge-loss notification | **Audit without notifying** | `7c01dfe` |
+| 6A | Calendar audience — admin | **Direct-access, not promoted (6A-2)** | `dfd0eb0` (no gate change) |
+| 6B | Calendar audience — partner | **Reachable, unpromoted, titled (6B-3)** | `dfd0eb0` |
+
+### 1 — Permanent lock
+
+The one document that appeared to contradict the lock — "Administrators |
+Correct records, with every action written to an audit log" — **predates
+close-out by three weeks** (`d79a984`, 2026-08-05; close-out in `32e6880`,
+2026-08-26) and was last touched 2026-08-14. It is silent on close-out, not
+opposed to it. Everything that does speak to close-out agrees: "No takebacksies"
+is named as the product requirement, the module header says an existing record
+"can no longer be changed at all — by anyone, including an administrator", and
+the administrator refusal is test-enforced with its reasoning.
+
+So no `hours.correct` capability and no override route. An override is a reopen
+endpoint for one record, which the close-out route names as "the hole through
+which every bypass of it would go" — and it would have to sit with the owner
+rather than administrators anyway, since `audit.read` is SUPER_ONLY and an
+administrator cannot review another's corrections. The documents were corrected
+instead, including the half that protects the student: somebody with no record
+on the event can still be credited.
+
+### 2 — The document and the record are different things
+
+Voiding was never available ("There is no option to void a certificate", a
+hash-pinned sentence), so only visibility was open. The owner's list excluded a
+cancelled event while the public list showed it and `/verify/:code` answered
+`valid: true` — the owner was the one person hidden from their own document,
+which is the fault `getCertificateForOwner` had already been corrected for one
+level down. Both lists now enumerate certificates that exist; the transcript
+(`/hours`, the portfolio) still excludes the event entirely, asserted directly
+rather than by proxy. The public list's mirror fault — listing a cancelled event
+that never had a certificate — is fixed by the same predicate.
+
+### 3 — Split by metric, not by surface
+
+`record.hoursCredited: 21` and a reached 25-hour Silver Award in one payload,
+while the "25 Hours" badge went unawarded to the same student. Hours tiers now
+read credited hours; events tiers keep counting participation, so
+`milestoneInputs`'s recorded decision ("because the service still happened")
+stands for the metric it was made about.
+
+**Conflict named:** the published no-penalty principle ("penalising them for
+somebody else's cancellation") is scoped to the Auto Select draw and cannot be
+generalised past the frozen decision that credited hours exclude cancelled
+events — the transcript already drops those hours, so a tier showing more than
+the transcript is not protecting the student.
+
+### 4A — The preference was accurately described
+
+The comment asserting that every confirmed volunteer "must hear about" a
+cancellation described a requirement the delivery model does not meet. The
+comment moved, not the behaviour: the switch is labelled "Event Updates &
+Reminders — When an event you applied to changes, or to remind you of a shift",
+defaults to on, and a cancellation is inside those words. The eleven mandatory
+notices are notices about the reader's own standing and rights. The set's
+membership is now pinned so widening it forces the argument to be revisited.
+
+### 4B — Told to the people it happened to
+
+Scoped by the rule this product already applies to hour-impact messages:
+`HOURS_ADJUSTED` goes only past a `wasCredited` guard. The recipient set was
+wrong in both directions — an accepted no-show was told nothing had changed
+correctly but a credited volunteer who later withdrew was told nothing at all —
+and both are fixed. One kind, two bodies, chosen by a payload flag, following
+`HOURS_APPROVED`, because `dispatchMany` renders content once per fan-out. The
+rule the sentence asserts is now published, under "If an event is cancelled".
+
+### 5A / 5B — Deterministic, and never silent
+
+Cancelling applied the badge rule to nobody but the organizer, so an attendee
+kept a badge until some unrelated action of their own re-evaluated it — next
+week, or never. That is not grandfathering; it is the outcome depending on
+timing nobody chose. The repository already makes this argument for the
+organizer half of the same route. Paired with an audit row carrying the actor,
+following the manual revoke, which audits and does not notify.
+
+### 6 — Neither gate changed
+
+Nothing in the repository designs a district calendar, and a route working is
+not evidence it was meant to be promoted; the evidence on both sides is recorded
+at the nav entry so it is not rediscovered as a bug. The partner half is a
+titling defect of a class already fixed once, and the new derived guard found
+two more instances of it on `/report-issue`.
+
+### Verification
+
+Full suite **652 files, 10,917 passed, 0 failed, 178 skipped, exit 0**; lint,
+build and a bundle scan over 164 chunks clean; `bin/legal-hashes.mjs` reports 13
+ok and 0 drift. Every changed path was additionally run against real PostgreSQL
+on a scratch database created and dropped for the purpose — 561 tests across
+thirteen files, including the two certificate aggregates whose `GROUP BY` the
+engine is strict about. No production database was opened and no production data
+was read.
+
+### Remaining owner decisions
+
+**None from the matrix.** §57 remains unresolved and is unchanged by this pass:
+it is a gap in supplied material, not a question the repository can answer.
