@@ -192,4 +192,53 @@ describe('who is told what when an event is cancelled', () => {
     ).get(credited, `cancelled:${eventId}:${credited}`);
     expect(rows.n).toBe(1);
   });
+
+  /**
+   * An event that credits no hours at all.
+   *
+   * `credits_hours = 0` — a donation drive, a supply sort — records attendance
+   * and awards nothing, writing `hours_awarded = 0`. Those volunteers turned up
+   * and are affected by the cancellation, but they have no credited hours to
+   * lose, so the hour-impact sentence would be false for them.
+   *
+   * The predicate is `present = 1 AND hours_awarded > 0`, which handles it for
+   * the same reason `HOURS_APPROVED` prints no number on such an event: "You
+   * earned 0 hours" "reads as a refusal to somebody who turned up and did the
+   * work", and "your hours no longer count" is the same sentence one step on.
+   *
+   * Found by the post-implementation audit of owner decision 4B.
+   */
+  it('does not claim an hour impact on an event that credits no hours', async () => {
+    const eventId = 'evt-cancel-zero-hours';
+    const attended = await userId('leo.chen@example.com');
+
+    await db.prepare(`
+      INSERT INTO events (id, title, description, category, location,
+                          application_deadline, organizer_id, status, credits_hours, created_at)
+      VALUES (?, ?, ?, 'Donation Drive', ?, ?, ?, 'open', 0, ?)
+    `).run(eventId, 'Coat Sort', 'Synthetic fixture.', 'Springfield',
+      '2026-07-20T00:00:00.000Z', organizerId, '2026-07-01T00:00:00.000Z');
+    await db.prepare(`
+      INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+      VALUES (?, ?, 'Afternoon', 'Synthetic fixture.', ?, ?, 20)
+    `).run('slot-cancel-zero', eventId, '2026-07-23T13:00:00.000Z', '2026-07-23T17:00:00.000Z');
+    await db.prepare(`
+      INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+      VALUES ('app-cancel-zero', ?, ?, 'slot-cancel-zero', 'accepted', ?)
+    `).run(attended, eventId, '2026-07-02T00:00:00.000Z');
+    /* Present, and credited nothing — which is what such an event does. */
+    await db.prepare(`
+      INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+      VALUES (?, 'slot-cancel-zero', ?, 1, 0)
+    `).run(eventId, attended);
+
+    await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'cancelled' }, organizer);
+
+    const told = await notice(attended, eventId);
+    expect(told, 'somebody who turned up was not told the event was off').toBeTruthy();
+    expect(
+      told.body,
+      'a volunteer with no credited hours was told their hours stopped counting'
+    ).not.toMatch(/no longer count/i);
+  });
 });

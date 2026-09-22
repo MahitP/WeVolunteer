@@ -300,4 +300,117 @@ describe('badges when an event is cancelled', () => {
       ).toBe(true);
     });
   });
+
+  /**
+   * Undo the hand-grant stamp the case above leaves behind.
+   *
+   * That case re-stamps "500 Hours" as `awarded_by = <organizer>`, which makes
+   * it permanently immune to automatic withdrawal — deliberately, that is the
+   * rule it asserts. Everything below is about the automatic path, so the badge
+   * has to be an automatic award again. Declared here rather than by reordering
+   * the file, so neither case depends on where the other sits.
+   */
+  const clearHandGrant = async () => {
+    await db.prepare(`
+      UPDATE user_badges SET awarded_by = NULL
+      WHERE user_id = ? AND badge_id = (SELECT id FROM badges WHERE name = '500 Hours')
+    `).run(studentId);
+  };
+
+  /**
+   * Repeating the trigger must not repeat the effect.
+   *
+   * `cancelled -> open -> cancelled` is a legal sequence, and the evaluator is
+   * called on every one of them. The award and the withdrawal are each
+   * conditional on the current state, so the state cannot oscillate into
+   * duplicate rows — and `announce`'s permanent dedupe on `badge:<id>` means a
+   * re-award is silent, so a flapping event cannot become a notification storm.
+   *
+   * Checked because owner decision 5A made this route write to `user_badges`
+   * for the first time, and because the audit trail is the one thing that
+   * legitimately grows with each pass.
+   */
+  describe('repeating a status change', () => {
+    it('reaches the same state every time, and notifies nobody', async () => {
+      /* Asserted as determinism rather than as an absolute count: this student
+         carries other fixtures' events, so whether the tier is held after a
+         cancel depends on those too. What must hold is that repeating the
+         sequence reproduces the same state exactly — no duplicate rows, no
+         drift — and that a flapping event never becomes a notification. */
+      const eventId = await creditedEvent(500);
+      await badgeService.evaluateBadges(studentId);
+      await clearHandGrant();
+
+      const badgeRows = async () => (await db.prepare(`
+        SELECT COUNT(*) AS n FROM user_badges ub JOIN badges b ON b.id = ub.badge_id
+        WHERE ub.user_id = ? AND b.name = '500 Hours'
+      `).get(studentId)).n;
+      const notices = async () => (await db.prepare(
+        "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = 'VOLUNTEER'"
+      ).get(studentId)).n;
+
+      const noticesBefore = await notices();
+      const seen = [];
+      for (let i = 0; i < 3; i += 1) {
+        await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'cancelled' }, organizer);
+        const afterCancel = await badgeRows();
+        await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'open' }, organizer);
+        const afterOpen = await badgeRows();
+        seen.push([afterCancel, afterOpen]);
+      }
+
+      /* At most one row, ever — the evaluator inserts only when none is held
+         and deletes only when one is. */
+      for (const [a, b] of seen) {
+        expect(a, 'a withdrawal left a duplicate behind').toBeLessThanOrEqual(1);
+        expect(b, 'a re-award inserted a second row').toBeLessThanOrEqual(1);
+      }
+      /* And every cycle lands in exactly the same place as the first. */
+      expect(seen[1]).toEqual(seen[0]);
+      expect(seen[2]).toEqual(seen[0]);
+
+      expect(
+        await notices(),
+        'a flapping event became a notification storm'
+      ).toBe(noticesBefore);
+    });
+
+    it('is a no-op when the status does not actually change', async () => {
+      const eventId = await creditedEvent(500);
+      await badgeService.evaluateBadges(studentId);
+      await clearHandGrant();
+      await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'cancelled' }, organizer);
+
+      const before = (await auditRows('BADGE_WITHDRAWN')).length;
+      await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'cancelled' }, organizer);
+      expect(
+        (await auditRows('BADGE_WITHDRAWN')).length,
+        'a repeated cancellation wrote a second withdrawal for a badge already gone'
+      ).toBe(before);
+    });
+  });
+
+  /**
+   * A manual revocation and an automatic withdrawal stay distinguishable.
+   *
+   * They are different acts — one is somebody's decision about a person, the
+   * other is a recomputation — and the trail is the only place that difference
+   * survives. `BADGE_REVOKED` is not a notification kind and must not become
+   * one by this route.
+   */
+  it('writes a different action from a manual revocation, and no notification kind', async () => {
+    const eventId = await creditedEvent(500);
+    await badgeService.evaluateBadges(studentId);
+    await clearHandGrant();
+    await srv.call('PATCH', `/api/events/${eventId}/status`, { status: 'cancelled' }, organizer);
+
+    const withdrawn = await auditRows('BADGE_WITHDRAWN');
+    expect(withdrawn.length).toBeGreaterThan(0);
+    expect(withdrawn[0].details).toMatch(/automatically/);
+
+    const notices = await db.prepare(
+      "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind IN ('BADGE_REVOKED', 'BADGE_WITHDRAWN', 'BADGE_LOST')"
+    ).get(studentId);
+    expect(notices.n).toBe(0);
+  });
 });
