@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck, ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock, AlertTriangle } from 'lucide-react';
 import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions } from '../utils/helpers';
 import { api } from '../utils/api';
@@ -338,6 +338,10 @@ export default function OrganizerDashboard({
           A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
           you can post events. You can browse opportunities in the meantime.
         </p>
+        {/* The sentence above says what to do next and this card used to offer
+            nothing to do it with — on the one screen every organizer sees
+            between registering and being approved. */}
+        <Link to="/discover" className="btn btn-primary btn-sm">Browse opportunities</Link>
         <div className="alert alert-info s-2db5ef">
           <span>
             <span className="alert-title">Testing the demo?</span>{' '}

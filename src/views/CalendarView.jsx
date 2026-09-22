@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, CalendarDays, MapPin, Clock } from 'lucide-react';
 import { formatHours, formatTimeRange, formatDay, haversineDistance } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
@@ -363,6 +364,11 @@ export default function CalendarView({
               <span className="empty-icon"><CalendarDays size={18} /></span>
               <h3 style={{ color: 'var(--ink)' }}>Nothing on this day</h3>
               <p>Pick another date, or browse opportunities to fill it.</p>
+              {/* The sentence above named a next step and the card offered no
+                  way to take it. Discover is in the rail for everybody who can
+                  reach this page, so this was a promise the reader had to go and
+                  keep themselves. */}
+              <Link to="/discover" className="btn btn-secondary btn-sm">Browse opportunities</Link>
             </div> : <div className="list">
               {selectedEntries.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} />)}
             </div>}
