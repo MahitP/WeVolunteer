@@ -145,8 +145,10 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
      * This query and the dashboard's are the inputs to the same
      * `buildMilestones` call, so if they ever drift the two surfaces disagree
      * about whether a student has earned a tier — on the same afternoon, for
-     * the same student. `milestoneInputs` is the single derivation, and
-     * `volunteerInsights.test.js` asserts the agreement.
+     * the same student. `milestoneInputs` is the single derivation for the
+     * EVENTS argument, and `routes.volunteerInsights.test.js` asserts the
+     * agreement — including on a credited cancelled event, which is the one
+     * input that can tell the two derivations apart.
      */
     const totals = await milestoneInputs(db, req.params.id);
 
@@ -166,9 +168,11 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
      * `volunteerInsights`. The extraction shared a derivation; it did not pick
      * one for the totals.
      *
-     * `milestones` deliberately keeps the other derivation — that IS a recorded
-     * decision ("because the service still happened"), and it is not this
-     * route's to overturn.
+     * `milestones` keeps the other derivation for its EVENTS tiers only — that
+     * half IS a recorded decision ("because the service still happened"). Its
+     * HOURS tiers read `credited.hours`, for the reason set out at the
+     * `buildMilestones` call in `volunteerInsights.js`: a tier measured in
+     * hours has to mean the same hours this response reports beside it.
      */
     const credited = await creditedTotalsFor(db, req.params.id);
 
@@ -262,7 +266,10 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
          the total would hand the reader the same fact by another route — a
          milestone tier IS an hours threshold, and the category breakdown sums
          to the total. */
-      milestones: hoursVisible ? buildMilestones(Number(totals.hours) || 0, totals.events || 0) : [],
+      /* Same pairing as `volunteerInsights`, and it has to stay the same:
+         the two surfaces must not disagree about whether a tier is earned.
+         `routes.volunteerInsights.test.js` asserts the agreement. */
+      milestones: hoursVisible ? buildMilestones(Number(credited.hours) || 0, totals.events || 0) : [],
       byCategory: hoursVisible
         ? byCategory.map(c => ({ category: c.category, hours: Number(c.hours) }))
         : [],

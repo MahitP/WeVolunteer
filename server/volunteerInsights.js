@@ -322,7 +322,28 @@ export async function volunteerInsights(db, userId, { now = new Date(), months =
       kindsOfService: await kindsOfService(db, userId),
       shiftsWorked: credited.shifts,
     },
-    milestones: buildMilestones(inputs.hours, inputs.events),
+    /**
+     * Hours from the CREDITED derivation, events from the participation one.
+     *
+     * Both arguments used to come from `milestoneInputs`, which counts a
+     * cancelled event. That is right for the events tiers and wrong for the
+     * hours tiers, and the difference is visible in this very object:
+     * `record.hoursCredited` above excludes cancelled events, so one response
+     * could report 21 credited hours and a reached 25-hour Silver Award. The
+     * "25 Hours" BADGE, whose evaluator excludes them too, would not be
+     * awarded to that student — so the same word answered three ways.
+     *
+     * Split by metric rather than by surface, which is what lets both recorded
+     * decisions stand: `milestoneInputs`'s "counts a cancelled event, because
+     * the service still happened" is a statement about turning up, and it
+     * still governs `events`. An hours figure is a statement about credited
+     * time, and the platform has already decided — and published, in the Auto
+     * Select section of the Volunteer Record Policy — that a cancelled event
+     * contributes none of it.
+     *
+     * Decided during the 2026-09-21 audit (owner decision 3).
+     */
+    milestones: buildMilestones(credited.hours, inputs.events),
     streak: buildStreak(await attendanceMonths(db, userId), now),
     upcomingCount: await upcomingCount(db, userId, { now: nowIso }),
     serviceHourGoal: SERVICE_HOUR_GOAL,

@@ -243,3 +243,81 @@ describe('volunteerInsights', () => {
     expect(out.milestones.every(m => m.earned === false)).toBe(true);
   });
 });
+
+/**
+ * A tier measured in hours means CREDITED hours — the same hours on the chart
+ * above it.
+ *
+ * ── The state this prevents ──
+ *
+ * `volunteerInsights` returns `record.hoursCredited` (cancelled events
+ * excluded) and `milestones` in one payload. While both came from
+ * `milestoneInputs`, one response could say a student had 21 credited hours and
+ * that they had reached the 25-hour Silver Award — and the "25 Hours" badge,
+ * whose evaluator excludes cancelled events, would not be awarded to the same
+ * student on the same afternoon. Three surfaces, three answers, one word.
+ *
+ * ── Why the EVENT tiers still count a cancelled event ──
+ *
+ * Because that half was a recorded decision and remains one: "counts a
+ * cancelled event, because the service still happened". Turning up is a fact
+ * about the volunteer; an hours figure is a statement about credited time, and
+ * the platform already decided — and published, in the Auto Select section of
+ * the Volunteer Record Policy — that a cancelled event contributes none.
+ *
+ * So the split is by METRIC, not by surface. `milestoneInputs` is untouched and
+ * still counts everything; what changed is which of the two derivations feeds
+ * each argument of `buildMilestones`.
+ *
+ * Decided during the 2026-09-21 audit (owner decision 3).
+ */
+describe('milestones after an event is cancelled', () => {
+  /** 21 credited hours, plus 4 more at an event that was later called off. */
+  const twentyOneAndACancelledFour = () => {
+    credit('u1', '2026-07-02T15:00:00.000Z', { hours: 7 });
+    credit('u1', '2026-07-09T15:00:00.000Z', { hours: 7 });
+    credit('u1', '2026-07-16T15:00:00.000Z', { hours: 7 });
+    credit('u1', '2026-07-23T15:00:00.000Z', { hours: 4, status: 'cancelled' });
+  };
+
+  it('does not award an hours tier on hours the record does not credit', async () => {
+    twentyOneAndACancelledFour();
+    const insights = await volunteerInsights(db, 'u1', { now: NOW });
+
+    expect(insights.record.hoursCredited).toBe(21);
+    const silver = insights.milestones.find(m => m.id === 'silver');
+    expect(silver.threshold).toBe(25);
+    expect(
+      silver.earned,
+      'the 25-hour tier was reached on hours the same payload reports as 21'
+    ).toBe(false);
+  });
+
+  it('still counts the cancelled event towards a participation tier', async () => {
+    twentyOneAndACancelledFour();
+    const insights = await volunteerInsights(db, 'u1', { now: NOW });
+
+    /* Four events, one of them called off. `first-shift` is the events tier
+       with the lowest threshold; the volunteer turned up to all four. */
+    const firstShift = insights.milestones.find(m => m.id === 'first-shift');
+    expect(firstShift.metric).toBe('events');
+    expect(firstShift.earned).toBe(true);
+
+    const tenHours = insights.milestones.find(m => m.id === 'ten-hours');
+    expect(tenHours.earned, '21 credited hours clears the 10-hour tier').toBe(true);
+  });
+
+  it('awards the hours tier once the credited hours actually reach it', async () => {
+    credit('u1', '2026-07-02T15:00:00.000Z', { hours: 25 });
+    const insights = await volunteerInsights(db, 'u1', { now: NOW });
+    expect(insights.milestones.find(m => m.id === 'silver').earned).toBe(true);
+  });
+
+  it('leaves `milestoneInputs` itself counting everything', async () => {
+    /* The derivation is not what changed — the wiring is. A caller that wants
+       participation still has it, which is what the events tiers use. */
+    twentyOneAndACancelledFour();
+    expect((await milestoneInputs(db, 'u1')).hours).toBe(25);
+    expect((await milestoneInputs(db, 'u1')).events).toBe(4);
+  });
+});

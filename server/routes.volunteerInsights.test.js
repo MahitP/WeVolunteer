@@ -151,4 +151,66 @@ describe('volunteer insights endpoint', () => {
     }
   });
 });
+
+  /**
+   * The same pairing, exercised where it can actually differ.
+   *
+   * The agreement case above passes whichever derivation each surface uses,
+   * because the seeded student has no credited attendance at a cancelled
+   * event — so it cannot see the two routes drift apart on the one input that
+   * distinguishes them. Mutation-checked: reverting `userRoutes.js` alone left
+   * it green.
+   *
+   * Placed last in the file and mutating shared fixture state on purpose: it
+   * credits a cancelled event to this student, which every earlier case in
+   * this file would otherwise have to account for.
+   *
+   * Decided during the 2026-09-21 audit (owner decision 3).
+   */
+  describe('once a cancelled event carries credited hours', () => {
+    it('keeps the hours tiers on credited hours, on both surfaces', async () => {
+      const { db } = await import('./db.js');
+      const me = (await srv.call('GET', '/api/auth/me', undefined, student)).body;
+
+      const before = (await insights(student)).record.hoursCredited;
+
+      /* Enough to cross a tier on its own, so the case cannot pass by accident
+         on a student who was already past every threshold. */
+      const eventId = 'evt-cancelled-milestone';
+      const slotId = 'slot-cancelled-milestone';
+      await db.prepare(`
+        INSERT INTO events (id, title, description, category, location,
+                            application_deadline, organizer_id, status, created_at)
+        VALUES (?, ?, ?, 'Donation Drive', ?, ?, ?, 'cancelled', ?)
+      `).run(
+        eventId, 'Called-off drive', 'Synthetic fixture for the milestone split.',
+        'Springfield', '2026-07-20T00:00:00.000Z', me.id, '2026-07-01T00:00:00.000Z',
+      );
+      await db.prepare(`
+        INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+        VALUES (?, ?, 'Afternoon', 'Synthetic fixture.', ?, ?, 5)
+      `).run(slotId, eventId, '2026-07-23T13:00:00.000Z', '2026-07-23T17:00:00.000Z');
+      await db.prepare(
+        'INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded) VALUES (?, ?, ?, 1, ?)'
+      ).run(eventId, slotId, me.id, 500);
+
+      const after = await insights(student);
+      const profile = (await srv.call('GET', `/api/users/${me.id}/profile`, undefined, student)).body;
+
+      /* The cancelled hours reach no total ... */
+      expect(after.record.hoursCredited).toBe(before);
+      /* ... and no hours tier. 500 hours would clear every one of them. */
+      const hourTiers = after.milestones.filter(m => m.metric === 'hours');
+      expect(hourTiers.length).toBeGreaterThan(0);
+      for (const tier of hourTiers) {
+        if (tier.threshold > before) {
+          expect(tier.earned, `${tier.label} was reached on cancelled hours`).toBe(false);
+        }
+      }
+
+      /* And the two surfaces still say the same thing, which is what the
+         agreement case exists to protect. */
+      expect(profile.milestones).toEqual(after.milestones);
+    });
+  });
 });
