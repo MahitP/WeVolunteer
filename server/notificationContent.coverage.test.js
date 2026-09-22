@@ -546,3 +546,51 @@ describe('the dispatch scanner itself', () => {
     expect(names.length).toBeGreaterThan(10);
   });
 });
+
+/**
+ * `EVENT_CANCELLED` answers to the reader's preference, deliberately.
+ *
+ * Owner decision 4A of the 2026-09-21 audit. The source comment beside the
+ * dispatch used to assert that every confirmed volunteer "must hear about" a
+ * cancellation immediately, which the delivery model does not do — so either
+ * the notice had to join `MANDATORY_NOTICE_EVENTS` or the claim had to go.
+ *
+ * The claim went, because the preference was accurately described to the person
+ * who switched it off: "Event Updates & Reminders — When an event you applied
+ * to changes, or to remind you of a shift." A cancellation is inside those
+ * words. The mandatory set is a different class — every member is a notice
+ * about the reader's own standing or rights, where a preference would become a
+ * way to avoid being served notice.
+ *
+ * Pinned because the next person to read that dispatch will have the same
+ * instinct I did, and a decision nobody wrote down gets re-litigated by
+ * whoever notices it next.
+ */
+describe('the cancellation notice and the mandatory set', () => {
+  it('is not mandatory, so the Events preference governs it', () => {
+    expect(MANDATORY_NOTICE_EVENTS.has('EVENT_CANCELLED')).toBe(false);
+  });
+
+  it('is filed under the Events category the preference switch names', () => {
+    expect(EVENT_CATEGORIES.EVENT_CANCELLED).toBe('EVENT');
+  });
+
+  it('keeps every mandatory notice about the reader’s own standing', () => {
+    /* The distinction the decision rests on. If a future notice about somebody
+       ELSE's event joins this set, the argument above stops holding and should
+       be revisited rather than quietly widened. */
+    expect([...MANDATORY_NOTICE_EVENTS].sort()).toEqual([
+      'ACCOUNT_REINSTATED',
+      'ACCOUNT_SUSPENDED',
+      'ACCOUNT_WARNED',
+      'APPEAL_DECISION_REVERSED',
+      'APPEAL_DECISION_STANDS',
+      'APPEAL_REOPENED',
+      'LEGAL_ACCEPTANCE_REQUIRED',
+      'LEGAL_DOCUMENT_UPDATED',
+      'ORGANIZATION_BANNED',
+      'RECOVERY_CODE_USED',
+      'SYSTEM_ALERT',
+    ]);
+  });
+});

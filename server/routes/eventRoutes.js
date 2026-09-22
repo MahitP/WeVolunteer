@@ -1787,8 +1787,34 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
      */
     await badgeService.evaluateBadges(event.organizer_id);
 
-    // Calling off an event is the one change every confirmed volunteer must
-    // hear about immediately — they may have arranged a ride around it.
+    /**
+     * Calling off an event is the change confirmed volunteers most need to
+     * hear about — they may have arranged a ride around it.
+     *
+     * ── It is NOT a mandatory notice, and that is a decision ──
+     *
+     * This comment used to say "the one change every confirmed volunteer MUST
+     * hear about immediately", which read as a requirement the delivery model
+     * does not meet: `EVENT_CANCELLED` is not in `MANDATORY_NOTICE_EVENTS`, so
+     * a volunteer who has turned the Events category off, or opted out of
+     * email, is not told. `CRITICAL` priority governs retention and display,
+     * not delivery.
+     *
+     * Owner decision 4A of the 2026-09-21 audit left that as it is, on the
+     * evidence rather than on inertia. The preference this notice answers to is
+     * labelled "Event Updates & Reminders" and described to the reader as "When
+     * an event you applied to changes, or to remind you of a shift"
+     * (`NotificationPreferences.jsx`) — a cancellation is squarely inside the
+     * words somebody is shown when they switch it off, and it defaults to on,
+     * so silence is a choice that was accurately offered. The eleven members of
+     * `MANDATORY_NOTICE_EVENTS` are a different class and say so in their own
+     * comments: suspension, warnings, reinstatement, bans, appeal outcomes,
+     * legal changes — notices about the person's own standing and rights, where
+     * a preference would become a way to not be served notice.
+     *
+     * So the comment is corrected to describe what happens, rather than the
+     * requirement being invented to match the comment.
+     */
     let notified = 0;
     if (status === 'cancelled' && event.status !== 'cancelled') {
       notified = await notifyConfirmedVolunteers(eventId, 'EVENT_CANCELLED', { eventId: event.id, eventTitle: event.title }, `cancelled:${eventId}`);
