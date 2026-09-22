@@ -145,6 +145,14 @@ It does mean the ledger cannot be *complete* with respect to the specific
 sentence-level UI requests the brief describes. Those are the one input that
 cannot be recovered from the repository.
 
+**Status: UNRESOLVED.** Still outstanding as of the notification fix
+(`ece14c6`). No requirement in this ledger has been reconstructed from
+recollection to fill the gap, and none will be: a remembered requirement is
+indistinguishable from an invented one, and this document's whole value is that
+its claims are traceable. Every entry here cites the repository or a command
+that was run. If the material arrives it will be folded in as a new source; if
+it does not, the gap stays recorded as a gap.
+
 ---
 
 ## Phase 1 — Product and feature completeness audit
@@ -446,6 +454,7 @@ repository. Corrected, with the removal's reasoning preserved.
 |---|---|
 | Phase 0 baseline | 633 files, **10,742 passed**, 0 failed, 176 skipped |
 | After the five fixes | 633 files, **10,753 passed**, 0 failed, 176 skipped |
+| After the notification fix | 636 files, **10,781 passed**, 0 failed, 176 skipped |
 
 The delta is exactly the net new tests: +2 renderer (one replaced, so +1 net),
 +1 route, +5 certificate viewer (server), +3 certificate viewer (client),
@@ -467,6 +476,7 @@ run in this engagement captures full output.
 | `b4a1e11` | A Student Organizer was shown check-in and then refused it |
 | `d3175e3` | The holder could not open a certificate the world could verify |
 | `c2f5fff` | Reliable Volunteer promised a threshold it can never award |
+| `ece14c6` | An event link answered "no longer available" for a live event |
 | `3346317` | The ledger, and a stale comment on the development database path |
 
 ### Promoted to Verified, fix designed but not yet written
@@ -496,3 +506,73 @@ existing server-side visibility filtering, including withholding arrival
 instructions from non-attendees — and have `openEventById` ask the server before
 it says an event is gone. That repairs the in-app path and the email path
 together.
+
+### N-1 / N-2 — FIXED, `ece14c6`
+
+**Grade: Verified. Severity: High. Category: B. Status: FIXED.**
+
+**Scope correction made while implementing.** The earlier note said "every
+notification email CTA" dead-ends. That was too broad, and the narrower claim is
+the true one: **23** kinds emit `link: event:<id>`, but only **two** are
+addressed to somebody who is not involved —
+
+| Kind | Body |
+|---|---|
+| `FRIEND_SIGNED_UP` | "… signed up for X. There may still be places." |
+| `ORGANIZATION_EVENT_POSTED` | "X is open for applications." |
+
+For the other 21 the recipient has an application, attendance, a favourite, or
+hosts the event, so `mine=true` already returns it. `REMOVED_FROM_EVENT` was
+checked specifically: removal writes `applications.status` and never deletes the
+row (`DELETE FROM applications` appears only in slot deletion, event deletion
+and retention), so the event stays in the index.
+
+**Authorization and visibility — what actually changed.**
+
+- `?id=` is an ordinary bound clause in `buildEventWhere`, pushed alongside the
+  others so it **ANDs** with every predicate. Naming an id can only remove rows.
+- Nothing about disclosure changed. The same serialiser runs, and
+  `canSeeInstructions` (`event.moderate || host || accepted`) still blanks
+  arrival instructions. Pinned from both directions: blank for a non-attendee
+  resolving by id, present for the host.
+- **No read is granted that paging the list did not already grant.** Established
+  by reading the query builder: there is no audience-based row exclusion in
+  `buildEventWhere`, so an ordinary `event.view` holder could already page to
+  any event's browse card. The filter narrows a set, it does not widen one.
+- `GET /api/events` keeps `authenticateToken`; an unauthenticated `?id=` is 401.
+- **The endpoint used to FAIL OPEN.** `?id=` was an unknown parameter and was
+  ignored, so a mistyped link returned the first row of the whole table. It now
+  matches nothing.
+- No staff-only bypass was created, and `GET /api/events/:id` was left alone.
+
+**Files changed**
+
+| File | Change |
+|---|---|
+| `server/eventQuery.js` | `id` default, parsing (trimmed; empty means "not asked"), and the AND-ed clause |
+| `src/utils/resolveEvent.js` | **new** — caches first, then server, null on failure |
+| `src/utils/api.js` | `fetchEventById` — browse query narrowed, `scope=all` so a cancelled or completed event still resolves |
+| `src/App.jsx` | `openEventById` consults the server before refusing; a deep-link effect backfills an unresolved `?event=`, once per id via a ref |
+
+**Tests added — 28.** `server/routes.eventsById.test.js` (11):
+resolution for an uninvolved student, a control proving the event is absent from
+that student's index, modal-shaped fields, instructions withheld, instructions
+present for the host, fail-closed on an unknown id, 401 unauthenticated, AND-ing
+with other filters, and both notification kinds plus the email CTA id.
+`src/utils/resolveEvent.test.js` (12) and `src/App.eventDeepLink.test.jsx` (5),
+the latter mounting the real shell at `/?event=<id>` with an empty index — the
+cold-load shape exactly.
+
+**Mutation-checked in three places**, each failing only its own cases: removing
+the SQL clause (4 server cases, including the fail-open one); making the seam
+skip the network (6); disabling the deep-link backfill (5). All restored.
+
+**Verification.** Focused: 13 server suites / 492 passed; 6 client suites / 97
+passed. Full: **636 files, 10,781 passed, 0 failed, 176 skipped**, exit 0,
+output preserved at `/tmp/wev-fullrun-20260921-205958.txt`. Lint, `npm run
+build` and `npm run scan:bundle` all clean.
+
+**Coverage gap found, not closed.** There are no client test files for
+`src/views/Notifications.jsx` or `src/components/NotificationsBell.jsx` — the
+two components that dispatch `event:` links. Recorded rather than fixed, to keep
+this change to one concern.
