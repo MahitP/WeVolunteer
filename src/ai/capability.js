@@ -143,6 +143,22 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
 
   let reason = null;
   if (isIOS) {
+    /**
+     * Unreachable today, and kept rather than deleted.
+     *
+     * Reaching here needs `fits` to be non-empty, and on iOS it never is:
+     * `fitsDevice` rejects a model that is not `conversational`, and the only
+     * model under `IOS_MAX_MODEL_BYTES` (200 MB) is the 105 MB `fast` tier,
+     * which is withheld from conversation. So every iPhone and iPad takes the
+     * `fits.length === 0` return above instead, and is told the assistant is
+     * not available here — not this sentence.
+     *
+     * Left in place because it is defensive rather than dead: raising the
+     * ceiling, or adding a small conversational model, makes it both reachable
+     * and correct on the same day. What is recorded here is that it does not
+     * describe what an iOS reader sees today, so nobody concludes from reading
+     * it that they are offered the Fast model.
+     */
     reason =
       'On iPhone and iPad, Safari limits how much memory a page may use, so only '
       + 'the smallest model is offered here.';
