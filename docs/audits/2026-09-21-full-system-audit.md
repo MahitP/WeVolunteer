@@ -1768,3 +1768,116 @@ real service-hour data entered a fixture or a log at any point in this pass.
 
 **None.** N-8/N-9 record a dependency on unbuilt work rather than a question,
 and the N-13 terminology items are (D) optional by the standing classification.
+
+---
+
+## Pass 13 — Priority 6: the three destructive confirmations, one at a time
+
+N-6 was fixed as a single commit because the three share one mechanism. Priority
+6 asks a different question of each — *is the existing confirmation actually
+inadequate **in this context**, what is the intended behaviour, and can it be
+made safer without touching authorization or product semantics* — so each is
+answered separately here.
+
+### Is `window.confirm` inadequate at all? — three reasons, not a preference
+
+1. **It can be suppressed.** A browser that has had "prevent this page from
+   creating additional dialogs" ticked returns `false` without drawing
+   anything. For a destructive action that is the safe direction — the action
+   does not happen — but the reader is given no indication why their click did
+   nothing, and the same suppression applies to every later confirm on the page.
+2. **It cannot carry structure.** The consequence sentence is the whole point of
+   a destructive confirmation, and a `confirm` string can only be plain text
+   with `\n\n` for a paragraph. `OrganizerDashboard` was already pushing a
+   computed sign-up count through one.
+3. **It is recorded as intended work, twice.** The stabilization report lists it
+   at P2 — "`window.confirm` remains in 7 non-auth places; `ConfirmDialog`
+   exists to replace them" — and the deployment runbook at L5, roadmap P2-7,
+   names the cost: "Unstyled, poor on mobile, and with no room to explain
+   consequences ('this will remove 12 sign-ups')."
+
+So the intended behaviour is not inferred. It is written down, and the component
+it names already exists.
+
+### Finding 6a — deny an organizer (`AdminDashboard`)
+
+**What it destroys:** the applicant's account, not merely their request. The
+old string did not say so.
+
+**Now:** "Deny this organizer?" over "<name>'s account will be removed, and they
+will have to register again to ask a second time. This cannot be undone."
+(`src/views/AdminDashboard.jsx:718-732`). The name is the row's own, so the
+dialog cannot describe the wrong person.
+
+**Authorization untouched.** The control's gate and the endpoint are unchanged;
+this action carries `busy={busyId === denying.id}` so the confirm cannot be
+double-fired while the request is in flight.
+
+### Finding 6b — remove an event (`AdminDashboard`)
+
+**What it destroys:** the event and every sign-up under it.
+
+**Now:** "Remove this event?" over "'<title>' and all of its sign-ups will be
+deleted. This cannot be undone." (`src/views/AdminDashboard.jsx:734-747`).
+
+**Authorization untouched**, and deliberately so: the server still refuses an
+event that has attendance recorded against it, and the 409 evidence-hold
+explanation still lands on the dashboard. The dialog is a second chance to stop,
+not a second gate — moving any part of the refusal into the client would have
+weakened the real check.
+
+### Finding 6c — delete an event (`OrganizerDashboard`)
+
+**What it destroys:** the same thing, from the owner's side.
+
+**Now:** "Delete this event?" over "'<title>' will be deleted. **N volunteer
+sign-ups** will be removed with it. This cannot be undone."
+(`src/views/OrganizerDashboard.jsx:819-833`). The count was *already computed*
+for the old string; it now reads as a sentence with the number emphasised,
+which is exactly the sentence roadmap P2-7 used as its example. The clause is
+omitted rather than printed as zero when there are none.
+
+**Authorization untouched:** `eventPermissions().canDelete` still gates the
+control.
+
+### One structural decision shared by all three
+
+Each dialog is rendered at the **component root**, not beside its button. Both
+admin controls sit inside tables that re-render on every `loadData`, and a
+dialog mounted inside a row unmounts underneath the reader when the queue
+refreshes behind it. The pending row is held in state (`denying`,
+`removingEvent`, `deletingEvent`) rather than an id, because the dialog has to
+name it.
+
+### What was deliberately left on `window.confirm` — six sites
+
+`ConfirmDialog`'s own header scopes its argument to the two security actions it
+was written for, so this is not a finding that every `window.confirm` must go.
+The remaining six destroy nothing of anyone else's:
+
+- `EventComments.jsx:52`, `EventAnnouncements.jsx:71`,
+  `OrganizationAnnouncements.jsx:72` — the author deleting their own post.
+- `VolunteerDashboard.jsx:117` and `EventModal.jsx:267` — a volunteer
+  withdrawing or releasing **their own** application. Re-checked in this pass:
+  both are self-affecting, and both already phrase the accepted case
+  differently from the pending one.
+- `WellyView.jsx:594` — clearing conversation history on this device.
+
+A reader who suppresses dialogs and then cannot delete their own comment has a
+recoverable problem. One who cannot tell why an account was not removed does
+not.
+
+### Verification
+
+Covered by `AdminDashboard.destructiveConfirm.test.jsx` (160 lines) and
+`OrganizerDashboard.deleteConfirm.test.jsx` (124 lines), added with the fix.
+Mutation-checked four ways — each of the three controls wired straight back to
+its action, and the sign-up count removed — and every case failed only its own
+assertions. No authorization behaviour is asserted by these tests, because none
+of it changed.
+
+### New owner decisions
+
+**None.** The intended behaviour was already recorded in two places, and the
+scoping question (which confirmations must move) is answered by what each action
+destroys rather than by preference.
