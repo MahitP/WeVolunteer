@@ -1037,3 +1037,144 @@ No code changed, so there is nothing to regress. The matrix above was produced
 by temporary probes through the real API against synthetic events and the
 seeded demo accounts; both probes were removed and the tree is clean. No
 production database was touched.
+
+---
+
+## Pass 8 — badge triggers and floors (R-5 … R-8)
+
+Four findings, investigated and committed separately because they are four
+different questions that happen to live near `badgeService`.
+
+### The trigger graph, as it was
+
+| Trigger | Caller | Badges it could affect | Production? |
+|---|---|---|---|
+| attendance finalised → credited | `attendanceRoutes.js:176`, for `c.userId` | all, for the VOLUNTEER only | yes |
+| attendance finalised → revoked | `attendanceRoutes.js:205`, for `r.userId` | all, for the VOLUNTEER only | yes |
+| QA seed script | `bin/seed-qa-profile.mjs` | all | no |
+
+Nothing else on the platform asked. Manual award (`POST /api/admin/badges/award`)
+bypasses evaluation entirely and is audited.
+
+### R-5 — **DEFECT. FIXED `e57a2bb`**
+
+Two criteria do not depend on attendance: `events_created` (Organizer ≥ 1,
+Community Builder ≥ 10) and `early_adopter` (Early Supporter, by `joinRank`).
+Neither was ever evaluated by the act that satisfies it.
+
+Reproduced on synthetic data through the real API:
+
+| Scenario | Result |
+|---|---|
+| organizer, **12** non-cancelled events, never volunteered | **zero badges** |
+| the same account then credited as a volunteer elsewhere | Organizer, Community Builder **and** Early Supporter arrive at once |
+| student at `joinRank` 17, never volunteered | **no** Early Supporter |
+| Early Supporter `earned_at` | the evaluation timestamp, not the account's `created_at` |
+
+So not unearnable in the abstract — reachable only through an unrelated action,
+and unreachable for anybody who never performs it. `badgeService` already
+describes that state as a defect it fixed once: the `early_adopter` branch used
+to be empty, leaving the badge "unearnable by every code path in the
+application — it sat in the catalogue looking like something to aim for". The
+evaluator was fixed and the trigger was not.
+
+**Four explicit triggers**, each tied to its eligibility event rather than a
+run-badges-everywhere hook: event create, event duplicate, event status change
+(the mirror — evaluated for the event's *organizer*, since an admin cancelling
+somebody else's event changes that organizer's count), and signup.
+
+Creation rather than completion, because `collectStats` says why it counts
+`status != 'cancelled'`: requiring completion would withhold the badge "until
+that opportunity had already finished — which is not what it says, and is not
+when the recognition is worth anything."
+
+Repeat evaluation verified safe rather than assumed: awards insert only when no
+row exists, `user_badges` carries `UNIQUE(user_id, badge_id)`, the announcement
+dedupe key is permanent, and `evaluateBadges` catches its own errors so none of
+these can fail the request it hangs off. `df4e815` is respected — `collectStats`
+still excludes cancelled events.
+
+### R-5 · Early Supporter dating — resolved by the criterion, not chosen
+
+`collectStats` explains that eligibility is a **rank** and not a date precisely
+because "the number of accounts created before yours never changes". The answer
+is therefore final the instant the row exists, which makes signup the only
+moment at which the stored date and the eligibility date can agree. No owner
+decision was needed: the repository settles it.
+
+### R-6 — **DEFECT. FIXED `0b8030e`**
+
+`BADGE_CRITERIA_META` marked `early_adopter` `threshold: false`, so
+`AdminBadges` omits the input and the definition saves with `criteria_value` 0
+— while `meetsCriteria` requires `threshold > 0`, deliberately, so an
+un-reconciled database fails closed. An administrator defining a new
+early-adopter badge therefore got one that validated, saved, appeared in the
+catalogue and could never be earned.
+
+The metadata's reading — "decided by when somebody joined rather than by how
+much they have done" — is true of the question and false of the definition: the
+threshold **is** the cohort size, and the seeded badge carries 250.
+`badgeCriteria.js` names the outcome in its own header: a wrong unit "produces a
+badge that is either trivial or unearnable, and the symptom of both is silence."
+
+`manual` remains the only `threshold: false` type, correctly — `meetsCriteria`
+answers `null` for it. The guard is written against the metadata, so any future
+type hiding a threshold must answer the same question.
+
+### R-7 — **Half intentional, half an owner decision. No change.**
+
+- **Permanent dedupe on re-earning: intentional and documented.** `announce`
+  keys on `badge:${badge.id}` so that "re-earning one after a revocation does
+  not produce a second copy of the same congratulation … the right trade for a
+  message whose entire content is 'you have this badge'."
+- **Silence on automatic withdrawal: no mechanism exists.** There is no
+  `BADGE_LOST` notification kind anywhere; `BADGE_REVOKED` exists only as an
+  *audit* action on the manual admin revoke path. So automatic withdrawal is
+  neither notified nor audited.
+
+Whether losing a badge should be announced is a product decision, and there is
+a reasonable case for silence: the withdrawal is a consequence of an attendance
+correction the volunteer is already told about through `HOURS_ADJUSTED`, and a
+second message naming the loss is the unkinder of the two. **Recorded, not
+decided.**
+
+### R-8 — **DEFECT. FIXED `74f8a38`**
+
+Two discrepancies, not one. `reliability.js` abolished the applicant row's
+floor by name — "three numbers answering one question, in three files,
+disagreeing. `MIN_EVIDENCE` is the one that remains, **and every surface reads
+it**" — and `ApplicantReview` kept a hardcoded 3. That claim was simply false.
+
+The quantity was the worse half: the gate read `eventsSignedUp`, which counts
+every commitment whose shift has **ended** whether or not anybody confirmed it.
+So four shifts nobody had recorded read as four shifts missed, and the row told
+an organizer "0 of 4 attended" about a volunteer with no record either way —
+while `eventsAwaitingRecord` sits in the same payload specifically to keep those
+apart, "because reading the second as the first is the specific unfairness this
+whole set of definitions exists to prevent."
+
+Now `attended + absent` against `MIN_EVIDENCE`, mirrored client-side the way
+four other shared vocabularies already are.
+
+**A test was changed rather than preserved, deliberately.** The case asserting
+counts appear "once there are three completed commitments" encoded the
+superseded number, not a product rule. A neighbouring case needed a new fixture
+instead: it covers a volunteer with commitments but no confirmed *attendance*,
+and its four unconfirmed commitments now legitimately read "New volunteer", so
+it uses four recorded **absences** — past the floor, still nothing attended,
+which is what the case is named for.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused | 9 server suites / 173 passed; client applicant + boundary / 27 passed |
+| Full suite (R-5) | 640 files, **10,821 passed**, 0 failed, exit 0 |
+| Full suite (R-6) | 640 files, **10,822 passed**, 0 failed, exit 0 |
+| Full suite (R-8) | 640 files, **10,824 passed**, 0 failed, exit 0 |
+| Output preserved | `/tmp/wev-r5-20260922-010301.txt`, `/tmp/wev-r6-20260922-010748.txt`, `/tmp/wev-r8-20260922-011155.txt` |
+| Lint / build / bundle scan | clean |
+| Mutation checks | **7** — four triggers, the metadata, and both halves of the applicant gate |
+
+Reliable Volunteer's algorithm and wording (`c2f5fff`) were not revisited; no
+evidence in this pass bore on them.
