@@ -1080,11 +1080,41 @@ export function getInAppContent(event, payload) {
         link: `event:${payload.eventId}`
       };
     case 'EVENT_CANCELLED':
+      /**
+       * Two bodies, one kind, chosen by a payload flag — the shape
+       * `HOURS_APPROVED` above already uses, for the same reason: `dispatchMany`
+       * renders content ONCE for a fan-out, so a clause that applies to some
+       * recipients and not others cannot live inside a single dispatch. The
+       * cancellation route makes two calls over disjoint sets.
+       *
+       * ── Why only the credited are told about hours ──
+       *
+       * Because that is already the rule for hour-impact messages here.
+       * `HOURS_ADJUSTED` is dispatched only past a `wasCredited` guard, whose
+       * note says "Somebody who was never credited has had nothing taken from
+       * them and should not be told their hours changed". A cancellation takes
+       * credit away from exactly those people and no others.
+       *
+       * ── What the sentence may and may not claim ──
+       *
+       * Not that the hours were removed: they are not. The attendance row, its
+       * ledger entry and any issued certificate all survive, and the Volunteer
+       * Record Policy now says so in those words under "If an event is
+       * cancelled". What changed is that the event is no longer part of the
+       * record the product presents — so the sentence names the total, and says
+       * the record is intact, which is the pair a student needs.
+       *
+       * Decided during the 2026-09-21 audit (owner decision 4B).
+       */
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.CRITICAL,
         title: `${payload.eventTitle} was cancelled`,
-        body: `The organizer has cancelled this event.`,
+        body: payload.hadCreditedHours
+          ? 'The organizer has cancelled this event. The hours you were credited for it '
+            + 'no longer count towards your totals — your attendance record and any '
+            + 'certificate you were issued are unchanged.'
+          : 'The organizer has cancelled this event.',
         link: `event:${payload.eventId}`
       };
     case 'EVENT_UPDATED':

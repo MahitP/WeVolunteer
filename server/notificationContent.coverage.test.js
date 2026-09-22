@@ -168,9 +168,24 @@ function stripComments(src) {
   return src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
 }
 
+/**
+ * `dispatchMany` counts too, and it did not.
+ *
+ * The pattern required `(` immediately after `dispatch`, so
+ * `dispatchMany('X', …)` was invisible. That cost nothing while
+ * `notifyConfirmedVolunteers` was the only caller — the indirect scanner below
+ * covered it by name — and became a live blind spot the moment a route called
+ * `dispatchMany` itself, which `eventRoutes.js` now does to send the
+ * cancellation notice in two bodies over disjoint recipient sets.
+ *
+ * Found by this file failing rather than by review: the real-tree assertion
+ * stopped seeing EVENT_CANCELLED. That is the guard working, and widening the
+ * pattern is the fix — the alternative, dropping the anchor, is how a scanner
+ * quietly stops scanning.
+ */
 export function matchDispatchedEventNames(src) {
   const names = [];
-  for (const m of stripComments(src).matchAll(/dispatch\(\s*['"`]([A-Z0-9_]+)['"`]/g)) names.push(m[1]);
+  for (const m of stripComments(src).matchAll(/dispatch(?:Many)?\(\s*['"`]([A-Z0-9_]+)['"`]/g)) names.push(m[1]);
   return names;
 }
 
@@ -513,7 +528,12 @@ describe('the dispatch scanner itself', () => {
      * it.
      */
     { label: 'a block comment before the argument', src: "dispatch(\n  /** why */\n  'PROBE_EVENT', {}\n)" },
-    { label: 'a line comment before the argument', src: "dispatch(\n  // why\n  'PROBE_EVENT', {}\n)" }
+    { label: 'a line comment before the argument', src: "dispatch(\n  // why\n  'PROBE_EVENT', {}\n)" },
+    /* The fan-out form. `notifyConfirmedVolunteers` used to be its only caller,
+       so the indirect scanner covered it by name; a route calling it directly
+       is not covered by anything else. */
+    { label: 'the dispatchMany fan-out form', src: "dispatchMany('PROBE_EVENT', {}, ['u'])" },
+    { label: 'dispatchMany behind a service object', src: "notificationService.dispatchMany(\n  'PROBE_EVENT', payload, ids,\n)" }
   ];
 
   for (const { label, src } of QUOTE_STYLES) {

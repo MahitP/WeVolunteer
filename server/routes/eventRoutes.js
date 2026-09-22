@@ -1817,7 +1817,60 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
      */
     let notified = 0;
     if (status === 'cancelled' && event.status !== 'cancelled') {
-      notified = await notifyConfirmedVolunteers(eventId, 'EVENT_CANCELLED', { eventId: event.id, eventTitle: event.title }, `cancelled:${eventId}`);
+      /**
+       * Two dispatches over disjoint sets, because two different things are
+       * true of the recipients.
+       *
+       * Everybody accepted onto the event needs to know it is off. The people
+       * whose CREDITED hours have just stopped counting need to know that too,
+       * and they are not the same set in either direction:
+       *
+       *   · an accepted volunteer who never turned up has lost nothing, and
+       *     `HOURS_ADJUSTED`'s guard already records why they must not be told
+       *     their hours changed;
+       *   · somebody credited who later withdrew their application is NOT in
+       *     the accepted set at all, and their credited total is moving.
+       *     Attendance is deliberately independent of application status, so
+       *     the hours are theirs whatever the application says, and the old
+       *     recipient query told them nothing.
+       *
+       * So the credited set is derived from `attendance`, the plain set is the
+       * accepted applications minus it, and `getInAppContent` picks the body
+       * from `hadCreditedHours`. Content is rendered once per fan-out, which is
+       * why this is two calls rather than one with a per-recipient clause.
+       *
+       * The dedupe key is unchanged and shared, so the two sets cannot overlap
+       * into a double send even if the queries ever did.
+       *
+       * Decided during the 2026-09-21 audit (owner decision 4B).
+       */
+      const creditedRows = await db.prepare(`
+        SELECT DISTINCT user_id FROM attendance
+         WHERE event_id = ? AND present = 1 AND hours_awarded > 0
+      `).all(eventId);
+      const credited = creditedRows.map(r => r.user_id);
+      const creditedSet = new Set(credited);
+
+      const acceptedRows = await db.prepare(`
+        SELECT DISTINCT user_id FROM applications
+         WHERE event_id = ? AND status = 'accepted'
+      `).all(eventId);
+      const plain = acceptedRows.map(r => r.user_id).filter(id => !creditedSet.has(id));
+
+      const base = { eventId: event.id, eventTitle: event.title };
+      const key = (userId) => `cancelled:${eventId}:${userId}`;
+      const delivered = async (recipients, payload) => {
+        if (recipients.length === 0) return 0;
+        const outcomes = await notificationService.dispatchMany(
+          'EVENT_CANCELLED', payload, recipients, key,
+        );
+        /* Only a genuine delivery counts, exactly as `notifyConfirmedVolunteers`
+           has always counted it. */
+        return [...outcomes.values()].filter(Boolean).length;
+      };
+
+      notified = await delivered(credited, { ...base, hadCreditedHours: true })
+        + await delivered(plain, base);
     }
 
     res.json({ success: true, status, notified });

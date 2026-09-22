@@ -85,6 +85,20 @@ already-credited hours do not move.
 This is deliberate. A record of what you did should not change months later because somebody
 edited a form.
 
+## If an event is cancelled
+
+If an organizer cancels an event, **the hours you were credited for it stop counting
+towards your totals.** They are not deleted and nothing is taken off your attendance
+record — the entry stays, the ledger entry behind it stays, and any certificate you were
+already issued stays valid and keeps verifying. What changes is that the event is no
+longer part of the service record we present: it is not in your total, not on your
+transcript, and not counted towards an hours milestone.
+
+We tell you when this happens to hours you actually earned. The cancellation notice says
+so, and the certificate itself says so if you open it.
+
+This is why an organizer cannot cancel an event once it is complete.
+
 ## When an event's hours are closed out, they are final
 
 After every confirmed volunteer on an event has been accounted for, the organizer can **close

@@ -403,8 +403,15 @@ export const LEGAL_DOCUMENTS = [
        revisited, so "Who can change what" offered an administrator correction the
        software has always refused after close-out, and the disputes path named no
        end. Same reasoning as above for leaving the version at 1.0. Decided during
-       the 2026-09-21 audit (owner decision 1). */
-    contentHash: '4b0f6565fd97f95fb237bbc58b2a84234429b81cfcd23dffbda216189ddc8275',
+       the 2026-09-21 audit (owner decision 1).
+
+       And again for "If an event is cancelled". That a cancelled event's hours
+       stop counting has been true and enforced at ~30 call sites since b8cfb09,
+       and was stated nowhere a reader could find it — while this document's
+       stated purpose is to make the invariants "a promise to the user rather
+       than an internal convention". Owner decision 4B needed it published before
+       a notification could assert it. */
+    contentHash: 'dba7b507659e65169ef8fdb961ac653f82dbbabea64716ac98bd5dec520eae70',
     bundledWith: null,
   },
   {
