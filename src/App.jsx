@@ -328,6 +328,39 @@ const NAV = [
      moment anybody clicked it. `/events` still resolves — see RedirectToDiscover
      in routes/index.jsx — but nothing in the product points there any more. */
   { id: 'browse', path: '/discover', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
+  /**
+   * ── Who the calendar is for, and why the gate is narrower than the route ──
+   *
+   * The route requires `event.view`, which every role holds; this entry
+   * requires `event.apply` or `event.create`. So `admin` and `partner` can open
+   * the page and are not sent there, and that is a decision rather than an
+   * oversight — owner decision 6A of the 2026-09-21 audit, recorded here because
+   * the evidence pulls both ways and the next reader will notice the same
+   * things.
+   *
+   * Pulling one way: an `event.moderate` holder gets the UNFILTERED event index
+   * (`SessionProvider`), `scope` defaults to `all`, and `CalendarView`'s
+   * non-organizer branch draws a deadline for every open event — so the page
+   * genuinely behaves as a district calendar for admin and super_admin, and
+   * `PAGE_META.staff` calls it "Events across the district and when they close".
+   * Welly will navigate there on `event.view` too.
+   *
+   * Pulling the other: this gate is about DOING — turning up to shifts or
+   * running them — and an administrator does neither. The unfiltered index is
+   * justified in its own comment by the review queue, not by this page, so the
+   * district behaviour is inherited rather than designed. `staff` is shared with
+   * super_admin, who holds `event.apply` through the wildcard and does have the
+   * entry, so the title is earned without admin. And the admin rail is pinned
+   * exactly in `App.shellByRole.test.jsx`, in a file that explains every other
+   * presence and absence and says nothing about this one.
+   *
+   * Nothing in the repository designs a district calendar, and a route working
+   * is not evidence that it was meant to be promoted. So the gate stays as it
+   * is: reachable directly and through Welly, not surfaced in navigation. If
+   * that is ever revisited, the thing to decide first is whether `/calendar`
+   * shows you your own commitments or the district's schedule — the gate and
+   * the `staff` subtitle currently answer that differently.
+   */
   { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
   { id: 'welly', path: '/welly', label: 'Welly', icon: Sparkles, requiredCap: 'assistant.use' },
@@ -737,6 +770,9 @@ export const PAGE_META = {
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
+    /* See the note in the partner block: this page is reachable by every
+       signed-in account and was described for two personas out of four. */
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     messages: { title: 'Messages', sub: 'Coordinate directly with volunteers regarding your events' },
     welly: { title: 'Welly', sub: 'Ask about your events, your applicants, and shifts still short of volunteers' },
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
@@ -839,6 +875,30 @@ export const PAGE_META = {
      * page.
      */
     notifications: { title: 'Notifications', sub: 'Updates about your organization' },
+    /**
+     * A partner can open `/calendar` — the route gate is `event.view`, which
+     * they hold so that Discover works — and saw the bare product name.
+     *
+     * Titled rather than blocked or built out. Owner decision 6B of the
+     * 2026-09-21 audit: the page is reachable and deliberately unpromoted, so
+     * the reader who arrives is told what it is. Adding the key is exactly what
+     * was done for `profile` when it fell through the same fallback, and for
+     * the three keys beside it that a partner does not reach today.
+     *
+     * `welly` is still absent, and the difference is the reason: its route gate
+     * REFUSES a partner, so a title there would describe a page nobody can open.
+     * This one does not refuse.
+     *
+     * The subtitle says what a partner will actually see. They have no shifts
+     * and host nothing, so the only entries their index can produce are
+     * deadlines for events they favourited — promising anything more would be
+     * the fallback wearing a title.
+     */
+    calendar: { title: 'Calendar', sub: 'Application deadlines for opportunities you have favorited' },
+    /* Reachable by everybody signed in, and described for volunteers and staff
+       only — so an organizer and a partner reporting something broken read the
+       bare product name. Same copy as the other two blocks. */
+    reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     profile: { title: 'Profile', sub: 'How your organization appears on this platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
