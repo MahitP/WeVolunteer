@@ -1809,17 +1809,30 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
      * `cancelled -> open` is a legal transition and a re-evaluation that only
      * ever removed would be the same one-directional fault mirrored.
      *
-     * Scoped to credited attendance: those are the only people whose stats this
-     * event contributes to, so it is bounded by who turned up rather than by who
-     * signed up. Sequential, like the attendance route's own loop over its
-     * revoked list.
+     * ── Who is affected, which is not just the people who turned up ──
      *
-     * Decided during the 2026-09-21 audit (owner decision 5A).
+     * This selected `present = 1`, which is the right set for the hours and
+     * events criteria — those are the people the event contributed a figure
+     * for. It is the wrong set for RELIABILITY. `reliabilityOf`'s query runs
+     * over ACCEPTED APPLICATIONS left-joined to attendance and excludes
+     * cancelled events, so cancelling removes the commitment from the
+     * denominator for everyone who was accepted — including somebody marked
+     * absent, whose rate therefore RISES.
+     *
+     * So the set is the union: anyone with an attendance row at this event
+     * whatever it says, and anyone holding an accepted application. Bounded by
+     * who signed up rather than by the platform, and sequential, like the
+     * attendance route's own loop over its revoked list.
+     *
+     * Decided during the 2026-09-21 audit (owner decision 5A); the union is the
+     * post-implementation audit of it.
      */
     const affected = await db.prepare(`
-      SELECT DISTINCT user_id FROM attendance
-       WHERE event_id = ? AND present = 1
-    `).all(eventId);
+      SELECT DISTINCT user_id FROM attendance WHERE event_id = ?
+      UNION
+      SELECT DISTINCT user_id FROM applications
+       WHERE event_id = ? AND status = 'accepted'
+    `).all(eventId, eventId);
     for (const row of affected) {
       if (row.user_id === event.organizer_id) continue; // already done, above
       await badgeService.evaluateBadges(row.user_id, {

@@ -86,6 +86,42 @@ describe('badges when an event is cancelled', () => {
     return eventId;
   };
 
+  /** A fresh account, so a fixture cannot inherit the seed's history. */
+  const makeStudent = async (suffix) => {
+    const id = `user-cancel-badge-${suffix}`;
+    await db.prepare(`
+      INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, created_at)
+      SELECT ?, ?, ?, ?, password_hash, '11', 'student', 1, ?
+      FROM users WHERE id = 'user-student-1'
+    `).run(id, `Cancel Badge ${suffix}`, `cancel.badge.${suffix}@example.com`,
+      `cancelbadge${suffix}`, '2026-01-01T00:00:00.000Z');
+    return id;
+  };
+
+  /** An accepted commitment that ended in the past, with a recorded outcome. */
+  const commitment = async (userId, suffix, { present, endsAt, status = 'open' }) => {
+    const eventId = `evt-rel-${suffix}`;
+    await db.prepare(`
+      INSERT INTO events (id, title, description, category, location,
+                          application_deadline, organizer_id, status, created_at)
+      VALUES (?, ?, ?, 'Donation Drive', ?, ?, ?, ?, ?)
+    `).run(eventId, `Reliability fixture ${suffix}`, 'Synthetic fixture.', 'Springfield',
+      '2026-01-02T00:00:00.000Z', organizerId, status, '2026-01-01T00:00:00.000Z');
+    await db.prepare(`
+      INSERT INTO slots (id, event_id, name, description, start_datetime, end_datetime, max_spots)
+      VALUES (?, ?, 'Shift', 'Synthetic fixture.', ?, ?, 20)
+    `).run(`slot-rel-${suffix}`, eventId, endsAt, endsAt);
+    await db.prepare(`
+      INSERT INTO applications (id, user_id, event_id, slot_id, status, applied_at)
+      VALUES (?, ?, ?, ?, 'accepted', ?)
+    `).run(`app-rel-${suffix}`, userId, eventId, `slot-rel-${suffix}`, '2026-01-01T00:00:00.000Z');
+    await db.prepare(`
+      INSERT INTO attendance (event_id, slot_id, user_id, present, hours_awarded)
+      VALUES (?, ?, ?, ?, 1)
+    `).run(eventId, `slot-rel-${suffix}`, userId, present);
+    return eventId;
+  };
+
   const holds = async (name) => Boolean(await db.prepare(`
     SELECT 1 AS x FROM user_badges ub JOIN badges b ON b.id = ub.badge_id
     WHERE ub.user_id = ? AND b.name = ?
@@ -207,5 +243,61 @@ describe('badges when an event is cancelled', () => {
       WHERE ub.user_id = ? AND b.name = 'Organizer'
     `).get(organizerId));
     expect(Boolean(org)).toBe(true);
+  });
+
+  /**
+   * The absentee is affected too, and was not re-evaluated.
+   *
+   * ── The gap ──
+   *
+   * The trigger selected `present = 1`, which is the right set for the hours
+   * and events criteria: those are the people the event contributed a figure
+   * for. It is the wrong set for RELIABILITY. `reliabilityOf`'s query is over
+   * ACCEPTED APPLICATIONS left-joined to attendance and excludes cancelled
+   * events, so cancelling removes the commitment from the denominator for
+   * everyone who was accepted — including somebody marked absent, whose rate
+   * therefore RISES.
+   *
+   * So a volunteer held under the Reliable Volunteer threshold by one absence
+   * at an event that was then called off stayed under it, until some unrelated
+   * action of their own re-evaluated them. That is the same staleness owner
+   * decision 5A removed for the hours criteria, left behind on the one
+   * criterion where the affected set is different — and it fails in the
+   * direction of withholding recognition the volunteer has earned.
+   *
+   * Found by the post-implementation audit of owner decision 5A.
+   */
+  describe('and the people who were marked absent', () => {
+    it('re-evaluates an absentee whose rate the cancellation raises', async () => {
+      const student = await makeStudent('absent');
+
+      /* Four commitments kept, which clears the smoothed threshold on its own,
+         and one missed, which drops it under. Recency-weighted, so the missed
+         one is stamped most recent to carry full weight. */
+      await commitment(student, 'k1', { present: 1, endsAt: '2026-02-01T17:00:00.000Z' });
+      await commitment(student, 'k2', { present: 1, endsAt: '2026-02-08T17:00:00.000Z' });
+      await commitment(student, 'k3', { present: 1, endsAt: '2026-02-15T17:00:00.000Z' });
+      await commitment(student, 'k4', { present: 1, endsAt: '2026-02-22T17:00:00.000Z' });
+      const missedId = await commitment(student, 'miss', {
+        present: 0, endsAt: '2026-03-01T17:00:00.000Z',
+      });
+
+      await badgeService.evaluateBadges(student);
+      const held = async () => Boolean(await db.prepare(`
+        SELECT 1 AS x FROM user_badges ub JOIN badges b ON b.id = ub.badge_id
+        WHERE ub.user_id = ? AND b.name = 'Reliable Volunteer'
+      `).get(student));
+      expect(held(), 'the fixture did not hold the badge back').resolves.toBe(false);
+
+      const res = await srv.call(
+        'PATCH', `/api/events/${missedId}/status`, { status: 'cancelled' }, organizer,
+      );
+      expect(res.status).toBe(200);
+
+      expect(
+        await held(),
+        'the absence stopped counting against them and nothing re-evaluated the badge'
+      ).toBe(true);
+    });
   });
 });
