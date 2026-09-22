@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Fixed — switching to Welly AI and typing straight away
+
+Turning Welly AI on from the mode control and asking a question before the
+model had finished arriving got you Welly Chat's answer — usually "I can't help
+with that one" for anything conversational — under a pill that said "Welly AI ·
+Running on this device". Asking after a page reload was already correct; it was
+only the switch that was not, and only on a conversation with nothing in it yet.
+
+The engine is now decided from the preference as it stands when you press send,
+rather than from the value the composer happened to capture earlier, so the
+question waits for the model you just chose.
+
 ### Changed — what a cancelled event does to your record
 
 A full-system audit (2026-09-21 → 22) settled four questions about what

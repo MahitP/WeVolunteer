@@ -2310,3 +2310,201 @@ skipped, lint and build clean, 164 bundle chunks with 0 server-only-string hits,
 561 PostgreSQL tests across 14 files on a scratch database created and dropped.
 `bin/legal-hashes.mjs` reports 13 ok and 0 drift; no legal document was touched
 by this pass.
+
+---
+
+## Pass 17 — the last four intake claims, F-1, and §57
+
+Pass 16 carried `R-9 … R-12` forward as never investigated. They are
+investigated here, from the intake claims rather than from any prior
+classification. One was a live defect; the other three were not, and two of
+those describe behaviour the repository had already decided deliberately.
+
+### R-9 — **FIXED, before this audit began**
+
+The claim: `identity_self` tells the reader "nothing you type here is sent
+anywhere" while a search question reaches `/api/events` and may be embedded
+server-side.
+
+The claim was true of the code when the intake table was written and is not
+true of the code now. `FIXED.identity_self` was corrected in **`083b7d1`**
+(2026-08-30), an ancestor of HEAD, and the reasoning sits above the string: the
+absolute half was replaced with the narrower keepable claim — the model runs on
+your device, and *"Looking something up … is answered by WeVolunteer's server,
+the same as the rest of the app."*
+
+Regression coverage exists for both branches, and the second one exists
+*because* of a mutation check: `identity.test.js` records that the first version
+used a loaded runtime only, so restoring the old claim in the no-model fallback
+left the suite green. Both are asserted now.
+
+So this is a stale intake row against already-corrected code, not an open
+finding. Nothing to do.
+
+### R-10 — **DISPROVEN**
+
+The claim: Welly-created events carry no coordinates, so they are second-class
+in the distance features Welly offers.
+
+Both halves check out and the conclusion does not. The `create_event` payload
+(`src/ai/tools.js:1089-1108`) carries no `latitude`/`longitude`, and an event
+without them is excluded by a distance filter — `eventQuery.js:692`, with the
+reason stated: *"An event with no coordinates has no distance, so it cannot
+satisfy a distance filter."*
+
+But this is **not Welly-specific**. `CreateEvent.jsx` validates only that the
+location *text* is non-empty (`:258-259`), so an organizer who types a place and
+never opens the picker publishes exactly the same event. There is no
+server-side geocoding on create by design, and the property is recorded as
+intentional in `server/db.js:1805`:
+
+> "An event with no pin is an ordinary thing — an organizer typed a place name
+> and never opened the picker — and every location surface has to degrade for
+> it: no map, no distance, no forecast … That path is the one most likely to
+> regress, and a seed where every event has a pin is a seed where nobody ever
+> sees it."
+
+`eventQuery.js:17` lists the exclusion among the client behaviours it
+deliberately mirrors. A decision already recorded is not an owner decision
+still owed, so this is disproven rather than escalated.
+
+### R-11 — **DISPROVEN**
+
+The claim: the transcript UI is built for token streaming that no longer
+happens.
+
+The single-call `onToken` is deliberate, measured and documented
+(`WllamaRuntime.js:352-377`): streaming dropped the final chunk, which also
+lost `finish_reason`, so the non-streaming call is what makes the text right
+and the "ran out of room" notice possible. The contract is explicitly kept —
+*"`onToken` is still honoured, once, with the finished text … and `MockRuntime`
+still emits word by word, so every test that pins fragment reassembly keeps
+exercising it."*
+
+And the consumer is arity-agnostic: `WellyView.jsx:695` accumulates
+`m.text + token`, which is correct whether called once or fifty times. No
+visible artefact, no dead path — a retained interface with a live test double.
+
+### R-12 — **CONFIRMED, reproduced, FIXED `0b6e0f3`**
+
+The claim named `send`'s dependency array. The reachable consequence is worse
+than a stale value, and it was reproduced through the real component before
+anything changed.
+
+`send` is `useCallback(…, [busy, messages, position, currentUser, navigate])`
+and reads `prefs.enabled` to decide whether to wait for a loading model.
+`prefs` is not in that array, and **on an empty conversation nothing else in it
+changes when the mode control is used** — `messages` is still empty, `busy` is
+still false. So a reader who switched from Welly Chat to Welly AI and typed
+before the model arrived was served by a closure that still said Welly AI was
+off: the wait was skipped, `ask` got a null runtime, and the transcript carried
+Chat's refusal — *"I can't help with that one. I can look up opportunities…"* —
+under a pill reading "Welly AI · Running on this device".
+
+That is the defect `WellyView.engineWait.test.jsx` exists to prevent,
+reintroduced through the mode-switch path. Both of its existing cases start
+with `enabled: true` already in storage, so the closure is correct at mount and
+neither could see it.
+
+Fixed by reading `readPreferences()` at the decision point rather than adding a
+dependency: it is the source of truth `prefs` mirrors, `selectMode` already
+reads it that way, and it is also correct across tabs where the `storage`
+listener has not run yet.
+
+**Mutation results.** Restoring the closure fails the new case. Dropping the
+`enabled` half of the guard **survives**, and is characterised rather than
+papered over: `loadRuntime` returns early when Welly AI is off, so
+`loadingRef.current` is already settled and awaiting it costs a microtask. The
+check stays because it states what the wait is for. The neighbouring case was
+also strengthened — it cleared `modelId`, so `enabled` was never under test;
+switching to Welly Chat keeps the chosen model, and the fixture now matches
+that.
+
+### F-1 — **Characterised. Not a defect. Remains a follow-up.**
+
+Re-verified rather than inherited. `notifyConfirmedVolunteers` now has exactly
+one caller — `EVENT_UPDATED` at `eventRoutes.js:1495` — and its recipient query
+is `applications WHERE status = 'accepted'` (`utils.js:1285-1288`), which is the
+query owner decision 4B corrected for cancellation.
+
+The correction does not transfer, and the reason is specific rather than
+general. For a cancellation the withdrawn-but-credited volunteer is affected
+because their credited hours stop counting. For `EVENT_UPDATED` no hour
+consequence exists: `PUT /api/events/:id` refuses a completed event — *"its
+details can no longer be changed. Attendance can still be corrected."*
+(`eventRoutes.js:1220-1224`) — and an existing credit keeps its stored
+`hours_awarded` whatever happens to the slot afterwards. So the notice concerns
+a future shift the person has withdrawn from, and not sending it is defensible
+on its face.
+
+Kept open as a follow-up rather than closed, because *whether* a withdrawn
+volunteer should hear that an event they once held a place at has changed is a
+product question nobody has answered. It was not caused by the nine decisions
+and was not needed to resolve them.
+
+### §57 — **UNRESOLVED, and the search is now exhaustive**
+
+Two avenues pass 14 did not try were tried here, and both are dead ends worth
+recording so nobody repeats them:
+
+- **Deleted files.** `git log --diff-filter=D --name-only` across the whole
+  history turns up one deleted file matching any requirements-like name
+  (`tests/e2e/core-flow.spec.js`, a test). No requirements document was ever
+  committed and later removed.
+- **The initial commit.** `ed2dea1` (2026-07-20) contains one prose document,
+  `README.md`, and it is the only artefact in the repository that is *upstream*
+  of the work rather than a description of it. It yields a product thesis — "a
+  SignUpGenius-style app", "confirmed attendance turns into certified
+  community-service hours" — and a feature inventory, including the original
+  name for Auto Select ("Equalizer") and the original position that the
+  attendance ledger is "re-editable", which close-out later bounded rather than
+  contradicted.
+
+That is the whole of it. A thesis and a feature list are not "numerous highly
+specific historical UI/UX requirements", so **§57 is narrowed but not
+resolved**: the repository contains one upstream artefact, it has now been
+read, and it does not contain the material. Nothing was reconstructed from
+recollection, and §57 remains a bounded historical-evidence gap rather than an
+unresolved runtime defect or an owner decision.
+
+### Cross-surface finding — the published hours definition (`10aa55f`)
+
+Found by sweeping for stale statements of the policies this audit settled.
+`creditedHoursFor` is `SUM(hours_awarded) WHERE present = 1 AND e.status <>
+'cancelled'`, and four places that state it for a reader stopped at the first
+half.
+
+The README is the worst of them: it prints the incomplete formula in a fenced
+SQL block and then says *"that single constraint is why the figure can be
+trusted everywhere it appears"* — a trust claim resting on a definition the code
+does not use. Its corrections section also stopped short of close-out. Both are
+corrected, along with three live source comments in `seed_badges.js`,
+`badges.test.js` and `hoursLedger.js` — the first two matter most now that owner
+decision 3 made the hours milestones depend on that definition.
+
+Dated records were left alone: `docs/2026-08-06-production-readiness-audit.md`,
+`docs/questions-for-owner.md` and `docs/plans/2026-08-02-v1.4-meaning.md` say
+what was true when they were written, and rewriting a snapshot is not
+reconciliation.
+
+### Sweeps that found nothing, recorded so they are not repeated
+
+- **Hash destinations.** Two client links carry one, both `#welly-ai`, and the
+  id exists (`AISettingsCard.jsx:161`) with a ref that consumes it. The N-3
+  class is clean on the client; `serverLinks.test.js` covers the server side.
+- **Navigation wider than its route.** Every `NAV` entry's gate is identical to
+  its route's or narrower — `/calendar` is the only one that is narrower, which
+  is owner decision 6A. No role is shown an entry that would refuse it.
+- **Client-state-dependent destinations.** `?profile=&type=` resolves from the
+  server on a cold load, as `?event=` now does.
+
+### Status after this pass
+
+| ID | Final status | Evidence |
+|---|---|---|
+| R-9 | **FIXED** (before this run) | `083b7d1`; `identity.test.js`, both branches |
+| R-10 | **DISPROVEN** | `db.js:1805`, `eventQuery.js:17`; not Welly-specific |
+| R-11 | **DISPROVEN** | `WllamaRuntime.js:352-377`; consumer is arity-agnostic |
+| R-12 | **FIXED** | `0b6e0f3`, reproduced then mutation-checked |
+| F-1 | **Future follow-up** | No hour consequence; product question unanswered |
+| §57 | **UNRESOLVED** | Search exhausted: no deleted requirements file, initial commit read |
