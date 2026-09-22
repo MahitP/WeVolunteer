@@ -32,6 +32,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Changed — what a cancelled event does to your record
+
+A full-system audit (2026-09-21 → 22) settled four questions about what
+happens to your service record when an organizer calls an event off. The
+reasoning and the evidence are in `docs/audits/2026-09-21-full-system-audit.md`;
+what changed for a reader is here.
+
+- **A certificate you were issued stays yours, and you can see it.** If an event
+  is cancelled after your certificate was issued, it kept verifying to anybody
+  holding the code and kept appearing on your public profile — while your own
+  certificates page hid it from you. It now appears there too, marked "still
+  valid, not counted in your totals", which is the same sentence the certificate
+  itself carries. Nothing about the document changed: certificates are never
+  voided, and your transcript still excludes the event. The public list had the
+  mirror fault and listed cancelled events that never had a certificate at all;
+  it no longer does.
+- **You are told when hours stop counting.** Cancelling an event notified every
+  confirmed volunteer that it was off and said nothing about their hours, even
+  though the platform stops counting them. Volunteers who were actually credited
+  now get that sentence too — and only them, because telling somebody who was
+  never credited that their hours changed is the message this product already
+  declines to send. Somebody credited who later withdrew their application was
+  in no recipient set at all and is now told. The rule itself is published, under
+  "If an event is cancelled" in the Volunteer Record Policy.
+- **An hours milestone means credited hours.** The Silver Award and the other
+  hour tiers were computed from a figure that counted cancelled events, so one
+  screen could report 21 credited hours and a reached 25-hour award — while the
+  25 Hours *badge*, which excludes them, was not awarded to the same student.
+  Hour tiers now read credited hours. Tiers counted in events — First shift, 5
+  events, 10 events — still count a cancelled event, because you turned up and
+  the service happened.
+- **Badges follow the record, and the change is recorded.** A badge resting on a
+  cancelled event's hours used to survive until some unrelated action of yours
+  happened to re-evaluate it, so two students with identical records could hold
+  different badges. Re-evaluation now happens when the event's status changes,
+  for everyone it affects — including volunteers marked absent, whose reliability
+  improves when a commitment stops counting. An automatic withdrawal writes an
+  audit row naming who caused it; it does not notify, matching how an
+  administrator's manual revocation has always behaved.
+
+**Unchanged, and now said out loud:** hours that have been closed out are final
+and cannot be corrected by anyone, including an administrator. That has been
+true since close-out shipped; the Volunteer Record Policy and the Certificate
+Verification Policy said otherwise by omission and now describe it.
+
 ### Search — the last O(n), and not asking the vendor twice
 
 > Measured before and after at three corpus sizes, with a differential that

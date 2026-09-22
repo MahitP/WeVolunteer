@@ -372,7 +372,11 @@ rather than dropped so a plain student is still refused. Mutation-checked.
 
 ---
 
-### 1.6 Navigation and cross-feature coherence — reported, awaiting verification
+### 1.6 Navigation and cross-feature coherence — reported, since adjudicated
+
+*Heading corrected at closeout: every N-item below was adjudicated in passes
+5 and 9–12. The pointer under the table names the pass for each, and pass 16
+carries the reconciled status.*
 
 A full reachability sweep of the route table was run. Two results are worth
 recording before the individual findings:
@@ -420,6 +424,12 @@ survive verification.*
 
 Recorded with their evidence; **none acted on yet**. Each is promoted to
 `Verified` or dismissed before any change is made.
+
+*Corrected at closeout: that was true when written and is not true now.
+R-1 … R-8 were all adjudicated — see passes 6–8 and the reconciliation in pass
+16. **R-9 … R-12 were never investigated in this run** and remain exactly as
+reported: intake claims, unverified, not acted on. They are carried forward as
+open items rather than closed, because nothing in this audit examined them.*
 
 | # | Area | Claim | Severity |
 |---|---|---|---|
@@ -654,7 +664,8 @@ classified. Categorised rather than listed row by row.
 
 **C · Not decided here — referred to the owner.** See below.
 
-### Open question 1 — milestones
+### Open question 1 — milestones — **ANSWERED at closeout: owner decision 3 (3C), `83c9f68`**
+
 
 `milestoneInputs` deliberately counts a cancelled event.
 `volunteerInsights.test.js`: *"counts a cancelled event, because the service
@@ -673,7 +684,8 @@ hours total that no longer supports it.
 Either answer is defensible and both are one-line changes. **This is a product
 decision about recognition, not an implementation one.**
 
-### Open question 2 — the public certificates list
+### Open question 2 — the public certificates list — **ANSWERED at closeout: owner decision 2 (2D), `7fce206`**
+
 
 Newly verified while building the inventory, **not acted on**:
 `GET /api/users/:id/certificates` (`attendanceRoutes.js:540`, the public
@@ -886,7 +898,9 @@ it. There is no administrator override path today … a refusal that names a
 remedy which does not exist sends an organizer to ask for something nobody can
 do."
 
-**Open question for the owner.** Should a post-close-out credit be correctable —
+**Open question for the owner** *(answered at closeout: owner decision 1 chose
+1A, the permanent lock; no correction path was added, and the policies were
+corrected instead — `d776b72`)*. Should a post-close-out credit be correctable —
 by an administrator override, or by a short window — or is one-shot-final
 acceptable? The design intent ("somebody accepted afterwards has never been
 finalised at all") reads as though they should get the same correctable
@@ -1126,7 +1140,13 @@ badge that is either trivial or unearnable, and the symptom of both is silence."
 answers `null` for it. The guard is written against the metadata, so any future
 type hiding a threshold must answer the same question.
 
-### R-7 — **Half intentional, half an owner decision. No change.**
+### R-7 — **Half intentional, half an owner decision. No change at the time.**
+
+*Closeout: the owner-decision half is answered. Owner decision 5B chose audit
+without notifying, implemented in `7c01dfe`; automatic withdrawal now writes
+`BADGE_WITHDRAWN` with the actor. The permanent re-earn dedupe is unchanged and
+remains intentional. R-7 is therefore OWNER-DECIDED rather than open.*
+
 
 - **Permanent dedupe on re-earning: intentional and documented.** `announce`
   keys on `badge:${badge.id}` so that "re-earning one after a revocation does
@@ -1295,7 +1315,7 @@ That `/calendar` is "invisible/inaccessible to admin and partner accounts".
 | B | Can admin and partner reach it? | **Yes, both.** Verified by rendering the real shell at `/calendar`: all four roles render the calendar, no 403 |
 | C | Does either see a nav link? | **Neither.** The entry is `requiredCapAny: ['event.apply','event.create']` (`App.jsx:331`); measured with `navSectionsFor`, admin's primary is `[Dashboard, Discover, Messages, Welly, Admin]` and partner's is `[Discover]` |
 | D | Is the data right if it loads? | **admin: yes** — holding `event.moderate`, their session index is fetched unfiltered, so theirs is the only district-wide calendar. **partner: empty** — `{mine: 'true'}`, and a partner hosts nothing and applies to nothing |
-| E | Is the absence intentional? | **admin: unresolved — see below. partner: no title exists at all** |
+| E | Is the absence intentional? | **admin: unresolved at the time — answered at closeout by owner decision 6A. partner: no title exists at all — fixed by 6B, `dfd0eb0`** |
 
 Capabilities, measured rather than read: `event.view` is held by student,
 organizer, admin **and** partner; `event.apply` by student only; `event.create`
@@ -1939,7 +1959,11 @@ The residue of the gap is precise and enumerable: it is the set of questions
 where the repository establishes *what the code does* but not *which behaviour
 was wanted*. Those are the open owner decisions, and there are six.
 
-### Owner-decision register — the six open questions
+### Owner-decision register — the six questions, open when written
+
+*All six were answered in pass 15 and are reconciled in pass 16. Left in place
+because the register is the record of what was open at that moment, and the
+reasoning under each entry is what the decision was made against.*
 
 Collected here because they were recorded pass by pass and never in one place.
 Each is a product question the repository genuinely cannot answer; none has been
@@ -2104,3 +2128,176 @@ was read.
 
 **None from the matrix.** §57 remains unresolved and is unchanged by this pass:
 it is a gap in supplied material, not a question the repository can answer.
+
+---
+
+## Pass 16 — closeout: the ledger reconciled against the code
+
+Written last, against the repository at `a0a8ac2` rather than against the
+earlier passes' prose. Where a pass and the final code disagree, the code wins
+and the disagreement is named here rather than quietly overwritten.
+
+Every commit named below was checked to exist in `git log`. One identifier
+circulated in a shortened form that does not resolve on its own —
+`a521eb` — and the commit is `a521eb9`.
+
+### 16.1 What pass 15 got wrong about D5A
+
+**Pass 15 records owner decision 5A as implemented by `7c01dfe`. That
+implementation was defective and the pass says nothing about it.**
+
+`7c01dfe` re-evaluated `attendance WHERE event_id = ? AND present = 1`. That is
+the right set for the hours and events criteria and the wrong set for
+reliability: `reliabilityOf` builds commitments from **accepted applications**
+left-joined to attendance and excludes cancelled events
+(`server/reliability.js:280`), so cancelling removes the commitment for everyone
+accepted — including somebody marked absent, whose rate therefore *rises*. A
+volunteer held under the Reliable Volunteer threshold by one absence at an event
+that was then called off stayed under it until something unrelated re-evaluated
+them.
+
+Fixed in `57b7e18`, which selects the union of attendance rows at the event and
+accepted applications. The corrected statement of D5A is: **immediate
+re-evaluation of everyone the status change affects**, which is not the same set
+as everyone who turned up.
+
+Pass 15's table is otherwise accurate.
+
+### 16.2 The reported findings, reconciled
+
+`R-1 … R-8` were adjudicated; **`R-9 … R-12` were never investigated in this
+run** and are carried forward unchanged. §1.7's "none acted on yet" has been
+corrected in place to say so.
+
+| ID | Final status | Evidence |
+|---|---|---|
+| R-1 | **DISPROVEN** | Pass 7 — the ledger model, cancellation writes no ledger row because it removes nothing |
+| R-2 | **DISPROVEN** (central claim); second half **OWNER-DECIDED** as D1 | Pass 6; `d776b72` |
+| R-3 | **FIXED** | `593f281` — `FOR UPDATE` on the close-out re-read, reproduced on PostgreSQL first |
+| R-4 | **DISPROVEN** | Pass 7 |
+| R-5 | **FIXED** | `e57a2bb` — four trigger sites added |
+| R-6 | **FIXED** | `0b8030e` — `early_adopter` declared `threshold: true` |
+| R-7 | **OWNER-DECIDED** | Pass 8 for the intentional half; D5B (`7c01dfe`) for the rest |
+| R-8 | **FIXED** | `74f8a38` — the applicant row's floor and count |
+| R-9 … R-12 | **UNRESOLVED — never investigated** | Intake only (§1.7). Carried forward |
+
+| ID | Final status | Evidence |
+|---|---|---|
+| N-1, N-2 | **FIXED** | `ece14c6`, with `c4b7de9` pinning the destination |
+| N-3 | **FIXED** | `23988c5`; the guard that should have caught it, `af08856` |
+| N-4 | **OWNER-DECIDED** (admin) / **FIXED** (partner title) | Pass 10; D6A and D6B, `dfd0eb0` |
+| N-5 | **DISPROVEN** | `922bd23` — a documented unfinished role, not a dead end |
+| N-6 | **FIXED** | `e18a010` |
+| N-7 | **DISPROVEN** | Pass 12 — the overlay is URL-backed; no privacy difference |
+| N-8, N-9 | **DISPROVEN as live** | Pass 12 — latent; no route requires `capability.grant` |
+| N-10 | **FIXED** | `e84957d` |
+| N-11 | **FIXED** | `503c3c8` |
+| N-12 | **FIXED** | `d3402f9` |
+| N-13 | **FIXED** in part | `0fe739d`; items 2–4 classified (D) optional |
+| N-14 | **DISPROVEN** | Pass 12 — one click behind Discover, gated on the route's own capability |
+| N-15 | **DISPROVEN** | Pass 12 — a recorded decision in `accountMenu.js` |
+| N-16 | **FIXED** in part | `883f06d`; the date-input half declined with reasons |
+| N-17 | **FIXED** | `af08856` |
+
+Findings surfaced and fixed outside the two intake tables: the Welly link
+injection (`02480a6`), the Student Organizer check-in refusal (`b4a1e11`), the
+certificate the holder could not open (`d3175e3`), the Reliable Volunteer
+threshold (`c2f5fff`), the cancelled-hours totals (`df4e815`), the exact device
+position (`5f5d369`, recorded in `0b4328d`), and the two low items (`7729f70`
+fixed, `a521eb9` documentation-only).
+
+### 16.3 The owner decisions, as implemented
+
+| Decision | Final choice | Implemented by | Kind |
+|---|---|---|---|
+| D1 post-close-out corrections | **1A — permanent lock** | `d776b72` | DOCUMENTATION-ONLY (no behaviour changed) |
+| D2 cancelled-event certificates | **2D — document separate from record** | `7fce206`, `652f5be` | FIXED |
+| D3 cancelled events and milestones | **3C — separate dimensions** | `83c9f68` | FIXED |
+| D4A cancellation notice | **4A-1 — category-controlled** | `adfe591` | DOCUMENTATION-ONLY |
+| D4B cancellation content | **4B-3 — impact only where credit exists** | `a905997` | FIXED |
+| D5A attendee badge re-evaluation | **immediate, on affected status change** | `7c01dfe`, corrected by `57b7e18` | FIXED |
+| D5B automatic badge-loss notification | **audit without notifying** | `7c01dfe` | FIXED |
+| D6A admin calendar | **6A-2 — direct/Welly, unpromoted** | `dfd0eb0` | DOCUMENTATION-ONLY (no gate changed) |
+| D6B partner calendar | **6B-3 — reachable, unpromoted, titled** | `dfd0eb0` | FIXED |
+
+**The additional attendee-badge-evidence decision** — raised in pass 14 as
+depending on D3 and D5B — is answered by D5A and D5B together and has no
+separate identifier. Its dependencies resolved as follows: D3 (3C) makes the
+hours milestones derived and immediate, so a badge that did not follow would
+contradict a milestone on the same profile; D5B supplies the audit row that
+stops the withdrawal being silent. Without both, immediate re-evaluation would
+have been either incoherent or undocumented.
+
+### 16.4 The post-decision verification pass
+
+Six commits, and what each was:
+
+| Commit | Kind | What it established |
+|---|---|---|
+| `ee53fe9` | Test hardening | The late-credit half of D1 and the lock-before-`reason_required` ordering had nothing behind them. `eventClosedOut && prior && reason` passed all 28 cases |
+| `652f5be` | **FIXED** | D2 reached three surfaces and missed two: `VolunteerProfile`'s preview, which sits opposite the service record, and Welly's certificates card |
+| `469d113` | Test hardening + DOCUMENTATION-ONLY | The participation half of D3 could regress unseen; three stale comments in `milestones.js`, including "nothing about it can be lost", now false for hours tiers |
+| `57b7e18` | **FIXED** | The D5A affected-set defect (16.1) |
+| `663cf77` | Test hardening | Three D4B/D5 edges: zero-hour attendance, repeated status changes, manual vs automatic distinguishability |
+| `a0a8ac2` | Characterised, not a defect | The D4B recipient filter is not independently mutation-sensitive, because the shared dedupe key makes its removal behaviourally neutral. Removing it **and** reversing the two dispatches loses the hour impact, so its role is to make content independent of call order. Recorded at the code |
+
+### 16.5 §57
+
+Unchanged, and deliberately so. The historical UI/UX material the brief said it
+supplied was never supplied; pass 14 established that the repository's own
+record — 9 history documents, 13 spec files, 7 design reports, 14 audits, 27
+runbooks, a 1,750-line changelog — is uniformly downstream material describing
+what was built, and that `questions-for-owner.md` is a record of where intent
+was *missing*.
+
+The audit continued under assumptions stated at each point rather than stopping,
+and every finding that did not depend on §57 was resolved on repository
+evidence: twenty-five reported findings adjudicated, seven disproven on code
+alone. **§57 is a bounded historical-evidence gap, not an unresolved runtime
+defect, and it is not an owner decision.** Nothing in this ledger was
+reconstructed from recollection.
+
+### 16.6 Future follow-up
+
+| ID | Status | Claim | Evidence |
+|---|---|---|---|
+| F-1 | Open, **outside this audit's scope** | `EVENT_UPDATED` uses the same accepted-application recipient query the cancellation path used before D4B, so a volunteer with credited attendance who later withdrew is not told when the event's details change | Verified in code at closeout: `server/routes/eventRoutes.js:1495` is now the ONLY caller of `notifyConfirmedVolunteers`, whose query is `applications WHERE status = 'accepted'` (`server/utils.js:1285-1288`) |
+| R-9 … R-12 | Open, never investigated | Four Welly claims from the 1.7 intake table | §1.7; no pass in this document examines them |
+
+**F-1 is recorded as a shared query, not as a demonstrated harm**, and the
+distinction is the reason it is not being fixed here. For a cancellation the
+withdrawn-but-credited volunteer is affected because their credited hours stop
+counting. For `EVENT_UPDATED` no hour consequence exists: `PUT /api/events/:id`
+refuses a completed event — "its details can no longer be changed. Attendance
+can still be corrected" (`eventRoutes.js:1220-1224`) — and an existing credit
+keeps its stored `hours_awarded` whatever happens to the slot. So the update
+concerns a future shift the person is no longer signed up for, and excluding
+them may well be right. It was not caused by the nine decisions, was not needed
+to resolve them, and deciding it is a product question in its own right.
+
+### 16.7 What was stale, and what was corrected
+
+| Where | Was | Now |
+|---|---|---|
+| §1.6 heading | "reported, awaiting verification" | "reported, since adjudicated", with the passes named |
+| §1.7 | "none acted on yet" | Corrected in place; R-1 … R-8 adjudicated, R-9 … R-12 explicitly still unexamined |
+| Pass 4, open questions 1 and 2 | Open | Answered — D3 and D2, with commits |
+| Pass 6, "Open question for the owner" | Open | Answered — D1, `d776b72` |
+| Pass 8, R-7 | "Half an owner decision. No change." | Owner-decided — D5B, `7c01dfe` |
+| Pass 10, question E | "admin: unresolved" | Answered — D6A; partner half fixed by D6B |
+| Pass 14 register | "the six open questions" | Relabelled as the state at that moment; all six answered in pass 15 |
+| Pass 15, D5A | Implemented by `7c01dfe` | Corrected: that implementation was defective; `57b7e18` is the fix (16.1) |
+
+Nothing was closed that remains genuinely open. R-9 … R-12 stay open because
+this audit never looked at them; F-1 stays open because it is out of scope; §57
+stays unresolved because the material does not exist.
+
+### Verification
+
+This pass changes documentation only. The repository has no artifact generated
+from these files, so the full suite was not re-run for it; the state it records
+is the verified state at `a0a8ac2` — 664 files, 10,933 passed, 0 failed, 178
+skipped, lint and build clean, 164 bundle chunks with 0 server-only-string hits,
+561 PostgreSQL tests across 14 files on a scratch database created and dropped.
+`bin/legal-hashes.mjs` reports 13 ok and 0 drift; no legal document was touched
+by this pass.
