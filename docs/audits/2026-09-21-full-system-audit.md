@@ -1178,3 +1178,94 @@ which is what the case is named for.
 
 Reliable Volunteer's algorithm and wording (`c2f5fff`) were not revisited; no
 evidence in this pass bore on them.
+
+---
+
+## Pass 9 — N-3, the join-request fragment
+
+**Finding: N-3. Classification: Confirmed defect. FIXED `23988c5`.**
+
+### Evidence
+
+| Source | What it says |
+|---|---|
+| `server/services/notificationContent.js:694` | `ORGANIZATION_JOIN_REQUEST_RECEIVED` emits `/organizations/@${slug}#requests`, `ctaText: 'Review the request'` |
+| `docs/superpowers/specs/2026-09-03-organization-share-links-design.md:353` | the intended destination, stated: "every manager … → **the requests section**" |
+| `src/components/organizations/JoinRequestInbox.jsx:87-89` | the section's only id was its heading, `org-requests-heading` |
+| `src/views/OrganizationPage.jsx:105` | `location` was read for `pathname` only — never `hash` |
+| grep across `src/` | the only hash consumers were `LegalDocument` and `AdminDashboard`; no `id="requests"` existed anywhere |
+
+No conflicting evidence: the spec, the CTA label and the notification body all
+name the same destination.
+
+### Failure mechanism — three independent causes
+
+1. **No anchor.** Nothing carried `id="requests"`.
+2. **No consumer.** The page never read the fragment, and the browser cannot
+   substitute: this is an SPA, so when the fragment is resolved the club has not
+   been fetched and the section does not exist. That is the same timing failure
+   `LegalDocument.fragment.test.jsx` exists for.
+3. **The redirect discarded it.** Canonicalisation rebuilt the URL from the
+   pathname alone, so a non-canonical link — an id or a bare handle, both of
+   which still resolve so that older notification rows keep working — was tidied
+   into one carrying no fragment.
+
+### Affected roles and path
+
+Organization **managers and owners** (`viewer.canManage`) receiving
+`ORGANIZATION_JOIN_REQUEST_RECEIVED`, in-app and by email — the email CTA is
+`${APP_URL}${content.link}` and preserves the fragment. They arrived at the top
+of a 1,100-line page with the queue inside a `canManage` band well below.
+
+### Reproduction
+
+`src/views/OrganizationPage.requestsFragment.test.jsx`, through the real page
+with the real router: rendered at `/organizations/@chess-club#requests` as a
+manager with one pending request. Before the fix, four cases failed — no
+`#requests` element, no scroll, no focus, and none in the no-`scrollIntoView`
+environment.
+
+### Fix
+
+One effect on the page that owns the destination, mirroring the two that already
+exist — no new navigation architecture for one link. `id="requests"` and
+`tabIndex={-1}` on the inbox section; the redirect carries the hash across.
+Focus moves as well as scrolling, per the convention `LegalDocument` set: "the
+deep link either works for everybody or it is decoration."
+
+### Regression tests — 8
+
+Non-vacuity (the section renders at all), the anchor exists, scroll, focus, a
+no-fragment control (nothing scrolls, nothing steals focus), an unknown
+fragment, a missing `scrollIntoView`, and the canonicalisation case.
+
+### Mutation results
+
+| Mutation | Result |
+|---|---|
+| remove `id`/`tabIndex` | 5 cases fail |
+| remove the hash effect | 4 cases fail |
+| redirect drops the fragment | 1 case fails |
+
+The third earned its keep twice. Asserting **focus** in that case passed with
+the fix reverted — both effects run in one commit, so the hash effect reads the
+pre-redirect location and lands regardless. It now asserts the **settled URL**,
+which is what Back returns to and what the reader copies.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Focused | 6 client suites / 76 passed; 2 server suites / 325 passed |
+| Full suite | **641 files, 10,832 passed, 0 failed**, 178 skipped, exit 0 |
+| Output preserved | `/tmp/wev-n3-20260922-012409.txt` |
+| Lint / build / bundle scan | clean, exit 0 |
+
+### Observation, not acted on
+
+The hash-and-focus pattern now exists in three places (`LegalDocument`,
+`AdminDashboard`, `OrganizationPage`) as three local copies. Extracting it would
+mean touching two working call sites for a defect that needed one — recorded
+rather than done.
+
+**No new owner decision.** The five already open are unchanged.
