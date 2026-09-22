@@ -37,6 +37,7 @@
 import { recordHoursChange } from './hoursLedger.js';
 import { MAX_SLOT_HOURS } from './validation.js';
 import { withSpan } from './observability/spans.js';
+import { forUpdate } from './db/dialectSql.js';
 
 /**
  * The check-in table, as a database created from scratch gets it.
@@ -437,10 +438,36 @@ async function finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, rea
    * permanent. That is the one outcome this feature exists to prevent, so it is
    * not left to how quickly two organizers happen to click.
    *
-   * Reading it here puts the check and the write in the same transaction, which
-   * closes the window on both engines: SQLite serialises the writer outright,
-   * and PostgreSQL's READ COMMITTED returns the value as of this statement
-   * rather than as of the route's.
+   * Reading it here puts the check and the write in the same transaction. On
+   * SQLite that closes the window outright, because the engine serialises the
+   * writer.
+   *
+   * ── `FOR UPDATE`, because on PostgreSQL the re-read alone does not ──
+   *
+   * It was a plain SELECT, on the reasoning that READ COMMITTED returns the
+   * value as of this statement rather than as of the route's. True, and not
+   * sufficient: the statement's snapshot says nothing about what commits
+   * AFTERWARDS. The close-out is a bare autocommit CAS
+   * (`attendanceRoutes.js`), and this transaction holds no lock on `events` —
+   * it writes `attendance` — so a close-out committing between this read and
+   * the upsert below is not blocked by anything, and the correction commits on
+   * top of it.
+   *
+   * Measured on real PostgreSQL with two connections, the statements this code
+   * actually issues:
+   *
+   *   plain SELECT, close-out during the window
+   *     → commit order: close-out → correction        INVARIANT VIOLATED
+   *   FOR UPDATE, close-out during the window
+   *     → commit order: correction → close-out        held: the correction
+   *       landed while the hours were still open, which is legitimate, and the
+   *       close-out blocked until this transaction committed
+   *   FOR UPDATE, close-out already committed
+   *     → this read returns the timestamp and the submission is refused
+   *
+   * So the row is locked for the life of this transaction, which makes the two
+   * acts serialise instead of overlapping. `forUpdate` is empty on SQLite, so
+   * nothing changes there.
    *
    * Falls back to the route's copy if the row cannot be read — a database that
    * cannot answer this is not a database this should be writing hours to
@@ -450,7 +477,7 @@ async function finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, rea
   let eventClosedOut = Boolean(event.hours_closed_out_at);
   try {
     const fresh = await db.prepare(
-      'SELECT hours_closed_out_at FROM events WHERE id = ?'
+      `SELECT hours_closed_out_at FROM events WHERE id = ?${forUpdate(db)}`
     ).get(event.id);
     eventClosedOut = Boolean(fresh?.hours_closed_out_at);
   } catch { /* keep the route's answer; see above */ }
