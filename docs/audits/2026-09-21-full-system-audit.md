@@ -1881,3 +1881,109 @@ of it changed.
 **None.** The intended behaviour was already recorded in two places, and the
 scoping question (which confirmations must move) is answered by what each action
 destroys rather than by preference.
+
+---
+
+## Pass 14 — §57 revisited, and the owner-decision register
+
+Revisited last, as instructed, using only repository evidence.
+
+### Status: still **UNRESOLVED**, and now resolved *as far as the repository can*
+
+The brief's §57 said "the following material is the complete historical context
+I am providing" and referred to "numerous highly specific historical UI/UX
+requirements in the supplied product history". Only topic headings followed.
+That is unchanged.
+
+What this pass adds is a measured answer to the question P0-2 left open — *can
+the repository stand in for it?* — instead of restating that it cannot.
+
+### What the repository actually holds
+
+| Source | Extent |
+|---|---|
+| `docs/history/` | 9 documents (launch blockers, production hardening, product-quality roadmap, v1.1 audit and design, the BLOCK2 hours-pipeline/stabilization/mutation set, launch-readiness roadmap) |
+| `docs/spec/` | 13 files including six numbered chapters, five appendices and a `reviews/` directory |
+| `docs/specs/` | 7 dated design and audit reports |
+| `docs/audits/` | 14, this document included |
+| `docs/features/` | 5, one per feature area |
+| `docs/operations/` | 27 runbooks |
+| `CHANGELOG.md` | 1,750 lines |
+
+That is a substantial historical record, and it is the record this audit was
+built from. But it is uniformly **downstream** material: it documents work done
+and assumptions taken, authored after the requirement it serves. It answers
+"what was built and why" and not "what was asked for".
+
+The one file whose shape is close — `docs/audits/questions-for-owner.md` — makes
+the distinction exactly. Its own header reads: *"Raised during the 2026-08-07
+recovery audit. Work continued past every one of these under the stated
+assumption; none blocked implementation."* It is a record of where intent was
+**missing**, and of what was assumed in its absence. That is the opposite of a
+requirements record, and it is the strongest evidence in the repository that the
+§57 class of material was never written down here.
+
+**Conclusion.** The specific, sentence-level UI/UX requests the brief describes
+have no repository counterpart, and cannot be derived from one. The gap is not
+narrowable by more reading.
+
+### What the gap actually cost — measured, not estimated
+
+Nothing in this audit was blocked by it. All twenty-five reported findings
+(N-1 … N-17, R-1 … R-8) were adjudicated on repository and runtime evidence, and
+seven of them were **disproven** on that evidence alone — which is the stronger
+demonstration that the missing material was not load-bearing for the
+verification work.
+
+The residue of the gap is precise and enumerable: it is the set of questions
+where the repository establishes *what the code does* but not *which behaviour
+was wanted*. Those are the open owner decisions, and there are six.
+
+### Owner-decision register — the six open questions
+
+Collected here because they were recorded pass by pass and never in one place.
+Each is a product question the repository genuinely cannot answer; none has been
+answered by assumption in the code.
+
+1. **PostgreSQL cutover.** Both engines work; PostgreSQL is implemented,
+   boot-tested and `POSTGRES_READY`, selected by `DATABASE_ENGINE=postgres`.
+   Whether to cut over is a decision, not a defect (§ Stack, above).
+2. **Hours are locked at close-out, permanently.** Reproduced on synthetic data
+   through the real route: the first credit succeeds with no reason required,
+   and every later correction — organizer *and* administrator — answers `409
+   hours_locked`. So a mistake in the first entry is unfixable by anyone. Is an
+   audited administrator correction wanted, or is permanence the point?
+   (Pass 6, R-2's second half.)
+3. **Losing a badge is silent.** Permanent dedupe on re-earning is intentional
+   and documented; automatic withdrawal has no notification kind at all and is
+   not audited either. There is a reasonable case for silence — the volunteer
+   already hears about the attendance correction through `HOURS_ADJUSTED` — and
+   a reasonable case against. (Pass 8, R-7.)
+4. **Who is the calendar for?** If overseeing events counts, `event.moderate`
+   belongs in the nav gate and two pins need updating deliberately; if it is for
+   people with shifts, the present gate is right and a partner should be kept
+   off the route rather than left on an untitled one. The partner page title
+   follows from the answer. (Pass 10, N-4.)
+5. **Milestones count a cancelled event.** `milestoneInputs` does so
+   deliberately — "the service still happened" — and is explicitly different
+   from `volunteerStats().eventsAttended`. Frozen as-is during the
+   cancelled-hours work; recorded because it is a presentation choice a reader
+   could reasonably expect to go the other way. (Pass 4, open question 1.)
+6. **A cancelled event's certificate is hidden from the student's own list and
+   shown on their public profile.** `GET /api/users/:id/certificates` has no
+   cancelled filter; `GET /api/certificates` has one. Verified and deliberately
+   not acted on, because which list is right is the product question.
+   (Pass 4, open question 2.)
+
+Separately, the **partner product being unfinished** is already a recorded
+decision in `authz.js` rather than an open question — noted so it is not
+mistaken for a seventh.
+
+### The standing refusal, restated
+
+No requirement in this ledger has been reconstructed from recollection, and
+none will be. A remembered requirement is indistinguishable from an invented
+one, and every claim in this document cites a file, a line, or a command that
+was run. If the §57 material arrives it folds in as a new source and may
+reopen items recorded here as intentional; if it does not, this gap stays
+recorded as a gap.
