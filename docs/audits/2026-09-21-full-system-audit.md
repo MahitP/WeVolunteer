@@ -1269,3 +1269,103 @@ mean touching two working call sites for a defect that needed one — recorded
 rather than done.
 
 **No new owner decision.** The five already open are unchanged.
+
+---
+
+## Pass 10 — N-4, the calendar and the admin/partner rails
+
+**Finding: N-4. Classification: the admin half is an OWNER DECISION, not a
+defect. The partner half is a separate, smaller confirmed inconsistency.
+No code changed.**
+
+### The claim investigated
+
+That `/calendar` is "invisible/inaccessible to admin and partner accounts".
+
+### The five questions, answered separately
+
+| | Question | Answer |
+|---|---|---|
+| A | Does the route exist? | Yes — `CalendarView`, `requiredCap: 'event.view'` (`routes/index.jsx:234`) |
+| B | Can admin and partner reach it? | **Yes, both.** Verified by rendering the real shell at `/calendar`: all four roles render the calendar, no 403 |
+| C | Does either see a nav link? | **Neither.** The entry is `requiredCapAny: ['event.apply','event.create']` (`App.jsx:331`); measured with `navSectionsFor`, admin's primary is `[Dashboard, Discover, Messages, Welly, Admin]` and partner's is `[Discover]` |
+| D | Is the data right if it loads? | **admin: yes** — holding `event.moderate`, their session index is fetched unfiltered, so theirs is the only district-wide calendar. **partner: empty** — `{mine: 'true'}`, and a partner hosts nothing and applies to nothing |
+| E | Is the absence intentional? | **admin: unresolved — see below. partner: no title exists at all** |
+
+Capabilities, measured rather than read: `event.view` is held by student,
+organizer, admin **and** partner; `event.apply` by student only; `event.create`
+by organizer only; `event.moderate` by admin and super_admin.
+
+### Why the admin half is not a defect — and the correction that got me there
+
+The tempting reading is that `PAGE_META.staff.calendar` — "Events across the
+district and when they close" — is copy written for an administrator, which
+together with their unfiltered index would make the missing rail entry an
+oversight. **That reading does not survive checking what `staff` means.**
+
+`PERSONAS` (`App.jsx:97`) keys `staff` on `event.moderate` and the comment says
+so outright: "`staff` covers admin AND super_admin". A super_admin **already
+has** the Calendar entry, via `*`. So the staff copy is fully explained without
+any claim about administrators, and it singles out nobody.
+
+Against that, two exact pins encode the current admin rail:
+
+- `App.shellByRole.test.jsx:210` — `['admin', ['Dashboard','Discover','Messages','Welly','Admin','Notifications','Profile']]`, under the name "admin nav is what its capabilities justify"
+- `App.shellByRole.test.jsx:324` — the same list through the rendered shell
+
+Their commentary is meticulous about every other inclusion and exclusion — why
+`Messages` was gained (migration 018 made the inbox non-empty), why
+`Audit Explorer` and `Admin Roster` are withheld (`audit.read` moved to
+SUPER_ONLY) — and says **nothing** about Calendar. That silence cuts both ways
+and is not evidence either direction.
+
+So the repository holds two coherent readings of one rule and settles neither:
+
+1. **The calendar is for people who have shifts or run them** — `event.apply ||
+   event.create`. An administrator does neither, so excluding them is
+   consistent, and the pins record it.
+2. **The calendar is for people who oversee events** — which is what
+   `event.moderate` means and what the unfiltered index delivers.
+
+Nothing in the specs, docs, changelog or commit history chooses. **This is a
+product decision about who the calendar is for, so it is reported rather than
+made.**
+
+I initially implemented reading 2 — adding `event.moderate` to the gate, with
+tests that bracketed it in both directions — and reverted it on finding the
+persona comment. Recorded because the reasoning is the useful part: a
+purpose-written page title is not intent evidence for a role when the persona it
+belongs to covers two roles and the other one already has the entry.
+
+### The partner half — a different, verified finding
+
+Not "inaccessible". A partner **can** reach `/calendar`, and when they do the
+page renders under the title **"WeVolunteer"** — measured, not inferred — because
+`PAGE_META.partner` has no `calendar` entry and the shell falls through to
+`{ title: APP_NAME, sub: '' }`.
+
+That is the exact defect the partner block's own comment describes for
+`profile`, and its stated convention argues for the entry: the other partner
+entries are there "for completeness rather than because a partner reaches them
+today … they cost nothing and mean that granting either capability later does
+not reintroduce an untitled page." `calendar` is the one page a partner
+genuinely reaches today, and it is the one with no title.
+
+**Left alone deliberately.** A title would frame a page that is structurally
+empty for that role, and deciding what a partner's calendar should contain is
+the same unanswered question as above. Fixing the copy without answering it
+would be decoration.
+
+### Verification
+
+No code changed. Full suite re-run to confirm the tree is exactly as the pass
+found it: **641 files, 10,832 passed, 0 failed, 178 skipped**, exit 0, output at
+`/tmp/wev-n4-20260922-014135.txt`. Lint, build and bundle scan clean.
+
+### New owner decision
+
+**Who is the calendar for?** If overseeing events counts, `event.moderate`
+belongs in the nav gate and two pins in `App.shellByRole.test.jsx` need updating
+deliberately. If it is for people with shifts, the current gate is right and a
+partner should arguably be kept off the route rather than left on an untitled
+one. The partner title follows from whichever answer is given.
