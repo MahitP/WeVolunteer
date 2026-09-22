@@ -84,7 +84,18 @@ export default function JoinRequestInbox({ orgKey, organizationName, policy, add
   if (policy !== 'request' && state.requests.length === 0 && !state.loading) return null;
 
   return (
-    <section className="card" aria-labelledby="org-requests-heading">
+    /* `id` and `tabIndex` are the landing point for
+       `/organizations/@slug#requests`, which is what the join-request
+       notification's "Review the request" sends a manager to — see the hash
+       effect in `views/OrganizationPage.jsx`. `tabIndex={-1}` is what lets
+       focus move here, the same arrangement the policy headings use for
+       `/legal/:slug#section`; it does not put the section in the tab order. */
+    <section
+      id="requests"
+      tabIndex={-1}
+      className="card"
+      aria-labelledby="org-requests-heading"
+    >
       <div className="card-head">
         <h3 id="org-requests-heading">Requests to join</h3>
         {state.requests.length > 0 && (

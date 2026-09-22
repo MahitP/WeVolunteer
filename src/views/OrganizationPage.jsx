@@ -103,9 +103,55 @@ export default function OrganizationPage({ addToast, currentUser }) {
   useEffect(() => {
     if (!canonical) return;
     if (decodeURIComponent(location.pathname) !== decodeURIComponent(canonical)) {
-      navigate(canonical, { replace: true });
+      /* The hash is carried across. It names where on the page the reader was
+         being sent — `#requests` from the join-request notification — and a
+         redirect that tidies the address while discarding the destination is a
+         worse answer than not redirecting at all. */
+      navigate(`${canonical}${location.hash || ''}`, { replace: true });
     }
-  }, [canonical, location.pathname, navigate]);
+  }, [canonical, location.pathname, location.hash, navigate]);
+
+  /**
+   * Land the reader on the section a fragment names.
+   *
+   * `ORGANIZATION_JOIN_REQUEST_RECEIVED` sends a manager to
+   * `/organizations/@slug#requests` under the label "Review the request", and
+   * the share-links design spec states that destination plainly: "every manager
+   * … → the requests section". Nothing implemented it. This page read
+   * `location.pathname` for the redirect above and never the hash, no element
+   * carried `id="requests"`, and the browser cannot help — this is an SPA, so
+   * when the fragment is resolved the club has not been fetched and the section
+   * does not exist yet. The manager arrived at the top of a long page having
+   * just been told somebody was waiting.
+   *
+   * Keyed on `data` so it runs once the section is actually in the DOM, and on
+   * `hash` so a second notification arriving at the same page still lands.
+   *
+   * Focus moves as well as the scroll, which is the convention
+   * `views/legal/LegalDocument.jsx` set for exactly this: "a scroll-only jump
+   * serves the sighted mouse user and leaves a keyboard or screen-reader user
+   * at the top of the document — the deep link either works for everybody or it
+   * is decoration."
+   *
+   * `scrollIntoView` and `matchMedia` are optional-called because jsdom
+   * implements neither, and a scrolling convenience must never be able to take
+   * down the page it was meant to help somebody read.
+   */
+  useEffect(() => {
+    if (!data || !location.hash || location.hash === '#') return;
+
+    let id = location.hash.slice(1);
+    /* `decodeURIComponent` throws on a malformed escape somebody pasted into
+       the address bar. A bad fragment means "no deep link", never a crash. */
+    try { id = decodeURIComponent(id); } catch { /* use the raw form */ }
+    const el = id ? document.getElementById(id) : null;
+    if (!el) return;
+
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+    el.scrollIntoView?.({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+    /* `preventScroll` so focusing cannot fight the scroll above. */
+    el.focus?.({ preventScroll: true });
+  }, [data, location.hash]);
 
   const [removing, setRemoving] = useState(null);
 
