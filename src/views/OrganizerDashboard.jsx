@@ -6,6 +6,7 @@ import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import VerifyCertificateAction from '../components/common/VerifyCertificateAction';
 import { CATEGORY_GROUPS } from '../eventCategories';
 import { can } from '../authz';
@@ -42,6 +43,11 @@ export default function OrganizerDashboard({
   const [agreementOutstanding, setAgreementOutstanding] = useState(null);
   // A deletion refused because the event is under a live safety review. Kept on
   // screen rather than left to a toast — see handleDelete.
+  /* Holds the event a delete is being asked about. The sign-up count it shows
+     was already computed for the old `window.confirm` string — it is the
+     "no room to explain consequences" the runbook names at L5, and a dialog is
+     where it can actually be read. */
+  const [deletingEvent, setDeletingEvent] = useState(null);
   const [heldReason, setHeldReason] = useState(null);
   useEffect(() => {
     let cancelled = false;
@@ -141,9 +147,7 @@ export default function OrganizerDashboard({
   /* ── Actions ─────────────────────────────────────────────── */
 
   const handleDelete = async event => {
-    const signups = appsForMe.filter(a => a.eventId === event.id).length;
-    const warning = signups > 0 ? `\n\n${signups} volunteer sign-up${signups !== 1 ? 's' : ''} will be removed with it.` : '';
-    if (!window.confirm(`Delete "${event.title}"?${warning}\n\nThis cannot be undone.`)) return;
+    setDeletingEvent(null);
     setHeldReason(null);
     try {
       await api.deleteEvent(event.id);
@@ -660,7 +664,7 @@ export default function OrganizerDashboard({
                             <button className="btn btn-ghost btn-sm btn-icon" title="Download roster as CSV" onClick={() => handleExport(event)}>
                               <Download size={14} />
                             </button>
-                            {perms.canDelete && <button className="btn btn-ghost btn-sm btn-icon s-973ad1" title="Delete event" onClick={() => handleDelete(event)}>
+                            {perms.canDelete && <button className="btn btn-ghost btn-sm btn-icon s-973ad1" title="Delete event" onClick={() => setDeletingEvent(event)}>
                                 <Trash2 size={14} />
                               </button>}
                             {!perms.canDelete && <span className="btn btn-ghost btn-sm btn-icon s-17fa6c" title={perms.blockedReason} aria-label={perms.blockedReason}>
@@ -802,6 +806,30 @@ export default function OrganizerDashboard({
             <button className="btn btn-primary" type="submit" form="quick-edit">Save changes</button>
           </div>
         </Modal>}
+
+      {deletingEvent && (() => {
+        /* Counted here so the dialog can say it in a sentence somebody reads,
+           rather than in a `\n\n` the browser typeset for us. */
+        const signups = appsForMe.filter(a => a.eventId === deletingEvent.id).length;
+        return (
+          <ConfirmDialog
+            title="Delete this event?"
+            confirmLabel="Delete"
+            destructive
+            onConfirm={() => handleDelete(deletingEvent)}
+            onCancel={() => setDeletingEvent(null)}
+          >
+            <span>
+              &ldquo;{deletingEvent.title}&rdquo; will be deleted.
+              {signups > 0 && (
+                <> <strong>{signups} volunteer sign-up{signups === 1 ? '' : 's'}</strong> will
+                be removed with it.</>
+              )}
+              {' '}This cannot be undone.
+            </span>
+          </ConfirmDialog>
+        );
+      })()}
     </div>;
 }
 

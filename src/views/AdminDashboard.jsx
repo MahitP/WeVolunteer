@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import { api } from '../utils/api';
 import { formatHours, formatDay, eventPermissions } from '../utils/helpers';
 import { BarChart } from '../components/BarChart';
@@ -43,6 +44,12 @@ const STATUS_TAG = {
 
 export default function AdminDashboard({ addToast, user }) {
   const { hash } = useLocation();
+  /* The two destructive actions ask in the application rather than through
+     `window.confirm`. Each holds the row it is about, which is also what lets
+     the dialog name it and say what goes with it — see `ConfirmDialog`, and
+     roadmap P2-7 in the stabilization report. */
+  const [denying, setDenying] = useState(null);
+  const [removingEvent, setRemovingEvent] = useState(null);
   const [pendingOrganizers, setPendingOrganizers] = useState([]);
   const [events, setEvents] = useState([]);
   const [totals, setTotals] = useState(null);
@@ -159,7 +166,7 @@ export default function AdminDashboard({ addToast, user }) {
   };
 
   const deny = async (org) => {
-    if (!window.confirm(`Deny ${org.name}?\n\nTheir account will be removed and they'll need to register again.`)) return;
+    setDenying(null);
     setBusyId(org.id);
     try {
       await api.apiFetch(`/api/admin/organizers/${org.id}/deny`, { method: 'POST' });
@@ -173,7 +180,7 @@ export default function AdminDashboard({ addToast, user }) {
   };
 
   const removeEvent = async (event) => {
-    if (!window.confirm(`Remove "${event.title}"?\n\nAll sign-ups for it will be deleted. This cannot be undone.`)) return;
+    setRemovingEvent(null);
     setHeldReason(null);
     try {
       await api.deleteEvent(event.id);
@@ -494,7 +501,7 @@ export default function AdminDashboard({ addToast, user }) {
                   </div>
 
                   <div className="row" style={{ gap: 'var(--s2)' }}>
-                    <button className="btn btn-danger btn-sm" disabled={busyId === org.id} onClick={() => deny(org)}>
+                    <button className="btn btn-danger btn-sm" disabled={busyId === org.id} onClick={() => setDenying(org)}>
                       <UserX size={14} /> Deny
                     </button>
                     <button className="btn btn-primary btn-sm" disabled={busyId === org.id} onClick={() => approve(org)}>
@@ -680,7 +687,7 @@ export default function AdminDashboard({ addToast, user }) {
                             className="btn btn-ghost btn-sm btn-icon"
                             style={{ color: 'var(--danger)' }}
                             title="Remove this event"
-                            onClick={() => removeEvent(event)}
+                            onClick={() => setRemovingEvent(event)}
                           >
                             <Trash2 size={14} />
                           </button>
@@ -700,6 +707,44 @@ export default function AdminDashboard({ addToast, user }) {
           </div>
         )}
       </section>
+
+      {/**
+        * The two destructive confirmations.
+        *
+        * Rendered here rather than beside their buttons because both sit inside
+        * tables that re-render on every `loadData`, and a dialog mounted in a
+        * row unmounts underneath the reader when the queue refreshes behind it.
+        */}
+      {denying && (
+        <ConfirmDialog
+          title="Deny this organizer?"
+          confirmLabel="Deny"
+          destructive
+          busy={busyId === denying.id}
+          onConfirm={() => deny(denying)}
+          onCancel={() => setDenying(null)}
+        >
+          <span>
+            <strong>{denying.name}</strong>&rsquo;s account will be removed, and they
+            will have to register again to ask a second time. This cannot be undone.
+          </span>
+        </ConfirmDialog>
+      )}
+
+      {removingEvent && (
+        <ConfirmDialog
+          title="Remove this event?"
+          confirmLabel="Remove"
+          destructive
+          onConfirm={() => removeEvent(removingEvent)}
+          onCancel={() => setRemovingEvent(null)}
+        >
+          <span>
+            &ldquo;{removingEvent.title}&rdquo; and all of its sign-ups will be deleted.
+            This cannot be undone.
+          </span>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
