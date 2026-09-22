@@ -694,6 +694,30 @@ export const api = {
 
   fetchEventDetails: async (eventId) => apiFetch(`/api/events/${eventId}`),
 
+  /**
+   * One event, as the BROWSE endpoint sees it.
+   *
+   * Deliberately not `fetchEventDetails` above, which is
+   * `GET /api/events/:id` — that route is staff-only and answers 403 to a
+   * student, so it cannot resolve the event a notification names for the
+   * person the notification was sent to.
+   *
+   * This is the ordinary browse query narrowed by `id`, so the same
+   * authorization and the same per-card disclosure rules apply, including
+   * blanking arrival instructions for anybody who is not going. `scope=all`
+   * because a link has to keep working for an event that has since been
+   * completed or called off — `EVENT_CANCELLED` is one of the kinds that
+   * carries one.
+   *
+   * Resolves to null rather than throwing when there is no such event: the
+   * callers are event handlers, and "no longer available" is an ordinary
+   * answer there rather than a failure.
+   */
+  fetchEventById: async (eventId) => {
+    const res = await api.fetchEventsFiltered({ id: eventId, scope: 'all', limit: 1 });
+    return res?.events?.[0] ?? null;
+  },
+
   createEvent: async (eventData) => apiFetch('/api/events', {
     method: 'POST',
     body: JSON.stringify(eventData)

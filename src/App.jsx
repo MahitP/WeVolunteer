@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, matchRoutes } from 'react-router-dom';
 import { api } from './utils/api';
+import { resolveEventById } from './utils/resolveEvent';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
@@ -1129,6 +1130,40 @@ function AppShell({ toasts, addToast, removeToast }) {
       return { ...indexed, ...seen };
     })()
     : null;
+  /**
+   * ── The deep link, which is where every notification EMAIL lands ──
+   *
+   * `notificationWorker` turns any `event:` link into
+   * `${APP_URL}/?event=<id>`, and that arrives as a COLD LOAD: `seenEvents` is
+   * empty because no browse surface has rendered, and `events` holds only what
+   * `{mine: 'true'}` returned. When neither had the id, `selectedEvent` was
+   * null and `{selectedEvent && …}` rendered nothing — no modal, no error, no
+   * explanation. The reader pressed "View Event Details" in their inbox and
+   * arrived at their own dashboard.
+   *
+   * So an unresolved `?event=` is backfilled into `seenEvents`, after which the
+   * merge above resolves it on the next render like any other browse response.
+   *
+   * Attempts are remembered per id rather than per render: `selectedEvent` is a
+   * fresh object every render, so depending on it would loop, and an id the
+   * server genuinely does not have must be asked about once rather than
+   * forever.
+   */
+  const eventLookupsTried = useRef(new Set());
+  useEffect(() => {
+    if (!selectedEventId || selectedEvent) return;
+    if (eventLookupsTried.current.has(selectedEventId)) return;
+    eventLookupsTried.current.add(selectedEventId);
+
+    let cancelled = false;
+    resolveEventById(selectedEventId, { events, seenEvents, fetchById: api.fetchEventById })
+      .then(found => { if (found && !cancelled) rememberEvents([found]); });
+    return () => { cancelled = true; };
+    /* `selectedEvent` is read but deliberately not a dependency — it is rebuilt
+       every render, and the ref above is what makes one attempt one attempt. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEventId, events, seenEvents, rememberEvents]);
+
   const profileId = searchParams.get('profile');
   const profileType = searchParams.get('type');
   const viewingProfile = profileId && profileType ? { type: profileType, id: profileId } : null;
@@ -1296,18 +1331,41 @@ function AppShell({ toasts, addToast, removeToast }) {
   // Callers pass either an event object (cards, dashboards) or an id string
   // (notifications, calendar, profiles). Normalise here rather than at nine
   // call sites — `viewVolunteer` below already takes the same approach.
-  const openEventById = (eventOrId, options) => {
+  const openEventById = async (eventOrId, options) => {
     const id = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
     if (!id) return addToast('That event is no longer available.', 'info');
 
     // Given the whole object — which is what a card passes — trust it and record
     // it, rather than insisting it also be in the index. Browse pages are
     // filtered server-side now and legitimately contain events the index does not.
-    if (typeof eventOrId === 'object' && eventOrId) rememberEvents([eventOrId]);
+    if (typeof eventOrId === 'object' && eventOrId) {
+      rememberEvents([eventOrId]);
+      return setSelectedEventState(id, options?.mode);
+    }
 
-    const known = events.some(e => e.id === id) || !!seenEvents[id] || typeof eventOrId === 'object';
-    if (known) setSelectedEventState(id, options?.mode);
-    else addToast('That event is no longer available.', 'info');
+    /**
+     * An id alone is what a NOTIFICATION hands over, and the caches are the
+     * wrong authority for it.
+     *
+     * This used to be `events.some(…) || seenEvents[id]`, and a miss became
+     * "That event is no longer available." But `events` is fetched with
+     * `{mine: 'true'}` for anybody without `event.moderate`, and `seenEvents`
+     * is empty on a cold load — so two notification kinds whose entire purpose
+     * is to point at an event the reader is NOT part of, `FRIEND_SIGNED_UP`
+     * and `ORGANIZATION_EVENT_POSTED`, said that about a live, open event.
+     *
+     * `resolveEventById` still checks both caches first and only then asks the
+     * server, through the browse query narrowed by id — same authorization,
+     * same withholding of arrival instructions from non-attendees. The message
+     * survives for the case where it is true.
+     */
+    const resolved = await resolveEventById(id, {
+      events, seenEvents, fetchById: api.fetchEventById,
+    });
+    if (!resolved) return addToast('That event is no longer available.', 'info');
+
+    rememberEvents([resolved]);
+    setSelectedEventState(id, options?.mode);
   };
 
   const viewVolunteer = (person) => {

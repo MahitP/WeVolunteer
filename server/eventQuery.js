@@ -94,6 +94,31 @@ export function parseEventFilters(query = {}) {
      * asks for 'listable' explicitly.
      */
     scope: 'all',
+    /**
+     * One event by id, for resolving a link rather than browsing.
+     *
+     * 23 notification kinds emit `link: event:<id>`, and the client resolved
+     * that id only against caches it already held — the SessionProvider index,
+     * fetched with `mine=true` for anybody without `event.moderate`, plus
+     * whatever a browse surface rendered this session. Two of those kinds are
+     * about an event the recipient is deliberately NOT part of
+     * (`FRIEND_SIGNED_UP`, `ORGANIZATION_EVENT_POSTED`), so they answered "That
+     * event is no longer available" for a live one, and every notification
+     * email's `/?event=<id>` resolved through the same code.
+     *
+     * It belongs here rather than on a new endpoint because this is where the
+     * per-card disclosure rules live — `canSeeInstructions` in eventRoutes.js
+     * blanks arrival details for anybody who is not going. Narrowing this query
+     * reuses all of that; a second single-event read would be a second
+     * authorization path to keep in step. `GET /api/events/:id` is not an
+     * option either: it is staff-only and answers 403 to a student.
+     *
+     * A plain equality that AND-s with every other predicate, so naming an id
+     * can only ever remove rows. Null means "not asked for" — an absent or
+     * empty value must not become a filter that matches nothing, and a supplied
+     * one that matches nothing must return nothing rather than everything.
+     */
+    id: null,
     openOnly: false,
     favoritesOnly: false,
     from: null,
@@ -197,6 +222,13 @@ export function parseEventFilters(query = {}) {
       return { ok: false, field: 'scope', error: `scope must be one of: ${EVENT_STATUS_SCOPES.join(', ')}` };
     }
     out.scope = String(query.scope);
+  }
+
+  /* Trimmed, because a link pasted out of an email can carry whitespace; an
+     empty result after trimming is "not asked for", not "match nothing". */
+  if (query.id != null) {
+    const id = String(query.id).trim();
+    if (id) out.id = id;
   }
 
   out.mine = bool(query.mine);
@@ -506,6 +538,15 @@ export function buildEventWhere(
   // Browse never shows drafts, completed or cancelled events unless asked.
   if (filters.scope === 'listable') clauses.push(`e.status IN ('open', 'closed')`);
   else if (filters.scope === 'open') clauses.push(`e.status = 'open'`);
+
+  /* Bound, never interpolated — the value arrives straight off a query string.
+     Pushed as an ordinary clause so it AND-s with the scope above and with
+     everything below: resolving a link is a narrowing of browse, not a bypass
+     of it. See the field's note in `parseEventFilters`. */
+  if (filters.id) {
+    clauses.push('e.id = @eventId');
+    params.eventId = filters.id;
+  }
 
   if (filters.q) {
     /**
