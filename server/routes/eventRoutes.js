@@ -25,6 +25,7 @@ import { recommendationsFor, explanationText } from '../search/recommendations.j
 import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import { canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds } from '../organizations.js';
 import { MAIL_DOMAIN } from '../emailIdentity.js';
+import { badgeService } from '../services/badgeService.js';
 
 const router = express.Router();
 
@@ -1088,6 +1089,32 @@ router.post('/api/events', authenticateToken, requireCapAny(['event.create', 'or
     await markEventDirty(db, eventId);
 
     /**
+     * Re-evaluate the organizer's own badges, now that the count has moved.
+     *
+     * `events_created` — Organizer at one, Community Builder at ten — is the
+     * only criterion decided by the actor's own activity rather than by
+     * attendance, and `evaluateBadges` had exactly two production callers, both
+     * in the attendance route and both for the VOLUNTEER being credited. So an
+     * organizer who never volunteered was never evaluated: measured at twelve
+     * non-cancelled events and zero badges, with all three arriving at once the
+     * moment that account was credited as a volunteer somewhere else.
+     *
+     * Creation is the right moment rather than completion, and `collectStats`
+     * says why it counts `status != 'cancelled'` instead of `completed`:
+     * requiring completion would withhold the badge "until that opportunity had
+     * already finished — which is not what it says, and is not when the
+     * recognition is worth anything."
+     *
+     * After the commit, and it cannot fail the request: `evaluateBadges`
+     * catches its own errors by design, for the same reason the notification
+     * fan-out below is wrapped — a badge must never be able to destroy an event
+     * the organizer successfully created. Repeat calls are safe: an award is
+     * inserted only when no row exists, `user_badges` carries
+     * UNIQUE(user_id, badge_id), and the announcement dedupe key is permanent.
+     */
+    await badgeService.evaluateBadges(req.user.id);
+
+    /**
      * Tell the organization's members, in one pass, after the commit.
      *
      * `memberIds` is a single query returning ids; the loop then writes rows
@@ -1745,6 +1772,21 @@ router.patch('/api/events/:id/status', authenticateToken, requireCapAny(['event.
        deletion when the queue drains. */
     await markEventDirty(db, eventId);
 
+    /**
+     * The mirror of the award on creation.
+     *
+     * `events_created` counts events that are NOT cancelled, so cancelling one
+     * can take an organizer back below a threshold — and `evaluateBadges`
+     * withdraws an automatic award as readily as it grants one. Evaluating only
+     * on the way up would leave the badge reporting a count that no longer
+     * exists, which is the same asymmetry the attendance route fixed by
+     * evaluating its `revoked` list as well as its `credited` one.
+     *
+     * The event's own organizer, not the actor: an administrator cancelling
+     * somebody else's event changes THAT organizer's count, not their own.
+     */
+    await badgeService.evaluateBadges(event.organizer_id);
+
     // Calling off an event is the one change every confirmed volunteer must
     // hear about immediately — they may have arranged a ride around it.
     let notified = 0;
@@ -1860,6 +1902,10 @@ router.post('/api/events/:id/duplicate', authenticateToken, requireCapAny(['even
         shiftIso(s.start_datetime), shiftIso(s.end_datetime), s.max_spots);
     }
     await refreshEventSummary(db, newEventId);
+
+    /* The other way an event comes into existence, so the same re-evaluation.
+       See the note on the create route above. */
+    await badgeService.evaluateBadges(req.user.id);
 
     res.status(201).json({ success: true, id: newEventId });
   } catch (err) {

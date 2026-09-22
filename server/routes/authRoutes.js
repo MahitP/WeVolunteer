@@ -19,6 +19,7 @@ import { ROLE, previewPersonaOf } from '../authz.js';
 import { verifyTotpOnce } from '../totpReplay.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { recordSecurityEvent } from '../securityAudit.js';
+import { badgeService } from '../services/badgeService.js';
 
 const router = express.Router();
 
@@ -592,6 +593,29 @@ router.post('/api/auth/signup', async (req, res) => {
     /* The caller describing themselves, so `grants` and `withheld` travel with
        it — see `selfUserResponse`. Sign-in seeds `currentUser` directly. */
     const user = await selfUserResponse(userRow);
+
+    /**
+     * Evaluate badges once, now, because one criterion is already decided.
+     *
+     * `early_adopter` — the "Early Supporter" badge — is judged on `joinRank`,
+     * the number of accounts created before this one, and `collectStats`
+     * explains that a rank rather than a date is used precisely because it
+     * "never changes". So the answer is final the instant this row exists, and
+     * waiting adds nothing.
+     *
+     * It used to wait anyway. `evaluateBadges` had two production callers, both
+     * for the volunteer whose attendance had just been finalised, so the badge
+     * arrived at somebody's first credited shift — dated to that day rather
+     * than to when they joined — and never arrived at all for a member who
+     * never volunteered. `badgeService` describes that state as the defect it
+     * already fixed once, when the `early_adopter` branch was empty: the badge
+     * "sat in the catalogue looking like something to aim for".
+     *
+     * Cannot affect the signup: `evaluateBadges` catches its own errors by
+     * design, and this runs after the account is committed. Nothing about the
+     * response depends on it.
+     */
+    await badgeService.evaluateBadges(userId);
 
     /**
      * Sign the new account in either way, and let the email gate decide what
