@@ -1369,3 +1369,91 @@ belongs in the nav gate and two pins in `App.shellByRole.test.jsx` need updating
 deliberately. If it is for people with shifts, the current gate is right and a
 partner should arguably be kept off the route rather than left on an untitled
 one. The partner title follows from whichever answer is given.
+
+---
+
+## Pass 11 — N-5, the partner dashboard "dead end"
+
+**Finding: N-5. Classification: DISPROVEN as a defect — an intentional terminal
+informational state for a role the repository documents as unfinished. No code
+changed.**
+
+### The claim investigated
+
+That a partner has no dashboard: `/` renders an `EmptyState` with no action, and
+the brand mark navigates there unconditionally.
+
+### Both structural facts are true
+
+- `DASHBOARD_NAV` (`App.jsx:143-147`) has no `partner` key, so `navItemsFor`
+  emits no `/` entry for them.
+- `App.jsx:2015` renders `<EmptyState title="No dashboard for this account">`
+  with **no `action` prop**.
+- The brand mark (`App.jsx:1845-1852`) is `href="/"` with
+  `onClick → navigate('/')`, unconditionally and with no role check.
+
+### Why it is not a dead end
+
+The empty state's copy names two exits — "Browse opportunities from the
+navigation, or change your account settings" — and **both were measured to
+work**, by mounting the real shell at `/` as a partner:
+
+```
+rail/sidebar controls = ["WeVolunteer Community", "Discover", "🏢Pat Partner…"]
+account menu items    = ["Profile", "Notifications", "Settings", "Sign Out"]
+controls INSIDE the empty state = []
+```
+
+So the reader has a meaningful next action, a route to perform it, and a valid
+destination. The original report treated Settings as not counting because it is
+"not in their rail either (it is in ProfileMenu)" — but the copy attaches "from
+the navigation" to browsing, not to settings, and `ACCOUNT_MENU_ITEMS` gates
+Settings on nothing at all.
+
+### The state is documented as unfinished, in three independent places
+
+| Source | What it says |
+|---|---|
+| `PAGE_META.partner.dashboard` (`App.jsx`) | "Partner accounts do not have a dashboard yet" |
+| the empty state itself | "This account type does not have a dashboard yet." |
+| `server/authz.js:471-474` | `analytics.public` "stays registered and still reads nothing: it is the name for figures chosen FOR an outside reader, and **that surface has not been designed**. A partner who should see a figure is the argument for building it, not for reusing the administrators' page." |
+
+The third is the decisive one: it is not silence, it is a recorded decision not
+to reuse an existing screen, with the condition under which the real one gets
+built.
+
+### Partner states — there is only one, and that was established rather than assumed
+
+The brief asked for partner-with-events, partner-with-applications and so on to
+be tested separately. They are unreachable by construction. The partner
+capability set is `['analytics.public', 'event.view', 'geocode.use',
+'persona.preview.exit']`, so a partner holds:
+
+- no `event.create` → cannot create or host an event
+- no `event.apply` → cannot apply to one
+- no `organization.join` → cannot be a club member, so cannot hold
+  `manager`/`student_organizer`, which is the only other route to events
+  (`organizationRoles.js:81` reads `organization_members.member_role`)
+
+One reachable data state, and it is the one exercised above.
+
+### Observation, not a defect
+
+The two exits are named in prose and have no button: `EmptyState` supports an
+`action` and none is passed. A "Browse opportunities" control would be a small
+improvement — and it belongs to the same undesigned surface, so it is recorded
+rather than added. Putting a CTA on a page whose entire message is "this does
+not exist yet" is a product decision about what a partner's home should be, not
+a navigation fix.
+
+### Verification
+
+No code changed. Both temporary probes removed and the tree confirmed clean.
+Full suite re-run: **641 files, 10,832 passed, 0 failed, 178 skipped**, exit 0,
+output at `/tmp/wev-n5-20260922-015633.txt`. Lint, build and bundle scan clean.
+
+### New owner decisions
+
+**None.** The partner product being unfinished is already recorded as a decision
+in `authz.js`, and the N-4 question ("who is the calendar for?") remains the
+open one that touches this role.
