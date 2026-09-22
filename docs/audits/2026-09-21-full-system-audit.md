@@ -926,3 +926,114 @@ it reports "committed" instead of "blocked".
 | Mutation checks | 1, failing on the intended assertion |
 
 Scratch databases were created and dropped; no production database was touched.
+
+---
+
+## Pass 7 — the ledger model (R-1, R-4)
+
+Investigated together, and they are **not** the same invariant: R-1 is about
+cancellation semantics, R-4 about ledger consumers. They touch only at the
+parity contract. **Both are disproven, and no code was changed.**
+
+### The ledger's documented model
+
+Stated in its own header and in the contract on its only write function:
+
+> "Hours Ledger — **append-only history of every change to credited service
+> hours**." · "`attendance` remains the single source of truth … **nothing here
+> is read by any hours calculation**." · "This table records *what changed,
+> when, and who changed it*."
+
+and the invariant, written where it is enforced:
+
+> "`delta` is always computed here rather than accepted from the caller, so the
+> invariant **`SUM(delta) per user == credited hours per user`** cannot be
+> broken by a call site doing its own arithmetic."
+
+`credited()` keys on `attendance.present` and `hours_awarded` **only** — it has
+no reference to event status. So the ledger tracks *mutations of attendance
+rows*, which is model **B**, not a financial-style ledger of the derived
+presentation.
+
+### R-1 — **DISPROVEN**
+
+Reproduced through the real API on synthetic data. The reachable window is
+narrower than the report implied: an event auto-completes as soon as every
+accepted volunteer is accounted for — **including as absent** — and a completed
+event cannot be cancelled. So cancelling an event that has credited hours
+requires at least one accepted volunteer still *unrecorded*.
+
+| Scenario | Before | After cancellation | Uncancelled |
+|---|---|---|---|
+| attended + credited (one volunteer unrecorded) | row `present=1 hours=4`; ledger `delta=4`; credited 4, raw 4 | **rows unchanged, ledger unchanged**; credited **0**, raw 4 | credited **4** again |
+| attended + absent (all accounted) | event auto-completes | cancellation **refused**, 409 | — |
+| no attendance record | — | cancelled, 200, no rows | — |
+| closed out | status `completed` | cancellation **refused**, 409 `event_completed` | — |
+| ledger parity throughout | — | **`ok: true`, 0 mismatches** | — |
+
+Each element of the report is explained by the documented model:
+
+- **No ledger row.** Required by the invariant above. Cancellation changes
+  neither `present` nor `hours_awarded`, so `delta` would be 0 by construction;
+  a row carrying a *meaningful* delta would break parity — measured in pass 6 at
+  ledger 11 vs filtered attendance 4.
+- **Attendance untouched.** The record/presentation distinction, exactly.
+- **Reversible.** Correct under that distinction. Nothing was destroyed, so
+  nothing has to be reconstructed; uncancelling restores a presentation, not
+  data.
+- **No audit row** — verified with a positive control (close-out writes
+  `EVENT_HOURS_CLOSED_OUT`; cancellation writes nothing, by the same query).
+  Consistent with **both** stated audit principles: an organizer's own listing
+  act is deliberately not audited ("not an exercise of power over another
+  person … would bury the rows that matter"), and the act that *is* audited is
+  audited because "this is the one action on the platform that makes a
+  student's service record **unchangeable**" — which a reversible act is not.
+
+### R-1 / close-out interaction — no contradiction, established from code
+
+Close-out requires `status === 'completed'`; `PATCH /api/events/:id/status`
+refuses a completed event. So a closed-out event **cannot** be cancelled, and
+the close-out route says it relies on exactly that: "There is no reopen route
+and no `DELETE` … `PATCH /api/events/:id/status` already refuses a completed
+event, so the precondition cannot be unwound either." Confirmed empirically:
+409 `event_completed`.
+
+### R-4 — **DISPROVEN**
+
+The ledger is not write-only. Complete production inventory:
+
+| Operation | Location | R/W | Production? | Purpose |
+|---|---|---|---|---|
+| `createHoursLedgerTable` | `db.js` | schema | yes | boot |
+| `recordHoursChange` | `attendance.js` | **write** | yes | the only writer — every attendance mutation |
+| `backfillHoursLedger` | `db.js` boot, migration 053 | write | yes | history for pre-ledger rows |
+| `verifyLedgerParity` | `db.js` boot, `verifyHours.js` | **read** | yes | integrity gate; exits non-zero in the CLI |
+| `hoursLedgerStatus` | `adminRoutes.js`, `ownerRoutes.js` | **read** | yes | surfaced in the Owner Center as "Diverged — N volunteers do not reconcile" (`OwnerCenter.jsx:592`) |
+| `getLedgerForUser` | — | read | **no caller** | per-user itemised history |
+
+So it is **audit and integrity infrastructure with live readers**, one of which
+an owner looks at. Only the per-user history is unwired, and that is documented
+rather than overlooked — the function's own header says "no route calls
+`getLedgerForUser`", explains that wiring it would require a monotonic column
+plus a backfill ("a schema change and a cutover decision"), and says it is
+tracked. **Verified: `POSTGRES_MIGRATION_STATUS.md:2268` records it**, with the
+same caveat for `moderation_actions`.
+
+Nothing was deleted. Removing it would remove the only reader of the history
+the table exists to hold, at the moment the migration it is blocked on lands.
+
+### One observation, not a defect
+
+`EVENT_CANCELLED` is CRITICAL priority and says only "The organizer has
+cancelled this event." A volunteer who had already been credited for it is not
+told that those hours have stopped counting toward their total. Whether it
+should say so — and only for recipients who actually hold credited hours, since
+most cancellations precede any attendance — is a copy decision, so it is
+recorded rather than made.
+
+### Verification
+
+No code changed, so there is nothing to regress. The matrix above was produced
+by temporary probes through the real API against synthetic events and the
+seeded demo accounts; both probes were removed and the tree is clean. No
+production database was touched.
