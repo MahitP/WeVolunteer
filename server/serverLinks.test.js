@@ -145,6 +145,41 @@ function serverLinks() {
         links.push({ path: normalise(m[1]), kind: 'emailed URL', ...at });
       }
     });
+
+    /**
+     * A second pass over the WHOLE file, for a `link:` ternary that spans
+     * lines.
+     *
+     * The scan above reads one line at a time, so a link written as
+     *
+     *     link: payload.organizationSlug
+     *       ? `/organizations/@${payload.organizationSlug}#requests`
+     *       : '/organizations',
+     *
+     * matched nothing at all — neither arm sits on the `link:` line. Two links
+     * were written that way, and they are precisely the two carrying a query
+     * string and a fragment, which is to say the two most likely to be wrong.
+     * One of them was: `#requests` named an id that did not exist, and the
+     * guard whose whole job is to catch a destination that goes nowhere
+     * reported coverage it did not have.
+     *
+     * Kept as a separate pass rather than making the loop above multi-line.
+     * Those patterns use `$` anchors and per-line `continue`s that mean what
+     * they say only on one line; widening them would change what every
+     * existing case matches, to fix a case none of them was written for.
+     *
+     * The line number is derived from the match offset so a failure still
+     * points at the `link:` rather than at the top of the file.
+     */
+    const text = readFileSync(file, 'utf8');
+    const rel = path.relative(process.cwd(), file);
+    const MULTILINE_TERNARY = /\blink:\s*[^,;{}]*?\?\s*`(\/[a-z][^`]*)`\s*:\s*['"](\/[a-z][^'"]*)['"]/g;
+    for (const m of text.matchAll(MULTILINE_TERNARY)) {
+      if (!m[0].includes('\n')) continue; // the per-line pass already has it
+      const line = text.slice(0, m.index).split('\n').length;
+      links.push({ path: normalise(m[1]), kind: 'notification link', file: rel, line });
+      links.push({ path: m[2], kind: 'notification link', file: rel, line });
+    }
   }
   return links;
 }
@@ -157,6 +192,21 @@ describe('server-generated links', () => {
     // authz.completeness.test.js: a scan that reports success over an empty set
     // is worse than no scan, because it looks like coverage.
     expect(links.length).toBeGreaterThan(10);
+  });
+
+  it('reads a link whose ternary spans lines', () => {
+    /**
+     * The gap this pass closes, asserted by naming one.
+     * `ORGANIZATION_JOIN_REQUEST_RECEIVED` writes its link across three lines,
+     * so the line-by-line scan saw neither arm — and that is the link whose
+     * `#requests` fragment turned out to point at nothing.
+     */
+    const both = links.filter(l => l.file.endsWith('services/notificationContent.js'));
+    expect(
+      both.some(l => l.path.startsWith('/organizations/@')),
+      'the multi-line ternary in notificationContent.js is still invisible to this scan',
+    ).toBe(true);
+    expect(both.some(l => l.path === '/organizations')).toBe(true);
   });
 
   it('sees both of the forms the server writes links in', () => {
