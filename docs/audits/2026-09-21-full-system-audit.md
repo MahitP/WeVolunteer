@@ -2270,7 +2270,7 @@ reconstructed from recollection.
 
 | ID | Status | Claim | Evidence |
 |---|---|---|---|
-| F-1 | Open, **outside this audit's scope** | `EVENT_UPDATED` uses the same accepted-application recipient query the cancellation path used before D4B, so a volunteer with credited attendance who later withdrew is not told when the event's details change | Verified in code at closeout: `server/routes/eventRoutes.js:1495` is now the ONLY caller of `notifyConfirmedVolunteers`, whose query is `applications WHERE status = 'accepted'` (`server/utils.js:1285-1288`) |
+| F-1 | **CLOSED** in the completion run — see below | `EVENT_UPDATED` uses the same accepted-application recipient query the cancellation path used before D4B | Verified in code at closeout: `eventRoutes.js:1495` is the ONLY caller of `notifyConfirmedVolunteers`, whose query is `applications WHERE status = 'accepted'` (`utils.js:1285-1288`). Adjudicated and pinned at `2fd19d3` |
 | R-9 … R-12 | Open, never investigated | Four Welly claims from the 1.7 intake table | §1.7; no pass in this document examines them |
 
 **F-1 is recorded as a shared query, not as a demonstrated harm**, and the
@@ -2298,8 +2298,9 @@ to resolve them, and deciding it is a product question in its own right.
 | Pass 15, D5A | Implemented by `7c01dfe` | Corrected: that implementation was defective; `57b7e18` is the fix (16.1) |
 
 Nothing was closed that remains genuinely open. R-9 … R-12 stay open because
-this audit never looked at them; F-1 stays open because it is out of scope; §57
-stays unresolved because the material does not exist.
+this audit never looked at them; F-1 stayed open here and was closed in the
+completion run (`2fd19d3`); §57 stays unresolved because the material does not
+exist.
 
 ### Verification
 
@@ -2535,5 +2536,75 @@ deployment made at any point in this run.
 | R-10 | **DISPROVEN** | `db.js:1805`, `eventQuery.js:17`; not Welly-specific |
 | R-11 | **DISPROVEN** | `WllamaRuntime.js:352-377`; consumer is arity-agnostic |
 | R-12 | **FIXED** | `0b6e0f3`, reproduced then mutation-checked |
-| F-1 | **Future follow-up** | No hour consequence; product question unanswered |
+| F-1 | **DISPROVEN** — closed in the completion run | `2fd19d3`; the recipient set is documented, not undecided |
 | §57 | **UNRESOLVED** | Search exhausted: no deleted requirements file, initial commit read |
+
+---
+
+## Completion run — F-1 closed, and the final state
+
+Not an audit pass. The audit terminated at pass 17; this records the one
+remaining item being settled and the state the repository was left in.
+
+### F-1 — **DISPROVEN. Closed. `2fd19d3`**
+
+Carried as a follow-up because the shared recipient query was real and nobody
+had established what the intended set was. The repository does establish it, so
+it is closed on evidence rather than left as a product question.
+
+`notifyConfirmedVolunteers` states its contract twice — *"notify every confirmed
+volunteer on an event"* (`utils.js:1260-1262`) — and a withdrawn application is
+by definition not a confirmed volunteer. The term means the same thing
+everywhere else it is used: the close-out precondition
+(`attendanceRoutes.js:304`), and the 24-hour and 2-hour shift reminders
+(`utils.js:1037`, `:1061`). Redefining it for one notice would put that notice
+out of step with the vocabulary.
+
+The reason owner decision 4B widened the cancellation notice does not transfer.
+That widening was about HOURS, which are deliberately independent of application
+status. An edit has no hour consequence, for three reasons — the third found
+while building the fixture rather than by reading:
+
+1. `PUT /api/events/:id` refuses a completed event (`eventRoutes.js:1220-1224`).
+2. An existing credit keeps its stored `hours_awarded` however the slot is
+   edited afterwards.
+3. An edit that would **remove** a shift with credited attendance against it is
+   refused outright, 409 `attendance_exists`.
+
+So the notice concerns a future shift, and somebody who withdrew is not going to
+it. Pinned in `server/eventUpdateRecipients.test.js` with the exact person 4B
+added to the cancellation notice — credited, then withdrawn — who must *not*
+receive this one. Mutation-checked by widening the query to every application.
+
+### §57 — unchanged, and deliberately not revisited
+
+Recorded as **UNRESOLVED — a bounded historical-evidence gap**. Pass 14
+established that the repository's record is uniformly downstream of the work;
+pass 17 exhausted the two remaining avenues (no requirements document was ever
+committed and deleted; the initial commit's README is the only upstream artefact
+and does not contain the material). No further search was made in this run, and
+none should be: the absence of the material is the conclusion, not a reason to
+keep looking. It is not an owner decision and not a runtime defect.
+
+### Optional work, left as optional
+
+Recorded so it is not mistaken for outstanding: the three N-13 terminology
+claims and the four date inputs under N-16, both classified (D) optional; the
+hash-and-focus pattern duplicated across three views; and the stale
+`graphify-out/` index. None affects correctness, and none was done.
+
+### Final verification
+
+Full suite **665 files, 10,937 passed, 0 failed, 178 skipped**, exit 0, output
+preserved. Lint exit 0, build exit 0, bundle scan 164 chunks with 0
+server-only-string hits, `bin/legal-hashes.mjs` 13 ok and 0 drift.
+PostgreSQL: 122 tests across 7 files on a scratch database created and dropped,
+including the new `eventUpdateRecipients` cases.
+
+Working tree clean. Nothing pushed. No production deployment, no production
+database opened, and no real service-hour data in any fixture or log at any
+point in this run.
+
+**The audit is closed.** Every finding — R-1 … R-12, N-1 … N-17, D1 … D6B and
+F-1 — carries one status. §57 remains the single bounded historical-evidence
+gap, and the optional items above remain optional.
