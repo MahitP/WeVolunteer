@@ -112,6 +112,22 @@ Work through §4 and §4a of the runbook. The items below are the ones that bite
 
 - [ ] `JWT_SECRET` generated with `openssl rand -base64 48`. Not a passphrase — the
       boot guard rejects fewer than 8 distinct characters, and it is right to.
+- [ ] `TFA_ENCRYPTION_KEY` generated with
+      `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+      **Boot-fatal in every environment**, and it fires *after* `JWT_SECRET` and
+      *before* the mail check — so a deployment that sets only the secrets this
+      checklist used to list stops here with
+      `FATAL: TFA_ENCRYPTION_KEY is not set`. Added after a boot rehearsal hit
+      exactly that; it was in `.env.example` and in neither operational document.
+      **Changing it orphans every existing 2FA enrolment**, so generate once.
+- [ ] A mail provider is configured: `RESEND_API_KEY` (preferred) **or** all of
+      `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`. Production refuses to boot with
+      neither — there would be no way to send a verification or password-reset
+      message.
+- [ ] For a **PostgreSQL** deployment: `DATABASE_ENGINE=postgres` and
+      `DATABASE_URL` both set explicitly. With neither, the server silently runs
+      on SQLite at `WEV_DB_PATH`. The URL carries a password and belongs in
+      `/etc/wevolunteer/wevolunteer.env`, never in a repository `.env`.
 - [ ] `NODE_ENV=production`. **Nothing checks this**, and without it you get none of
       the production guards.
 - [ ] `APP_URL` set to the real https origin, no trailing slash.
@@ -128,6 +144,53 @@ Work through §4 and §4a of the runbook. The items below are the ones that bite
 - [ ] If any OAuth provider is configured, `OAUTH_REDIRECT_URI` names *this*
       deployment. The server refuses to boot otherwise — see §4a.
 - [ ] `/etc/wevolunteer/wevolunteer.env` is `chmod 640`, owned `root:wev`.
+
+---
+
+## 2a — Boot rehearsal (the cheapest check that finds missing configuration)
+
+Every guard in §2 fires at import time, one at a time, in a fixed order. So the
+fastest way to find a missing variable is to start the server exactly as
+production will and read what it says. Against a **scratch** database, never
+production:
+
+```bash
+DB=wev_bootcheck_$(date +%s)
+createdb "$DB"
+
+cd server
+NODE_ENV=production \
+DATABASE_ENGINE=postgres DATABASE_URL="postgres://localhost/$DB" \
+JWT_SECRET="$(openssl rand -base64 48)" \
+TFA_ENCRYPTION_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")" \
+SMTP_HOST=127.0.0.1 SMTP_USER=scratch SMTP_PASS=scratch \
+APP_URL="https://scratch.invalid" CORS_ORIGINS="https://scratch.invalid" \
+BIND_ADDRESS=127.0.0.1 API_PORT=5199 TRUST_PROXY=1 \
+node server.js
+```
+
+- [ ] It reaches `WeVolunteer API Server listening on 127.0.0.1:5199`.
+- [ ] `curl -sf http://127.0.0.1:5199/health` returns
+      `{"status":"ok","database":"connected","writable":true,…}`.
+- [ ] `SIGTERM` drains cleanly: the log shows the workers stopping, the database
+      closing and `[Shutdown] Complete (exit 0)`.
+- [ ] Drop the scratch database afterwards: `dropdb "$DB"`.
+
+Measured 2026-09-22 on the audited baseline: listening in 1s, health connected
+and writable, clean SIGTERM drain. It is also how the `TFA_ENCRYPTION_KEY` gap
+in §2 was found — the suite was green and the documented configuration was
+incomplete, which is the failure mode this whole checklist exists for.
+
+Two things the rehearsal prints that are **expected** on a fresh database and
+are not failures:
+
+- `[ownership] WARNING: Platform has ZERO owners.` — a new database has no
+  super-admin. Bootstrapping one with `bin/grant-ownership.mjs` is §11's job,
+  not a boot defect.
+- `Better Stack disabled`, `Traces and metrics disabled`, `Pinecone disabled`,
+  `no adapter` — every optional integration degrades to a named, logged
+  fallback. That is the intended behaviour when the keys are absent, and §7
+  covers turning them on.
 
 ---
 

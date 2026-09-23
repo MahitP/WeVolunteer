@@ -645,13 +645,23 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 | **Purpose** | Signs and verifies every session token. |
 | **Example** | `openssl rand -hex 32` → `9f2c…` (64 hex chars) |
 | **Security** | Anyone holding it can mint a token for any user, including an admin. Treat it as the crown jewel. Never commit it; never log it; never pass it on a shell command line that lands in shell history. Changing it invalidates every session (users must sign in again) — which is also how you respond to a suspected leak. **There is no fallback secret** — an earlier version fell back to a hardcoded literal outside production, which meant a deployment that forgot `NODE_ENV=production` signed real tokens with a value published in the repository. That fallback has been removed. |
-| **If missing** | `FATAL: JWT_SECRET must be set.` thrown at import from [config.js:14](../../server/config.js#L14), in **every** environment — **verified**. This is the first guard to fire; it precedes the SMTP check. `npm run dev` supplies a clearly-labelled development value so local work is unaffected. |
+| **If missing** | `FATAL: JWT_SECRET must be set.` thrown at import from [config.js:14](../../server/config.js#L14), in **every** environment — **verified**. This is the first guard to fire; it precedes `TFA_ENCRYPTION_KEY`, which in turn precedes the mail check. `npm run dev` supplies a clearly-labelled development value so local work is unaffected. |
+
+#### `TFA_ENCRYPTION_KEY`
+
+| | |
+|---|---|
+| **Required** | **Yes, always** — enforced in every environment, not only production. |
+| **Purpose** | AES-256 key encrypting every stored two-factor secret. Without it the server cannot read or write a 2FA enrolment. |
+| **Example** | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` → 44 base64 chars |
+| **Security** | Holding it turns the stored second factors into usable seeds, so it is the crown jewel beside `JWT_SECRET` and is kept in the same place with the same permissions. **Changing it orphans every existing enrolment** — the stored secrets become undecryptable and each administrator must re-enrol — so it is generated once per deployment and rotated only deliberately, following [`database-credential-rotation.md`](database-credential-rotation.md). |
+| **If missing** | `FATAL: TFA_ENCRYPTION_KEY is not set …` thrown at import from [config.js:242](../../server/config.js#L242), in **every** environment — **verified by boot rehearsal**, see §"Boot rehearsal" below. It fires **after** `JWT_SECRET` and **before** the mail check, so a deployment that sets only the secrets this runbook used to list stops here. |
 
 #### `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS`
 
 | | |
 |---|---|
-| **Required** | **Yes in production** — all three, enforced. |
+| **Required** | **In production, one mail provider is required.** Either `RESEND_API_KEY` (preferred) or all three of these. The boot message names both: *"Set RESEND_API_KEY (preferred), or SMTP_HOST, SMTP_USER and SMTP_PASS, or both."* |
 | **Purpose** | Outbound mail relay for verification and password-reset messages. |
 | **Example** | `smtp.sendgrid.net` / `apikey` / `SG.xxxxx` |
 | **Security** | A relay credential. If leaked, someone can send mail as your district's domain — the highest-value phishing asset in this deployment. Scope the credential to sending only, and rotate it if the host is ever compromised. |
@@ -666,6 +676,16 @@ does not corrupt data, but it does spam the log. Set `RestartSec=5` and a
 | **Example** | `587` |
 | **Security** | Setting `465` while the server expects STARTTLS (or vice versa) produces connection failures, not silent plaintext — but confirm with your provider. |
 | **If missing** | `587` + STARTTLS. Correct for most providers. |
+
+#### `DATABASE_ENGINE` / `DATABASE_URL`
+
+| | |
+|---|---|
+| **Required** | **Only for a PostgreSQL deployment.** Absent, the server uses SQLite at `WEV_DB_PATH`, which is what the pilot ran on. |
+| **Purpose** | `DATABASE_ENGINE=postgres` selects the engine; `DATABASE_URL` is the connection string. `DATABASE_POOL_MAX` optionally bounds the pool (1–100). |
+| **Example** | `DATABASE_ENGINE=postgres` / `postgres://user:pass@host:5432/wevolunteer` |
+| **Security** | The connection string carries a password. It belongs in `/etc/wevolunteer/wevolunteer.env` with the other secrets and **never in a repository `.env`** — that file is read by the test suite and by every privileged `bin/` script, so a production URL there points those tools at production. |
+| **If missing** | With `DATABASE_ENGINE=postgres` and no URL, boot fails naming the variable. With neither set, the server runs on SQLite — which is a silent choice of engine, so set both explicitly for a PostgreSQL deployment rather than relying on a default. |
 
 #### `APP_URL`
 
