@@ -235,6 +235,24 @@ account can be used. This is not a step to defer.
 
 ## 6 — Backups and restore
 
+> **Which pair of scripts applies depends on the engine, and the items below
+> name the SQLite ones.** For a **PostgreSQL** deployment use
+> `bin/backup-postgres.sh` and `bin/verify-restore-postgres.sh`, documented in
+> [`backup-and-restore.md`](backup-and-restore.md) — `bin/verify-restore.sh` is
+> the SQLite rehearsal and will not prove anything about a PostgreSQL database.
+> The restore script additionally needs `WEV_RESTORE_URL` (a server to restore
+> *into*) and `WEV_PG_BIN` when the client on PATH is older than the server; it
+> refuses, loudly, rather than guessing.
+>
+> Verified 2026-09-22 against scratch databases, end to end: a 257,201-row
+> synthetic database dumped to a 2.5 MB archive, then restored into a throwaway
+> database with the SHA-256 matching the manifest, 70 tables, 96 foreign keys
+> all validated, 193 indexes, and **the restored counts matching the manifest
+> exactly** (users 20,001 · credited hours 60,000.00 · certificates 10,000 ·
+> ledger 20,000 · migration 67). The version guard was exercised first, with a
+> 16.13 client against a 17.9 server: it refused, named the fix, and left no
+> zero-byte archive behind.
+
 - [ ] `sudo systemctl enable --now wevolunteer-backup.timer`.
 - [ ] `systemctl list-timers wevolunteer-backup.timer` shows a next run.
 - [ ] One run by hand succeeds: `sudo systemctl start wevolunteer-backup.service`,
