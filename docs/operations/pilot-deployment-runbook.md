@@ -385,16 +385,38 @@ starting in production — the static block does not check that `dist/` exists,
 so a missing build produces 404s on the SPA while `/api` and `/health` keep
 working.
 
-### Health endpoint
+### Health endpoints
 
-`GET /health` (note: **not** `/api/health`). Registered before the SPA
-catch-all specifically so a load balancer can never receive `index.html` from
-it. It runs `SELECT 1` against the database.
+There are **three**, all unauthenticated, none rate-limited (they sit outside
+the `/api` limiter), and all registered before the SPA catch-all specifically so
+a load balancer can never receive `index.html` from one. Note the paths: none of
+them is under `/api`.
 
-- `200 {"status":"ok","database":"connected","version":"1.0.0"}`
-- `500 {"status":"error","database":"disconnected"}`
+| Path | Checks | Point a proxy check here when |
+|---|---|---|
+| `/live` | Nothing but the process | You want restart-on-hang only. It answers while the database is down, which is the point — a dead database is not a reason to kill the process. |
+| `/health` | `SELECT 1`, plus a write probe | You want one endpoint for a human or a uptime monitor. |
+| `/ready` | Readable **and** writable, and reports optional dependencies without gating on them | **This is the one a reverse proxy or load balancer should use.** It returns **503** when the database is unreachable *or* read-only, so a degraded instance drains instead of accepting traffic it cannot serve. |
 
-It is unauthenticated and not rate-limited (it sits outside the `/api` limiter).
+Verified on 2026-09-23 against a scratch PostgreSQL database, production mode:
+
+```
+/live   200 {"status":"ok","version":"1.2.0"}
+/health 200 {"status":"ok","database":"connected","writable":true,"version":"1.2.0"}
+/ready  200 {"status":"ok","database":"connected","writable":true,
+             "dependenciesNonGating":{"redis":{"configured":false,"reason":"unconfigured"},
+                                      "pinecone":{"configured":false}},"version":"1.2.0"}
+```
+
+Two details that matter when wiring a check:
+
+- **`writable` is part of the payload**, and `/health`'s older documented shape
+  here omitted it. A database that is readable but not writable reports
+  `"database":"read-only"` with `writable:false` — `/ready` fails on it, `/live`
+  does not.
+- **`dependenciesNonGating` is named that way on purpose.** Redis and Pinecone
+  being unconfigured is reported, not a failure, and an operator should be able
+  to tell that from the payload without reading the source.
 
 ### Diagram
 
