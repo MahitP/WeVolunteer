@@ -368,46 +368,48 @@ the new certificate, keep the old private key until every archive encrypted to i
 has aged out of the 28-day window, then destroy it. There is no re-encryption
 step and there does not need to be one.
 
-### The 2026-09-24 rotation, and what it cost
+### The 2026-09-24 rotation, and what it found
 
-The pair generated on 2026-09-12 was never put anywhere durable. On 2026-09-24,
-preparing the pre-upgrade restore drill, the private key for the certificate
-below could not be found — not in the password manager, not on the operator
-machine. A full search of the project tree, the Desktop, `~/Documents`,
-`~/Downloads`, `~/.ssh` and the asset archive, by filename *and* by PEM private
-key header, returned two files, both of which are the host SSH key:
+The pair generated on 2026-09-12 was never put in the password manager. Preparing
+the pre-upgrade restore drill, its private half could not be found on the operator
+machine — searched by filename *and* by PEM private-key header across the project
+tree, Desktop, `~/Documents`, `~/Downloads`, `~/.ssh` and the asset archive. The
+only private keys there are the host SSH key, whose public half
+(`d97f8dbb…f108ad0`) does not match the certificate (`f61f0162…b6f968`).
 
-| | SHA-256 of the public key |
-|---|---|
-| certificate `00:49:B2:95:…:95:0C` | `f61f0162…b6f968` |
-| the only private keys on the machine | `d97f8dbb…f108ad0` |
+**It was on the host**, at `/root/backup-keys/backup-key.pem` — the exact file the
+section above says must not exist, because a host that can decrypt its own archives
+is a host where the encryption is decorative. Its public half matches the retired
+certificate, so the archives were never unreadable; they were readable by anyone
+who reached the box, and by nobody who did not. Both failure modes at once: no
+operator copy, and a copy in the one place it must not be.
 
-So: **every archive from `20260912T193009Z` through `20260924T144416Z` is
-ciphertext nobody can open.** They were left in place to age out of the 14-day
-window on their own — deleting them buys nothing and destroys the record that
-this happened. They are pre-launch archives: 4 seed accounts, 0 credited hours,
-0 certificates, 0 ledger rows. Had this been found after launch it would have
-been the loss of every student record the platform held.
+Two archives were decrypted with it and restored into isolated scratch databases —
+`wevolunteer-20260912T193009Z` (users=3) and the pre-upgrade
+`wevolunteer-20260924T144416Z` (users=4) — both `OK — this archive is proven
+restorable`, counts matching their manifests. That is what makes the rollback path
+real rather than assumed.
 
-Add-then-retire could not be followed, because there was no old key to retire.
-What was done instead:
+Add-then-retire was followed, with the retire step left to the operator:
 
 1. A new RSA-4096 pair, `CN=wevolunteer-backup`, SHA1
    `9E:47:81:20:8B:4B:20:BF:F6:0A:02:B1:48:AC:BE:94:B7:19:E6:F6`, valid to
-   2036-09-21. The private key never touched the host.
+   2036-09-21. **The new private key was never placed on the host.**
 2. The old certificate kept at `/etc/ssl/wevolunteer-backup.crt.retired-20260924`;
-   the new one installed at the path `WEV_BACKUP_PUBKEY` already names, so no
-   unit file changed.
+   the new one installed at the path `WEV_BACKUP_PUBKEY` already names, so no unit
+   file changed and the nightly job needed no edit.
 3. `wevolunteer-20260924T232114Z.dump.enc` taken, fetched, decrypted with the new
-   private key and restored into an isolated scratch database —
-   `OK — this archive is proven restorable`, counts matching the manifest exactly.
+   private key and restored into an isolated scratch database — again `OK`.
+4. The 2026-09-12 private key is still on the host. It opens archives up to
+   `20260924T144416Z` and none after. It should be copied to the password manager
+   and then `shred -u`'d from `/root/backup-keys/`, in that order.
 
-**The rule this produces:** generating a pair is not the step that matters. The
-step that matters is proving the private key is somewhere durable *before* the
-first archive is encrypted to it. Until a restore has been done with the copy
-you intend to keep, the backups are decorative — and nothing in the system will
-tell you, because encrypting does not need the private key and every check that
-runs on the host passes without it.
+**The rule this produces:** generating a pair is not the step that matters, and
+neither is a green nightly job. Encryption needs only the certificate, so every
+check that runs on the host passes whether or not a usable private key exists
+anywhere — the backups look perfect right up until the first restore. The gate is
+a restore performed with the copy you intend to keep, from a machine that is not
+the host.
 
 ---
 
