@@ -212,3 +212,87 @@ describe('migration 061', () => {
     expect(() => resync61(db)).not.toThrow();
   });
 });
+
+/**
+ * Migration 068 — the two documents the 2026-09-21 audit corrected.
+ *
+ * Structurally 054's repair with one addition: it names the two slugs as well
+ * as requiring zero acceptances, so it cannot become the general "rewrite any
+ * legal document" mechanism if a later hash moves for a reason nobody
+ * reviewed. Both conditions are asserted independently below, because either
+ * alone would be weaker than the pair.
+ */
+describe('migration 068', () => {
+  let resync068;
+
+  beforeEach(async () => {
+    ({ up: resync068 } = await import('./migrations/068_resync_audit_corrected_legal_hashes.js'));
+  });
+
+  it('clears the two corrected documents when nobody has accepted them', () => {
+    doc('certificate-verification-policy', '1.0', 'old-cert-hash');
+    doc('volunteer-record-policy', '1.0', 'old-record-hash');
+
+    resync068(db);
+
+    expect(remaining()).toEqual([]);
+  });
+
+  it('leaves either one alone the moment somebody has accepted it', () => {
+    doc('certificate-verification-policy', '1.0', 'old-cert-hash');
+    doc('volunteer-record-policy', '1.0', 'old-record-hash');
+    accept('volunteer-record-policy', '1.0', 'old-record-hash');
+
+    resync068(db);
+
+    /* The accepted one keeps its row AND its hash — it would keep blocking the
+       boot, which is the invariant working rather than failing. */
+    expect(remaining()).toEqual([{ slug: 'volunteer-record-policy', version: '1.0' }]);
+    expect(
+      db.prepare('SELECT content_hash FROM legal_documents WHERE slug = ?')
+        .get('volunteer-record-policy').content_hash,
+    ).toBe('old-record-hash');
+  });
+
+  it('touches no other document, however drifted or unaccepted', () => {
+    /* The live database carries eleven others. None of them is this migration's
+       business, and the slug list is what guarantees that. */
+    doc('terms-of-service', '1.0', 'tos-hash');
+    doc('privacy-policy', '1.0', 'privacy-hash');
+    doc('youth-safety-guidelines', '1.0', 'ysg-hash');
+    doc('certificate-verification-policy', '1.0', 'old-cert-hash');
+
+    resync068(db);
+
+    expect(remaining()).toEqual([
+      { slug: 'privacy-policy', version: '1.0' },
+      { slug: 'terms-of-service', version: '1.0' },
+      { slug: 'youth-safety-guidelines', version: '1.0' },
+    ]);
+  });
+
+  it('protects only the exact version, so a later unaccepted one still clears', () => {
+    doc('volunteer-record-policy', '1.0', 'old-record-hash');
+    accept('volunteer-record-policy', '1.0', 'old-record-hash');
+    doc('volunteer-record-policy', '1.1', 'newer-hash');
+
+    resync068(db);
+
+    /* 1.1 is not in the slug/version list, so it survives too — this migration
+       is scoped to the two v1.0 rows and nothing else. */
+    expect(remaining()).toEqual([
+      { slug: 'volunteer-record-policy', version: '1.0' },
+      { slug: 'volunteer-record-policy', version: '1.1' },
+    ]);
+  });
+
+  it('does nothing on an empty catalogue', () => {
+    expect(() => resync068(db)).not.toThrow();
+    expect(remaining()).toEqual([]);
+  });
+
+  it('skips a database too early to have the tables', () => {
+    const early = new DatabaseSync(':memory:');
+    expect(() => resync068(early)).not.toThrow();
+  });
+});
