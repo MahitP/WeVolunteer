@@ -368,6 +368,47 @@ the new certificate, keep the old private key until every archive encrypted to i
 has aged out of the 28-day window, then destroy it. There is no re-encryption
 step and there does not need to be one.
 
+### The 2026-09-24 rotation, and what it cost
+
+The pair generated on 2026-09-12 was never put anywhere durable. On 2026-09-24,
+preparing the pre-upgrade restore drill, the private key for the certificate
+below could not be found — not in the password manager, not on the operator
+machine. A full search of the project tree, the Desktop, `~/Documents`,
+`~/Downloads`, `~/.ssh` and the asset archive, by filename *and* by PEM private
+key header, returned two files, both of which are the host SSH key:
+
+| | SHA-256 of the public key |
+|---|---|
+| certificate `00:49:B2:95:…:95:0C` | `f61f0162…b6f968` |
+| the only private keys on the machine | `d97f8dbb…f108ad0` |
+
+So: **every archive from `20260912T193009Z` through `20260924T144416Z` is
+ciphertext nobody can open.** They were left in place to age out of the 14-day
+window on their own — deleting them buys nothing and destroys the record that
+this happened. They are pre-launch archives: 4 seed accounts, 0 credited hours,
+0 certificates, 0 ledger rows. Had this been found after launch it would have
+been the loss of every student record the platform held.
+
+Add-then-retire could not be followed, because there was no old key to retire.
+What was done instead:
+
+1. A new RSA-4096 pair, `CN=wevolunteer-backup`, SHA1
+   `9E:47:81:20:8B:4B:20:BF:F6:0A:02:B1:48:AC:BE:94:B7:19:E6:F6`, valid to
+   2036-09-21. The private key never touched the host.
+2. The old certificate kept at `/etc/ssl/wevolunteer-backup.crt.retired-20260924`;
+   the new one installed at the path `WEV_BACKUP_PUBKEY` already names, so no
+   unit file changed.
+3. `wevolunteer-20260924T232114Z.dump.enc` taken, fetched, decrypted with the new
+   private key and restored into an isolated scratch database —
+   `OK — this archive is proven restorable`, counts matching the manifest exactly.
+
+**The rule this produces:** generating a pair is not the step that matters. The
+step that matters is proving the private key is somewhere durable *before* the
+first archive is encrypted to it. Until a restore has been done with the copy
+you intend to keep, the backups are decorative — and nothing in the system will
+tell you, because encrypting does not need the private key and every check that
+runs on the host passes without it.
+
 ---
 
 ## 7. Recovery, after losing the host entirely
