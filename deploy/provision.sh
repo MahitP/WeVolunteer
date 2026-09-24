@@ -601,9 +601,49 @@ cmd_verify() {
   elif echo "$bind" | grep -qE '^(127\.0\.0\.1|\[::1\]):'; then ok "app bound to loopback only ($bind)"
   else bad "app bound to $bind — reachable outside the proxy. Set BIND_ADDRESS=127.0.0.1"; fails=$((fails+1)); fi
 
-  log "Health endpoints (through nginx, then direct)"
-  for u in "http://127.0.0.1/health" "http://127.0.0.1:$APP_PORT/health"; do
-    local code; code=$(curl -s -o /tmp/_h -w '%{http_code}' --max-time 10 "$u" || echo 000)
+  # ── Why these probes are not plain HTTP ──
+  #
+  # This block used to fetch `http://127.0.0.1/health` and require 200. On this
+  # origin nginx answers port 80 with a 301 to https, which is the posture we
+  # want — so the check reported FAIL on a correctly configured host, every run,
+  # for both /health and the socket.io handshake below. Observed on production
+  # 2026-09-24. A gate that cannot pass is a gate operators learn to skip, which
+  # is worse than no gate.
+  #
+  # So: port 80 passes on 200 OR on a redirect to https (that redirect IS the
+  # requirement), and the real check is made over https against the hostname the
+  # application is configured to serve, resolved to the loopback so it never
+  # leaves the box. `-k` is deliberate — the origin certificate is issued by
+  # Cloudflare's origin CA, which the system trust store does not carry and is
+  # not meant to; this probe is testing that our own nginx and app answer, not
+  # the chain a browser sees.
+  local public_host; public_host=$(grep -m1 -E '^APP_URL=' "$ENV_FILE" 2>/dev/null \
+    | cut -d= -f2- | sed -E 's#^https?://##; s#/.*##')
+
+  log "Health endpoints (port 80 posture, through nginx over https, then direct)"
+  local code80 loc80
+  code80=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1/health" || echo 000)
+  loc80=$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 10 "http://127.0.0.1/health" || echo "")
+  case "$code80" in
+    200) ok "http://127.0.0.1/health -> 200 (no https redirect configured)" ;;
+    301|302|307|308)
+      case "$loc80" in
+        https://*) ok "http://127.0.0.1/health -> $code80 to https (http is redirected, as intended)" ;;
+        *) bad "http://127.0.0.1/health -> $code80 to '${loc80:-nowhere}' (expected an https target)"; fails=$((fails+1)) ;;
+      esac ;;
+    *) bad "http://127.0.0.1/health -> $code80"; fails=$((fails+1)) ;;
+  esac
+
+  local probes=("http://127.0.0.1:$APP_PORT/health")
+  if [ -n "$public_host" ]; then
+    probes=("https://$public_host/health" "${probes[@]}")
+  else
+    warn "APP_URL is not set in $ENV_FILE — cannot probe nginx over https"
+  fi
+  for u in "${probes[@]}"; do
+    local code args=(-s -o /tmp/_h -w '%{http_code}' --max-time 10)
+    case "$u" in https://*) args+=(-k --resolve "$public_host:443:127.0.0.1") ;; esac
+    code=$(curl "${args[@]}" "$u" || echo 000)
     if [ "$code" = "200" ]; then ok "$u -> 200 $(head -c 120 /tmp/_h)"
     else bad "$u -> $code"; fails=$((fails+1)); fi
   done
@@ -618,9 +658,18 @@ cmd_verify() {
     echo "$host" | grep -q 'supabase' && ok "points at Supabase" || warn "does not look like Supabase"
   else bad "DATABASE_URL missing"; fails=$((fails+1)); fi
 
+  # Over https for the same reason as the health probes above: on port 80 this
+  # handshake gets the 301 and never reaches the upgrade path it is testing.
   log "Socket.IO upgrade through nginx"
-  local sio; sio=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
-    "http://127.0.0.1/socket.io/?EIO=4&transport=polling" || echo 000)
+  local sio
+  if [ -n "$public_host" ]; then
+    sio=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -k \
+      --resolve "$public_host:443:127.0.0.1" \
+      "https://$public_host/socket.io/?EIO=4&transport=polling" || echo 000)
+  else
+    sio=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+      "http://127.0.0.1/socket.io/?EIO=4&transport=polling" || echo 000)
+  fi
   [ "$sio" = "200" ] && ok "socket.io handshake -> 200" || { bad "socket.io handshake -> $sio"; fails=$((fails+1)); }
 
   log "Externally reachable ports (from this host's own view)"
