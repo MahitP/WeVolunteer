@@ -99,9 +99,23 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
                   aria-label — so the heading is announced as content rather
                   than being the only thing identifying the dialog. */}
               <h2 className="delete-hero-title">Delete Account?</h2>
+              {/* Precise, because "may be preserved" was not.
+                  What the endpoint actually does (accountRoutes.js, step 1):
+                  before anonymising the account it writes the volunteer's NAME,
+                  the event, the organisation, the hours and the completion date
+                  into snapshot columns on every certificate, and keeps those
+                  rows. The certificate stays verifiable by a school office
+                  precisely because the name on it survives.
+                  "May be preserved" let a reader believe deletion removed their
+                  name everywhere and that some records might incidentally
+                  linger. The opposite is true and is a deliberate design: it is
+                  the difference between a certificate and a claim. Saying so is
+                  what R-02 asks for — fix it, or disclose it precisely. */}
               <p className="lead delete-hero-lead">
                 Deleting your account removes your profile, settings, and login access.
-                Your verified volunteer records and certificates may be preserved for verification purposes.
+                Certificates you have already earned are kept, and <strong>your name stays on
+                them</strong> — that is what lets a school or college still verify them. Nothing
+                else keeps your name.
               </p>
             </div>
 
@@ -121,12 +135,14 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
                   </div>
 
                   <div className="stack-sm delete-summary-col">
-                    <p className="strong small delete-summary-kept">Preserved</p>
+                    <p className="strong small delete-summary-kept">Kept, with your name on it</p>
                     <ul className="small dim delete-summary-list">
-                      <li>Certificates</li>
-                      <li>Verified volunteer hours</li>
-                      <li>Historical records</li>
+                      <li>Certificates you earned — your name, the event, the organisation, the hours and the date</li>
+                      <li>The verified hours behind them</li>
                     </ul>
+                    {/* "Historical records" was removed rather than reworded: it
+                        named nothing a reader could check, and everything it
+                        might have meant is either listed above or anonymised. */}
                   </div>
                 </div>
               </div>
