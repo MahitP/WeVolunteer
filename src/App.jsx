@@ -7,8 +7,6 @@ import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
 import BrandMark from './components/common/BrandMark';
-import useBrandMicroPass from './components/common/useBrandMicroPass';
-import Wordmark from './components/common/Wordmark';
 import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
 import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
@@ -1043,7 +1041,6 @@ function AppShell({ toasts, addToast, removeToast }) {
   const online = useOnline();
   const navigate = useNavigate();
   /* The brand link's one-shot micro-pass; see the hook and `.wv-micro`. */
-  const brandMicroPass = useBrandMicroPass();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1895,28 +1892,37 @@ function AppShell({ toasts, addToast, removeToast }) {
 
       {/* ── Sidebar (desktop / rail on tablet) ── */}
       <aside className="sidebar">
-        {/* The brand's micro-pass: one 560ms pass of the gait through the
-            wordmark's W, static at rest. `useBrandMicroPass` carries the
-            `.wv-micro` class for exactly one pass rather than permanently —
-            see the hook for why a sustained hover otherwise leaves a gap
-            painted across the W. The pass is a gap in the surface colour, and
-            the sidebar is `--surface`, which is what `--wv-sweep` defaults to.
-            The rail's tile stays static: at 18.6px it would animate the
-            thickened small-size stroke rather than the frozen one. */}
+        {/* The brand's hover micro-pass is gone with the drawn wordmark, and
+            deliberately not moved onto the tile.
+
+            `BrandMark` reports its mark at `32 * TILE_MARK_RATIO` = 18.56px,
+            and `MOTION_MIN_MARK_PX` is 32 — so `resolveMotion` answers `'none'`
+            for any behaviour asked of a tile this size. That is the system
+            refusing to animate a mark too small to draw its real stroke, which
+            is correct; passing `motion="micro"` here would have been a prop
+            that silently did nothing. The wordmark could carry the pass because
+            it drew the W at full size. The badge cannot, so the lockup is
+            static — see `useBrandMicroPass`, still used by nothing else. */}
         <a
           className="brand"
           href="/"
-          ref={brandMicroPass.ref}
-          onPointerEnter={brandMicroPass.onPointerEnter}
-          onFocus={brandMicroPass.onFocus}
-          onBlur={brandMicroPass.onBlur}
           onClick={(e) => { e.preventDefault(); navigate('/'); }}
         >
-          {/* The tile is shown only on the tablet rail, where the wordmark does
-              not fit; see `.sidebar .brand` in index.css. */}
+          {/* The lockup is the tile beside the name — the green badge carrying
+              the checkmark-W, then "WeVolunteer" as text.
+
+              This replaced the drawn wordmark, whose own first letter was the
+              checkmark-W, on the owner's decision (2026-09-27): a wordmark alone
+              read as plain white text rather than as a logo. The tile is now
+              shown at every width, not only on the tablet rail, and the name
+              beside it is set rather than drawn — so the W appears once as a
+              badge and once as a letterform, which is the ordinary shape of a
+              lockup and is deliberate here. `Wordmark` still draws the combined
+              form and is still used where the product signs a page it does not
+              own: PublicOrganizationView and CertificateVerification. */}
           <BrandMark />
           <span className="brand-text">
-            <Wordmark motion="micro" />
+            <span className="brand-name">{APP_NAME}</span>
             <span className="brand-sub">{SCHOOL_NAME}</span>
           </span>
         </a>

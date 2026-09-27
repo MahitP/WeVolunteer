@@ -856,9 +856,10 @@ time { font-variant-numeric: tabular-nums; }
   min-width: 0;
 }
 
-/* The sidebar carries the tile only for the tablet rail, where the wordmark does
-   not fit. Everywhere wider, the wordmark's W already is the mark. */
-.sidebar .brand > .brand-mark { display: none; }
+/* The tile is part of the lockup at every width (owner decision, 2026-09-27).
+   It used to be rail-only, because the drawn wordmark's W already was the mark;
+   the shell now sets the name as text beside the badge instead, so the tile is
+   what makes the lockup read as a logo rather than as a line of white type. */
 .brand-name {
   display: block;
   font-family: var(--font-display);
@@ -3912,7 +3913,7 @@ a.list-row:hover { text-decoration: none; }
 @media (max-width: 1024px) and (min-width: 701px) {
   .app { grid-template-columns: var(--rail-w) minmax(0, 1fr); }
   .sidebar { padding-left: var(--s2); padding-right: var(--s2); align-items: center; }
-  .sidebar .brand > .brand-mark { display: grid; }
+  /* The tile shows at every width now; the rail only hides the text. */
   /* Visually hidden rather than `display: none`, so the rail's home link keeps
      the wordmark's accessible name: the tile beside it is aria-hidden, and
      removing both left a link with no name at all. Same technique as `.sr-only`. */
@@ -8028,7 +8029,10 @@ input:disabled + .premium-slider {
   text-decoration: none;
   transition: border-color 120ms ease, background-color 120ms ease;
 }
-.legal-doc-card:hover { border-color: var(--border-hover); background: var(--surface-hover); }
+/* text-decoration: none for the same reason as `.mod-area:hover` — the whole
+   card is the link, so the global underline struck through the title, the
+   summary and the meta line together. */
+.legal-doc-card:hover { border-color: var(--border-hover); background: var(--surface-hover); text-decoration: none; }
 /* Focus is not left to the hover treatment. A keyboard reader moving down ten
    cards needs to know which one Enter will open, and a border-colour shift is
    not enough of a signal on its own. */
@@ -9301,6 +9305,12 @@ input:disabled + .premium-slider {
 .mod-area:hover {
   background: var(--surface-2);
   border-color: var(--brand);
+  /* The global `a:hover` underline is for links inside a sentence, where the
+     underline IS the affordance. This link is a whole tile, so that rule struck
+     a line through the title and every word of the blurb at once — the tile
+     already answers the hover with its surface and its border, which is the
+     affordance a card carries. Reported on the Admin page, 2026-09-27. */
+  text-decoration: none;
 }
 /* The focus ring is on the tile, not inside it: the whole tile is the link, so
    the whole tile is what a keyboard reader has landed on. */
@@ -13189,6 +13199,16 @@ li a.btn,
 .nav a,
 .mobilenav a,
 .rail-item,
+/* Whole-tile links. `li a` above is written for a link inside a sentence, where
+   the underline IS the affordance; these are links that ARE a card, so the rule
+   struck a line through the title and every word of the blurb at once — five
+   tiles of underlined text on the Admin page, at rest, not on hover. Reported
+   2026-09-27. The tiles answer with their surface, border and focus ring, which
+   is the affordance a card carries. Readers who want every link underlined
+   still get these: Settings → Accessibility → "Always show link underlines" is
+   a superset and is applied after this block. */
+.mod-area,
+.legal-doc-card,
 a.btn {
   text-decoration: none;
 }

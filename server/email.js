@@ -624,6 +624,14 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
       .brand-word {
         color: #eee !important;
       }
+      /* The badge does NOT follow the theme, matching the brand-mark-bg and
+         brand-mark-ink tokens in the app, which are deliberately held out of
+         dark mode so the logo is one object everywhere. (No backticks here:
+         this CSS is inside a JS template literal.) */
+      .brand-badge {
+        background-color: #0f6b45 !important;
+        color: #ffffff !important;
+      }
       .footer {
         color: #888 !important;
       }
@@ -639,7 +647,37 @@ export const buildHtmlTemplate = (title, contentHTML, ctaText = null, ctaUrl = n
             <table class="main" role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
               <tr>
                 <td class="header">
-                  <span class="brand-word" style="font-family: 'Arial', Helvetica, sans-serif; font-size: 22px; font-weight: bold; color: ${wordmarkColor}; letter-spacing: -0.8px;">${escapeHtml(APP_NAME)}</span>
+                  <!--
+                    The lockup: the green badge, then the name.
+
+                    The badge is a TABLE CELL with a background colour and a
+                    letter in it, not an image and not an inline SVG. Both of
+                    those fail in the place this has to work: a remote image is
+                    blocked by default in Outlook and Gmail, which is the whole
+                    reason the header was text-only before (see the note above),
+                    and Gmail strips inline SVG outright. A background-colour
+                    cell is the one way to draw a solid shape that every client
+                    since Outlook 2007 renders, so the badge is a white W on
+                    Forest rather than the drawn checkmark-W of the app.
+
+                    It is the same colour and the same corner treatment, and it
+                    degrades to a plain green square where border-radius is
+                    unsupported - never to a broken-image box.
+
+                    The badge is aria-hidden: the name beside it already says
+                    the product, and a screen reader announcing a stray W first
+                    is noise.
+
+                    NOTE: no backticks in this comment. It sits inside a JS
+                    template literal, where a backtick ends the string.
+                  -->
+                  <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr>
+                    <td class="brand-badge" aria-hidden="true" width="32" height="32" align="center" valign="middle" style="width: 32px; height: 32px; background-color: ${brandColor}; border-radius: 7px; font-family: 'Arial', Helvetica, sans-serif; font-size: 18px; font-weight: bold; color: #ffffff; text-align: center; line-height: 32px; mso-line-height-rule: exactly;">W</td>
+                    <td width="10" style="width: 10px;">&nbsp;</td>
+                    <td valign="middle">
+                      <span class="brand-word" style="font-family: 'Arial', Helvetica, sans-serif; font-size: 22px; font-weight: bold; color: ${wordmarkColor}; letter-spacing: -0.8px;">${escapeHtml(APP_NAME)}</span>
+                    </td>
+                  </tr></table>
                 </td>
               </tr>
               <tr>
