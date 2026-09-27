@@ -77,6 +77,7 @@ import schedulerLeases from './065_scheduler_leases.js';
 import eventSlotSummary from './066_event_slot_summary.js';
 import searchTrigramIndexes from './067_search_trigram_indexes.js';
 import resyncAuditCorrectedLegalHashes from './068_resync_audit_corrected_legal_hashes.js';
+import resyncCookieNoticeMapSection from './069_resync_cookie_notice_map_section.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -492,7 +493,7 @@ export const MIGRATIONS = [
    * it declines rather than failing the boot when the role cannot install the
    * extension.
    */
-  searchTrigramIndexes, resyncAuditCorrectedLegalHashes,
+  searchTrigramIndexes, resyncAuditCorrectedLegalHashes, resyncCookieNoticeMapSection,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

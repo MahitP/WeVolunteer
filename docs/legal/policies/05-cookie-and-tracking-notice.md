@@ -180,23 +180,23 @@ here are under 18, and consent that was never asked for is not consent.
 **We have never used any of the first six and we are not planning to.** Adding one would
 require changing this page first.
 
-### One thing that is not tracking, but is a third party
+### Maps, which used to be a third party and no longer are
 
-When a page shows you a **map**, the map images are loaded by your browser directly from
-**CARTO** (`basemaps.cartocdn.com`), a map-hosting company, using OpenStreetMap data.
+An earlier version of this notice said map images were loaded by your browser directly from
+**CARTO**, that CARTO could therefore see your IP address and roughly which event location you
+were looking at, and that we were considering serving the images ourselves instead.
 
-We want to be precise about what that means, because "we use no third-party CDNs" would be
-easier to say and would not be true:
+**We did that.** Map images now come from WeVolunteer's own server. Your browser asks us; we
+ask the map provider; we pass the picture back. The provider sees a request from our server,
+not from your device — so it learns nothing about your IP address, your location, or which
+event you were looking at.
 
-- CARTO **does** see your device's IP address and which map squares you loaded — which tells
-  them roughly which event location you were looking at.
-- CARTO **does not** receive your name, email, account, or anything else about you. It does not
-  know who you are, only that some browser asked for some map tiles.
-- This happens only on pages that actually show a map.
-- CARTO's own privacy terms govern what they do with it. We do not control that.
+The provider is currently **OpenStreetMap**, whose data every map here has always been drawn
+from. We cache each map square for about a week, both because their usage policy asks relays
+like ours to, and because it means we ask them far less often than you look at maps.
 
-We are looking at whether to serve map images ourselves so that no outside company sees
-anything at all. Until then, this is the honest description.
+This is now the same arrangement as everything else in the table below that goes through our
+server: the outside company sees us, never you.
 
 ## Why there is no cookie banner
 
@@ -240,14 +240,15 @@ records behind it. The same schedule is in the
 | **Open-Meteo** | Our server | The *event's* coordinates, for the forecast. Nothing about you |
 | **OpenRouteService** | Our server | The *event's* coordinates and your position blurred to about 110 metres, to work out a rough driving time. Nothing that says who you are |
 | **Resend** | Our server | Your email address and the message, when we send you one |
-| **CARTO** | **Your browser** | Your IP address and which map squares you loaded. Not your name or account |
+| **OpenStreetMap** (map images) | Our server | Which map squares our server asked for. Nothing about you or your device |
 | **Amplitude** — **only if you switched analytics on** | **Your browser** | See the analytics section above |
 
 Everything contacted by *our server* never sees your device at all — it sees ours.
 
-CARTO is the exception that applies to everybody, described above. Amplitude is the exception
-that applies only to people who chose it, described above. Neither sets a cookie for
-advertising, and nothing on this list is a data broker.
+Amplitude is now the only exception — it runs in your browser, and only for people who chose
+to switch analytics on. Everything else reaches an outside company through our server, which
+means none of them see your device. Nothing on this list sets a cookie for advertising, and
+none of them is a data broker.
 
 If you tap **Get directions** on an event, your device opens whichever maps app you use. From
 that point you are in their app and their terms apply — the same as clicking any link.

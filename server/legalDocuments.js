@@ -435,12 +435,20 @@ export const LEGAL_DOCUMENTS = [
     summary: 'The cookies this site sets, all of which are needed to keep you signed in. No advertising or analytics trackers.',
     effectiveAt: '2026-08-06',
     file: '05-cookie-and-tracking-notice.md',
-    /* Re-pinned to remove a dangling clause. "Previous versions are kept at"
-       introduced a URL that had been deleted, leaving the sentence spliced into
-       the v1.0 paragraph mid-clause. 01 and 02 carry the same passage without
-       it, so the clean form already existed and this was the one file that
-       diverged. Pre-launch correction, 1.0 stands. */
-    contentHash: '58ae889d647a791533266e037668a7eeea3475697046bb3c4eed274f90e930ef',
+    /* Re-pinned twice, both pre-launch corrections, so 1.0 stands.
+       1. To remove a dangling clause: "Previous versions are kept at"
+          introduced a URL that had been deleted, leaving the sentence spliced
+          into the v1.0 paragraph mid-clause. 01 and 02 carry the same passage
+          without it, so the clean form already existed.
+       2. 2026-09-27 — the map section described tiles loading in the reader's
+          browser directly from CARTO, which could therefore see their IP
+          address and roughly which event they were looking at, and ended by
+          saying we were considering serving the images ourselves. That work was
+          done: `server/routes/tileRoutes.js` proxies every tile, and with
+          MAP_TILES_CARTO_KEY unset the upstream is OpenStreetMap. The notice
+          was describing a third-party exposure that no longer exists, which is
+          the safe direction to be wrong in and still wrong. */
+    contentHash: 'a053f9ef54c03d2d9c199f0ef6e72851070fa1c13ef7a5aa448c2843bc8982c9',
     bundledWith: null,
   },
   {
