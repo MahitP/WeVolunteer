@@ -439,6 +439,29 @@ sensible", it is `test -f ~/keys/backup-key.pem` *after* a reboot, and a restore
 that used that exact path. Until then, treat the backups as unverified no matter
 how many times the nightly job logged OK.
 
+### Closed out 2026-09-27
+
+- **The host no longer holds a private key.** `/root/backup-keys/backup-key.pem`
+  was copied off, proven by restoring `20260924T144416Z` with the copy being
+  kept, and only then `shred -u`'d — the order this document asks for.
+  `/root/backup-keys/` now holds the certificate alone, and
+  `WEV_BACKUP_TESTKEY` is unset on the host, so the nightly job encrypts and
+  cannot decrypt. That is the posture §6 has described since it was written; it
+  is now also true.
+- **Two operator copies**, `~/keys/` and a second folder beside the SSH keys,
+  with a README naming which certificate each one matches and which archives it
+  opens. Both are on one disk, so the password manager copy is still the one
+  that survives losing the laptop.
+- **The BACKUP heartbeat is live.** A heartbeat had been created in Better Stack
+  (period 1 day, grace 2 h, email alerting) and never written into
+  `/etc/wevolunteer/heartbeats.env`, so it sat `down` and alerted on nothing.
+  Now configured; a run flipped it to `up`. The failure path was already wired —
+  `OnFailure=` reaches the template, which maps the unit to `BACKUP` and reports
+  `fail`.
+
+This is what the three weeks of silently useless backups actually needed: not a
+better script, but a key somebody could find and an alarm that could ring.
+
 ---
 
 ## 7. Recovery, after losing the host entirely
