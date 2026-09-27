@@ -807,6 +807,29 @@ rather than described. What it does not close: the archives and both copies of
 the key that opens them live on one laptop and in one Backblaze account. The
 password-manager copy is still the only thing that survives losing that laptop.
 
+### All three heartbeats live — 2026-09-27
+
+`/etc/wevolunteer/heartbeats.env` had every value commented out since the file
+was installed, so all three scheduled jobs ran unmonitored. `HOST` and
+`CF_REFRESH` were created against the live account with the periods this
+document specifies, checked first against the timers rather than trusted:
+
+| Heartbeat | Timer | Period | Grace |
+|---|---|---|---|
+| `BACKUP` | `OnCalendar` 03:00 daily | 1 day | 2 h |
+| `HOST` | `OnUnitActiveSec=15min` | 15 min | 15 min |
+| `CF_REFRESH` | `OnCalendar Mon 05:00`, `RandomizedDelaySec=2h` | 7 days | 1 day |
+
+The `CF_REFRESH` grace has to absorb that two-hour randomised delay; a day does,
+comfortably. All three report `ok`, all three units name the `OnFailure=`
+template, and the template maps each unit to its heartbeat name. First runs:
+`host-check: healthy`, and the firewall refresh found `15 live -> 15 fetched,
+no change`.
+
+Worth stating plainly, because §12 exists for it: **a heartbeat is the only check
+here that catches a job which stops being scheduled at all.** Everything else in
+this document verifies a backup that ran.
+
 ### The drill that was actually run — 2026-09-13
 
 Not a unit test: the real scripts, a real PostgreSQL 17 cluster, the real
