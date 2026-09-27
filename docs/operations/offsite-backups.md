@@ -772,6 +772,41 @@ finished until the old key is refused.
 
 Honesty about this is the point of the document.
 
+### Off-site uploads went live — 2026-09-27
+
+Until this date every §1–§11 claim about B2 was a design that had been drilled
+but never wired: the account, the bucket, the Object Lock and the lifecycle rule
+all existed and had been exercised on 2026-09-14 and 2026-09-20, and the host
+had no credentials, so `bin/backup-postgres.sh` logged its
+`no off-site destination configured` warning every night for two weeks.
+
+A bucket-scoped writer key was created and installed. The full chain, on the
+first real run:
+
+```
+uploaded wevolunteer/backups/postgres/daily/2026/09/27/…dump.enc (201324 bytes)
+verified: B2 reports the expected size and SHA-256
+verified: downloaded copy is byte-identical (SHA-256)
+OK — off-site copy uploaded and verified
+```
+
+Then the half that actually matters, run on the operator laptop with the host
+playing no part — `backup-fetch.mjs --latest` (SHA-256 checked against both the
+manifest and B2's own object metadata) into a throwaway directory, decrypted
+with `~/keys/backup-key.pem`, restored into a scratch database: 70 tables,
+96 foreign keys all validated, 193 indexes, counts matching the manifest,
+migration 68. `OK — this archive is proven restorable`.
+
+`b2-audit` reports `authorization: VERIFIED (native API) + VERIFIED (S3 API)`,
+`bucket configuration: VERIFIED`, and exit **3** — the accepted single-key
+deviation of §4, never a clean pass.
+
+**What this closes.** The three failure modes §1 opens with — losing the host,
+the tenancy, or the Supabase project — now have an answer that has been executed
+rather than described. What it does not close: the archives and both copies of
+the key that opens them live on one laptop and in one Backblaze account. The
+password-manager copy is still the only thing that survives losing that laptop.
+
 ### The drill that was actually run — 2026-09-13
 
 Not a unit test: the real scripts, a real PostgreSQL 17 cluster, the real
