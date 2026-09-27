@@ -35,7 +35,7 @@
  * difference is the authority boundary, drawn honestly.
  */
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge,
 } from 'lucide-react';
@@ -282,6 +282,7 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
   const selectedPersona = PERSONAS.find(p => p.id === persona) ?? PERSONAS[0];
   const [previewError, setPreviewError] = useState(null);
   const [starting, setStarting] = useState(false);
+  const navigate = useNavigate();
 
   const startPreview = async () => {
     setStarting(true);
@@ -292,6 +293,25 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
          what this account may do, so every gated control on every page is now
          stale — including this one, which the owner is about to lose. */
       await onPreviewStarted?.();
+      /**
+       * Leave before the page re-renders without the right to be here.
+       *
+       * This is the Admin page, and the personas previewed from it — student,
+       * organizer — cannot open it. Staying put re-rendered the admin route
+       * under the previewed role and the next request answered 401, which is
+       * the server being right: the whole point of the preview is that this
+       * account no longer has admin rights. The reader saw an error for doing
+       * exactly what the button offered.
+       *
+       * The dashboard is where a preview should begin anyway — it is the first
+       * thing the previewed person sees when they sign in, which is the
+       * question the preview exists to answer. `replace` so the back button
+       * does not return to the admin page that is now forbidden.
+       *
+       * Ending the preview needs no equivalent: it restores rights rather than
+       * dropping them, so wherever the reader is standing stays legible.
+       */
+      navigate('/', { replace: true });
     } catch (err) {
       setPreviewError(err?.data?.error || err?.message || 'Could not start the preview.');
       setStarting(false);

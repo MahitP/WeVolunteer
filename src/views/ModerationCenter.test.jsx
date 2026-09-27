@@ -18,12 +18,15 @@
  *      tools is exactly the confusion this page exists to remove.
  */
 import React from 'react';
-import { render, screen, within, fireEvent } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
-import { MemoryRouter } from 'react-router-dom';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import ModerationCenter from './ModerationCenter';
 import { APP_ROUTES } from '../routes/index.jsx';
-import { can } from '../authz';
+import { can, ROLE } from '../authz';
+
+/** SUPER_ONLY capabilities need the super-admin role, not an admin flag. */
+const SUPER_ROLE = ROLE.SUPER_ADMIN;
 
 const USER = (role) => ({
   id: `${role}-1`, name: 'Test Person', email: 't@e.org', role,
@@ -269,5 +272,58 @@ describe('the persona preview control', () => {
     fireEvent.click(screen.getByRole('radio', { name: /administrator/i }));
     expect(selected()).toHaveLength(1);
     expect(selected()[0].textContent).toMatch(/administrator/i);
+  });
+});
+
+/**
+ * Starting a preview must LEAVE the Admin page.
+ *
+ * The personas previewable from here — student, organizer — cannot open
+ * `/admin/moderation`. Starting a preview and staying put re-rendered the admin
+ * route under the previewed role, and the next request answered 401. That is
+ * the server being right: the account genuinely no longer has admin rights, and
+ * dropping them is the entire point. But the reader saw an error for pressing
+ * the button the page offered them, which reads as the product being broken.
+ *
+ * Asserted through the real router rather than by spying on `navigate`, so this
+ * fails if the destination changes as well as if the call disappears.
+ */
+/* `ModerationCenter` imports the NAMED export (`import { api }`), so the mock
+   has to replace that binding — replacing a default export leaves the component
+   calling the real one, which fails the fetch and never reaches the navigate. */
+vi.mock('../utils/api', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    api: { ...actual.api, startPersonaPreview: vi.fn(async () => ({ ok: true })) },
+  };
+});
+
+describe('starting a persona preview', () => {
+  const Probe = () => {
+    const loc = useLocation();
+    return <div data-testid="where">{loc.pathname}</div>;
+  };
+
+  it('lands on the dashboard rather than leaving the reader on a page they just lost', async () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/moderation']}>
+        <Probe />
+        <Routes>
+          <Route
+            path="/admin/moderation"
+            element={<ModerationCenter currentUser={USER(SUPER_ROLE)} onPreviewStarted={async () => {}} />}
+          />
+          <Route path="/" element={<div>dashboard</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    /* No escape hatch: if the control is not reachable for this role the test
+       must FAIL, because a test that quietly returns when it cannot find its
+       subject is a test that passes forever after the button is renamed. */
+    const start = screen.getByRole('button', { name: /preview|view as/i });
+    fireEvent.click(start);
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/'));
   });
 });
