@@ -26,15 +26,48 @@ is what is wrong** — reconcile it at the next access review and note the discr
 
 ## Current administrators
 
+Addresses are deliberately not written here — this repository is on GitHub, and the
+register's job is to say *which accounts hold access and why*, which it can do without
+publishing anybody's mailbox. Reconcile against `users.role` to match rows to addresses.
+
 | Account | Role | Capabilities beyond the role | Granted | Granted by | Reason |
 |---|---|---|---|---|---|
-| *(the operator's own account)* | `super_admin` | — | Pre-launch | — | Platform owner. Sole administrator at launch. |
+| *(the operator's own account)* | `super_admin` | — | 2026-09-08, `bootstrap-owners.mjs` | — | Platform owner. The account actually in use. |
+| *(the project mailbox account, `owner_…` username)* | `super_admin` | — | 2026-09-08, `bootstrap-owners.mjs` | — | Second owner, created in the same bootstrap run as the first. **Unclaimed — see below.** |
 
-**One administrator is a known limitation, and it is disclosed rather than hidden.**
-With a single administrator, an appeal against a suspension that administrator issued
-cannot be decided inside the application at all — `appeals.js` refuses it, and no
+### The second owner is unclaimed, and that is the state to resolve
+
+It has never signed in and has no second factor. Neither fact is an anomaly:
+`bootstrap-owners.mjs` creates an account whose password is a bcrypt hash of 32 random
+bytes that were discarded in memory, so it is *claimed* through **Forgot password** rather
+than handed a credential. `tfa_enabled = 0` on a bootstrap account is documented as "the
+policy working, not a fault" — `REQUIRE_ADMIN_2FA` cannot be false in production, so the
+account is refused every capability with `403 tfa_required` until it enrols.
+
+So it cannot be used by anybody who does not control that mailbox. It is not an open door.
+
+**But unclaimed is the worst of the three available states.** A second owner exists to be
+the recovery path when the first is locked out — and an account that must first be claimed
+under pressure, by somebody who has never done it, is not a recovery path. Meanwhile it is
+a standing grant on a mailbox, and whoever controls that mailbox can take it.
+
+Two ways to resolve it, and either is better than leaving it:
+
+1. **Claim it.** Sign in via Forgot password, enrol a second factor, store the recovery
+   codes somewhere that is not the same place as the first account's. Then it is a real
+   break-glass account and this row stops being a caveat.
+2. **Revoke it.** `node bin/revoke-ownership.mjs <address> "<reason>"` — confirms
+   interactively, bumps `token_version`, writes `OWNER_REVOKED`. It refuses to remove the
+   last owner, so the first account is never at risk.
+
+**Until one of those happens, treat this platform as having one administrator**, with the
+consequences in the next paragraph.
+
+**One *effective* administrator is a known limitation, and it is disclosed rather than
+hidden.** With a single administrator, an appeal against a suspension that administrator
+issued cannot be decided inside the application at all — `appeals.js` refuses it, and no
 privilege level overrides that refusal. The Community Guidelines say so in plain words.
-Adding a second administrator is what closes it.
+A second *claimed* administrator is what closes it; the unclaimed row above does not.
 
 ## Access review
 
@@ -53,3 +86,4 @@ prints it rather than implying an oversight process that does not exist.
 | Date | Change | By |
 |---|---|---|
 | 2026-08-06 | Register created as part of the v1.0 policy release. | Operator |
+| 2026-09-27 | **Corrected against production.** The register recorded one account and said "sole administrator at launch"; the database has held **two** `super_admin` accounts since 2026-09-08, both created in the same `bootstrap-owners.mjs` run. Found during the launch-checklist audit, not by a review — the quarterly access review below had never run. The second account is recorded, and its unclaimed state written down rather than left as a discrepancy between this file and the database. | Operator |
