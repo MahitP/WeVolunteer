@@ -142,7 +142,7 @@ GREEN 1–4 · YELLOW 5–9 · ORANGE 10–15 · RED 16–25
 | R-15 | Impersonation (v2.0, unimplemented) would let an adult act as a minor | 5 | 2 | **10** | ORANGE | **Yes, before it ships** |
 | R-16 | WCAG 2.1 AA not formally verified; district deadline 2027-04-26 | 3 | 3 | **9** | YELLOW | No |
 | R-17 | No ToS: no liability limit, no governing law, no termination right | 4 | 3 | **12** | ORANGE | **Yes** |
-| R-18 | Map tiles load from CARTO — students' browsers contact an uncontracted CDN (**proxied in code 2026-09-13; deploy + policy text pending**) | 3 | 4 | **12** | ORANGE | No |
+| R-18 | Map tiles load from CARTO — students' browsers contact an uncontracted CDN. **CLOSED 2026-09-27**: the proxy is deployed (every tile is served by this application; upstream is OpenStreetMap with `MAP_TILES_CARTO_KEY` unset) and the Cookie Notice now describes it. No student's browser contacts a map provider. Residual: the **Privacy Policy still carries the old passage**, deferred to launch because it is the one drifted document with an acceptance row — see the launch checklist. That overstates sharing, so it is a documentation defect, not an exposure. | 1 | 2 | **2** | GREEN | No |
 | R-19 | `localStorage` caches account details, persisting on shared school devices | 2 | 4 | **8** | YELLOW | No |
 
 ---
@@ -454,7 +454,13 @@ code comment or test asserting that only event locations reach the geocoder.
 - **R-16 — Accessibility.** Deadline 2027-04-26 (Posture A, ≥50k population). Phase 5 of this
   engagement addresses it. Not urgent; is dated.
 
-### R-18 — Students' browsers contact an uncontracted third-party CDN · **ORANGE (12)**
+### R-18 — Students' browsers contact an uncontracted third-party CDN · **CLOSED 2026-09-27 (was ORANGE 12)**
+
+> **Closed.** Everything below describes the state before the tile proxy was deployed, and
+> is kept because the reasoning is what makes the fix legible. What is true now: every tile
+> is served by this application, `MAP_TILES_CARTO_KEY` is unset in production so the upstream
+> is OpenStreetMap, and no student's browser contacts a map provider at all. The two
+> remaining items at the end of this entry are resolved except where noted there.
 
 **Found while fact-checking the Cookie Notice draft, not in the original sweep.**
 
@@ -513,16 +519,24 @@ for its other two geo services, which is a strong hint it is the intended archit
 > OSM's tile policy permits for an identified, caching relay; with `MAP_TILES_CARTO_KEY` it
 > draws the CARTO styles, and the key never reaches the bundle.
 >
-> Remaining, and neither is engineering:
+> Remaining, and neither is engineering — **both resolved on 2026-09-27 except one half**:
 >
-> 1. **Deploy it.** Until then production still shows the defaced CARTO tiles and still
->    exposes students' IPs to CARTO. The nginx `location /tiles/` block ships with it.
-> 2. **The published Privacy Policy (§ third parties, and the "CARTO is different" paragraph)
->    and the Cookie and Tracking Notice (map images) still say the browser loads tiles
->    directly from CARTO.** After deployment that overstates what is shared rather than
->    understating it, but it is no longer accurate, and those documents are versioned through
->    the Legal editor rather than edited in the repository. See the owner action list in
->    `docs/audits/2026-09-13-production-readiness-pass.md`.
+> 1. ~~**Deploy it.**~~ **Done.** The proxy is live; `/tiles/provider` answers from the server
+>    and the nginx `location /tiles/` block is in place. Students' IPs no longer reach CARTO
+>    or any other map host.
+> 2. **The published documents.** The **Cookie and Tracking Notice is corrected** — its map
+>    section now describes the proxy, and the third-party table moves maps from "your browser"
+>    to "our server" (migration 069 repaired the pinned hash at 1.0, which was safe because
+>    nobody had accepted that notice).
+>
+>    **The Privacy Policy still carries the old passage, deliberately.** It is the one drifted
+>    document with an acceptance row, so repairing 1.0 underneath it is a decision about a
+>    consent record rather than a migration — and the pre-launch rule forbids bumping a version
+>    to record a wording fix. The owner's decision on 2026-09-27 was to leave it until launch,
+>    when the version reset makes the correction free. Until then the two published documents
+>    disagree, and the Privacy Policy overstates what is shared. That is a documentation defect
+>    in the safe direction, not an exposure. Tracked as a launch blocker in
+>    `docs/legal/05-LAUNCH-CHECKLIST.md`.
 
 ---
 

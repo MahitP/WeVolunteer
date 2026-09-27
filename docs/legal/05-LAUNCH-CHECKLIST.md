@@ -40,6 +40,7 @@ Nothing below can be completed while any of these is open.
 | Organizer Agreement published **and acceptance recorded in the database** | [policy 9](policies/09-organizer-agreement.md) | ☐ |
 | Every `[[BRACKETED]]` value in every published document resolved | — | ☐ |
 | Attorney sign-off on the seven items in the brief | [brief](00-COMPLIANCE-AND-RISK.md#where-outside-counsel-is-genuinely-required) | ☐ |
+| **Privacy Policy: remove the CARTO passage** — it says map images load in the reader's browser directly from CARTO, which can therefore see their IP address. Untrue since the tile proxy shipped; the Cookie Notice was corrected on 2026-09-27 and this was deliberately left, so the two published documents currently disagree. Deferred because it is the one drifted document with an acceptance row, and repairing 1.0 under an acceptance is a decision about a consent record. At launch the reset makes it free. | [policy 1 §third parties](policies/01-privacy-policy.md) | ☐ |
 
 ### Code changes the documents depend on
 
