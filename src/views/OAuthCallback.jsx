@@ -5,6 +5,7 @@ import { AlertCircle, ShieldCheck } from 'lucide-react';
 import { takePendingReauth, saveReadyGrant, clearReadyGrant } from '../utils/stepUp';
 import BrandMark from '../components/common/BrandMark';
 
+import { OAUTH_CALLBACK_PATH } from '../../server/oauthCallbackPath.js';
 /**
  * Reads the provider out of the signed `state` the server issued.
  *
@@ -152,7 +153,7 @@ export default function OAuthCallback({ onLoginSuccess, onLinked, addToast }) {
          * button re-submits a code that has already been spent — which reads
          * to the user as a random sign-in failure moments after signing in.
          */
-        window.history.replaceState({}, '', '/oauth/callback');
+        window.history.replaceState({}, '', OAUTH_CALLBACK_PATH);
 
         if (data.action === 'require_2fa') {
           navigate('/login', { 

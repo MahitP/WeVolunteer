@@ -38,6 +38,30 @@ describe('clientRoutes.js is plain data', () => {
     expect(src).not.toMatch(/require\s*\(/);
   });
 
+  /**
+   * The one literal this file may not import, checked instead.
+   *
+   * `OAUTH_CALLBACK_PATH` is the single source of truth for the OAuth callback
+   * route — `App.jsx` routes on it and `config.js` refuses to boot a production
+   * server whose `OAUTH_REDIRECT_URI` does not end at it. This file cannot
+   * import it, because the test above forbids importing anything at all, and
+   * that invariant is load-bearing for `errorReporter.js`.
+   *
+   * So the two are kept in step here rather than by a shared reference. A rename
+   * of the route that missed this list would not be a 404 — the SPA fallback
+   * serves the page either way — it would silently downgrade every error report
+   * from the callback page to `unknown`, on the one route whose query string
+   * carries a live authorization code and whose failures therefore matter most.
+   */
+  it('agrees with OAUTH_CALLBACK_PATH, which it is not allowed to import', async () => {
+    const { OAUTH_CALLBACK_PATH } = await import('./oauthCallbackPath.js');
+    const { CLIENT_ROUTE_PATTERNS } = await import('./clientRoutes.js');
+    expect(
+      CLIENT_ROUTE_PATTERNS,
+      'the OAuth callback route was renamed without updating CLIENT_ROUTE_PATTERNS'
+    ).toContain(OAUTH_CALLBACK_PATH);
+  });
+
   it('exports patterns and nothing that could act as a router', () => {
     expect(Array.isArray(CLIENT_ROUTE_PATTERNS)).toBe(true);
     expect(Object.isFrozen(CLIENT_ROUTE_PATTERNS)).toBe(true);

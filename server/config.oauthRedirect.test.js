@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import { OAUTH_CALLBACK_PATH } from './oauthCallbackPath.js';
 
 /**
  * The OAuth redirect-URI guard.
@@ -95,6 +96,67 @@ describe('OAUTH_REDIRECT_URI in production', () => {
     const r = boot({ ...PROD, ...MICROSOFT, OAUTH_REDIRECT_URI: '' });
     expect(r.booted).toBe(false);
     expect(r.stderr).toMatch(/OAUTH_REDIRECT_URI/);
+  });
+
+  /**
+   * The guard that was missing on 2026-09-12.
+   *
+   * Production ran `OAUTH_REDIRECT_URI=https://app.wevolunteers.org/api/auth/google/callback`
+   * for fifteen days. The host is not a loopback address, so every check above
+   * passed and the server booted reporting google enabled. That path has never
+   * been served by anything — the SPA renders the callback at
+   * OAUTH_CALLBACK_PATH — so Google was asked to deliver authorization codes to
+   * a 404 and sign-in was dead for everyone who pressed the button.
+   *
+   * A wrong path fails exactly like a forgotten variable: silently, at the
+   * provider, on a path the application advertises as working.
+   */
+  it('refuses a redirect URI whose path is not the route the SPA serves', () => {
+    const r = boot({ ...PROD, ...GOOGLE, OAUTH_REDIRECT_URI: 'https://volunteers.example.org/api/auth/google/callback' });
+    expect(r.booted).toBe(false);
+    expect(r.stderr).toMatch(/OAUTH_REDIRECT_URI/);
+  });
+
+  it('names the path it expected, so the fix does not need a code read', () => {
+    const r = boot({ ...PROD, ...GOOGLE, OAUTH_REDIRECT_URI: 'https://volunteers.example.org/api/auth/google/callback' });
+    expect(r.stderr).toContain(OAUTH_CALLBACK_PATH);
+  });
+
+  it('refuses the root, which is the other plausible wrong guess', () => {
+    const r = boot({ ...PROD, ...GOOGLE, OAUTH_REDIRECT_URI: 'https://volunteers.example.org/' });
+    expect(r.booted).toBe(false);
+  });
+
+  /* Providers match the redirect URI exactly, so a trailing slash is a
+     different string to Google and fails there too. Refusing it at boot turns
+     a redirect_uri_mismatch nobody can see into a message at the moment the
+     value is set. */
+  it('refuses a trailing slash rather than quietly accepting it', () => {
+    const r = boot({ ...PROD, ...GOOGLE, OAUTH_REDIRECT_URI: `https://volunteers.example.org${OAUTH_CALLBACK_PATH}/` });
+    expect(r.booted).toBe(false);
+  });
+
+  it('applies to Microsoft too — the path is the provider-independent half', () => {
+    const r = boot({ ...PROD, ...MICROSOFT, OAUTH_REDIRECT_URI: 'https://volunteers.example.org/api/auth/microsoft/callback' });
+    expect(r.booted).toBe(false);
+  });
+
+  /* A query string or fragment is not part of the path and providers ignore
+     neither; this asserts the check reads pathname rather than the whole URL,
+     so a legitimate value is not refused for containing a `?`. */
+  it('accepts the correct path even with a query string attached', () => {
+    const r = boot({ ...PROD, ...GOOGLE, OAUTH_REDIRECT_URI: `https://volunteers.example.org${OAUTH_CALLBACK_PATH}?district=westfield` });
+    expect(r.booted).toBe(true);
+  });
+
+  it('does NOT apply outside production, where the dev default is correct', () => {
+    const r = boot({ NODE_ENV: 'development', JWT_SECRET: STRONG, ...GOOGLE, OAUTH_REDIRECT_URI: 'http://localhost:5173/anything' });
+    expect(r.booted).toBe(true);
+  });
+
+  it('does NOT apply when no provider is configured', () => {
+    const r = boot({ ...PROD, OAUTH_REDIRECT_URI: 'https://volunteers.example.org/nonsense' });
+    expect(r.booted).toBe(true);
   });
 
   it('boots with a real https redirect URI', () => {

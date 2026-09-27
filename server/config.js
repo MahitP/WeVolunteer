@@ -7,6 +7,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { OAUTH_CALLBACK_PATH } from './oauthCallbackPath.js';
 
 export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export const DEMO_MODE = process.env.DEMO_MODE === 'true';
@@ -596,6 +597,49 @@ if (IS_PRODUCTION && ANY_OAUTH_PROVIDER_CONFIGURED) {
       + '  OAUTH_REDIRECT_URI=https://volunteers.example.org/oauth/callback\n'
       + 'and register exactly that value with the provider. To run email-only instead,\n'
       + 'unset GOOGLE_CLIENT_ID/SECRET and MICROSOFT_CLIENT_ID/SECRET.'
+    );
+  }
+
+  /**
+   * The host being right does not make the URL right.
+   *
+   * Production ran `https://app.wevolunteers.org/api/auth/google/callback` from
+   * 2026-09-12 to 09-27. It is https, it is this deployment's hostname, and it
+   * passed every check above. Nothing has ever served that path: the callback is
+   * a SPA route, and the code is posted from there to
+   * `/api/oauth/<provider>/callback` afterwards. So Google was handed a 404 to
+   * deliver authorization codes to, the "Continue with Google" button was
+   * advertised to every visitor, and sign-in was dead for fifteen days without a
+   * single error anywhere — the failure happens at the provider, or in a
+   * redirect the server never sees.
+   *
+   * Fatal rather than a warning, unlike the https check below. That one defers
+   * to the provider because the provider is the authority on its own rules. This
+   * one is about OUR routing table, which we are the authority on, and the
+   * answer is knowable at boot with certainty.
+   *
+   * Compared on pathname, so a query string — which providers preserve and which
+   * a district might use to tag a deployment — is not mistaken for a wrong path.
+   * A trailing slash IS refused: providers match the registered URI exactly, so
+   * `/oauth/callback/` fails at Google too, and refusing it here turns an
+   * invisible `redirect_uri_mismatch` into a message at the moment it is set.
+   */
+  let redirectPath = null;
+  try {
+    redirectPath = new URL(OAUTH_REDIRECT_URI).pathname;
+  } catch { /* unreachable: the URL parsed above or we already threw */ }
+
+  if (redirectPath !== OAUTH_CALLBACK_PATH) {
+    throw new Error(
+      'FATAL: OAUTH_REDIRECT_URI does not end at the route that serves the callback.\n'
+      + `  configured: ${OAUTH_REDIRECT_URI}\n`
+      + `  expected path: ${OAUTH_CALLBACK_PATH}\n`
+      + 'Nothing serves the configured path, so the provider would deliver every\n'
+      + 'authorization code to a 404 while the sign-in button kept being advertised.\n'
+      + 'Set it to this deployment\'s origin followed by that path, e.g.\n'
+      + `  OAUTH_REDIRECT_URI=https://volunteers.example.org${OAUTH_CALLBACK_PATH}\n`
+      + 'and register exactly that value with the provider — they match it verbatim,\n'
+      + 'so a trailing slash is a different URI and will be refused there too.'
     );
   }
 

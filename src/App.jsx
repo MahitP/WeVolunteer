@@ -36,6 +36,7 @@ import {
 import { consumePendingRedirect } from './utils/pendingInvite';
 import { ACCOUNT_MENU_ITEMS } from './accountMenu.js';
 import { organizationPath } from './utils/organizationUrl';
+import { OAUTH_CALLBACK_PATH } from '../server/oauthCallbackPath.js';
 import {
   LayoutDashboard, Compass, ShieldCheck, LogOut, CalendarDays,
   X, Bell, UserRound, MessageSquare, MoreHorizontal, Sparkles
@@ -928,7 +929,7 @@ export const ROLE_LABEL = {
  * resolve whether or not a session exists. Handled ahead of the session
  * branches in AppShell — see the comment at the check itself.
  */
-const AUTH_FLOW_PATHS = ['/oauth/callback', '/reset-password'];
+const AUTH_FLOW_PATHS = [OAUTH_CALLBACK_PATH, '/reset-password'];
 
 /**
  * Addressable takeover URLs — `/404`, `/500`, `/offline` and the rest.
@@ -1458,7 +1459,7 @@ function AppShell({ toasts, addToast, removeToast }) {
       <>
         <React.Suspense fallback={<RouteFallback />}>
         <Routes>
-          <Route path="/oauth/callback" element={
+          <Route path={OAUTH_CALLBACK_PATH} element={
             <OAuthCallback
               onLoginSuccess={handleLoginSuccess}
               /* Someone who started this from Settings wants to end up back in
