@@ -23,6 +23,7 @@ Nothing below can be completed while any of these is open.
 | 7 | **Legal entity behind WeVolunteer?** | ToS — you cannot publish one without a legal person to be a party to it | Form an entity before any district signs | ☐ |
 | 8 | **Governing law and venue?** | ToS | New Jersey | ☐ |
 | 9 | **Named privacy contact, and who monitors it?** | Every document | — | ☐ |
+| 5a | **The four `PRIVACY_*` values**, once 5 and 9 are answered: `PRIVACY_CONTACT`, `PRIVACY_RETENTION`, `PRIVACY_UNDER13`, `PRIVACY_OWNER` | The built-in privacy notice — `privacyNoticeComplete()` is false until all four are set, and the page says it is incomplete | Set them as `VITE_*` build variables; the code will not invent them | ☐ |
 | 10 | **Do guardians get accounts, or act through the district?** | Guardian access design | Through the district in A | ☐ |
 
 ---
@@ -44,16 +45,23 @@ Nothing below can be completed while any of these is open.
 
 ### Code changes the documents depend on
 
-| Change | Finding | Done |
-|---|---|---|
-| Age gate at signup; under-13 hard block; `'N/A'` not self-selectable | R-01 | ☐ |
-| Certificate handling at deletion fixed **or** disclosed precisely | R-02 | ☐ |
-| Organizer→student messaging constrained to applicants | R-03 | ☐ |
-| `organizer_agreements` table; `organizer.approve` gated on acceptance | R-04 | ☐ |
-| `PRIVACY_URL` defaults to `/privacy` so consent always renders | UX §1 | ☐ |
-| `PRIVACY_CONTACT`, `PRIVACY_RETENTION`, `PRIVACY_UNDER13`, `PRIVACY_OWNER` set — `privacyNoticeComplete()` returns true | R-05, R-09 | ☐ |
-| Auto Select disclosed at the application form and on decline | R-06 | ☐ |
-| Deletion copy replaces "may be preserved" | R-02 | ☐ |
+> **Audited line by line on 2026-09-27, and this column was badly out of date.**
+> Five of the eight were already built and tested; three were finished that day;
+> one was never a code task. Every ☑ below names the test that proves it, so the
+> claim can be rechecked rather than believed. The lesson for the rest of this
+> file: a checklist that understates completion costs as much as one that
+> overstates it — somebody rebuilds finished work at the worst moment.
+
+| Change | Finding | Evidence | Done |
+|---|---|---|---|
+| Age gate at signup; under-13 hard block; `'N/A'` not self-selectable | R-01 | `server/ageGate.test.js` — 18 cases, incl. "REFUSES an under-13 applicant", "cannot be bypassed by claiming an Adult grade", and the OAuth path. `MINIMUM_AGE = 13` in `accountValidation.js` | ☑ |
+| Certificate handling at deletion fixed **or** disclosed precisely | R-02 | Disclosed, 2026-09-27. Deletion snapshots the volunteer's real name onto certificates and keeps them; the dialog now says so instead of "may be preserved" | ☑ |
+| Organizer→student messaging constrained to applicants | R-03 | `server/messaging.friends.test.js` — "an organizer cannot reach an arbitrary student through the peer endpoint", alongside "organizer → student on their own event still works" | ☑ |
+| `organizer_agreements` table; `organizer.approve` gated on acceptance | R-04 | **Built differently and better.** No separate table: acceptance is a row in `legal_acceptances`, matched on `(slug, version)` so any version bump re-gates. `organizerAgreement.js` withholds 8 capabilities — `event.create`, `applicant.review`, `attendance.*`, `announcement.post` — until accepted. `server/routes.organizerAgreement.test.js`, 19 cases, incl. "sees no applicants at all — the finding this exists for" | ☑ |
+| `PRIVACY_URL` defaults to `/privacy` so consent always renders | UX §1 | `src/config.js` — defaults to `/legal/privacy-policy` (hash-verified, versioned); `/privacy` still redirects there | ☑ |
+| `PRIVACY_CONTACT`, `PRIVACY_RETENTION`, `PRIVACY_UNDER13`, `PRIVACY_OWNER` set — `privacyNoticeComplete()` returns true | R-05, R-09 | **Not a code task — moved to Phase 0.** The code is finished and deliberately refuses to supply these: how long a district keeps student records, who a family contacts, and what consent applies below 13 are decisions a district is accountable for, and a plausible default would manufacture the appearance of a reviewed policy. They are empty, the page says loudly that it is incomplete, and `privacyNoticeComplete()` stays false until a human fills them in. **Blocked on Phase 0 decisions 5 and 9.** | ☐ |
+| Auto Select disclosed at the application form and on decline | R-06 | Apply surface: `EventDetailsExperience.jsx`. Decision surface added 2026-09-27 — acceptance and waitlisting from the draw now say a machine decided. **"On decline" deliberately not done:** Auto Select never rejects, it waitlists, because "the organizer did not reject them"; naming it on a decline would blame a machine for a human refusal. `server/autoSelectDisclosure.test.js` pins both halves | ☑ |
+| Deletion copy replaces "may be preserved" | R-02 | `DeleteAccountModal.jsx` — now states that certificates keep your name and nothing else does, matching what the Data Deletion Policy already said | ☑ |
 
 ### Operational
 
