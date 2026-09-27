@@ -944,6 +944,38 @@ The code now fails closed on this. Understand that before you configure it:
 | Client credentials set **and** `OAUTH_REDIRECT_URI` is `http://` (non-localhost) | Boots, with a loud warning. Both providers reject non-HTTPS redirect URIs, so sign-in fails at the provider. |
 | `OAUTH_ALLOW_MOCK=true` in production | **FATAL — refuses to boot.** |
 
+Since 2026-09-27 there is a fourth fatal case, and it is the one that actually
+bit: **a redirect URI whose path is not the route that serves the callback.**
+Production ran `https://app.wevolunteers.org/api/auth/google/callback` for
+fifteen days. It is https, it is the right host, and every check above passed
+it — but nothing has ever served that path. Google was handed a 404 to deliver
+authorization codes to while the sign-in button was advertised to every
+visitor. The path is now one exported constant (`server/oauthCallbackPath.js`)
+that the SPA routes on and `config.js` refuses to boot without.
+
+### Two OAuth clients, not one
+
+The production client should carry exactly one redirect URI — this deployment's
+— and **not** `http://localhost:5173/oauth/callback`.
+
+WeVolunteer shared a single client between development and production until
+2026-09-27, which is why localhost was registered on the production client. The
+loopback guard above makes the consequence unreachable, but that is a defence,
+not an absence: with localhost registered, anything that put a loopback value
+into `OAUTH_REDIRECT_URI` would have the provider deliver a live authorization
+code to the user's own machine over plain HTTP rather than refusing.
+
+| | Redirect URIs | Credentials live in |
+|---|---|---|
+| Production client | `https://<app host>/oauth/callback` | `/etc/wevolunteer/wevolunteer.env` |
+| Development client | `http://localhost:5173/oauth/callback` | the developer's own `.env`, never deployed |
+
+Google Cloud console → APIs & Services → Credentials → Create Credentials →
+OAuth client ID → Web application. Create the development client first, put its
+id and secret in the developer `.env`, confirm local sign-in still works, and
+only then remove the localhost URI from the production client. In that order
+nothing is broken at any point.
+
 That last one deserves emphasis. Both providers carry a test transport that takes
 the identity straight from the `code` parameter, skipping the real exchange. It is
 opt-in and impossible to reach in production, and it must stay that way — with it
