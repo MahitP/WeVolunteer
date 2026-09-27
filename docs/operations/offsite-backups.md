@@ -452,15 +452,28 @@ how many times the nightly job logged OK.
   with a README naming which certificate each one matches and which archives it
   opens. Both are on one disk, so the password manager copy is still the one
   that survives losing the laptop.
-- **The BACKUP heartbeat is live.** A heartbeat had been created in Better Stack
-  (period 1 day, grace 2 h, email alerting) and never written into
-  `/etc/wevolunteer/heartbeats.env`, so it sat `down` and alerted on nothing.
-  Now configured; a run flipped it to `up`. The failure path was already wired —
-  `OnFailure=` reaches the template, which maps the unit to `BACKUP` and reports
-  `fail`.
+- **The BACKUP heartbeat is live**, and the alarm had been ringing the whole
+  time. The heartbeat was created in Better Stack on 2026-09-14 (period 1 day,
+  grace 2 h, email) and never written into `/etc/wevolunteer/heartbeats.env`.
+  It did exactly what a dead man's switch is for: `Missed heartbeat`
+  2026-09-15 → 09-20, a manual `fail`/`ok` test on 09-20, then `Missed
+  heartbeat` 2026-09-21 19:40 held open for **six days**, resolved only by the
+  first run that could finally report. Now configured; the failure path was
+  already correct — `OnFailure=` reaches the template, which maps the unit to
+  `BACKUP` and reports `fail`, verified by firing that unit on 2026-09-27.
 
-This is what the three weeks of silently useless backups actually needed: not a
-better script, but a key somebody could find and an alarm that could ring.
+**The correction worth keeping.** The first version of this entry said the
+heartbeat "sat `down` and alerted on nothing". That was wrong, and wrong in the
+convenient direction: it blamed an absent alarm for a gap that an alarm had in
+fact reported, twice, by email, for eleven of the previous thirteen days. The
+monitoring was the one part of this system that worked. What failed was that its
+output — a `Missed heartbeat` incident sitting open — was never connected to its
+cause, which was three lines of missing configuration on the host.
+
+So the lesson is not "add monitoring". It is that an incident nobody closes is
+indistinguishable from an incident nobody raised, and the backups were unverified
+for the same reason either way. Check for open incidents before concluding a job
+is unmonitored; the answer may be that it is monitored and shouting.
 
 ---
 
