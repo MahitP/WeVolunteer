@@ -32,14 +32,20 @@ Nothing below can be completed while any of these is open.
 
 ### Legal documents
 
-| Item | Ref | Done |
-|---|---|---|
-| Privacy Policy finalised, all `[[BRACKETS]]` filled | [policy 1](policies/01-privacy-policy.md) | ☐ |
-| **Terms of Service drafted by an attorney** — not merely reviewed | [policy 2](policies/02-terms-of-service.md) | ☐ |
-| Data Deletion Policy matches actual behaviour | [policy 4](policies/04-data-deletion-policy.md) | ☐ |
-| Youth Safety Guidelines published | [policy 8](policies/08-youth-safety-guidelines.md) | ☐ |
-| Organizer Agreement published **and acceptance recorded in the database** | [policy 9](policies/09-organizer-agreement.md) | ☐ |
-| Every `[[BRACKETED]]` value in every published document resolved | — | ☐ |
+> **Audited 2026-09-27**, the same way the code column was. Four of these were
+> already true. The two that look like placeholder checks were false alarms
+> resolved by reading context — both surviving `[[…]]` strings are historical
+> notes ABOVE the `## Draft` marker, describing markers that were removed, and a
+> reader never sees them. What is left is the attorney work and one deferral.
+
+| Item | Ref | Evidence | Done |
+|---|---|---|---|
+| Privacy Policy finalised, all `[[BRACKETS]]` filled | [policy 1](policies/01-privacy-policy.md) | Zero unresolved placeholders in any published body across all 13 documents | ☑ |
+| **Terms of Service drafted by an attorney** — not merely reviewed | [policy 2](policies/02-terms-of-service.md) | Not verifiable from the repository, and not an engineering task | ☐ |
+| Data Deletion Policy matches actual behaviour | [policy 4](policies/04-data-deletion-policy.md) | Every concrete claim checked against code: messages 3y, audit logs 1y, anonymised shells 3y, applications 3y after the EVENT (`retentionWorker.js` `RETENTION`), hours and certificates indefinite (`PRESERVED_TABLES`), exports 7d (`cleanupExpiredExports`), and the certificate name snapshot. All match | ☑ |
+| Youth Safety Guidelines published | [policy 8](policies/08-youth-safety-guidelines.md) | `GET /api/legal/documents/youth-safety-guidelines` → 200, 12,738 bytes, unauthenticated | ☑ |
+| Organizer Agreement published **and acceptance recorded in the database** | [policy 9](policies/09-organizer-agreement.md) | Published: 200, 8,764 bytes. Acceptance: the mechanism is built and tested (19 cases) and writes to `legal_acceptances`. **Zero rows today because production has no organizer accounts** — 2 students, 2 super_admins. Not a gap; an empty set. It becomes true the first time an organizer onboards, and capabilities stay withheld until then | ☑ |
+| Every `[[BRACKETED]]` value in every published document resolved | — | Two `[[…]]` strings remain, both in explanatory notes above the `## Draft` marker in policies 4 and 6, describing markers already removed. Not published, not hashed, not seen by a reader | ☑ |
 | Attorney sign-off on the seven items in the brief | [brief](00-COMPLIANCE-AND-RISK.md#where-outside-counsel-is-genuinely-required) | ☐ |
 | **Privacy Policy: remove the CARTO passage** — it says map images load in the reader's browser directly from CARTO, which can therefore see their IP address. Untrue since the tile proxy shipped; the Cookie Notice was corrected on 2026-09-27 and this was deliberately left, so the two published documents currently disagree. Deferred because it is the one drifted document with an acceptance row, and repairing 1.0 under an acceptance is a decision about a consent record. At launch the reset makes it free. | [policy 1 §third parties](policies/01-privacy-policy.md) | ☐ |
 
@@ -67,14 +73,28 @@ Nothing below can be completed while any of these is open.
 
 | Item | Ref | Done |
 |---|---|---|
-| Privacy contact inbox exists, monitored, with a named owner | DECISION 9 | ☐ |
-| Safety inbox exists, monitored, with a stated response window | policy 8 | ☐ |
-| **Breach response runbook written**, including the NJ State Police-first step | R-07 | ☐ |
-| Mandated-reporter procedure written and every admin briefed | R-03 | ☐ |
-| Admin roster documented; every admin has accepted policy 10 | R-11 | ☐ |
-| Report triage: who looks, how fast, what gets escalated | R-10 | ☐ |
+> **Audited 2026-09-27.** This column is mostly genuine — unlike the code column,
+> little of it turned out to be secretly finished. Three items have no document
+> at all, one has a document that has drifted out of date, and two are half true.
+> Two findings below are new and are not on any list.
+
+| Item | Ref | Evidence | Done |
+|---|---|---|---|
+| Privacy contact inbox exists, monitored, with a named owner | DECISION 9 | `privacy@wevolunteers.org` is defined in `emailIdentity.js` and named 15 times across the published policies, and the domain has Cloudflare MX records so mail is accepted. **Monitored, by a named person — unverified and not checkable from here.** That half is DECISION 9 | ☐ |
+| Safety inbox exists, monitored, with a stated response window | policy 8 | `security@wevolunteers.org` exists and policy 8 names it. **No stated window:** the published text says reports are reviewed "as soon as", where the Privacy Policy commits to 10 business days and 45 days. A safety inbox with a vaguer commitment than the privacy one is the wrong way round | ☐ |
+| **Breach response runbook written**, including the NJ State Police-first step | R-07 | **No such document exists.** Searched `docs/operations` and `docs/legal`; the matches are incidental mentions | ☐ |
+| Mandated-reporter procedure written and every admin briefed | R-03 | **No such document exists** | ☐ |
+| Admin roster documented; every admin has accepted policy 10 | R-11 | `docs/operations/administrator-register.md` **exists but has drifted.** It records one account and says "Sole administrator at launch"; production holds **two** `super_admin` accounts. **Zero acceptances of policy 10.** The register is named in a published policy that tells admins "if you are not on it, you should not have the access", so the drift is a broken commitment rather than untidiness | ☐ |
+| Report triage: who looks, how fast, what gets escalated | R-10 | Policy 8 tells READERS what happens and that harm is escalated immediately. There is no internal procedure naming who looks, within what time, and what escalates. `docs/operations/error-triage.md` is engineering errors — a different thing | ☐ |
 | **Posture A:** DPA signed before any student data is loaded | — | ☐ |
 | **Posture A:** listed on the district's vendor register | — | ☐ |
+
+#### Two findings from the 2026-09-27 audit that were on no list
+
+| Finding | Detail | Done |
+|---|---|---|
+| **A dormant `super_admin` nobody registered** | `owner_wevolunteerplatfor`, seeded alongside `mahit` on 2026-09-08, holds full platform privileges, has **never signed in**, has no second factor of any kind, and is not in the administrator register. It is not an open door — `REQUIRE_ADMIN_2FA` defaults to ENABLED when unset, which is how production runs, so it cannot sign in without enrolling one. But a privileged account nobody has listed or used is exactly what the register exists to surface. Decide whether it is needed; remove it or register it | ☐ |
+| **Neither administrator has accepted policy 10** | The Admin Responsibilities Policy is published and both `super_admin` accounts are bound by it. `legal_acceptances` holds zero rows for it. Unlike the Organizer Agreement, nothing withholds capabilities until an admin accepts — so this is a commitment made in a published document and not enforced anywhere | ☐ |
 
 ---
 
