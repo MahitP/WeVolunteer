@@ -490,9 +490,15 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
         `).all(...selectedIds)
       : [];
 
+    /* `decidedBy` is what lets the notice say a machine chose. Both outcomes
+       carry it, because both are the draw's decision and a volunteer told only
+       the result cannot tell an organizer's judgement from an algorithm's.
+       The human paths in applicationRoutes.js deliberately pass nothing, so
+       their notices stay silent about Auto Select — which is correct there,
+       and is why this is a payload flag rather than a template change. */
     await notificationService.dispatchMany(
       'APPLICATION_ACCEPTED',
-      { eventId: event.id, eventTitle: event.title },
+      { eventId: event.id, eventTitle: event.title, decidedBy: 'auto-select' },
       acceptedRows.map(r => r.user_id),
     );
 
@@ -535,7 +541,7 @@ export async function applyRun(db, eventId, run, { executedBy = 'organizer' } = 
       null,
       [...rankByUser.keys()],
       null,
-      (userId) => ({ eventId: event.id, eventTitle: event.title, waitlistRank: rankByUser.get(userId) }),
+      (userId) => ({ eventId: event.id, eventTitle: event.title, waitlistRank: rankByUser.get(userId), decidedBy: 'auto-select' }),
     );
 
     // 4. Compute selection summary

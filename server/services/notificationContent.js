@@ -134,6 +134,33 @@ export const MANDATORY_NOTICE_EVENTS = new Set([
 
 export const isMandatoryNotice = (event) => MANDATORY_NOTICE_EVENTS.has(event);
 
+/**
+ * The sentence a volunteer is owed when a machine decided, and not otherwise.
+ *
+ * R-06: Auto Select is disclosed where somebody APPLIES ("Applications stay open
+ * until the deadline, then Auto Select helps assign spots fairly" —
+ * EventDetailsExperience), and was disclosed nowhere at the moment it actually
+ * decided about them. A volunteer read "You are on the waitlist" and had no way
+ * to tell an organizer's judgement from an automated draw.
+ *
+ * ── Why this is keyed on a payload flag rather than the template ──
+ *
+ * Both outcomes are reachable two ways. `applicationRoutes.js` is an organizer
+ * choosing; `autoSelect.js` is the draw. Only the draw sets `decidedBy`, so a
+ * human decision never claims to be automated and an automated one never hides.
+ *
+ * ── Why the decline notice is NOT covered ──
+ *
+ * The finding says "on decline", and taken literally that would have been wrong.
+ * Auto Select never rejects: unselected applicants are WAITLISTED, deliberately,
+ * because "the organizer did not reject them" (autoSelect.js). Every
+ * APPLICATION_REJECTED is a person's decision, so naming Auto Select there would
+ * attribute a human refusal to a machine — the opposite of the disclosure this
+ * exists to make.
+ */
+export const AUTO_SELECT_NOTE =
+  ' This was decided automatically by Auto Select when the deadline passed, not by an organizer.';
+
 export const EVENT_CATEGORIES = {
   // APPLICATION
   APPLICATION_SUBMITTED: 'APPLICATION',
@@ -307,7 +334,8 @@ export function getInAppContent(event, payload) {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'You were accepted!',
-        body: `You are officially scheduled for ${payload.eventTitle}.`,
+        body: `You are officially scheduled for ${payload.eventTitle}.`
+          + (payload.decidedBy === 'auto-select' ? AUTO_SELECT_NOTE : ''),
         link: `event:${payload.eventId}`
       };
     case 'APPLICATION_REJECTED':
@@ -342,12 +370,13 @@ export function getInAppContent(event, payload) {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'You are on the waitlist',
-        body: payload.waitlistRank
+        body: (payload.waitlistRank
           // Auto Select already computes this rank and used to discard it.
           ? `You are number ${payload.waitlistRank} on the waitlist for ${payload.eventTitle}. `
             + 'A spot may become available if another volunteer withdraws.'
           : `You are on the waitlist for ${payload.eventTitle}. `
-            + 'A spot may become available if another volunteer withdraws.',
+            + 'A spot may become available if another volunteer withdraws.')
+          + (payload.decidedBy === 'auto-select' ? AUTO_SELECT_NOTE : ''),
         link: `event:${payload.eventId}`
       };
     case 'WAITLIST_PROMOTED':
