@@ -411,6 +411,34 @@ anywhere — the backups look perfect right up until the first restore. The gate
 a restore performed with the copy you intend to keep, from a machine that is not
 the host.
 
+### And then it happened again, three days later
+
+The pair from 2026-09-24 (`9E:47:81:…`) was generated into a temporary working
+directory and never moved anywhere durable. That directory was cleaned. On
+2026-09-27 the private half was gone — from the same machine, for the same
+reason, three days after the rule above was written into this file.
+
+Four archives are encrypted to it and cannot be opened: `20260924T232114Z`,
+`20260925T030420Z`, `20260926T030409Z` and `20260927T030312Z`. They are
+pre-launch — 4 accounts, 0 credited hours, 0 certificates, 0 ledger rows — and
+are left to age out of the 14-day window rather than deleted. Archives up to
+`20260924T144416Z` are unaffected: their key is still in `/root/backup-keys/`.
+
+Replaced with `50:35:41:A5:D0:C1:77:5A:42:E2:4D:A7:22:62:ED:20:FC:2A:97:77`,
+valid to 2036-09-24, **private half at `~/keys/backup-key.pem` on the operator
+machine, not on the host and not in a temp directory.**
+`wevolunteer-20260927T172224Z.dump.enc` decrypted with it and restored into an
+isolated scratch database: counts matching the manifest, migration 68.
+
+**What the first version of this section got wrong:** it treated "the key is
+durable" as something you decide, when it is something you verify. A path under
+`/tmp`, a scratch directory, a shell that is still open, a file you mean to move
+later — each of these is a copy that can be gone before the next backup runs,
+with nothing anywhere reporting it. The check is not "did I put it somewhere
+sensible", it is `test -f ~/keys/backup-key.pem` *after* a reboot, and a restore
+that used that exact path. Until then, treat the backups as unverified no matter
+how many times the nightly job logged OK.
+
 ---
 
 ## 7. Recovery, after losing the host entirely
