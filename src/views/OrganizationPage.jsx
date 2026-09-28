@@ -398,6 +398,7 @@ export default function OrganizationPage({ addToast, currentUser }) {
           * default is right, an empty state sits under a card's own `h2`.
           */}
         <EmptyState
+          notFound
           headingLevel={2}
           icon={Building2}
           title="No organization here"

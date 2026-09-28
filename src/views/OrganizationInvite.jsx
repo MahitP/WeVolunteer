@@ -133,6 +133,10 @@ export default function OrganizationInvite() {
         <PublicOrganizationTopbar sub="Invitation" />
         <main className="invite-main">
           <EmptyState
+            /* Only the `invalid` arm — a link that resolves to nothing. The
+               other arm is a failure to reach the server, which is a fault at
+               our end rather than a wrong address. */
+            notFound={invalid}
             /**
               * `headingLevel={1}`, because on this page the empty state IS the
               * page.

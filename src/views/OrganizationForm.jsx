@@ -191,6 +191,7 @@ export default function OrganizationForm({ addToast }) {
     return (
       <div className="page">
         <EmptyState
+          notFound={loadError === 'not_found'}
           icon={Building2}
           title={loadError === 'forbidden' ? 'You do not manage this organization' : 'Organization unavailable'}
           message={loadError === 'forbidden'

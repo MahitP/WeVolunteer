@@ -99,7 +99,7 @@ export default function PublicCertificates({ currentUser }) {
       )}
 
       {state.status === 'missing' && (
-        <EmptyState title="No such profile" message="We could not find that volunteer." />
+        <EmptyState notFound title="No such profile" message="We could not find that volunteer." />
       )}
 
       {state.status === 'error' && (

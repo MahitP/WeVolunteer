@@ -37,6 +37,7 @@ export default function BadgesPage({ currentUser }) {
   const [badges, setBadges] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +45,7 @@ export default function BadgesPage({ currentUser }) {
     const load = async () => {
       setLoading(true);
       setError('');
+      setMissing(false);
       try {
         /* Resolved through the public profile, which is also what decides
            whether this reader may see the person at all. Reading badges from an
@@ -59,15 +61,37 @@ export default function BadgesPage({ currentUser }) {
         if (cancelled) return;
         setSubject(person.profile ?? person);
         setBadges(res.badges || []);
-      } catch {
-        if (!cancelled) setError('These achievements could not be loaded.');
+      } catch (err) {
+        /**
+         * A username nobody has is not a failure to load.
+         *
+         * This used to catch everything into one string — "These achievements
+         * could not be loaded" — so `/users/nobody/badges` read as though the
+         * page had broken on the way to a real person's badges, and the reader's
+         * sensible response was to try again. Both sibling pages,
+         * `PublicCertificates` and `PublicServiceHistory`, already separated the
+         * two and this one did not, so the same wrong address produced three
+         * different answers depending on which tab you were on.
+         *
+         * Same test as theirs, deliberately: the status when the API gives one,
+         * and the message when the throw came from the `subjectId` check above
+         * rather than from a response.
+         */
+        if (cancelled) return;
+        if (err?.status === 404 || /not found|no such/i.test(err?.message || '')) {
+          setMissing(true);
+        } else {
+          setError('These achievements could not be loaded.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
     if (isSelf ? currentUser?.id : username) load();
-    else { setLoading(false); setError('These achievements could not be loaded.'); }
+    /* No username in the URL and no signed-in account to fall back on: there is
+       nobody to show, which is the missing case rather than a load failure. */
+    else { setLoading(false); setMissing(true); }
 
     return () => { cancelled = true; };
   }, [username, isSelf, currentUser?.id, currentUser?.name, currentUser?.username]);
@@ -88,7 +112,7 @@ export default function BadgesPage({ currentUser }) {
           <ArrowLeft size={14} aria-hidden="true" /> Back to profile
         </Link>
         <h2 className="page-title">{whose}</h2>
-        {!loading && !error && ordered.length > 0 && (
+        {!loading && !error && !missing && ordered.length > 0 && (
           <p className="dim small">
             {ordered.length} {ordered.length === 1 ? 'badge' : 'badges'}, newest kind first.
           </p>
@@ -99,7 +123,17 @@ export default function BadgesPage({ currentUser }) {
 
       {!loading && error && <p className="small dim" role="status">{error}</p>}
 
-      {!loading && !error && ordered.length === 0 && (
+      {/* Before the empty state, not after it. "No badges yet" about somebody
+          who does not exist is a confident answer to a question nobody asked,
+          and it is what this page said for every unknown username. The wording
+          matches PublicCertificates and PublicServiceHistory exactly, because a
+          reader switching tabs on the same bad link should not have to work out
+          whether three different sentences mean the same thing. */}
+      {!loading && !error && missing && (
+        <EmptyState notFound title="No such profile" message="We could not find that volunteer." />
+      )}
+
+      {!loading && !error && !missing && ordered.length === 0 && (
         <EmptyState
           title="No badges yet"
           message={isSelf
@@ -108,7 +142,7 @@ export default function BadgesPage({ currentUser }) {
         />
       )}
 
-      {!loading && !error && ordered.length > 0 && (
+      {!loading && !error && !missing && ordered.length > 0 && (
         <section className="card card-pad">
           <ul className="badge-list">
             {ordered.map(b => (

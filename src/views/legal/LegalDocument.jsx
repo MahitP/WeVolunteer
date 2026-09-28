@@ -143,7 +143,12 @@ export default function LegalDocument() {
       </Link>
 
       {failure === 'missing' && (
-        <div className="stack-sm">
+        /* `data-error-kind="404"`, the marker `ErrorExperience` sets and the
+           accessibility sweep reads. Without it, `/legal/:slug` with a slug
+           that is not in the registry returns 200, lands on the requested
+           path, renders this panel — and the sweep measured it and filed the
+           numbers under the real route. See `EmptyState`'s `notFound` note. */
+        <div className="stack-sm" data-error-kind="404">
           <h1 id="policy-title">No such document</h1>
           <p>
             There is no policy at this address. The{' '}

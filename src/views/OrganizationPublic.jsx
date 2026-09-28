@@ -178,6 +178,11 @@ export default function OrganizationPublic() {
         <PublicOrganizationTopbar sub="Organizations" />
         <main className="invite-main">
           <EmptyState
+            /* Only the `missing` arm. The other two are a connection fault and
+               the rate-limit ceiling — our end, not a wrong address — and
+               marking them would tell the sweep to discard a page that
+               rendered. */
+            notFound={missing}
             /* `headingLevel={1}`: on this page the empty state IS the page.
                Everywhere else it sits under a section's `h2` and an `h3` is
                right, which is why that is the default — and why the invitation

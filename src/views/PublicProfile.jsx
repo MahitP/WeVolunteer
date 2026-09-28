@@ -115,6 +115,7 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
     return (
       <div className="page">
         <EmptyState
+          notFound
           icon={UserX}
           title="No profile here"
           message={id
