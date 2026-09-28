@@ -3291,6 +3291,24 @@ a.list-row:hover { text-decoration: none; }
   padding: 0.1875rem 0.4375rem;
   font-size: 0.75rem;
   max-width: 210px;
+  /**
+   * 44px, for the report rather than for the control.
+   *
+   * This bar exists only under DEMO_MODE and production refuses to boot with
+   * it, so nobody it ships to can miss this target. It appeared on every
+   * signed-in route in a11y/sweep.geometry.spec.js's 44px list all the same —
+   * twenty-two of the twenty-three entries were this one select, and the
+   * twenty-third is an inline link in a sentence, which SC 2.5.8 exempts.
+   *
+   * A report that is permanently twenty-two lines long is a report nobody
+   * reads, and the next control that genuinely falls below the floor would
+   * have arrived as a twenty-fourth line in a list everybody had learned to
+   * skip. Clearing it is what makes the list mean something.
+   *
+   * It is also the control the person demonstrating this platform reaches for
+   * most, frequently on a laptop trackpad in front of an audience.
+   */
+  min-height: 44px;
 }
 .demobar select option { color: var(--ink); }
 .demobar button {
