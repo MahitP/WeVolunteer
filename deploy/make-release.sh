@@ -165,9 +165,27 @@ if [ -n "$TO" ]; then
   [ "$REMOTE_SHA" = "$SHA" ] || die "shipped, but $DEST/.deployed-sha reads '$REMOTE_SHA', expected '$SHA'"
   ok "$DEST/.deployed-sha = $REMOTE_SHA"
   echo
-  echo "   Next, on the host:"
-  echo "     sudo $DEST/deploy/provision.sh app"
-  echo "     sudo $DEST/deploy/provision.sh verify"
+  if [ "$DEST" = "/srv/wevolunteer" ]; then
+    # Shipped straight over the live tree: there is nothing to stage, so the
+    # service is down for the whole build. Correct for a first provision.
+    echo "   Next, on the host:"
+    echo "     sudo $DEST/deploy/provision.sh app"
+    echo "     sudo $DEST/deploy/provision.sh verify"
+  else
+    # Staged. Build it where it stands, THEN swap — the outage is the restart
+    # rather than the whole npm ci and vite build.
+    #
+    # WEV_APP_DIR is passed explicitly even though provision.sh now defaults to
+    # its own release. Belt and braces, because getting this wrong is what put a
+    # build into the live tree on 2026-09-28 while the staged tree stayed empty.
+    echo "   Next, on the host — build the staged release, then swap it in:"
+    echo "     sudo WEV_APP_DIR=$DEST $DEST/deploy/provision.sh build"
+    echo "     sudo /srv/wevolunteer/deploy/provision.sh swap"
+    echo "     sudo /srv/wevolunteer/deploy/provision.sh verify"
+    echo
+    echo "   If it goes wrong:"
+    echo "     sudo /srv/wevolunteer/deploy/provision.sh rollback"
+  fi
 else
   OUT=${OUT:-"wevolunteer-$SHA.tar.gz"}
   gzip -nc "$TAR" > "$OUT"

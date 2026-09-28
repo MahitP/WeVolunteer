@@ -63,11 +63,29 @@
 set -euo pipefail
 
 APP_USER=wev
-# WEV_APP_DIR exists so the provisioning logic can be exercised against fixture
-# directories in tests. It is namespaced deliberately: a bare APP_DIR is a common
-# enough variable that an operator could have one exported for something else and
-# silently provision the wrong directory.
-APP_DIR=${WEV_APP_DIR:-/srv/wevolunteer}
+
+# ── Which directory does this operate on? ──
+#
+# The release THIS SCRIPT IS PART OF, because that is what the command line
+# says. `sudo /srv/wevolunteer-next/deploy/provision.sh build` reads as "build
+# the thing at /srv/wevolunteer-next", and it used to build /srv/wevolunteer
+# instead — a hardcoded default that silently ignored the path the operator
+# typed.
+#
+# That is not hypothetical. On 2026-09-28 a staged release was shipped to
+# /srv/wevolunteer-next and built with exactly that command; the build landed in
+# the LIVE tree, and the staging tree was left with no dist/ and no
+# node_modules/. Swapping it in on the assumption it was built would have put an
+# unbootable tree into production. It was caught by checking before the swap,
+# which is not a control — it is luck with a good habit attached.
+#
+# WEV_APP_DIR still overrides, and the tests rely on that to point the logic at
+# fixture directories. It is namespaced deliberately: a bare APP_DIR is common
+# enough that an operator could have one exported for something else.
+SELF_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+APP_DIR=${WEV_APP_DIR:-$(dirname -- "$SELF_DIR")}
+LIVE_DIR=/srv/wevolunteer
+STAGE_DIR=${WEV_STAGE_DIR:-/srv/wevolunteer-next}
 STATE_DIR=/var/lib/wevolunteer
 BACKUP_DIR=/var/backups/wevolunteer
 ENV_DIR=/etc/wevolunteer
@@ -388,7 +406,19 @@ wait_for_ready() {
   return 1
 }
 
-cmd_app() {
+# ─────────────────────────────────────────────────────────────────────────────
+# build — produce a runnable tree at APP_DIR. Touches nothing outside it.
+#
+# Split out of `app` so a release can be built BEFORE it goes live. `app` used
+# to build in place, which meant the service was down for the whole npm ci and
+# vite build — about two minutes — when the only step that genuinely requires
+# downtime is the restart. Build the staged tree, then swap, and the outage is
+# the restart alone.
+#
+# Nothing here reads $ENV_FILE, so the output does not depend on which directory
+# it was produced in. That is what makes building somewhere else and moving it
+# afterwards safe rather than merely convenient.
+cmd_build() {
   need_root
   app_dir_has_source \
     || die "no application source at $APP_DIR (need package.json and package-lock.json).
@@ -424,6 +454,26 @@ cmd_app() {
   # And nginx must be able to reach uploads/ (see cmd_host). Re-asserted here so a
   # host provisioned before that fix is corrected by the next release.
   chmod o+x "$STATE_DIR" "$STATE_DIR/uploads"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# activate — install units, restart the service, reload nginx.
+#
+# Always operates on the LIVE tree. Activating a staged directory would point
+# systemd at a path that is about to be renamed, so this deliberately ignores
+# APP_DIR: `swap` moves the tree into place first, and this is what makes it
+# run.
+cmd_activate() {
+  need_root
+  APP_DIR="$LIVE_DIR"
+
+  # The guard that would have caught the 2026-09-28 near-miss. A tree with no
+  # dist/ starts, serves no client, and reports itself healthy — the server
+  # answers /health whether or not the front end was ever built.
+  [ -f "$APP_DIR/dist/index.html" ] \
+    || die "no dist/index.html at $APP_DIR — this tree was never built.
+       Run 'build' against it first, or 'app' to do both."
+  [ -f "$ENV_FILE" ] || die "$ENV_FILE missing — run 'host' and fill it in"
 
   log "systemd units"
   install -m 0644 "$APP_DIR/deploy/wevolunteer.service"        /etc/systemd/system/
@@ -478,6 +528,141 @@ cmd_app() {
   nginx -t || die "nginx config rejected — not reloading"
   systemctl reload nginx
   ok "nginx reloaded"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# app — build here, then activate. The original behaviour, unchanged.
+#
+# Correct for a host being provisioned for the first time, and for any occasion
+# where a couple of minutes of downtime does not matter. When it does, use
+# build → swap instead.
+cmd_app() {
+  cmd_build
+  cmd_activate
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# swap — put a built staged release live, keeping the old one for rollback.
+#
+# The outage is the mv plus the restart: both trees are on the same filesystem,
+# so the rename is instant. Compare with `app` on a live host, which is down for
+# the whole npm ci and vite build.
+#
+# It refuses an unbuilt staging tree. That is the whole point: the manual
+# version of this sequence is four commands typed at speed, and the one that
+# goes wrong is moving a tree nobody built.
+cmd_swap() {
+  need_root
+  [ -d "$STAGE_DIR" ] || die "no staged release at $STAGE_DIR — ship one with deploy/make-release.sh --dir $STAGE_DIR"
+  [ -f "$STAGE_DIR/dist/index.html" ] \
+    || die "$STAGE_DIR has no dist/index.html — it was never built.
+       Run: sudo WEV_APP_DIR=$STAGE_DIR $STAGE_DIR/deploy/provision.sh build"
+  [ -d "$STAGE_DIR/node_modules" ] \
+    || die "$STAGE_DIR has no node_modules — it was never built."
+  [ -d "$LIVE_DIR" ] || die "no live release at $LIVE_DIR to replace"
+
+  local new_sha old_sha ts prev
+  new_sha=$(cat "$STAGE_DIR/.deployed-sha" 2>/dev/null || echo unknown)
+  old_sha=$(cat "$LIVE_DIR/.deployed-sha" 2>/dev/null || echo unknown)
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+  prev="$LIVE_DIR-prev-$old_sha-$ts"
+
+  log "Swapping $old_sha -> $new_sha"
+  systemctl stop wevolunteer.service
+  mv "$LIVE_DIR" "$prev"
+  mv "$STAGE_DIR" "$LIVE_DIR"
+  # Written before activate, so a failure during activate still leaves a pointer
+  # home. `rollback` reads this and nothing else.
+  printf '%s\n' "$prev" > /srv/.last-rollback
+  ok "previous release kept at $prev"
+
+  cmd_activate
+  ok "live: $(cat "$LIVE_DIR/.deployed-sha" 2>/dev/null)"
+  echo "   Roll back with: sudo $LIVE_DIR/deploy/provision.sh rollback"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# rollback — put the previous release back.
+#
+# Exists because the moment you need it is the moment you should not be
+# composing mv commands from memory. Reads /srv/.last-rollback, which `swap`
+# writes before it does anything that can fail.
+cmd_rollback() {
+  need_root
+  local prev current ts
+  [ -f /srv/.last-rollback ] || die "no /srv/.last-rollback — nothing recorded to roll back to"
+  prev=$(cat /srv/.last-rollback)
+  [ -d "$prev" ] || die "recorded rollback target $prev does not exist"
+  [ -f "$prev/dist/index.html" ] || die "$prev has no dist/ — it is not bootable, refusing"
+
+  current=$(cat "$LIVE_DIR/.deployed-sha" 2>/dev/null || echo unknown)
+  ts=$(date -u +%Y%m%dT%H%M%SZ)
+
+  log "Rolling back $current -> $(cat "$prev/.deployed-sha" 2>/dev/null || echo unknown)"
+  systemctl stop wevolunteer.service
+  # The failed release is KEPT, not deleted. You will want to look at it, and
+  # deleting the evidence of a bad deploy during the bad deploy is how nobody
+  # ever finds out what happened.
+  mv "$LIVE_DIR" "$LIVE_DIR-failed-$current-$ts"
+  mv "$prev" "$LIVE_DIR"
+  rm -f /srv/.last-rollback
+  ok "the release that was rolled back is kept at $LIVE_DIR-failed-$current-$ts"
+
+  cmd_activate
+  ok "live: $(cat "$LIVE_DIR/.deployed-sha" 2>/dev/null)"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# prune-releases — keep the most recent few, delete the rest.
+#
+# Retained releases are the rollback path, so this keeps several rather than
+# one: the release you need may not be the one you just replaced. Default 3,
+# override with WEV_KEEP_RELEASES.
+#
+# It will not delete the target /srv/.last-rollback names, whatever its age —
+# that is the one directory whose whole job is to still be there.
+cmd_prune_releases() {
+  need_root
+  local keep protected
+  keep=${WEV_KEEP_RELEASES:-3}
+  protected=$(cat /srv/.last-rollback 2>/dev/null || echo "")
+
+  # Globbed into an array and sorted in one pass, deliberately WITHOUT a
+  # `| head` to take the oldest. Under `set -o pipefail` an early-exiting reader
+  # SIGPIPEs its producer, 141 becomes the pipeline's status and `set -e` turns a
+  # successful check into a fatal error. That bug has cost this project twice —
+  # it deleted good backups once and killed `audit` at exit 141 on production —
+  # and server/deploy.provisioning.test.js forbids the construct outright. `sort`
+  # consumes all of its input, so it is safe; the slicing is done in bash.
+  local found=() dirs=()
+  shopt -s nullglob
+  found=("$LIVE_DIR"-prev-* "$LIVE_DIR"-failed-*)
+  shopt -u nullglob
+
+  local total=${#found[@]}
+  log "Retained releases: $total (keeping $keep)"
+  if [ "$total" -le "$keep" ]; then
+    ok "nothing to prune"
+    return 0
+  fi
+
+  # Field 4 is the UTC timestamp: /srv/wevolunteer-prev-<sha>-<ts>. Sorting on
+  # the whole name would order by commit sha, which is not chronological.
+  mapfile -t dirs < <(printf '%s\n' "${found[@]}" | sort -t- -k4,4)
+
+  local i removed=0
+  for (( i = 0; i < total - keep; i++ )); do
+    local d=${dirs[$i]}
+    if [ "$d" = "$protected" ]; then
+      ok "kept $(basename "$d") — it is the current rollback target"
+      continue
+    fi
+    rm -rf "$d"
+    ok "removed $(basename "$d")"
+    removed=$(( removed + 1 ))
+  done
+  ok "removed $removed, kept $(( total - removed ))"
+  ok "disk free on /srv: $(df -h /srv | awk 'NR==2{print $4}')"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -775,9 +960,23 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     packages)   cmd_packages ;;
     host)       cmd_host ;;
     app)        cmd_app ;;
+    build)      cmd_build ;;
+    activate)   cmd_activate ;;
+    swap)       cmd_swap ;;
+    rollback)   cmd_rollback ;;
+    prune-releases) cmd_prune_releases ;;
     verify)     cmd_verify ;;
     harden-ssh) cmd_harden_ssh ;;
     cloudflare-firewall) cmd_cloudflare_firewall ;;
-    *) die "usage: $0 {audit|packages|host|app|verify|harden-ssh|cloudflare-firewall}" ;;
+    *) die "usage: $0 {audit|packages|host|app|build|activate|swap|rollback|prune-releases|verify|harden-ssh|cloudflare-firewall}
+
+  Zero-downtime release (outage is the restart, not the build):
+    deploy/make-release.sh --to <host> --dir /srv/wevolunteer-next
+    sudo WEV_APP_DIR=/srv/wevolunteer-next /srv/wevolunteer-next/deploy/provision.sh build
+    sudo /srv/wevolunteer/deploy/provision.sh swap
+    sudo /srv/wevolunteer/deploy/provision.sh verify
+
+  If it goes wrong:
+    sudo /srv/wevolunteer/deploy/provision.sh rollback" ;;
   esac
 fi

@@ -304,18 +304,72 @@ application reads git metadata. `/health` takes its version from
 credential that exists only to be stolen.
 
 So a release is an archive of a **committed** tree, stamped with the commit it
-came from:
+came from.
+
+### The normal way — build first, then swap
+
+The outage is the restart, about ten seconds, rather than the whole `npm ci` and
+`vite build`.
 
 ```bash
-./deploy/make-release.sh --to ubuntu@<host> -i ~/path/to/ssh-key
+./deploy/make-release.sh --to ubuntu@<host> --dir /srv/wevolunteer-next -i ~/path/to/ssh-key
 ```
 
 Then on the host:
 
 ```bash
+sudo WEV_APP_DIR=/srv/wevolunteer-next /srv/wevolunteer-next/deploy/provision.sh build
+sudo /srv/wevolunteer/deploy/provision.sh swap
+sudo /srv/wevolunteer/deploy/provision.sh verify
+```
+
+`swap` stops the service, renames the live tree to
+`/srv/wevolunteer-prev-<sha>-<timestamp>`, moves the staged tree into place,
+records the rollback target in `/srv/.last-rollback`, and activates. It refuses a
+staged tree with no `dist/` or no `node_modules/`.
+
+**If it goes wrong:**
+
+```bash
+sudo /srv/wevolunteer/deploy/provision.sh rollback
+```
+
+That puts the previous release back and keeps the failed one at
+`/srv/wevolunteer-failed-<sha>-<timestamp>` — deleting the evidence of a bad
+deploy during the bad deploy is how nobody ever finds out what happened.
+
+### Straight over the live tree
+
+Correct for a first provision, or when a couple of minutes of downtime does not
+matter. `app` is `build` followed by `activate`.
+
+```bash
+./deploy/make-release.sh --to ubuntu@<host> -i ~/path/to/ssh-key
 sudo /srv/wevolunteer/deploy/provision.sh app
 sudo /srv/wevolunteer/deploy/provision.sh verify
 ```
+
+### Housekeeping
+
+Retained releases are the rollback path, so several are kept rather than one —
+the release you need may not be the one you just replaced.
+
+```bash
+sudo /srv/wevolunteer/deploy/provision.sh prune-releases     # keeps 3
+sudo WEV_KEEP_RELEASES=5 /srv/wevolunteer/deploy/provision.sh prune-releases
+```
+
+It will not delete whatever `/srv/.last-rollback` names, whatever its age.
+
+> **Why `build` and `activate` are separate commands.** On 2026-09-28 a staged
+> release was shipped to `/srv/wevolunteer-next` and built with a command naming
+> that path — and `APP_DIR` was hardcoded to `/srv/wevolunteer`, so the build
+> landed in the live tree and the staged tree was left with no `dist/` and no
+> `node_modules/`. Swapping it in would have put an unbootable release into
+> production, and nothing downstream would have said so: the server answers
+> `/health` whether or not a front end was ever built. `APP_DIR` now defaults to
+> the release the script is part of, and `activate` refuses a tree with no
+> `dist/index.html`.
 
 To produce a tarball instead of shipping directly, omit `--to`. To ship a tag
 rather than `HEAD`, pass `--ref v1.2.0`.

@@ -468,17 +468,67 @@ describe('the release path does not reintroduce a credential on the host', () =>
     expect(writes).toBeNull();
   });
 
+  /**
+   * A shell function's body, by name.
+   *
+   * `cmd_app` was split into `cmd_build` and `cmd_activate` on 2026-09-28 so a
+   * release can be built before it goes live — `app` built in place, which held
+   * the service down for the whole npm ci and vite build when only the restart
+   * genuinely needs downtime. The invariants below did not change; they moved,
+   * and a test that reads one fixed function name would have gone quietly green
+   * against a function that no longer contains the thing it is checking.
+   */
+  const fnBody = (src, name) => {
+    const at = src.indexOf(`${name}() {`);
+    expect(at, `${name} not found — has it been renamed?`).toBeGreaterThan(-1);
+    const rest = src.slice(at);
+    return rest.slice(0, rest.indexOf('\n}\n'));
+  };
+
   it('restarts the application after building, instead of enable --now', () => {
     /* `systemctl enable --now` does nothing to a unit that is already running,
        so on a live host the rebuilt tree was never loaded and .deployed-sha
        described code that was not running. Observed on production 2026-09-13. */
-    const app = code(provision).slice(code(provision).indexOf('cmd_app() {'));
-    const body = app.slice(0, app.indexOf('\n}\n'));
+    const body = fnBody(code(provision), 'cmd_activate');
     expect(body).not.toMatch(/enable --now wevolunteer\.service/);
     const restart = body.indexOf('systemctl restart wevolunteer.service');
     expect(restart).toBeGreaterThan(-1);
     expect(body.indexOf('wait_for_ready', restart)).toBeGreaterThan(restart);
     expect(body.indexOf('systemctl daemon-reload')).toBeLessThan(restart);
+  });
+
+  it('still builds BEFORE it activates, now that the two are separable', () => {
+    /* The ordering the split could silently lose. Separately each half is
+       correct and `app` could still run them the wrong way round, which would
+       restart the service onto a tree mid-rebuild. */
+    const body = fnBody(code(provision), 'cmd_app');
+    const build = body.indexOf('cmd_build');
+    const activate = body.indexOf('cmd_activate');
+    expect(build).toBeGreaterThan(-1);
+    expect(activate).toBeGreaterThan(build);
+  });
+
+  it('refuses to activate a tree that was never built', () => {
+    /* The near-miss this guard exists for, 2026-09-28: a staged release was
+       shipped and "built" with a command naming the staging path, but APP_DIR
+       was hardcoded so the build landed in the live tree. The staging tree had
+       no dist/ and no node_modules/. Activating it would have put an unbootable
+       release into production — and the server answers /health whether or not a
+       front end was ever built, so nothing downstream would have noticed. */
+    const body = fnBody(code(provision), 'cmd_activate');
+    expect(body).toMatch(/dist\/index\.html/);
+    expect(body).toMatch(/\bdie\b/);
+  });
+
+  it('resolves APP_DIR from the script, not from a hardcoded path', () => {
+    /* Same near-miss, from the other side. `provision.sh` living inside a
+       release should operate on THAT release: the command line named the
+       staging directory and the script ignored it. */
+    const src = code(provision);
+    expect(src).toMatch(/SELF_DIR=.*BASH_SOURCE/);
+    expect(src).toMatch(/APP_DIR=\$\{WEV_APP_DIR:-\$\(dirname/);
+    /* The override the tests themselves depend on must survive. */
+    expect(src).toContain('WEV_APP_DIR');
   });
 
   it('lets nginx traverse to uploaded pictures without listing anything', () => {
@@ -487,8 +537,7 @@ describe('the release path does not reintroduce a credential on the host', () =>
     const src = code(provision);
     expect(src).toMatch(/install -d -o "\$APP_USER" -g "\$APP_USER" -m 0751 "\$STATE_DIR" "\$STATE_DIR\/uploads"/);
     expect(src).toMatch(/-m 0750 "\$STATE_DIR\/exports"/);
-    const app = src.slice(src.indexOf('cmd_app() {'));
-    expect(app.slice(0, app.indexOf('\n}\n'))).toContain('chmod o+x "$STATE_DIR" "$STATE_DIR/uploads"');
+    expect(fnBody(src, 'cmd_build')).toContain('chmod o+x "$STATE_DIR" "$STATE_DIR/uploads"');
   });
 
   it('documents both forms where an operator will look', () => {
