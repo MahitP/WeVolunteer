@@ -81,12 +81,7 @@ const ROUTES = {
       + 'which one happened.',
   },
 
-  '/checkin/:eventId': {
-    view: 'views/CheckInView.jsx',
-    exempt: 'One panel covers "event not found" and "could not load", so the '
-      + 'marker cannot be set without also claiming a network fault was a wrong '
-      + 'address. Worth splitting; not worth guessing.',
-  },
+  '/checkin/:eventId': { view: 'views/CheckInView.jsx', marked: true },
 
   '/events/:id/edit': {
     view: null,

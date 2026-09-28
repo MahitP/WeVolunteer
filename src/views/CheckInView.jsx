@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Users, AlertTriangle, QrCode } from 'lucide-react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { ArrowLeft, Users, AlertTriangle, CalendarX, QrCode } from 'lucide-react';
 import { api } from '../utils/api';
 import { formatTimeRange } from '../utils/helpers';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -21,6 +21,11 @@ export default function CheckInView({ currentUser, addToast }) {
   const [checkins, setCheckins] = useState(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notFound, setNotFound] = useState(false);
+  /* Bumped by Try again. The panel used to offer nothing at all, which is the
+     dead end finding N-16 named: an EmptyState with no action leaves somebody
+     whose only real option is a page reload they have to think of themselves. */
+  const [attempt, setAttempt] = useState(0);
   
   // Mobile check-in organizes by shift if there are multiple, or shows a flat list if there's only one.
   const [selectedSlotId, setSelectedSlotId] = useState(null);
@@ -29,6 +34,8 @@ export default function CheckInView({ currentUser, addToast }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError('');
+    setNotFound(false);
 
     Promise.all([
       api.fetchEventDetails(eventId),
@@ -47,14 +54,31 @@ export default function CheckInView({ currentUser, addToast }) {
       }
     })
     .catch(err => {
-      if (!cancelled) setError(err.message);
+      if (cancelled) return;
+      /**
+       * An event id nobody has is not a failure to load.
+       *
+       * Both used to arrive as one panel — "Cannot load check-in / Event not
+       * found." — which is two different answers printed together and leaves an
+       * organizer standing at a venue unable to tell whether to try again or
+       * check the link. They are also different to the sweep: React Router
+       * serves the shell for any path, so `/checkin/nothing` answers 200 and
+       * the panel was measured and filed as coverage of the check-in screen.
+       *
+       * `notFound` marks only the first, so the coverage claim is honest and
+       * the retry advice is only offered when retrying could work. Same test as
+       * `BadgesPage` and the two public profile pages, for the same reason:
+       * three spellings of one question is how they drift apart.
+       */
+      setNotFound(err?.status === 404 || /not found|no such/i.test(err?.message || ''));
+      setError(err.message);
     })
     .finally(() => {
       if (!cancelled) setLoading(false);
     });
 
     return () => { cancelled = true; };
-  }, [eventId]);
+  }, [eventId, attempt]);
 
   const toggleCheckin = async (app) => {
     const key = `${app.slotId}:${app.userId}`;
@@ -106,13 +130,35 @@ export default function CheckInView({ currentUser, addToast }) {
     return <LoadingSkeleton heights={[60, 400]} className="stack-lg page" style={{ padding: 'var(--s4)' }} />;
   }
 
+  /* `notFound` alone, NOT `notFound || !event`. A network failure also leaves
+     `event` null, so the first version of this showed "No such event" for a
+     server that could not be reached — telling an organizer their link was
+     wrong when it was not, and losing the retry that would have worked.
+     `CheckInView.notFound.test.jsx` caught it and pins both directions. */
+  if (notFound) {
+    return (
+      <EmptyState
+        notFound
+        icon={CalendarX}
+        title="No such event"
+        message="There is no event at this address. It may have been called off, or the link may be wrong."
+        action={<Link className="btn btn-secondary" to="/">Back to your dashboard</Link>}
+        style={{ margin: 'var(--s6)' }}
+      />
+    );
+  }
+
+  /* `|| !event` lands HERE. No error and no event after loading is something
+     unexpected rather than a wrong address, and a retry is the honest offer. */
   if (error || !event) {
     return (
-      <EmptyState 
-        icon={AlertTriangle} 
-        title="Cannot load check-in" 
-        message={error || 'Event not found.'} 
-        style={{ margin: 'var(--s6)' }} 
+      <EmptyState
+        icon={AlertTriangle}
+        title="Cannot load check-in"
+        message={error || 'The check-in list did not arrive.'}
+        /* Offered here and not above, because here it might work. */
+        action={<button type="button" className="btn btn-secondary" onClick={() => setAttempt(a => a + 1)}>Try again</button>}
+        style={{ margin: 'var(--s6)' }}
       />
     );
   }
