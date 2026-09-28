@@ -707,7 +707,7 @@ RECOMMENDED:
 **Our response times.** Reports about a student's safety are sent to us the moment they are
 filed, and we aim to look at those the same day. Everything else we aim to reach within a few
 days. WeVolunteer is run by one person, so these are targets and not guarantees — and that is
-exactly why the safety hotlines in the [Youth Safety Guidelines](08-youth-safety-guidelines.md)
+exactly why the safety hotlines in the [Youth Safety Guidelines](policies/08-youth-safety-guidelines.md)
 are the right route for anything urgent. They are staffed around the clock and we are not.
 ```
 

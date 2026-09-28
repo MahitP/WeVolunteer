@@ -78,7 +78,7 @@ I walked each persona's complete journey against the code at `8604fe3`, in the o
 
 ### P0-1 · Printed certificates tell the verifier to visit a domain the district does not own
 
-**Location:** [src/components/CertificateModal.jsx:78](../../src/components/CertificateModal.jsx#L78) — `Verify at wevolunteer.org{verifyPath}`, a hardcoded string.
+**Location:** [src/components/CertificateDocument.jsx](../../src/components/CertificateDocument.jsx) (named `CertificateModal.jsx` when this review was written) — `Verify at wevolunteer.org{verifyPath}`, a hardcoded string.
 
 **1. Why it matters.** The certificate is the only artifact this system produces that leaves the platform. It goes to a school counsellor, a National Honor Society advisor, or a college admissions office. Its entire value rests on the reader being able to check it. The verification URL is hardcoded to `wevolunteer.org` and is not derived from any configuration — not `APP_URL`, not `VITE_APP_NAME`, nothing. Whatever hostname the district deploys to, every printed certificate points somewhere else.
 

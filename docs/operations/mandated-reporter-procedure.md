@@ -1,8 +1,14 @@
 # Mandated-reporter procedure
 
-**Status: DRAFT. Not yet reviewed by an attorney. No administrator has yet been briefed on
-it** — and R-03 asks for both. Being briefed is what makes this real; a procedure an admin
-has not read does not help the child it exists for.
+**Status: statutory citations VERIFIED against primary sources 2026-09-28. Not yet reviewed
+by an attorney. No administrator has yet been briefed on it** — and R-03 asks for the last
+two. Being briefed is what makes this real; a procedure an admin has not read does not help
+the child it exists for.
+
+What changed on 2026-09-28: every legal claim below was checked against the statute itself
+rather than against the risk register that first asserted it. All of them held, and three
+more were added that strengthen §3. What an attorney is still needed for is narrower and is
+named precisely in §1 — it is no longer "is any of this right".
 
 **If you are reading this because of something you just saw, go to §2 now.**
 
@@ -26,10 +32,18 @@ worth restating, because it is the whole justification for this file:
 This file is that missing thing. It is short on purpose. A procedure somebody has to search
 during the worst ten minutes of their year has failed before it starts.
 
-> **Attorney review required.** The statutory citation is taken from the risk register.
-> Whether a given situation meets the legal threshold is a judgement this document does not
-> make and cannot make for you. **When in doubt, report** — §3 explains why that instruction
-> is safe.
+> **The citation is verified.** N.J.S.A. 9:6-8.10 reads, in full: *"Any person having
+> reasonable cause to believe that a child has been subjected to child abuse, including
+> sexual abuse, or acts of child abuse shall report the same immediately to the Division of
+> Child Protection and Permanency by telephone or otherwise."* Universal — "any person", not
+> a list of enumerated professions. Immediate. By telephone. Every word this document relies
+> on is in that sentence.
+>
+> **What an attorney is still for**, and it is now one question rather than an open field:
+> whether a *particular* set of facts meets "reasonable cause to believe". That is a
+> judgement this document does not make, cannot make for you, and should not try to — and
+> §3 explains why guessing wrong in the direction of reporting is the safe error, with the
+> statutes that make it so.
 
 ---
 
@@ -43,10 +57,16 @@ You do not need to investigate first. You do not need permission.
 
 ### Step 1 — Report to the State. Now.
 
-**New Jersey Child Abuse Hotline: 1-877-NJ-ABUSE (1-877-652-2873).** Staffed 24 hours.
-This number is already published to students in the Youth Safety Guidelines.
+**New Jersey Child Abuse Hotline: 1-877-NJ-ABUSE (1-877-652-2873).** Staffed 24 hours a
+day, seven days a week. **TTY: 1-800-835-5510.** This number is already published to
+students in the Youth Safety Guidelines.
 
 **If a child is in immediate danger, call 911 first.**
+
+That line is the **State Central Registry**, which is the intake for the Division of Child
+Protection and Permanency — the body the statute names. So calling it *is* "report to
+DCP&P" in the words of N.J.S.A. 9:6-8.10; you do not need to find the Division separately.
+You do not need proof, and the call may be made anonymously.
 
 Have ready, as far as you know it: who the child is, who the concern is about, what you saw
 and where, and when.
@@ -89,7 +109,21 @@ procedure, and it is the part most likely to be ignored under pressure.
 
 New Jersey's statute is written around *reasonable cause to believe*, not certainty, and
 it exists because the alternative — everyone waiting to be sure — is how children are
-failed. The Youth Safety Guidelines already say this to students in almost the same words:
+failed.
+
+**The law protects the person who reports, and penalises the person who does not.** Both
+halves are worth knowing before you are deciding at speed:
+
+| | |
+|---|---|
+| **N.J.S.A. 9:6-8.13** | Anyone acting under this act in making a report **has immunity from any liability, civil or criminal**, that might otherwise be incurred. A good-faith report that turns out to be nothing is not something you can be sued or charged over. |
+| **N.J.S.A. 9:6-8.14** | Knowingly failing to report, having reasonable cause to believe abuse occurred, is a **disorderly persons offence**. Knowingly failing to report **sexual** abuse is a **crime of the fourth degree** — raised from a disorderly persons offence by P.L. 2019, c.40. |
+
+So the two mistakes are not symmetrical in law either, not just in conscience. One is
+explicitly immunised. The other is a criminal offence, and for the category this platform
+is most exposed to — private adult-to-minor messaging — it is the more serious one.
+
+The Youth Safety Guidelines already say this to students in almost the same words:
 
 > "You do not need proof. You do not need to be sure. We would much rather look at fifty
 > reports that turn out fine than miss the one that was not."
@@ -138,4 +172,9 @@ and date appear below, that half is unmet.
 
 | Administrator | Briefed on | By |
 |---|---|---|
-| *(none yet)* | — | — |
+| Mahit Pulavarthi (platform owner) | *(fill in the date you read this in full)* | Self |
+
+> The owner's row is prefilled because he is currently the only administrator, and left
+> undated because being briefed is an event, not a name in a table. Date it when you have
+> actually read §2 and §3 end to end. Every administrator added later gets a row on the day
+> they are briefed — before their account is created, not after.

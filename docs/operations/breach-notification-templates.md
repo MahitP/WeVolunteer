@@ -4,18 +4,27 @@ Companion to [`breach-response.md`](breach-response.md). That runbook says what 
 do and in what order; this holds the words, so they are chosen calmly rather than
 at 2am by somebody who has been awake since the alert fired.
 
-> **These are drafts, and drafting them is not the same as approving them.**
-> Notification content for a breach involving New Jersey residents is partly
-> prescribed by statute, and every affected student here is a minor, which
-> changes who must be told and through what channel. Nothing below has been
-> reviewed by counsel. It is the R-07 item "pre-drafted notification templates"
-> made to exist; the R-07 item "attorney review" is still open and still blocks
-> sending any of this.
+> **Corrected 2026-09-28.** An earlier version of this warning said notification
+> content "is partly prescribed by statute". **That was wrong**, and it was the
+> assumption that made these templates look legally risky. Checked twice against
+> the official text of N.J.S.A. 56:8-163 as amended by P.L. 2019, c.95: the
+> statute regulates *delivery method* and *timing*, and prescribes **no content
+> whatsoever** for the notice to individuals.
 >
-> Where a template says `[[…]]`, that is a value the incident supplies or a
-> question counsel must answer. **Do not invent one under time pressure** — an
-> invented legal citation or an invented commitment is worse than a slower
-> notice.
+> That changes what these are. **The wording below cannot be non-compliant,**
+> because there is no content standard to fail. Choosing it well is a drafting
+> and duty-of-care exercise, not a legal one.
+>
+> **What is still open, and it is narrow:** whether the notification duty is
+> triggered at all. That turns on the single question in
+> [`breach-response.md`](breach-response.md) §0 — whether bcrypt-hashed passwords
+> take the `users` table outside the statutory definition of "personal
+> information". **Until counsel answers it, assume the duty applies and send.**
+> Over-notifying is not an offence; under-notifying is.
+>
+> Where a template says `[[…]]`, that is a value **the incident** supplies. Not a
+> legal question — those are all in §0 now. **Do not invent one under time
+> pressure**, and do not leave one bracketed in something you send.
 
 ---
 
@@ -71,10 +80,15 @@ the first two sentences whether their child is affected and what they have to do
 > These are the most sensitive things the platform holds and burying them in a
 > list is the kind of thing that is later read as concealment.]]`
 >
-> **What information was not involved.** `[[ONLY IF YOU CAN SAY IT WITH
-> CONFIDENCE. We do not store payment details or government identifiers at all,
-> which is worth saying plainly because it is the first thing most people fear.
-> Delete this paragraph rather than guess.]]`
+> **What information was not involved.** WeVolunteer does not hold Social
+> Security numbers, driver's licence or State ID numbers, or any payment or bank
+> details. None of those could have been involved, because none of them exist in
+> our systems.
+>
+> `[[ADD anything else you can rule out WITH CONFIDENCE for this specific
+> incident — but the sentence above is always true and is verified against the
+> data inventory in breach-response.md §5. It is worth leading with, because it
+> is the first thing most parents fear.]]`
 >
 > **What we have done.** `[[CONTAINMENT, IN CONCRETE TERMS — sessions ended,
 > credentials rotated, the route closed. Past tense for what is done; do not
@@ -87,7 +101,7 @@ the first two sentences whether their child is affected and what they have to do
 > address was exposed, warning about messages that impersonate the school is a
 > real and specific instruction.]]`
 >
-> **Who to contact.** `[[NAMED PERSON]]`, `[[ROLE]]` — `privacy@wevolunteers.org`.
+> **Who to contact.** Mahit Pulavarthi, platform owner — `privacy@wevolunteers.org`.
 > We will answer every question we can, and say so when we cannot yet.
 >
 > I am sorry this happened. Your child trusted this platform with their
@@ -138,7 +152,7 @@ moment they receive it, so it is dense where the guardian notice is plain.
 > unknown later, having been given a confident account now, will reasonably
 > stop trusting the account.]]`
 >
-> Our contact for this incident is `[[NAMED PERSON]]`,
+> Our contact for this incident is Mahit Pulavarthi, platform owner,
 > `privacy@wevolunteers.org`, reachable at `[[NUMBER]]`.
 
 ---
@@ -166,7 +180,7 @@ guardian framing. Same rules about speculation.
 > done in their name, and they may be the fastest route to establishing what
 > actually happened.]]`
 >
-> Questions to `[[NAMED PERSON]]`, `privacy@wevolunteers.org`.
+> Questions to Mahit Pulavarthi, `privacy@wevolunteers.org`.
 
 ---
 
@@ -210,13 +224,18 @@ For checking a draft written under pressure against something written calmly.
 Carried from R-07, so that finishing this file is not mistaken for finishing the
 item:
 
-- **Attorney review of these templates.** Statutory content requirements for a
-  breach involving New Jersey minors are not settled here and must not be
-  guessed. This blocks sending.
-- **`[[NAMED PERSON]]`** in `breach-response.md` §3 — the same name belongs in
-  every template above, and until it exists these read as though nobody is
-  accountable.
-- **The rehearsal.** Filling one of these in against the scratch database, from
-  the five answers, is the cheapest test of whether they can actually be filled
-  in. Templates that cannot be completed from the runbook's own assessment are
-  the wrong templates.
+- **~~Attorney review of the wording.~~ Resolved by research, not by review.**
+  N.J.S.A. 56:8-163 prescribes no notice content, so there is no content standard
+  for this wording to fail. What remains for counsel is one question about
+  whether the duty is triggered at all — `breach-response.md` §0 — and it does
+  not block drafting or, on the "assume it applies" rule, sending.
+- **~~`[[NAMED PERSON]]`~~ Done 2026-09-28.** Mahit Pulavarthi, platform owner,
+  in all four templates and in `breach-response.md` §3. **No deputy yet**, which
+  is the part still missing: one name removes the ambiguity but not the single
+  point of failure.
+- **A real phone number.** `[[NUMBER]]` in the district template is the one
+  placeholder above that is neither incident-specific nor answered. A district
+  counterpart with a 24-hour clock needs to be able to reach a human by voice.
+- **The rehearsal.** Still the cheapest test of whether these can actually be
+  filled in from the runbook's own five answers. Templates that cannot be
+  completed from §2.3 are the wrong templates.

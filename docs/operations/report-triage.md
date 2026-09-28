@@ -131,8 +131,12 @@ distinguish them.
 
 ## 8. Not yet true
 
-- **Nobody is named.** "Who looks" is answered by "the one administrator". Name a person
-  and a deputy when one exists.
+- **~~Nobody is named.~~ Done 2026-09-28: Mahit Pulavarthi, platform owner**, is who looks
+  at these queues, matching the breach-response decision-maker in
+  [`breach-response.md`](breach-response.md) §3 — deliberately the same person, because a
+  report that turns out to be an incident should not change hands mid-way.
+  **Still no deputy**, which is the real remaining gap: these queues have response targets
+  and one person has holidays, exams and a phone that runs out of battery.
 - **The same-day target is unproven.** Measure before publishing it in policy 8.
 - **Retention is undecided.** §7.
 - **No admin has accepted the Admin Responsibilities Policy**, which is what should bind
