@@ -618,6 +618,29 @@ cmd_app() {
 # goes wrong is moving a tree nobody built.
 cmd_swap() {
   need_root
+
+  # ── Do not saw off the branch ──
+  #
+  # The documented invocation is `sudo /srv/wevolunteer/deploy/provision.sh
+  # swap`, and this function renames /srv/wevolunteer while bash is still
+  # reading that very file. On Linux the rename keeps the inode and the open
+  # descriptor stays valid, so it very probably works — but "very probably
+  # works" is a poor property for the one command whose failure leaves the
+  # service stopped with a half-moved tree.
+  #
+  # So when it is running from inside the directory it is about to move, it
+  # re-execs from a copy that nothing is going to rename. The copy is what
+  # performs the swap; the original goes away with the old release, as it
+  # should.
+  if [ "${WEV_SWAP_REEXEC:-}" != "1" ] && [ "${SELF_DIR#"$LIVE_DIR"}" != "$SELF_DIR" ]; then
+    local tmp
+    tmp=$(mktemp /tmp/wevolunteer-provision.XXXXXX) || die "could not create a temporary copy to swap from"
+    cp "${BASH_SOURCE[0]}" "$tmp"
+    chmod 0700 "$tmp"
+    ok "running the swap from $tmp — this script lives in the tree being moved"
+    WEV_SWAP_REEXEC=1 exec "$tmp" swap
+  fi
+
   [ -d "$STAGE_DIR" ] || die "no staged release at $STAGE_DIR — ship one with deploy/make-release.sh --dir $STAGE_DIR"
   [ -f "$STAGE_DIR/dist/index.html" ] \
     || die "$STAGE_DIR has no dist/index.html — it was never built.
