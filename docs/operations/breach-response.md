@@ -247,13 +247,21 @@ prose list, including this document's.**
 > now has one: every judgement call in this file — whether to notify, when, and what to say
 > — is his to make and his to answer for.
 >
-> **There is no deputy, and that is the remaining gap.** One name is better than none, but a
-> single point of decision is also a single point of failure: an incident found at 3am while
-> that person is unreachable has no one authorised to start the clock. Name a second person
-> when one exists. Until then, the standing instruction if the decision-maker cannot be
-> reached is to **contain and preserve (§2.1, §2.2) and keep notifying up the chain until a
-> human answers** — containment never needs authorisation, and the sequence in §1 protects
-> the order even when nobody is available to deliberate about it.
+> **There is no deputy. Decided 2026-09-28, not overlooked.** The platform currently has one
+> administrator, so a deputy would be a name with no role attached — and a register naming
+> somebody who has not been briefed and holds no account is worse than an honest blank.
+>
+> **The accepted consequence, stated so it is not a surprise later:** an incident discovered
+> while Mahit is unreachable has nobody authorised to decide whether to notify. The clock in
+> the DPA runs from *discovery*, not from when somebody picks up.
+>
+> **What happens anyway, with no authorisation needed:** contain and preserve (§2.1, §2.2).
+> Neither requires a decision — containment is never the wrong call, and evidence not
+> preserved in the first hour is usually gone. Keep escalating until a human answers. The
+> fixed sequence in §1 is what protects the ORDER of notification even when nobody is
+> available to deliberate about it, which is the part that cannot be repaired afterwards.
+>
+> **Revisit the moment a second administrator exists.** That is the trigger, not a date.
 
 ### 3.1 New Jersey State Police — FIRST
 

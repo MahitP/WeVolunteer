@@ -172,9 +172,14 @@ and date appear below, that half is unmet.
 
 | Administrator | Briefed on | By |
 |---|---|---|
-| Mahit Pulavarthi (platform owner) | *(fill in the date you read this in full)* | Self |
+| Mahit Pulavarthi (platform owner) | 2026-09-28 | Self |
 
-> The owner's row is prefilled because he is currently the only administrator, and left
-> undated because being briefed is an event, not a name in a table. Date it when you have
-> actually read §2 and §3 end to end. Every administrator added later gets a row on the day
-> they are briefed — before their account is created, not after.
+> Dated on the owner's own confirmation that he has read §2 and §3 in full. Recorded that
+> way deliberately: being briefed is an event, and this row is a person's statement that the
+> event happened, not a system's observation of it. That is what a briefing register is —
+> the same status a signed acknowledgement would have.
+>
+> Every administrator added later gets a row on the day they are briefed — **before** their
+> account is created, not after. R-03 asks that every admin be briefed, and an account that
+> exists before the briefing is an account that can read a child's report before its holder
+> knows what the law requires of them.

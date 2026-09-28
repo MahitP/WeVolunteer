@@ -56,13 +56,13 @@ P.L. 2019, c.95 added the element that reaches us.
 | # | Requirement | Status | Action |
 |---|---|---|---|
 | 1 | Written breach runbook | **Met** | — |
-| 2 | Named decision-maker | **Met** — Mahit Pulavarthi | Name a deputy |
+| 2 | Named decision-maker | **Met** — Mahit Pulavarthi | Deputy declined 2026-09-28 (one administrator); accepted risk, revisit when a second exists |
 | 3 | Pre-drafted notifications | **Met** — four templates + pre-send checklist | — |
 | 4 | Rehearsal | **Partly** — assessment half walked 2026-09-28; found three defects, all fixed | Containment (§2.1) still never executed |
 | 5 | State Police before individuals | **Met** — fixed as the house rule regardless of Q1 | — |
 | 6 | Notice content compliant | **Not applicable** — the statute prescribes none | — |
 | 7 | Mandated-reporter procedure | **Met**, citations verified | Threshold judgement is Q3 |
-| 8 | Every admin briefed | **Not met** — register has one undated row | Date it |
+| 8 | Every admin briefed | **Met** for the only administrator — register dated 2026-09-28 | Brief each new admin before their account is created |
 | 9 | Reachable contact | **Met** — email and voice | Consider a forwarding number before publishing the repo |
 | 10 | Admin Responsibilities Policy accepted | **Not met** — gate is live in production, zero acceptances | Accept it |
 
@@ -120,7 +120,7 @@ makes safe.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Under-notifying because Q1 is unanswered | **High** | Standing rule: assume the duty applies |
-| Single decision-maker, no deputy | **High** | Unresolved. An incident at 3am has nobody else authorised |
+| Single decision-maker, no deputy | **High** | **Accepted 2026-09-28** — one administrator, so a deputy would be a name with no role. Containment and preservation proceed without authorisation; the notification clock does not |
 | Containment (§2.1) never executed | **Medium** | Unresolved. The steps under most time pressure are the untested ones |
 | Admin duties unacknowledged | **Medium** | Gate is live; acceptance outstanding |
 | Personal mobile committed to the repo | **Low** | Acceptable in a private repo; replace before publishing |
@@ -131,10 +131,13 @@ makes safe.
 ## Recommended actions
 
 1. **Put Q1 to counsel.** One question, yes/no, decides whether a statutory duty exists.
-2. **Name a deputy decision-maker.** The largest unmitigated operational risk here.
-3. **Accept the Admin Responsibilities Policy** and date the briefing register.
-4. **Rehearse containment** against staging — the untested half.
-5. **Read the DPA's notification clause on signing**; it likely governs before the statute.
+   Cheapest routes: fold it into the district's own DPA review, or a nonprofit legal clinic.
+2. **Accept the Admin Responsibilities Policy.** The gate is live in production with zero
+   acceptances, so administrative capability is currently withheld from both owners.
+3. **Rehearse containment** against staging — the half that has never been executed, and the
+   half under the most time pressure.
+4. **Read the DPA's notification clause on signing**; it likely governs before the statute.
+5. **Revisit the deputy decision** the moment a second administrator exists.
 
 ---
 
