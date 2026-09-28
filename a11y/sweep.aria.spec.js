@@ -16,6 +16,7 @@ test('the accessible structure of every route holds up', async ({ browser, reque
   const wrongH1 = [];
   const badHeadings = [];
   const ambiguousLandmarks = [];
+  const duplicateMains = [];
   const namelessControls = [];
 
   const titles = [];
@@ -64,9 +65,41 @@ test('the accessible structure of every route holds up', async ({ browser, reque
         return s.position === 'fixed' || el.offsetParent !== null;
       };
 
+      /**
+       * The role the browser computes, not the tag that was typed.
+       *
+       * `<header>` and `<footer>` are `banner` and `contentinfo` ONLY at the top
+       * level. Nested in `article`, `aside`, `main`, `nav` or `section` they are
+       * generic elements and appear in no landmark list at all — HTML-AAM has
+       * said so since it was written.
+       *
+       * Bucketing by tag name therefore reported a page header inside `main` as
+       * a second banner, and `/portfolio` and `/welly` were both on the list for
+       * markup that was correct. That is the same defect as the `nav x2` false
+       * positive above, one level up: a measurement that is wrong costs more
+       * than no measurement, because the fix it demands is to break working
+       * markup until the instrument is satisfied.
+       */
+      const SECTIONING = 'article,aside,main,nav,section';
+      const roleOf = (el) => {
+        const explicit = el.getAttribute('role');
+        if (explicit) return explicit;
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'header' || tag === 'footer') {
+          /* `closest` starts at the element itself, so step up first — a
+             `<header>` is not its own ancestor but `closest` would say it is if
+             the selector ever grew to include it. */
+          return el.parentElement?.closest(SECTIONING)
+            ? null
+            : (tag === 'header' ? 'banner' : 'contentinfo');
+        }
+        return tag;
+      };
+
       const byRole = {};
       for (const el of [...document.querySelectorAll('nav,main,header,footer,aside,[role="navigation"],[role="region"]')].filter(exposed)) {
-        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+        const role = roleOf(el);
+        if (!role) continue;
         const labelledBy = el.getAttribute('aria-labelledby');
         const name = (
           el.getAttribute('aria-label')
@@ -78,6 +111,20 @@ test('the accessible structure of every route holds up', async ({ browser, reque
       const ambiguous = Object.entries(byRole)
         .filter(([, names]) => names.length > 1 && new Set(names).size < names.length)
         .map(([role, names]) => `${role} x${names.length} all named "${names[0] || '(unnamed)'}"`);
+
+      /**
+       * More than one `main`, however they are named.
+       *
+       * The ambiguity check above asks whether two landmarks of one role can be
+       * told apart, which is the right question for `nav` and `region` — a page
+       * may legitimately have several. It is the wrong question for `main`:
+       * there is supposed to be one, and naming the second one does not make it
+       * allowed. So `/welly` sat under the shell's `main` with a `main` of its
+       * own labelled "Welly conversation", the names differed, and the check
+       * stayed silent about a page with two of the landmark that is meant to be
+       * unique.
+       */
+      const mainCount = [...document.querySelectorAll('main,[role="main"]')].filter(exposed).length;
 
       /* A control with no accessible name is announced as just its role —
          "button" — which tells somebody nothing about what it does. axe's
@@ -108,6 +155,7 @@ test('the accessible structure of every route holds up', async ({ browser, reque
 
       return {
         h1Count: levels.filter(l => l.level === 1).length,
+        mainCount,
         skips,
         ambiguous,
         nameless: nameless.slice(0, 8)
@@ -115,6 +163,13 @@ test('the accessible structure of every route holds up', async ({ browser, reque
     });
 
     if (structure.h1Count !== 1) wrongH1.push(`${route.path} has ${structure.h1Count} h1 elements`);
+    if (structure.mainCount > 1) {
+      duplicateMains.push(
+        `${route.path} has ${structure.mainCount} exposed main landmarks — the shell `
+        + 'renders one around every APP_ROUTES view, so a view inside it must not '
+        + 'render another. Use a section with an aria-label if the region needs a name.'
+      );
+    }
     if (structure.skips.length) badHeadings.push(`${route.path}: ${structure.skips.join('; ')}`);
     if (structure.ambiguous.length) ambiguousLandmarks.push(`${route.path}: ${structure.ambiguous.join(', ')}`);
     if (structure.nameless.length) namelessControls.push(`${route.path}: ${structure.nameless.join(' | ')}`);
@@ -173,5 +228,15 @@ test('the accessible structure of every route holds up', async ({ browser, reque
      the missing section IS, and stalling the harness on it would stop the audit
      meant to enumerate them. */
   expect(wrongH1, `routes whose h1 count contradicts headingLevels.test.js:\n${wrongH1.join('\n')}`).toEqual([]);
+
+  /* Asserted rather than reported, unlike the ambiguity list above. "Two
+     landmarks share a name" is a judgement about whether a rotor is usable and
+     its fix is a naming decision; "this page has two mains" is a fact about
+     markup that is wrong however it is named, and there is exactly one way to
+     fix it. */
+  expect(
+    duplicateMains,
+    `routes with more than one main landmark:\n${duplicateMains.join('\n')}`
+  ).toEqual([]);
   expect(namelessControls, `WCAG 4.1.2 — controls with no accessible name:\n${namelessControls.join('\n')}`).toEqual([]);
 });

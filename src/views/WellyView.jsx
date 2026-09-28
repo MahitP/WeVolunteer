@@ -1092,7 +1092,26 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
       )}
 
       {/* ── Main Chat Workspace ─────────────────────────────────────────────── */}
-      <main className="welly-chat-main" aria-label="Welly conversation">
+      {/**
+        * A `section`, not a `main`. `/welly` is in `APP_ROUTES`, so the shell has
+        * already opened the page's `main` around this view — a `main` here was a
+        * second one nested inside the first, which the HTML spec does not allow
+        * and which leaves a screen reader's landmark list with two "main" entries
+        * for one page.
+        *
+        * `a11y/sweep.aria.spec.js` did not report it, and could not: its check
+        * flags landmarks of one role that share a NAME, and these two differ —
+        * the shell's is unnamed and this one is "Welly conversation". Two mains
+        * are wrong however they are named, so the check now asserts that
+        * separately.
+        *
+        * The label is kept, and `section` + `aria-label` is precisely what makes
+        * it worth keeping: it is a `region` landmark called "Welly conversation",
+        * so the jump straight to the chat that the label was written for still
+        * works. A plain `div` would have removed the nesting and the
+        * navigability together.
+        */}
+      <section className="welly-chat-main" aria-label="Welly conversation">
         {/**
           * The mobile bar.
           *
@@ -1468,7 +1487,7 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
             </Link>
           </div>
         </div>
-      </main>
+      </section>
 
     </div>
   );

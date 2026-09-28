@@ -97,39 +97,58 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
     }
   }
 
+  /**
+   * A `div`, not a `main` — the shell already rendered one.
+   *
+   * This route is in `APP_ROUTES`, so the app shell wraps it in
+   * `<main className="page" id="main-content">` before this view renders a
+   * thing. A `main` here is a SECOND main landmark nested inside the first, and
+   * a screen-reader user's landmark list then offers two entries called "main"
+   * with nothing to tell them apart. `a11y/sweep.aria.spec.js` reported exactly
+   * that: `main x2 all named "(unnamed)"`.
+   *
+   * It is the same mistake as the duplicated `h1` on this route, which was fixed
+   * when `src/headingLevels.test.js` stopped allowlisting these two views as
+   * rendering outside the shell — they never did. The heading half was corrected
+   * then and the landmark half was not, because the heading guard only reads
+   * headings.
+   *
+   * The classes stay. `content` and `stack-lg` are layout and carry no
+   * semantics; only the element was ever wrong.
+   */
   if (error && !status) {
     return (
-      <main className="content stack-lg">
+      <div className="content stack-lg">
         <h2 className="page-title">Student Organizer Agreement</h2>
         <p className="alert alert-warn" role="alert">{error}</p>
-      </main>
+      </div>
     );
   }
 
   if (!status) {
     return (
-      <main className="content stack-lg">
+      <div className="content stack-lg">
         <p className="dim" role="status" aria-live="polite">Loading the agreement…</p>
-      </main>
+      </div>
     );
   }
 
   if (!status.required) {
     return (
-      <main className="content stack-lg">
+      <div className="content stack-lg">
         <h2 className="page-title">Student Organizer Agreement</h2>
         <p>
           This agreement applies to people who help run an organization. You do not at the
           moment, so there is nothing for you to accept — you can read it in the{' '}
           <a className="auth-link" href="/legal/student-organizer-agreement">Legal Center</a>.
         </p>
-      </main>
+      </div>
     );
   }
 
   if (status.accepted) {
     return (
-      <main className="content stack-lg">
+      <div className="content stack-lg">
         <h2 className="page-title">Student Organizer Agreement</h2>
         <p className="alert alert-brand" role="status">
           <Check size={16} aria-hidden="true" /> You accepted this agreement (version {status.documents[0]?.version}).
@@ -140,14 +159,14 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
           it is ever updated, you will be asked to accept the new version before your
           organization tools work again.
         </p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="content stack-lg" aria-labelledby="soa-title">
+    <div className="content stack-lg">
       <div className="stack-sm">
-        <h2 id="soa-title" className="page-title">Before you help run this organization</h2>
+        <h2 className="page-title">Before you help run this organization</h2>
         <p>
           {/* An em dash, not a comma. "Alex Thompson, a manager has trusted
               you" reads as an appositive — as though Alex is the manager — which
@@ -216,6 +235,6 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
           </p>
         </div>
       </form>
-    </main>
+    </div>
   );
 }

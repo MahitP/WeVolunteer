@@ -120,9 +120,13 @@ Say plainly: what happened, what data, what you have done, what they should do, 
 contact. Do not minimise, do not speculate about cause, and do not promise a cause before
 the investigation finishes.
 
-> **`[[PRE-DRAFTED TEMPLATES]]`** — R-07 asks for these to exist before an incident, so
-> they are written calmly rather than at 2am. Not yet drafted. They need the attorney
-> review above, because notification content is partly prescribed by statute.
+> **Templates:** [`breach-notification-templates.md`](breach-notification-templates.md)
+> — drafted 2026-09-28, so the words are chosen calmly rather than at 2am. Four of them:
+> guardian, district, affected adult, and a holding statement, with a pre-send checklist.
+>
+> **They are not cleared to send.** Notification content for a breach involving New
+> Jersey minors is partly prescribed by statute and none of this has been read by
+> counsel. R-07 asks for the templates *and* the review; this is the first half.
 
 ### 3.4 Everyone else
 

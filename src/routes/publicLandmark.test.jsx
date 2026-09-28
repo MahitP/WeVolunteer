@@ -91,3 +91,78 @@ describe('public routes carry their own main landmark', () => {
     });
   }
 });
+
+/**
+ * The same rule from the other side: an APP route must NOT supply its own.
+ *
+ * ── Why this is the harder half ──
+ *
+ * A public route missing its `<main>` is visible — there is no skip target and
+ * no main region, and the sweep says so. An app route with an EXTRA `<main>`
+ * looks completely normal: the page renders, the skip link works, axe passes,
+ * and the only symptom is that a screen reader's landmark list offers two
+ * entries called "main" for one page. Nothing in the fast suite could see it.
+ *
+ * Three views had it. `OrganizerAgreement` and `StudentOrganizerAgreement` came
+ * by it honestly — both were once allowlisted in `src/headingLevels.test.js` as
+ * rendering outside the shell, which they never did; when that was corrected the
+ * duplicated `h1` was fixed and the duplicated landmark was not, because a
+ * heading guard reads headings. `WellyView`'s was labelled "Welly conversation",
+ * which made it invisible to the runtime check too: that one asks whether two
+ * landmarks of a role can be told APART, and these two could.
+ *
+ * ── Why a source scan, given the sweep now asserts this ──
+ *
+ * `a11y/sweep.aria.spec.js` catches it in a browser, which is the stronger
+ * instrument and the one that found it. But it needs a database, a dev server
+ * and about ten minutes, so in practice it runs occasionally and this runs on
+ * every commit. The mistake is structural — a `<main>` where a `<div>` or a
+ * labelled `<section>` belongs — so a structural check catches it at the moment
+ * it is typed rather than whenever somebody next sweeps.
+ */
+describe('app routes leave the main landmark to the shell', () => {
+  /** The `APP_ROUTES` array as source text. */
+  function appRoutesBlock(source) {
+    const start = source.indexOf('export const APP_ROUTES');
+    expect(start, 'APP_ROUTES not found — has it been renamed?').toBeGreaterThan(-1);
+    const end = source.indexOf('\n];', start);
+    return source.slice(start, end);
+  }
+
+  const appComponents = componentsIn(appRoutesBlock(routesSource));
+
+  /**
+   * Comments legitimately name the element — several of these views explain at
+   * length why they do NOT use one, and a scan that counted those would fail on
+   * exactly the files that got it right for exactly the reason they got it right.
+   */
+  function withoutComments(source) {
+    return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  }
+
+  it('finds the app routes at all', () => {
+    expect(appComponents.length, 'no app route components resolved')
+      .toBeGreaterThanOrEqual(20);
+  });
+
+  for (const component of appComponents) {
+    if (DELEGATES.has(component)) continue;
+
+    it(`${component} does not open a second <main>`, () => {
+      const file = fileFor(component, routesSource);
+      if (!file) return; // Not lazily imported; the public half covers the rest.
+
+      const code = withoutComments(fs.readFileSync(file, 'utf8'));
+      const opens = /<main[\s>]/.test(code) || /role=["']main["']/.test(code);
+
+      expect(
+        opens,
+        `${component} is an APP route, so the shell has already opened the page's `
+        + 'single `main` around it. A second one is a nested main landmark: the '
+        + 'page looks right, axe passes, and a screen reader is offered two "main" '
+        + 'entries for one page. Use a `<div>`, or a `<section aria-label="…">` if '
+        + 'the region deserves a name of its own — see WellyView.',
+      ).toBe(false);
+    });
+  }
+});

@@ -115,7 +115,38 @@ export const SWEEP_CANNOT_MEASURE = Object.freeze({
   '/certificates/:code':
     'owner-scoped: getCertificateForOwner reads by user_id, the seeded certificate '
     + 'belongs to user-student-2, and the sweep signs in as user-student-1. Covered '
-    + 'by a11y/workflows/certificate.spec.js, which signs in as the holder.'
+    + 'by a11y/workflows/certificate.spec.js, which signs in as the holder.',
+
+  /**
+   * The two organization routes, and why they appear here only now.
+   *
+   * Nothing about them changed. The demo seed has never held an organization —
+   * `FIXTURES` says so above, at length — so the Student pass has always landed
+   * on "No organization here" and "This invitation link does not work".
+   *
+   * What changed is that the sweep can SEE it. `walk.mjs` recognises a
+   * not-found state by `data-error-kind`, which was `ErrorExperience`'s
+   * attribute, and both of these views say it with an `EmptyState` instead —
+   * the exact remaining exposure recorded when the `:code` fixtures were fixed.
+   * `EmptyState` now carries the marker, so two routes that were being reported
+   * as measured are reported honestly, and honest means excused with a reason.
+   *
+   * Signed out, `/organizations/:key` is still genuinely measured: it renders
+   * "This page needs an account", which is a real page and not a miss. Only the
+   * signed-in pass is excused.
+   */
+  '/organizations/:key':
+    'the demo seed has no organizations, so no key can be filled in. Signed out '
+    + 'this path renders "This page needs an account" and IS measured; signed in '
+    + 'it is a genuine 404. Delete this entry the day the seed gains a club — '
+    + 'FIXTURES says an organization key belongs in fixtures.mjs from that day.',
+
+  '/organizations/invite/:token':
+    'the demo seed has no organizations and therefore no share links. Resolving a '
+    + 'real one is deliberately refused rather than merely hard: it would put a '
+    + 'live bearer credential into the walk, which is what every other token here '
+    + 'is arranged to avoid. See FIXTURES above. The page\'s own states are '
+    + 'covered by src/views/OrganizationInvite.test.jsx.',
 });
 
 /**
