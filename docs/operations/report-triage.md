@@ -135,10 +135,11 @@ distinguish them.
   at these queues, matching the breach-response decision-maker in
   [`breach-response.md`](breach-response.md) §3 — deliberately the same person, because a
   report that turns out to be an incident should not change hands mid-way.
-  **No deputy — decided 2026-09-28, not overlooked.** With one administrator a deputy would
-  be a name with no account and no briefing. The accepted consequence: these queues have
-  response targets and one person has holidays, exams and a phone that runs out of battery,
-  so a missed target is a matter of when. Revisit the moment a second administrator exists.
+  **Deputy set 2026-09-28: also Mahit Pulavarthi**, by the owner's explicit decision and
+  until he says otherwise — matching `breach-response.md` §3, so a report that becomes an
+  incident never changes hands. The queues have response targets and one person has
+  holidays, exams and a phone that runs out of battery, so a missed target remains a matter
+  of when rather than if. That is an accepted cost, not an unnoticed one.
 - **The same-day target is unproven.** Measure before publishing it in policy 8.
 - **Retention is undecided.** §7.
 - **No admin has accepted the Admin Responsibilities Policy**, which is what should bind

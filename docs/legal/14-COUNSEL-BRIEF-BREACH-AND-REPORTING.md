@@ -56,7 +56,7 @@ P.L. 2019, c.95 added the element that reaches us.
 | # | Requirement | Status | Action |
 |---|---|---|---|
 | 1 | Written breach runbook | **Met** | — |
-| 2 | Named decision-maker | **Met** — Mahit Pulavarthi | Deputy declined 2026-09-28 (one administrator); accepted risk, revisit when a second exists |
+| 2 | Named decision-maker | **Met** — Mahit Pulavarthi, primary and deputy | Both roles set to the same person 2026-09-28 by the owner. Escalation is unambiguous; availability is not improved |
 | 3 | Pre-drafted notifications | **Met** — four templates + pre-send checklist | — |
 | 4 | Rehearsal | **Partly** — assessment half walked 2026-09-28; found three defects, all fixed | Containment (§2.1) still never executed |
 | 5 | State Police before individuals | **Met** — fixed as the house rule regardless of Q1 | — |
@@ -120,7 +120,7 @@ makes safe.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Under-notifying because Q1 is unanswered | **High** | Standing rule: assume the duty applies |
-| Single decision-maker, no deputy | **High** | **Accepted 2026-09-28** — one administrator, so a deputy would be a name with no role. Containment and preservation proceed without authorisation; the notification clock does not |
+| One person is both primary and deputy | **High — accepted** | Set by the owner 2026-09-28. Naming the role twice removes the ambiguity, not the dependency: if he is unreachable the notification clock still runs. Containment and preservation proceed without authorisation; the decision to notify does not |
 | Containment (§2.1) never executed | **Medium** | Unresolved. The steps under most time pressure are the untested ones |
 | Admin duties unacknowledged | **Medium** | Gate is live; acceptance outstanding |
 | Personal mobile committed to the repo | **Low** | Acceptable in a private repo; replace before publishing |

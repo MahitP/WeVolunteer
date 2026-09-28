@@ -247,9 +247,14 @@ prose list, including this document's.**
 > now has one: every judgement call in this file — whether to notify, when, and what to say
 > — is his to make and his to answer for.
 >
-> **There is no deputy. Decided 2026-09-28, not overlooked.** The platform currently has one
-> administrator, so a deputy would be a name with no role attached — and a register naming
-> somebody who has not been briefed and holds no account is worse than an honest blank.
+> **The deputy is also Mahit Pulavarthi.** Set by the owner on 2026-09-28, explicitly and
+> until he says otherwise. The role has a name in both slots, so there is never a question
+> about who decides — which is what the finding asked for.
+>
+> **What it does not do is remove the single point of failure**, and that is recorded here
+> rather than left for somebody to discover during an incident. One person named twice is
+> one person: if he is unreachable, the decision still waits. The paragraph below is
+> therefore unchanged and is the operative instruction in that case.
 >
 > **The accepted consequence, stated so it is not a surprise later:** an incident discovered
 > while Mahit is unreachable has nobody authorised to decide whether to notify. The clock in
