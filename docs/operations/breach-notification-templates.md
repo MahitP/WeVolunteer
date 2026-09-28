@@ -153,7 +153,7 @@ moment they receive it, so it is dense where the guardian notice is plain.
 > stop trusting the account.]]`
 >
 > Our contact for this incident is Mahit Pulavarthi, platform owner,
-> `privacy@wevolunteers.org`, reachable at `[[NUMBER]]`.
+> `privacy@wevolunteers.org`, reachable at 201-790-7275.
 
 ---
 
@@ -233,9 +233,15 @@ item:
   in all four templates and in `breach-response.md` §3. **No deputy yet**, which
   is the part still missing: one name removes the ambiguity but not the single
   point of failure.
-- **A real phone number.** `[[NUMBER]]` in the district template is the one
-  placeholder above that is neither incident-specific nor answered. A district
-  counterpart with a 24-hour clock needs to be able to reach a human by voice.
-- **The rehearsal.** Still the cheapest test of whether these can actually be
-  filled in from the runbook's own five answers. Templates that cannot be
-  completed from §2.3 are the wrong templates.
+- **~~A real phone number.~~ Done 2026-09-28: 201-790-7275.** A district
+  counterpart on a 24-hour clock can now reach a human by voice.
+  > It is a personal mobile and it is committed to this repository. A deliberate
+  > trade — an unreachable contact during an incident is worse than a number in a
+  > private repo — but it is a reason not to publish this repository without
+  > re-reading this line, and a reason to move to a forwarding number (Google
+  > Voice or similar) before any wider distribution.
+- **~~The rehearsal.~~ Walked 2026-09-28** —
+  [`breach-rehearsal-2026-09-28.md`](breach-rehearsal-2026-09-28.md). The guardian
+  template filled from the runbook's five answers with nothing left bracketed
+  except the incident narrative and the district-supplied guardian name, which is
+  the test it had to pass.

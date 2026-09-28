@@ -105,9 +105,10 @@ research except:
 - `[[GUARDIAN NAME]]` and the delivery channel — which the **district** supplies under
   Posture A, and which we cannot know. Correct as a placeholder.
 - The one-sentence narrative — genuinely incident-specific.
-- `[[NUMBER]]` in the **district** template — **not incident-specific and not answerable.**
-  A district counterpart on a 24-hour clock needs to reach a human by voice, and there is
-  no phone number anywhere in this platform's operational documents. **Open.**
+- ~~`[[NUMBER]]` in the **district** template.~~ **Closed the same day — 201-790-7275.**
+  The rehearsal is what surfaced it: the only placeholder that was neither
+  incident-specific nor answerable from the five answers, which is exactly the class of
+  gap a dry run exists to find.
 
 The "what was not involved" paragraph, which was a bracketed instruction, is now a
 standing sentence of fact: no Social Security numbers, no driver's licence or State ID
