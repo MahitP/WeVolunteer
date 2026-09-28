@@ -1716,6 +1716,28 @@ input as deliberate, and `LogExternalHours` is additionally refused a future
 date server-side. That is polish, not correctness. Mutation-checked by removing
 each control in turn.
 
+> **Revisited 2026-09-28 — `LogExternalHours` converted after all (`1f31c43`).**
+>
+> The reasoning above is about BOUNDS, and on bounds it is right. What checking
+> the bounds could not see is the reason `DatePicker` was written in the first
+> place: a native date input takes none of the theme tokens, so in dark mode its
+> picker chrome stayed light while the form around it went dark. That is not a
+> correctness defect and this does not reclassify it as one — it is the same
+> polish, judged worth having on the one remaining STUDENT-facing form.
+>
+> The typed half weighed more here than on the five screens converted earlier.
+> This form is filled in mostly by typing, often off a certificate or a letter
+> somebody is reading from, and `DatePicker` reads a typed date in the locale's
+> field order rather than guessing between `05/14` and `14/05`. Its error also
+> moves inside the control with `role="alert"`; the span it replaced announced
+> nothing.
+>
+> The other two remain declined, and now for a mechanical reason rather than a
+> judgement: `LegalEditor` holds a `ref` on its input for focus management and
+> `DatePicker` does not forward one, and `ShareOrganizationDialog`'s two are the
+> link-expiry fields on a manager-only dialog. Both are worth doing; neither is
+> a five-line change.
+
 ### N-17 — **DEFECT in the guard itself. Medium. FIXED `af08856`**
 
 `serverLinks.test.js` reads one line at a time, so a `link:` ternary spanning
