@@ -33,6 +33,7 @@ import {
 import { api } from '../utils/api';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import DatePicker from '../components/common/DatePicker';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import CertificateImport from '../components/account/CertificateImport';
 
@@ -343,18 +344,33 @@ export default function LogExternalHours({ addToast }) {
           <div className="field-row">
             <div className="field field-grow-1">
               <label htmlFor="ext-date">Date</label>
-              <input
-                id="ext-date" className="input" type="date" value={form.occurredOn}
+              {/**
+                * `DatePicker`, not `<input type="date">`.
+                *
+                * The shared control exists because a native date input is a
+                * different thing in every engine — a text box with a hairline
+                * icon, a three-segment spinner, a full-screen wheel on iOS —
+                * and none of them take `--input-bg`, `--rule` or `--brand`. In
+                * dark mode the picker chrome stayed light while the form around
+                * it went dark. Five screens were converted when the component
+                * was written; this one was missed, which finding N-16 recorded.
+                *
+                * It is worth more here than the theming alone. This form is
+                * mostly TYPED, often from a certificate or a letter somebody is
+                * reading off, and `DatePicker` accepts a typed date without
+                * guessing the field order — `05/14` and `14/05` are both real
+                * conventions and it reads the locale's rather than picking one.
+                * Its error moves inside the control and carries `role="alert"`,
+                * so the hand-rolled span below it is no longer needed.
+                */}
+              <DatePicker
+                id="ext-date"
+                name="occurredOn"
+                value={form.occurredOn}
                 max={new Date().toISOString().slice(0, 10)}
-                aria-invalid={!!errors.occurredOn}
-                aria-describedby={errors.occurredOn ? 'ext-date-err' : undefined}
-                onChange={e => set('occurredOn', e.target.value)}
+                error={errors.occurredOn || ''}
+                onChange={next => set('occurredOn', next)}
               />
-              {errors.occurredOn && (
-                <span className="field-error" id="ext-date-err">
-                  <AlertCircle size={12} aria-hidden="true" />{errors.occurredOn}
-                </span>
-              )}
 <ExtractedMark source={extracted.occurredOn} />
             </div>
             <div className="field field-grow-1">
