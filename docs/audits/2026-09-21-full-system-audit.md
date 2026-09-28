@@ -1733,10 +1733,19 @@ each control in turn.
 > nothing.
 >
 > The other two remain declined, and now for a mechanical reason rather than a
-> judgement: `LegalEditor` holds a `ref` on its input for focus management and
-> `DatePicker` does not forward one, and `ShareOrganizationDialog`'s two are the
-> link-expiry fields on a manager-only dialog. Both are worth doing; neither is
-> a five-line change.
+> judgement. Both would REGRESS something documented if swapped as they stand:
+>
+> - `LegalEditor` holds a `ref` on its input, and `DatePicker` does not forward
+>   one.
+> - `ShareOrganizationDialog` sets `autoFocus`, and its comment says why — the
+>   field replaces the button that had focus, and without it focus fell to the
+>   document inside an open modal and a keyboard user had to Tab from the top of
+>   the dialog to find it. `DatePicker` takes no `autoFocus`.
+>
+> So converting either means first teaching `DatePicker` to forward a ref and to
+> accept `autoFocus`. That is worth doing and it is a change to a component
+> twenty-odd call sites depend on, which is a different size of job from the one
+> above — and both remaining inputs are on manager- or owner-only surfaces.
 
 ### N-17 — **DEFECT in the guard itself. Medium. FIXED `af08856`**
 
