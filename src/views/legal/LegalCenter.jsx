@@ -77,8 +77,8 @@ function groupDocuments(documents) {
     },
     {
       key: 'organizers',
-      title: 'For organizers',
-      blurb: 'What someone running events promises before they can see who applied.',
+      title: 'Agreements for people with extra access',
+      blurb: 'What somebody running events, a student helping run a club, or an administrator undertakes before they can see other people\'s records.',
       Icon: Handshake,
       /**
        * Any onboarding scope, not the adult one by name.

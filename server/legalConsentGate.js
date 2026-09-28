@@ -142,7 +142,29 @@ const SIGNUP_SCOPE = 'signup';
  * checkboxes has been told the same thing twice, the second time with more
  * authority, which teaches them the first notice was noise.
  */
-const AGREEMENT_SCOPES = new Set(['organizer-onboarding', 'student-organizer-onboarding']);
+const AGREEMENT_SCOPES = new Set([
+  'organizer-onboarding',
+  'student-organizer-onboarding',
+  /* Added 2026-09-27 with the Admin Responsibilities gate. Without it this
+     document falls to the generic notice channel, so republishing it would tell
+     an administrator "this changed — view it" while actually withholding
+     fourteen capabilities. A banner that describes an enforcement as routine is
+     the condition this set exists to prevent. */
+  'admin-onboarding',
+]);
+
+/**
+ * Whether republishing this document withholds capabilities until re-acceptance.
+ *
+ * Exported so the Legal Center editor and this module answer the question from
+ * one place. `legalAdminRoutes.js` asked it as `scope === 'organizer-onboarding'`
+ * and had been wrong about `student-organizer-onboarding` since that gate
+ * shipped — an owner fixing a typo there re-gated every student organizer with
+ * no warning. Adding a third gate the same way would have repeated it.
+ */
+export function withholdsUntilReaccepted(scope) {
+  return AGREEMENT_SCOPES.has(scope);
+}
 
 /** An existing dedicated agreement screen owns this change; say nothing here. */
 export const CHANNEL_AGREEMENT = 'agreement';

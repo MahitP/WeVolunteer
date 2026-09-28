@@ -10,6 +10,7 @@ import { ChallengeNotSpent, refuseReauth, spendChallenge } from '../reauthRespon
 import { recordAudit } from '../auditLog.js';
 import { documentBySlug } from '../legalDocuments.js';
 import { PolicyContentError } from '../legalContent.js';
+import { withholdsUntilReaccepted } from '../legalConsentGate.js';
 import {
   resolveDocument, effectiveDocuments, publishRevision, validatePublication,
   revisionHistory, LegalValidationError, MAX_BODY_LENGTH, MATERIAL_NOTICE_DAYS,
@@ -100,7 +101,7 @@ function editorMeta(doc) {
      * rather than hardcoded in the client, because the condition belongs to the
      * consent model and the client should not be the second place that knows it.
      */
-    reconsentOnPublish: doc.scope === 'organizer-onboarding',
+    reconsentOnPublish: withholdsUntilReaccepted(doc.scope),
     /**
      * Whether a MAJOR bump on this document re-consents its whole audience,
      * and how many days' notice the Terms owe that audience.

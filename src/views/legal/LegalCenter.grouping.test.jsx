@@ -44,12 +44,13 @@ const FIXTURE = [
   { slug: 'privacy-policy', title: 'Privacy Policy', version: '1.0', scope: 'signup', consentType: 'acknowledge', summary: 'What we collect and why.', effectiveAt: '2026-08-06' },
   { slug: 'organizer-agreement', title: 'Organizer Agreement', version: '1.0', scope: 'organizer-onboarding', consentType: 'agree', summary: 'What an organizer undertakes.', effectiveAt: '2026-08-06' },
   { slug: 'student-organizer-agreement', title: 'Student Organizer Agreement', version: '1.0', scope: 'student-organizer-onboarding', consentType: 'agree', summary: 'What a student helping run a club takes on.', effectiveAt: '2026-08-13' },
+  { slug: 'admin-responsibilities-policy', title: 'Admin Responsibilities Policy', version: '1.0', scope: 'admin-onboarding', consentType: 'agree', summary: 'What an administrator undertakes before looking at a student\'s record.', effectiveAt: '2026-08-06' },
   { slug: 'youth-safety-guidelines', title: 'Youth Safety Guidelines', version: '1.0', scope: 'notice', consentType: 'notice', summary: 'How to stay safe volunteering.', effectiveAt: '2026-08-06' },
   { slug: 'cookie-and-tracking-notice', title: 'Cookie and Tracking Notice', version: '1.0', scope: 'notice', consentType: 'notice', summary: 'The cookies this site sets.', effectiveAt: '2026-08-06' },
 ];
 
 /** Every scope the fixture covers, for the coverage assertion below. */
-const FIXTURE_SCOPES = ['signup', 'organizer-onboarding', 'student-organizer-onboarding', 'notice'];
+const FIXTURE_SCOPES = ['signup', 'organizer-onboarding', 'student-organizer-onboarding', 'admin-onboarding', 'notice'];
 
 const apiMock = vi.hoisted(() => ({ fetchLegalDocuments: vi.fn() }));
 vi.mock('../../utils/api', () => ({ api: apiMock }));
@@ -82,9 +83,20 @@ beforeEach(async () => {
 });
 
 describe('Legal Center grouping', () => {
+  /* The group was renamed on 2026-09-27, when the Admin Responsibilities Policy
+     became an agreement and landed here too — "For organizers" was no longer
+     true of everything under it. These assert the group is SHARED, which is the
+     property that matters, rather than pinning its wording. */
   it('files the Student Organizer Agreement with the other agreements somebody signs', async () => {
     await renderCenter();
-    expect(groupTitleFor('Student Organizer Agreement')).toBe('For organizers');
+    expect(groupTitleFor('Student Organizer Agreement'))
+      .toBe(groupTitleFor('Organizer Agreement'));
+  });
+
+  it('files the Admin Responsibilities Policy there too, not as reference material', async () => {
+    await renderCenter();
+    expect(groupTitleFor('Admin Responsibilities Policy'))
+      .toBe(groupTitleFor('Organizer Agreement'));
   });
 
   it('puts only notices under Reference policies', async () => {

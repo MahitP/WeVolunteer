@@ -209,7 +209,15 @@ export default function LegalDocument() {
                 */}
               {formatLegalDate(doc.updatedAt) && formatLegalDate(doc.updatedAt) !== formatLegalDate(doc.effectiveAt)
                 && ` · last revised ${formatLegalDate(doc.updatedAt)}`}
-              {doc.consentType === 'agree' && ' · you agreed to this when you signed up'}
+              {/* Keyed on SCOPE, not consentType. `consentType: 'agree'` means "a
+                  contract somebody accepts", which is true of the Organizer Agreement,
+                  the Student Organizer Agreement and — since 2026-09-27 — the Admin
+                  Responsibilities Policy. None is accepted at signup; each has its own
+                  screen for the people it binds. A reader who is not an administrator
+                  was being told they agreed to the administrator policy when they
+                  created their account, on the page whose job is to be the record of
+                  what was agreed. */}
+              {doc.scope === 'signup' && doc.consentType === 'agree' && ' · you agreed to this when you signed up'}
               {doc.consentType === 'acknowledge' && ' · shown to you when you signed up'}
             </p>
             {doc.summary && <p>{doc.summary}</p>}

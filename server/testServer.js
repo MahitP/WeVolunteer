@@ -502,6 +502,21 @@ export async function startTestServer() {
   /** `makeOwner` then sign in, which is what every caller actually wants. */
   const loginAsOwner = async (email, password = 'password123') => {
     await makeOwner(email);
+    /**
+     * Onboarded onto the Admin Responsibilities Policy, for the same reason
+     * `signupConfirmed` supplies consent: this helper's job is "give me an
+     * owner", not "exercise the policy gate".
+     *
+     * Since 2026-09-27 that policy withholds fourteen capabilities — the export,
+     * the reports queue, a student's contact details — from an administrator
+     * with no acceptance row, the platform owner included. Without this, every
+     * fixture owner reads 403 on the thing the suite is actually testing.
+     *
+     * The gate itself is exercised deliberately in
+     * `server/routes.adminResponsibilities.test.js`, which clears the row first.
+     */
+    const { seedAdminAcceptance } = await import('./db.js');
+    await seedAdminAcceptance();
     return login(email, password);
   };
   

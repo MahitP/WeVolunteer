@@ -22,6 +22,9 @@ import { ORGANIZER_DOCUMENTS, STUDENT_ORGANIZER_DOCUMENTS } from '../legalDocume
 import {
   acceptStudentOrganizerAgreement, studentOrganizerAgreementStatus,
 } from '../studentOrganizerAgreement.js';
+import {
+  acceptAdminResponsibilities, adminResponsibilitiesStatus, boundByAdminResponsibilities,
+} from '../adminResponsibilitiesPolicy.js';
 import { helpsRunAnywhere } from '../organizationRoles.js';
 import { validatePassword, validateUsername, validateEmail, isCurrentPassword } from '../accountValidation.js';
 import { issueVerificationToken, purgeExpiredVerificationTokens } from '../services/verification.js';
@@ -1048,6 +1051,68 @@ router.post('/api/legal/student-organizer-agreement/accept', authenticateToken, 
   } catch (error) {
     console.error('Student organizer agreement acceptance error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Accepting the Admin Responsibilities Policy.
+ *
+ * ── Why `authenticateToken` and nothing else ──
+ *
+ * Taken deliberately from the organizer route above, reasoning included. This is
+ * the one action that restores an administrator's withheld capabilities, so
+ * gating it on a capability would be circular, and gating it on step-up
+ * re-authentication would lock out anybody who cannot complete that round trip —
+ * on the single route that exists to let them back in.
+ *
+ * It matters more here than there. Unlike every other gate in this codebase, this
+ * one reaches the platform owner: `can()` checks `withheld` before the `'*'`
+ * wildcard. This route is the escape hatch, and below it only `bin/` remains.
+ */
+router.get('/api/legal/admin-responsibilities/status', authenticateToken, async (req, res) => {
+  try {
+    res.json(await adminResponsibilitiesStatus(db, req.user.id));
+  } catch (err) {
+    console.error('Admin responsibilities status error:', err);
+    res.status(500).json({ error: 'Could not read the policy status' });
+  }
+});
+
+router.post('/api/legal/admin-responsibilities/accept', authenticateToken, async (req, res) => {
+  try {
+    const user = await db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    if (!boundByAdminResponsibilities(user.role)) {
+      /* Refused rather than recorded, as the organizer route does: an acceptance
+         row for somebody the policy does not bind is a false record, and a false
+         record in this table is worse than a missing one. */
+      return res.status(400).json({
+        error: 'The Admin Responsibilities Policy applies to administrator accounts.',
+        code: 'not_an_administrator',
+      });
+    }
+
+    if (req.body?.acknowledged !== true) {
+      return res.status(400).json({
+        error: 'Every undertaking must be acknowledged before the policy can be accepted.',
+        code: 'acknowledgement_required',
+      });
+    }
+
+    const result = await acceptAdminResponsibilities(db, { userId: user.id, req });
+
+    await recordAudit(db, {
+      adminId: user.id,
+      action: 'ACCEPT_ADMIN_RESPONSIBILITIES',
+      targetUserId: user.id,
+      details: result.already ? 'already accepted' : `recorded ${result.recorded} acceptance(s)`,
+    });
+
+    res.json({ accepted: true, already: result.already });
+  } catch (err) {
+    console.error('Accept admin responsibilities error:', err);
+    res.status(500).json({ error: 'Could not record the acceptance' });
   }
 });
 

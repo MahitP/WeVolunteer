@@ -87,6 +87,12 @@ beforeAll(async () => {
        the capability under test. */
     const { enrolTwoFactor } = await import('./testServer.js');
     await enrolTwoFactor(db, email);
+    /* And onboarded onto the Admin Responsibilities Policy, for exactly the
+       reason the comment above gives about 2FA: since 2026-09-27 an
+       administrator with no acceptance row is refused fourteen capabilities, so
+       a promoted fixture that skipped it would read 403 across the matrix for a
+       reason unrelated to the capability under test. */
+    await (await import('./db.js')).seedAdminAcceptance();
     tokens[role] = signed.cookie;
   }
 
@@ -112,6 +118,7 @@ beforeAll(async () => {
 afterAll(async () => {
   global.fetch = originalFetch;
   await srv?.close();
+
 });
 
 /**

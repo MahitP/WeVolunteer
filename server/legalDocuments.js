@@ -455,8 +455,25 @@ export const LEGAL_DOCUMENTS = [
     slug: 'admin-responsibilities-policy',
     version: '1.0',
     title: 'Admin Responsibilities Policy',
-    consentType: 'notice',
-    scope: 'notice',
+    /**
+     * An AGREEMENT since 2026-09-27, not a notice.
+     *
+     * It was published as a notice, which meant it bound administrators in its
+     * own words and nothing enforced it — the launch-checklist audit found both
+     * owners holding every capability with zero acceptance rows. The Organizer
+     * Agreement has withheld capabilities until acceptance since it shipped; the
+     * document governing the MORE powerful role was the one with no gate.
+     *
+     * Only the registry metadata moves. `contentHash` is the sha256 of the
+     * published body, which is untouched, so no existing acceptance is
+     * invalidated and no repair migration is needed. The stored `consent_type`
+     * on the published row stays 'notice' — `syncLegalDocuments` never rewrites
+     * a published row — and nothing reads it for enforcement:
+     * `hasAcceptedAdminResponsibilities` matches on `(slug, version)` in
+     * `legal_acceptances`, exactly as the organizer gate does.
+     */
+    consentType: 'agree',
+    scope: 'admin-onboarding',
     summary: 'What administrators may do, what is logged when they do it, and the limits on looking at a student\'s record.',
     effectiveAt: '2026-08-06',
     file: '10-admin-responsibilities-policy.md',
@@ -589,6 +606,14 @@ export const ORGANIZER_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'orga
  */
 export const STUDENT_ORGANIZER_DOCUMENTS =
   LEGAL_DOCUMENTS.filter(d => d.scope === 'student-organizer-onboarding');
+
+/**
+ * The documents an administrator must accept before holding power over anyone.
+ *
+ * Derived by scope like its two siblings, so adding a second admin-facing
+ * agreement later needs no change here or in the gate that reads it.
+ */
+export const ADMIN_DOCUMENTS = LEGAL_DOCUMENTS.filter(d => d.scope === 'admin-onboarding');
 
 /**
  * The distinct consent controls a signup form must show.

@@ -24,6 +24,7 @@ import { syncLegalDocuments } from './consent.js';
 // argument and reaches only consent.js and legalDocuments.js, neither of which
 // imports this file, so there is no cycle.
 import { acceptOrganizerAgreement } from './organizerAgreement.js';
+import { acceptAdminResponsibilities } from './adminResponsibilitiesPolicy.js';
 // Safe to import here despite this module opening the database at module scope:
 // auditLog.js imports `node:crypto` and nothing else, and takes `db` as an
 // argument, so there is no cycle back into this file.
@@ -1560,6 +1561,32 @@ export async function completeDatabaseInit() {
   await initHoursLedger();
   await initCertificates();
   await seedOrganizerAcceptance();
+  await seedAdminAcceptance();
+}
+
+/**
+ * The demo administrator has accepted the Admin Responsibilities Policy.
+ *
+ * Seeded for the same reason the organizer's acceptance is: the gate is real, so
+ * a demo admin without an acceptance row is an admin who cannot moderate, cannot
+ * approve an organizer, and cannot see an applicant's contact details — which is
+ * not the demo anybody wants, and in the test suite it is 300 failures that say
+ * nothing about the code under test.
+ *
+ * DEMO_MODE only. A production administrator accepts through
+ * `/api/legal/admin-responsibilities/accept`, which is the whole point: the
+ * acceptance record has to be something a person did.
+ */
+export async function seedAdminAcceptance() {
+  if (!DEMO_MODE) return;
+
+  const admins = await db.prepare(
+    "SELECT id FROM users WHERE role IN ('admin', 'super_admin')"
+  ).all();
+
+  for (const admin of admins) {
+    await acceptAdminResponsibilities(db, { userId: admin.id, now: new Date().toISOString() });
+  }
 }
 
 export async function seedOrganizerAcceptance() {

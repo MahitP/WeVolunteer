@@ -2,7 +2,25 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestServer } from './testServer.js';
 
 let srv;
-beforeAll(async () => { srv = await startTestServer(); });
+beforeAll(async () => {
+  srv = await startTestServer();
+  /**
+   * The admins this file's fixtures create have accepted the Admin
+   * Responsibilities Policy.
+   *
+   * It became an enforced agreement on 2026-09-27: fourteen capabilities are
+   * withheld from an administrator with no acceptance row, the platform owner
+   * included. The DEMO_MODE seed covers the admins it creates; a super_admin
+   * made by a test after startup needs the same, or the fixture is an
+   * administrator who was never onboarded and this suite measures the gate
+   * rather than the thing under test.
+   *
+   * Imported here, not at the top: `db.js` opens its connection at module scope,
+   * so a static import binds it before startTestServer() sets WEV_DB_PATH.
+   */
+  const { seedAdminAcceptance } = await import('./db.js');
+  await seedAdminAcceptance();
+});
 afterAll(async () => { await srv.close(); });
 
 describe('messaging UX polish', () => {
@@ -63,6 +81,7 @@ describe('messaging UX polish', () => {
     expect(convo.otherParticipant.lastReadAt).toBeDefined();
     expect(convo.otherParticipant.lastReadAt).not.toBeNull();
   });
+
 });
 
 /**
@@ -185,6 +204,9 @@ describe('messages/conversations/resolve capability walkthrough (v1.2a messaging
     const { db } = await import('./db.js');
     await db.prepare("UPDATE users SET role = 'partner' WHERE email = ?").run('resolve-partner-7e@test.local');
     await db.prepare("UPDATE users SET role = 'super_admin', verified = 1 WHERE email = ?").run('resolve-superadmin-7e@test.local');
+    /* Onboard the freshly-promoted administrator: the gate withholds fourteen
+       capabilities until an acceptance row exists. */
+    await (await import('./db.js')).seedAdminAcceptance();
     partnerToken = partnerSigned.cookie;
     superAdminToken = superAdminSigned.cookie;
 

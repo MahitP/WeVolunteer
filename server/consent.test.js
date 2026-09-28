@@ -174,7 +174,12 @@ describe('the document registry', () => {
     // silently unenforceable — which is the failure the registry exists to stop.
     for (const doc of LEGAL_DOCUMENTS.filter(d => d.consentType !== 'notice')) {
       expect(
-        ['signup', 'organizer-onboarding', 'student-organizer-onboarding'].includes(doc.scope),
+        /* `admin-onboarding` joined the list on 2026-09-27. Until then policy 10
+           was registered with `scope: 'notice'` and was exactly the failure the
+           comment above describes: published, never accepted, unenforceable. It
+           is collected by /api/legal/admin-responsibilities/accept. */
+        ['signup', 'organizer-onboarding', 'student-organizer-onboarding', 'admin-onboarding']
+          .includes(doc.scope),
         `${doc.slug} needs acceptance but its scope (${doc.scope}) collects none`
       ).toBe(true);
     }

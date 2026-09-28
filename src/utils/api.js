@@ -1830,6 +1830,21 @@ export const api = {
     }),
 
   /**
+   * The Admin Responsibilities Policy — the same pair, for administrators.
+   *
+   * Since 2026-09-27 that policy withholds fourteen capabilities until it is
+   * accepted, the platform owner included. Both endpoints are deliberately
+   * reachable while those capabilities are withheld: they are the only way out.
+   */
+  fetchAdminResponsibilities: async () => apiFetch('/api/legal/admin-responsibilities/status'),
+
+  acceptAdminResponsibilities: async () =>
+    apiFetch('/api/legal/admin-responsibilities/accept', {
+      method: 'POST',
+      body: JSON.stringify({ acknowledged: true })
+    }),
+
+  /**
    * The same pair for the Student Organizer Agreement.
    *
    * Reachable by somebody holding none of the four helper capabilities, for the

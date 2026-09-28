@@ -569,6 +569,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/portfolio')) return 'portfolio';
   if (pathname.startsWith('/checkin')) return 'checkin';
   if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
+  if (pathname.startsWith('/admin-responsibilities')) return 'adminResponsibilities';
   if (pathname.startsWith('/student-organizer-agreement')) return 'studentOrganizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
   /* Before `/admin/appeals`? No — different prefixes, no conflict. But it must
@@ -648,6 +649,7 @@ export const RAIL_TAB = {
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
   studentOrganizerAgreement: 'dashboard',
+  adminResponsibilities: 'dashboard',
   appealForm: 'dashboard',
 };
 
@@ -721,6 +723,7 @@ export const PAGE_META = {
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     /**
@@ -763,6 +766,7 @@ export const PAGE_META = {
        and from the footer of the signed-out screens. */
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
@@ -787,6 +791,7 @@ export const PAGE_META = {
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
@@ -850,6 +855,7 @@ export const PAGE_META = {
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
+    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     /* "All events" was the pre-consolidation title, and it survived the rename
@@ -1787,6 +1793,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
+    '/admin-responsibilities': { currentUser, addToast, onAccepted: refreshAll },
     /* Same three. `refreshAll` is what makes the released capabilities visible
        to the navigation without a sign-out. */
     '/student-organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },

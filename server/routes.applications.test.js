@@ -5,7 +5,25 @@ import { startTestServer } from './testServer.js';
 // module-cached db.js, so a second call would silently reuse the first
 // database. Every describe below shares this srv.
 let srv;
-beforeAll(async () => { srv = await startTestServer(); });
+beforeAll(async () => {
+  srv = await startTestServer();
+  /**
+   * The admins this file's fixtures create have accepted the Admin
+   * Responsibilities Policy.
+   *
+   * It became an enforced agreement on 2026-09-27: fourteen capabilities are
+   * withheld from an administrator with no acceptance row, the platform owner
+   * included. The DEMO_MODE seed covers the admins it creates; a super_admin
+   * made by a test after startup needs the same, or the fixture is an
+   * administrator who was never onboarded and this suite measures the gate
+   * rather than the thing under test.
+   *
+   * Imported here, not at the top: `db.js` opens its connection at module scope,
+   * so a static import binds it before startTestServer() sets WEV_DB_PATH.
+   */
+  const { seedAdminAcceptance } = await import('./db.js');
+  await seedAdminAcceptance();
+});
 afterAll(async () => { await srv.close(); });
 
 describe('applications: withdrawal and re-application', () => {
@@ -70,6 +88,7 @@ describe('applications: withdrawal and re-application', () => {
     const res = await srv.call('PATCH', `/api/applications/${app.id}`, { status: 'accepted' }, studentToken);
     expect(res.status).toBe(403);
   });
+
 });
 
 describe('applications: bulk organizer actions', () => {
@@ -378,6 +397,9 @@ describe('applications: GET /api/applications payload scoping by capability', ()
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    /* Onboard the freshly-promoted administrator: the gate withholds fourteen
+       capabilities until an acceptance row exists. */
+    await (await import('./db.js')).seedAdminAcceptance();
     const superToken = superSigned.cookie;
 
     const partnerSigned = await srv.signupConfirmed({
@@ -454,6 +476,9 @@ describe('applications: admin-tier oversight of PATCH /api/applications/:id', ()
       password: 'Password123', grade: 'Adult', role: 'student'
     });
     await db.prepare('UPDATE users SET role = ?, verified = 1 WHERE id = ?').run('super_admin', superSigned.user.id);
+    /* Onboard the freshly-promoted administrator: the gate withholds fourteen
+       capabilities until an acceptance row exists. */
+    await (await import('./db.js')).seedAdminAcceptance();
     /* Promoted by SQL, so `login()`'s two-factor enrolment never ran and
        `requireCap` would refuse this account before any capability is read. */
     const { enrolTwoFactor } = await import('./testServer.js');

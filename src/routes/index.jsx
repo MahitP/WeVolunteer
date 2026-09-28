@@ -65,6 +65,7 @@ const AboutUs = React.lazy(() => import('../views/AboutUs'));
 const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
 const StudentOrganizerAgreement = React.lazy(() => import('../views/legal/StudentOrganizerAgreement'));
+const AdminResponsibilities = React.lazy(() => import('../views/legal/AdminResponsibilities'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
@@ -371,6 +372,14 @@ export const APP_ROUTES = [
    * server/studentOrganizerAgreement.js.
    */
   { path: '/student-organizer-agreement', element: <StudentOrganizerAgreement /> },
+  /**
+   * The same again, for administrators — and ungated for a sharper version of the
+   * same reason. `can()` checks `withheld` BEFORE the `super_admin` wildcard, so
+   * this is the only agreement gate in the product that reaches the platform
+   * owner. A capability requirement here would leave them no way back into their
+   * own instance short of `bin/`. See server/adminResponsibilitiesPolicy.js.
+   */
+  { path: '/admin-responsibilities', element: <AdminResponsibilities /> },
   /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */

@@ -5,6 +5,7 @@ import { recordAcceptances } from './consent.js';
 import { resolveDocument } from './legalStore.js';
 import { studentOrganizerWithholdingsFor } from './studentOrganizerAgreement.js';
 import { signupConsentWithholdingsFor } from './legalConsentGate.js';
+import { adminResponsibilitiesWithholdings } from './adminResponsibilitiesPolicy.js';
 
 /**
  * The Organizer Agreement, and what an organizer cannot do until they accept it.
@@ -220,6 +221,22 @@ export async function withheldCapabilitiesFor(db, userRow) {
      * per user until then.
      */
     ...await signupConsentWithholdingsFor(db, userRow),
+    /**
+     * The fourth arm: the Admin Responsibilities Policy.
+     *
+     * Here for the reason this function's own comment gives — it is documented as
+     * the single answer to "what is withheld from this person", and a list
+     * computed at a call site would be another place to forget.
+     *
+     * Note what it does to the paragraph above about admins. That paragraph
+     * explains why the ORGANIZER arm returns `[]` for one: "withholding from the
+     * operator would be a way to lock the platform owner out of their own
+     * instance." Still true of the organizer document, which does not bind them.
+     * This arm binds them on purpose, and avoids that trap a different way — by
+     * withholding only the power to act on or read another person's record, never
+     * sign-in, settings, or the owner console.
+     */
+    ...await adminResponsibilitiesWithholdings(db, userRow),
   ];
 }
 

@@ -51,6 +51,24 @@ beforeAll(async () => {
   srv = await startTestServer();
   ({ db } = await import('./db.js'));
   ({ deleteUploadedFile } = await import('./routes/profilePictureRoutes.js'));
+
+  /**
+   * Administrators created by this file's fixtures have accepted the Admin
+   * Responsibilities Policy.
+   *
+   * The policy became an enforced agreement on 2026-09-27: fourteen capabilities
+   * — including `appeal.review`, `report.resolve` and `user.contact.read` — are
+   * withheld from an administrator with no acceptance row, the platform owner
+   * included. The DEMO_MODE seed accepts for the admins it creates; every admin
+   * and super_admin inserted by a test after startup needs the same, or the
+   * fixture is an administrator who was never onboarded and the suite measures
+   * the gate instead of the thing under test.
+   */
+  /* Imported HERE, not at the top. `db.js` opens its connection at module
+     scope, so a static import would bind it before startTestServer() sets
+     WEV_DB_PATH — the guard in startTestServer() says exactly this. */
+  const { seedAdminAcceptance } = await import('./db.js');
+  await seedAdminAcceptance();
 });
 
 afterAll(async () => {

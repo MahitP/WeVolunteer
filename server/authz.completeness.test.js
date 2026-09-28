@@ -751,6 +751,18 @@ describe('authorization hygiene', () => {
        */
       'GET /api/legal/student-organizer-agreement': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (studentOrganizerAgreementStatus scoped to req.user.id); every role may ask, and somebody who holds the rank nowhere gets required:false rather than a refusal' },
       'POST /api/legal/student-organizer-agreement/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses somebody who holds the rank nowhere with 400 rather than recording a false acceptance, and must stay reachable while the four helper capabilities are withheld (accountRoutes.js)' },
+      /**
+       * ── The Admin Responsibilities Policy, the same shape again ──
+       *
+       * With one difference worth naming: this is the only agreement gate that
+       * reaches the platform owner, because `can()` checks `withheld` before the
+       * `'*'` wildcard. That makes "must stay reachable while capabilities are
+       * withheld" load-bearing rather than tidy — if either of these were gated
+       * on a capability this policy withholds, the owner would have no way back
+       * into their own instance short of `bin/`.
+       */
+      'GET /api/legal/admin-responsibilities/status': { category: CATEGORY.OPEN_TO_AUTHENTICATED, reason: 'reads only the caller\'s own acceptance state (adminResponsibilitiesStatus scoped to req.user.id); every role may ask, and a non-administrator gets accepted:true rather than a refusal' },
+      'POST /api/legal/admin-responsibilities/accept': { category: CATEGORY.SELF_ONLY, reason: 'writes acceptance rows for req.user.id only; refuses a non-administrator with 400 rather than recording a false acceptance, and must stay reachable while the fourteen admin capabilities are withheld — it is the only way an administrator, including the owner, gets them back (accountRoutes.js)' },
       'GET /api/privacy/export/download/:id': { category: CATEGORY.SELF_ONLY, reason: 'job.user_id !== caller -> 404 (always the caller\'s own export job); behind requireAAL2(\'data.download\') with the jobId bound — this is where the archive actually leaves, and gating only the request left a completed one behind a bare session for seven days (v1.2b audit F-1)' },
 
       /**
