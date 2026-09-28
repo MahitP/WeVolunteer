@@ -107,6 +107,37 @@ function clearFixture(userId, slug) {
 }
 
 /**
+ * Answers — or un-answers — the analytics question for one account.
+ *
+ * The question is tier 3 of the notice ladder, above the location offer, and
+ * every seeded account starts at `null`: never asked. So any case here that
+ * expects the location offer, or an empty slot, has to answer it first or it
+ * is measuring the analytics banner instead — which is how four of these cases
+ * started failing the day the question was added, each one reporting
+ * `"Usage analytics"` where it expected `"Use your location"`.
+ *
+ * `0` rather than `1`: a decline, so nothing in the tab is asked to start
+ * Amplitude. `null` puts the account back where the seed left it.
+ */
+function setAnalyticsConsent(userId, value) {
+  withDb((db) => {
+    db.prepare('UPDATE users SET analytics_consent = ? WHERE id = ?').run(value, userId);
+  });
+}
+
+/* The id, from the application rather than from a literal: seeded ids are
+   strings like `user-student-1` and a guess that misses would leave the
+   fixture attached to nobody and every assertion below vacuous. */
+async function currentUserId(page) {
+  const userId = await page.evaluate(async () => {
+    const res = await fetch('/api/auth/me', { credentials: 'include' });
+    return (await res.json()).id;
+  });
+  expect(userId, 'the signed-in account has no id').toBeTruthy();
+  return userId;
+}
+
+/**
  * A signed-in student page, with the fixture in place.
  *
  * `quietLocation` pre-dismisses the location opt-in for the tab. The notice
@@ -117,8 +148,14 @@ function clearFixture(userId, slug) {
  * it is measuring the wrong banner. (Found the hard way: the first version of
  * the gap case waited for `.app-notice` to detach and timed out staring at
  * `region "Use your location"`.)
+ *
+ * `analytics` is where the account's analytics answer is left: declined by
+ * default, so the ladder below the legal tier is just the location offer, and
+ * `null` for the case that walks every rung. See `setAnalyticsConsent`.
  */
-async function openWith(browser, request, baseURL, fixture, { quietLocation = false } = {}) {
+async function openWith(
+  browser, request, baseURL, fixture, { quietLocation = false, analytics = 0 } = {}
+) {
   const roles = await fetchRoles(request, baseURL);
   const role = roles.find(r => /student/i.test(r.key)) ?? roles[0];
   const statePath = await signInAs(browser, role, baseURL);
@@ -133,16 +170,10 @@ async function openWith(browser, request, baseURL, fixture, { quietLocation = fa
   }
   const page = await ctx.newPage();
 
-  /* The id, from the application rather than from a literal: seeded ids are
-     strings like `user-student-1` and a guess that misses would leave the
-     fixture attached to nobody and every assertion below vacuous. */
   await page.goto('/');
-  const userId = await page.evaluate(async () => {
-    const res = await fetch('/api/auth/me', { credentials: 'include' });
-    return (await res.json()).id;
-  });
-  expect(userId, 'the signed-in account has no id').toBeTruthy();
+  const userId = await currentUserId(page);
 
+  setAnalyticsConsent(userId, analytics);
   publishAndFallBehind(userId, fixture);
 
   await page.goto('/');
@@ -228,6 +259,56 @@ test.describe('the ordinary change notice', () => {
       expect(await page.locator('.app-notice').count(), 'still one banner, not two').toBe(1);
     } finally {
       clearFixture(userId, FIXTURE.slug);
+      await ctx.close();
+    }
+  });
+
+  test('walks every rung: the legal notice, then the analytics question, then the location offer', async ({ browser, request, baseURL }) => {
+    /**
+     * The whole ladder below the dialog, for an account that has never been
+     * asked about analytics — which is every account the seed creates.
+     *
+     * The analytics question sits between the other two on purpose (see the
+     * ladder in `AppNotices.jsx`): above the location offer because it is
+     * asked once and then never again, below the legal notice because it is a
+     * choice rather than something the reader is held to. The case above seeds
+     * it as answered to isolate the legal-to-location step; this one leaves it
+     * unanswered so that ordering is asserted rather than assumed, and measures
+     * the analytics banner with axe while it is on screen.
+     */
+    const { ctx, page, userId } = await openWith(
+      browser, request, baseURL, FIXTURE, { analytics: null }
+    );
+
+    try {
+      const banner = page.locator('.app-notice');
+      await banner.waitFor({ state: 'visible', timeout: 30000 });
+      expect(await banner.getAttribute('aria-label')).toBe('Legal document update');
+
+      await page.getByRole('button', { name: /I have seen/i }).click();
+
+      await expect(page.locator('.app-notice')).toHaveAttribute('aria-label', 'Usage analytics');
+      expect(await page.locator('.app-notice').count(), 'still one banner, not two').toBe(1);
+
+      const results = await new AxeBuilder({ page })
+        .withTags(AXE_TAGS)
+        .include('.app-notices')
+        .analyze();
+      expect(
+        results.violations.map(v => `${v.id}: ${v.nodes.length} node(s)`),
+        JSON.stringify(results.violations, null, 2)
+      ).toEqual([]);
+
+      /* Answered through the product, not the database: the banner leaves
+         because the session's `analyticsConsent` stops being `null`, and that
+         is the path worth exercising. */
+      await page.getByRole('button', { name: /no thanks/i }).click();
+
+      await expect(page.locator('.app-notice')).toHaveAttribute('aria-label', 'Use your location');
+      expect(await page.locator('.app-notice').count(), 'still one banner, not two').toBe(1);
+    } finally {
+      clearFixture(userId, FIXTURE.slug);
+      setAnalyticsConsent(userId, null);
       await ctx.close();
     }
   });
@@ -323,6 +404,9 @@ test.describe('the location opt-in, in the same slot', () => {
     const page = await ctx.newPage();
 
     try {
+      /* Answered first, or the analytics question outranks the offer. */
+      await page.goto('/');
+      setAnalyticsConsent(await currentUserId(page), 0);
       await page.goto('/');
       await page.addStyleTag({ content: SETTLE });
 
@@ -368,6 +452,9 @@ test.describe('the location opt-in, in the same slot', () => {
     const page = await ctx.newPage();
 
     try {
+      /* Answered first, or the analytics question outranks the offer. */
+      await page.goto('/');
+      setAnalyticsConsent(await currentUserId(page), 0);
       await page.goto('/');
       await page.addStyleTag({ content: SETTLE });
 
