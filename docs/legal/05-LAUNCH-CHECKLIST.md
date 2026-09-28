@@ -15,13 +15,13 @@ Nothing below can be completed while any of these is open.
 | # | Decision | Blocks | Recommendation | Done |
 |---|---|---|---|---|
 | 1 | **Posture A (district vendor) or B (independent)?** | Everything | A for the pilot; write documents to switch | ☐ |
-| 2 | **Minimum age. Is `'N/A'` grade self-selectable?** | Age gate, Privacy Policy, COPPA | 13+ hard floor; `'N/A'` not self-selectable | ☐ |
+| 2 | **Minimum age. Is `'N/A'` grade self-selectable?** | Age gate, Privacy Policy, COPPA | **DECIDED 2026-09-28: 13.** Already enforced — `MINIMUM_AGE = 13` in `accountValidation.js`, refused at signup and on the OAuth path, 18 cases in `ageGate.test.js`. Nothing to build; this records the decision the code was already making. Under-13 therefore never hold an account, which is what makes the COPPA question narrow | ☑ |
 | 3 | **May organizers message students who haven't applied?** | Youth Safety, Organizer Agreement, code | No | ☐ |
 | 4 | **Which SMTP provider?** | Subprocessor list, DPA | — | ☐ |
 | 5 | **Retention period for inactive accounts?** | Privacy Policy, COPPA §312.10 | 3 years inactive → purge | ☐ |
 | 6 | **How long do certificates stay verifiable?** | Certificate Policy, R-02 | 7 years, then purge | ☐ |
 | 7 | **Legal entity behind WeVolunteer?** | ToS — you cannot publish one without a legal person to be a party to it | Form an entity before any district signs | ☐ |
-| 8 | **Governing law and venue?** | ToS | New Jersey | ☐ |
+| 8 | **Governing law and venue?** | ToS | **DECIDED 2026-09-28: New Jersey.** The operator, the school and every pilot user are in New Jersey; the breach statute (N.J.S.A. 56:8-163) and the mandated-reporter duty (9:6-8.10) that the runbooks are built on are New Jersey law already. Choosing anything else would put the documents under one body of law and the obligations under another. Counsel should confirm the venue clause wording, not the choice | ☑ |
 | 9 | **Named privacy contact, and who monitors it?** | Every document | — | ☐ |
 | 5a | **The four `PRIVACY_*` values**, once 5 and 9 are answered: `PRIVACY_CONTACT`, `PRIVACY_RETENTION`, `PRIVACY_UNDER13`, `PRIVACY_OWNER` | The built-in privacy notice — `privacyNoticeComplete()` is false until all four are set, and the page says it is incomplete | Set them as `VITE_*` build variables; the code will not invent them | ☐ |
 | 10 | **Do guardians get accounts, or act through the district?** | Guardian access design | Through the district in A | ☐ |
@@ -95,7 +95,7 @@ Nothing below can be completed while any of these is open.
 
 | Finding | Detail | Done |
 |---|---|---|
-| **A dormant `super_admin` nobody registered** | `owner_wevolunteerplatfor`, seeded alongside `mahit` on 2026-09-08, holds full platform privileges, has **never signed in**, has no second factor of any kind, and is not in the administrator register. It is not an open door — `REQUIRE_ADMIN_2FA` defaults to ENABLED when unset, which is how production runs, so it cannot sign in without enrolling one. But a privileged account nobody has listed or used is exactly what the register exists to surface. Decide whether it is needed; remove it or register it | ☐ |
+| **~~A dormant `super_admin` nobody registered~~ RESOLVED 2026-09-28 — it is the operator's account**, confirmed by him and now recorded in the register rather than revoked. What remains is not a registration gap but an untested one: it has still never been claimed, so the recovery path it exists to provide has never been walked. Moved to Phase 2. Original finding: | `owner_wevolunteerplatfor`, seeded alongside `mahit` on 2026-09-08, holds full platform privileges, has **never signed in**, has no second factor of any kind, and is not in the administrator register. It is not an open door — `REQUIRE_ADMIN_2FA` defaults to ENABLED when unset, which is how production runs, so it cannot sign in without enrolling one. But a privileged account nobody has listed or used is exactly what the register exists to surface. Decide whether it is needed; remove it or register it | ☐ |
 | **~~Neither~~ ONE administrator has not accepted policy 10** | Verified in production 2026-09-28: `mahit` **accepted** it; `owner_wevolunteerplatfor` has not — and has never signed in, so it cannot, which makes this the same finding as the dormant-account row above rather than a second one. Resolving that account resolves this. | R-11 | ☐ |
 
 ---

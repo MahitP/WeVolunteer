@@ -33,9 +33,19 @@ publishing anybody's mailbox. Reconcile against `users.role` to match rows to ad
 | Account | Role | Capabilities beyond the role | Granted | Granted by | Reason |
 |---|---|---|---|---|---|
 | *(the operator's own account)* | `super_admin` | — | 2026-09-08, `bootstrap-owners.mjs` | — | Platform owner. The account actually in use. |
-| *(the project mailbox account, `owner_…` username)* | `super_admin` | — | 2026-09-08, `bootstrap-owners.mjs` | — | Second owner, created in the same bootstrap run as the first. **Unclaimed — see below.** |
+| *(the project mailbox account, `owner_…` username)* | `super_admin` | — | 2026-09-08, `bootstrap-owners.mjs` | — | Second owner, created in the same bootstrap run as the first. **Claimed by the operator 2026-09-28** — it is his, and it is the recovery path. See below. |
 
-### The second owner is unclaimed, and that is the state to resolve
+### The second owner is the operator's, and is the recovery path
+
+**Recorded 2026-09-28, on the owner's own statement:** the `owner_…` account belongs to
+Mahit Pulavarthi. It is not an orphan and it is not to be revoked. The launch-checklist
+finding that asked "remove it or register it" is answered by registering it — this section.
+
+That resolves the question of *whose* it is. It does not resolve the state below, which is
+about whether the recovery path would actually work when it is needed. Read on: an account
+that has never been claimed is a recovery path nobody has tested.
+
+### Why unclaimed is still the state to resolve
 
 It has never signed in and has no second factor. Neither fact is an anomaly:
 `bootstrap-owners.mjs` creates an account whose password is a bcrypt hash of 32 random
@@ -46,7 +56,7 @@ account is refused every capability with `403 tfa_required` until it enrols.
 
 So it cannot be used by anybody who does not control that mailbox. It is not an open door.
 
-**But unclaimed is the worst of the three available states.** A second owner exists to be
+**Even knowing whose it is, unclaimed is the worst of the three available states.** A second owner exists to be
 the recovery path when the first is locked out — and an account that must first be claimed
 under pressure, by somebody who has never done it, is not a recovery path. Meanwhile it is
 a standing grant on a mailbox, and whoever controls that mailbox can take it.
@@ -86,4 +96,5 @@ prints it rather than implying an oversight process that does not exist.
 | Date | Change | By |
 |---|---|---|
 | 2026-08-06 | Register created as part of the v1.0 policy release. | Operator |
+| 2026-09-28 | **Second owner claimed.** The operator confirmed the `owner_…` account is his. Registered rather than revoked, which answers the launch-checklist finding. Its unclaimed state — never signed in, no second factor — is unchanged and is still the thing to fix: a recovery path that has never been walked is a hypothesis, and the moment it is needed is the moment nobody wants to discover that. | Operator |
 | 2026-09-27 | **Corrected against production.** The register recorded one account and said "sole administrator at launch"; the database has held **two** `super_admin` accounts since 2026-09-08, both created in the same `bootstrap-owners.mjs` run. Found during the launch-checklist audit, not by a review — the quarterly access review below had never run. The second account is recorded, and its unclaimed state written down rather than left as a discrepancy between this file and the database. | Operator |
