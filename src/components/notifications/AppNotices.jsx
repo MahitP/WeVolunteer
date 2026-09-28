@@ -4,6 +4,7 @@ import { useLocationContext } from '../../contexts/LocationContext';
 import LocationPrompt from '../location/LocationPrompt';
 import LegalUpdateNotice from '../legal/LegalUpdateNotice';
 import LegalAcceptanceModal from '../legal/LegalAcceptanceModal';
+import AnalyticsConsentPrompt from './AnalyticsConsentPrompt';
 import './NoticeBanner.css';
 
 /**
@@ -42,7 +43,13 @@ import './NoticeBanner.css';
  *      have to answer.
  *   2. Legal document changes. One banner, however many documents — see
  *      `LegalUpdateNotice`.
- *   3. The location opt-in. Lowest, because it is an offer rather than news,
+ *   3. The analytics question, if this account has never been asked. Above the
+ *      location offer because it is asked ONCE and then never again — a
+ *      question that resolves permanently should not queue behind one that
+ *      recurs, or it waits for a tab where nobody happens to dismiss the
+ *      recurring one. Below the legal tiers because it is a choice rather than
+ *      something the reader is held to.
+ *   4. The location opt-in. Lowest, because it is an offer rather than news,
  *      and because it comes back: `dismissPrompt` remembers for the tab, not
  *      for ever.
  *
@@ -55,7 +62,7 @@ import './NoticeBanner.css';
  * shape that makes the notice slot feel like a place things pile up instead of
  * a place the app tells you one thing.
  */
-export default function AppNotices({ onAccepted, onSignOut, locationRelevant = true }) {
+export default function AppNotices({ currentUser, onAccepted, onSignOut, locationRelevant = true }) {
   const locationCtx = useLocationContext();
 
   const [notices, setNotices] = useState([]);
@@ -121,6 +128,33 @@ export default function AppNotices({ onAccepted, onSignOut, locationRelevant = t
     await onAccepted?.();
   }, [load, onAccepted]);
 
+  /**
+   * Recording the analytics answer.
+   *
+   * `updateProfile` is the same endpoint Settings → Privacy writes to, and the
+   * server refuses anything that is not a real boolean — a consent record that
+   * accepted `'false'` would store a yes nobody gave. Deliberately ONE path for
+   * this value: a second way to set it is a second thing to audit.
+   *
+   * `onAccepted` is `refreshAll` in the shell. Refetching is what makes the
+   * banner go away, because it is the session's `analyticsConsent` going from
+   * `null` to an answer that removes the condition below — and it is also what
+   * `useAnalyticsConsent` watches, so a yes starts Amplitude in this tab rather
+   * than at the next reload.
+   *
+   * A failure is deliberately silent and leaves the banner up. The alternative
+   * is an error toast about a question the reader did not ask for; leaving the
+   * question on screen says the same thing and is actionable.
+   */
+  const answerAnalytics = useCallback(async (consented) => {
+    try {
+      await api.updateProfile({ analyticsConsent: consented });
+      await onAccepted?.();
+    } catch {
+      /* Left on screen to be answered again. */
+    }
+  }, [onAccepted]);
+
   if (required.length > 0) {
     return (
       <LegalAcceptanceModal
@@ -155,14 +189,27 @@ export default function AppNotices({ onAccepted, onSignOut, locationRelevant = t
   const showLocation = locationRelevant && Boolean(locationCtx?.showPrompt);
   const showLegal = notices.length > 0;
 
+  /**
+   * `null` and only `null` — never asked.
+   *
+   * `false` is somebody who declined and must not be asked again, which is the
+   * whole difference between a choice and a nag. `=== null` rather than a
+   * falsy check for exactly that reason, and `?? null` so an account object
+   * that has not loaded the field yet is treated as "do not ask", not as "ask".
+   */
+  const showAnalytics = currentUser != null
+    && (currentUser.analyticsConsent ?? null) === null;
+
   /* The whole point: no notice, no node, no margin. */
-  if (!showLegal && !showLocation) return null;
+  if (!showLegal && !showAnalytics && !showLocation) return null;
 
   return (
     <div className="app-notices">
       {showLegal
         ? <LegalUpdateNotice notices={notices} onDismiss={dismissNotices} />
-        : <LocationPrompt />}
+        : showAnalytics
+          ? <AnalyticsConsentPrompt onAnswer={answerAnalytics} />
+          : <LocationPrompt />}
     </div>
   );
 }

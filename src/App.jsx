@@ -2085,6 +2085,7 @@ function AppShell({ toasts, addToast, removeToast }) {
             */}
           <AppNotices
             key={currentUser.id}
+            currentUser={currentUser}
             onAccepted={refreshAll}
             onSignOut={handleLogout}
             /* The lowest tier of the notice ladder is an OFFER, and an offer
