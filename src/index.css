@@ -12636,6 +12636,12 @@ input:disabled + .premium-slider {
   align-items: center;
   justify-content: space-between;
   gap: var(--s2);
+  /* 44px floor, the same one twenty other controls here carry. The padding
+     alone gave 40px, and a11y/sweep.geometry.spec.js reported all five of these
+     against the house rule on every run — the only entries on that list that
+     are not the demo-account switcher, which ships nowhere. They are also the
+     first thing anybody taps on an empty Welly, often on a phone. */
+  min-height: 44px;
   padding: var(--s3) var(--s4);
   background: var(--surface);
   border: 1px solid var(--rule);
