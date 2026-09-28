@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Routes, Route, useNavigate, useLocation, useSearchParams, Navigate, matchRoutes } from 'react-router-dom';
 import { api } from './utils/api';
 import { resolveEventById } from './utils/resolveEvent';
+import { adminIsPaused } from './utils/adminPaused';
 import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
@@ -246,7 +247,35 @@ export function pageMetaFor(user, activeTab) {
   const key = activeTab === 'profile'
     ? (PROFILE_META_PERSONA[selfProfileFor(user)] ?? persona)
     : persona;
-  return PAGE_META[key]?.[activeTab] || { title: APP_NAME, sub: '' };
+  const meta = PAGE_META[key]?.[activeTab] || { title: APP_NAME, sub: '' };
+
+  /**
+   * One subtitle that is not fixed per tab.
+   *
+   * `PAGE_META` is a static table and that is almost always right — a page's
+   * subtitle describes the page, not the reader. The Admin page is the exception
+   * since 2026-09-27: when the Admin Responsibilities Policy is outstanding it
+   * renders the gate instead of its tiles, and the topbar went on reading "Every
+   * administrative area you can open" above a page saying administration is
+   * paused. Two claims about the same screen, and the confident one is wrong.
+   *
+   * Decided here rather than at the render site because this function is what
+   * `documentTitle` and the topbar both call, so an override anywhere else would
+   * correct one and leave the other — and because it already takes `user`, which
+   * is the only thing the rule needs.
+   *
+   * The title is left alone deliberately: the page is still Admin, and the static
+   * guards that assert every reachable tab has a title read this table.
+   *
+   * `adminIsPaused` is shared with `ModerationCenter`, which uses the same answer
+   * to choose between the gate and the tiles. See its own file for why that is
+   * one function rather than two matching expressions.
+   */
+  if (activeTab === 'moderation' && adminIsPaused(user)) {
+    return { ...meta, sub: 'Paused until the Admin Responsibilities Policy is accepted' };
+  }
+
+  return meta;
 }
 
 /** Derived, not repeated, so the nav entry and the route can never disagree. */
@@ -651,7 +680,6 @@ export const RAIL_TAB = {
   externalHours: 'dashboard',
   organizerAgreement: 'dashboard',
   studentOrganizerAgreement: 'dashboard',
-  adminResponsibilities: 'dashboard',
   appealForm: 'dashboard',
 };
 
@@ -741,7 +769,6 @@ export const PAGE_META = {
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
-    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
     /**
@@ -784,7 +811,6 @@ export const PAGE_META = {
        and from the footer of the signed-out screens. */
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
-    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
@@ -809,7 +835,6 @@ export const PAGE_META = {
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
     portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
-    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
@@ -873,7 +898,6 @@ export const PAGE_META = {
        purpose — it is how an organizer accepts the terms that grant the rest —
        so any signed-in role can open it, partner included. */
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
-    adminResponsibilities: { title: 'Admin Responsibilities Policy', sub: 'What you undertake before acting on anyone\u2019s record' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Partner accounts do not have a dashboard yet' },
     /* "All events" was the pre-consolidation title, and it survived the rename

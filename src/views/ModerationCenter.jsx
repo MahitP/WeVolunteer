@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
+import { adminIsPaused } from '../utils/adminPaused';
 import AdminPolicyGate from '../components/legal/AdminPolicyGate';
 
 /**
@@ -320,7 +321,7 @@ export default function ModerationCenter({ currentUser, addToast, onPreviewStart
   };
 
   /**
-   * Whether administration is paused on this account.
+   * Whether administration is paused on this account — the gate, or the tiles.
    *
    * Read from `currentUser.withheld`, which `/api/auth/me` already carries, so it
    * is known at first render. An earlier version asked the server on mount and
@@ -328,13 +329,12 @@ export default function ModerationCenter({ currentUser, addToast, onPreviewStart
    * but it made the page's whole content depend on a round trip, and a page that
    * is briefly empty for everyone is a worse trade than the flash it avoided.
    *
-   * `report.resolve` is the Admin entry's own requirement and one of the fourteen
-   * the policy withholds, so its presence in that list is exactly the question
-   * "would these tiles 403". The gate below re-reads the real status from the
-   * server before offering anything, so this is a layout decision, never an
-   * authorization one — the server refuses regardless of what this renders.
+   * Shared with the shell, which captions the topbar from the same answer; see
+   * src/utils/adminPaused.js for which capability it reads and why, and for why
+   * a client-side read is a layout decision and never an authorization one. The
+   * gate below re-reads the real status from the server before offering anything.
    */
-  const adminPaused = (currentUser?.withheld ?? []).includes('report.resolve');
+  const adminPaused = adminIsPaused(currentUser);
 
   return (
     <div className="page">
