@@ -42,6 +42,7 @@ import OrgAvatar from '../components/common/OrgAvatar';
 import { CATEGORY_GROUPS } from '../eventCategories';
 import { organizationPath } from '../utils/organizationUrl';
 import { coarsen } from '../utils/coarsePosition';
+import { withViewTransition } from '../utils/motion';
 /**
  * The category filter is a grouped select, not a row of chips.
  *
@@ -429,9 +430,15 @@ export default function BrowseEvents({
       try {
         const res = await api.fetchEventsFiltered({ ...serverFilters, limit: PAGE_SIZE, offset: 0 });
         if (!isCurrent()) return;
-        setResults(res.events || []);
-        setTotal(res.pagination?.total ?? (res.events || []).length);
-        setNextOffset(res.pagination?.nextOffset ?? null);
+        /* The new page is committed inside a view transition, so cards that
+           survive a filter change move to their new places and the rest fade
+           (index.css, "B5"). Without support it is an ordinary update. */
+        withViewTransition(() => {
+          setResults(res.events || []);
+          setTotal(res.pagination?.total ?? (res.events || []).length);
+          setNextOffset(res.pagination?.nextOffset ?? null);
+          setLoading(false);
+        });
         if (res.places) setPlaces(['All', ...res.places]);
         /* The vocabulary comes back with the results and is computed over every
            event rather than the current page — so ticking one tag does not remove
@@ -1056,7 +1063,7 @@ export default function BrowseEvents({
           </button>
         </div>
 
-        {showFilters && <div className="card card-pad s-88cfef">
+        {showFilters && <div className="card card-pad s-88cfef reveal-in">
             <div className="grid s-346730">
               {/* Two independent pickers rather than one range widget, matching
                   AdminAuditExplorer and for the same reason recorded there: the
@@ -1142,10 +1149,14 @@ export default function BrowseEvents({
             </div>
           </div>}
 
-        {loading ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
+        {/* The previous results stay on screen while a filter change is
+            fetched — that is what lets the cards move rather than vanish and
+            reappear — so the placeholder is for the first load only, and the
+            count line below says the list is updating. */}
+        {loading && results.length === 0 ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
           : filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts a sign-up sheet, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
             <p className="small dim s-450599" role="status" aria-live="polite">
-              Showing {filtered.length} of {total} event{total !== 1 ? 's' : ''}
+              {loading ? 'Updating results…' : `Showing ${filtered.length} of ${total} event${total !== 1 ? 's' : ''}`}
             </p>
             {/*
               Only the rows near the viewport are mounted. Rendering the whole

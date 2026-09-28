@@ -3,6 +3,7 @@ import { Check, Clock4 } from 'lucide-react';
 import EmptyState from './common/EmptyState';
 import { formatHours, gradeLabel } from '../utils/helpers';
 import ApplicantReview from './ApplicantReview';
+import BusyButton from './common/BusyButton';
 
 export default function EventApplicantsTab({
   event,
@@ -150,9 +151,9 @@ export default function EventApplicantsTab({
                   <p className="small dim" style={{ margin: 'var(--s2) 0 var(--s4) 0' }}>
                     The application deadline has passed. You can now run the weighted selection.
                   </p>
-                  <button className="btn btn-primary" onClick={handleRunAutoSelect} disabled={submitting}>
-                    {submitting ? 'Running…' : 'Run Auto Select'}
-                  </button>
+                  <BusyButton className="btn btn-primary" onClick={handleRunAutoSelect} busy={submitting} busyLabel="Running…">
+                    Run Auto Select
+                  </BusyButton>
                 </div>
               ) : (
                 <>
@@ -170,7 +171,12 @@ export default function EventApplicantsTab({
 
                     return (
                       <>
-                        <div className="card" style={{ padding: 'var(--s4)', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
+                        {/* The result simply appears — a fade, keyed by run so
+                            each new draw fades in again. Nothing spins and
+                            nothing is held back before the reveal: this is a
+                            fairness mechanism used with minors, and suspense
+                            before a result is a gambling cue. */}
+                        <div key={latestDraft.id} className="card reveal-in" style={{ padding: 'var(--s4)', background: 'var(--surface-3)', border: '1px solid var(--rule)', borderRadius: 8, marginBottom: 'var(--s4)' }}>
                           <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 600, color: 'var(--ink)' }}>Auto Select Results (Preview)</h4>
                           <p className="small dim" style={{ margin: '4px 0 12px 0' }}>
                             Generated draft Run #{latestDraft.runNumber} on {new Date(latestDraft.createdAt).toLocaleTimeString()}

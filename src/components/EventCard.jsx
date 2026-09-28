@@ -4,6 +4,7 @@ import { formatHours, formatDay, formatTimeRange, countdown } from '../utils/hel
 import { Seats, DateChip } from './Seats';
 import { LocationThumbnail } from './location';
 import TagChips from './common/TagChips';
+import { rowTransitionStyle } from '../utils/motion';
 export default function EventCard({
   event,
   currentUser,
@@ -55,7 +56,10 @@ export default function EventCard({
   // than assuming one — card height varies with content and with the user's
   // font-size preference.
   return (
-    <article className={`eventcard ${isOpen ? '' : 'is-closed'}`} data-windowed-item>
+    /* Named for a view transition, so a card moves to its new place when the
+       Discover filters change instead of the grid jumping (`withViewTransition`
+       in BrowseEvents). */
+    <article className={`eventcard ${isOpen ? '' : 'is-closed'}`} data-windowed-item style={rowTransitionStyle('ev', event.id)}>
       <div className="eventcard-top">
         <DateChip iso={event.startDatetime} />
         {/* min-width:0 (not .truncate) so the title can clamp to two lines

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { playDialogExit } from './motion';
 
 /**
  * The dialogs currently open, outermost first.
@@ -219,6 +220,10 @@ export function useModal(onClose, { dismissible = true, initialFocus = null } = 
 
       // Give focus back to whatever opened the dialog
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+
+      /* The exit fade, played on an inert copy once the dialog is gone — see
+         `playDialogExit`. After the focus restore, so it cannot affect it. */
+      playDialogExit(node);
     };
   }, []);
 

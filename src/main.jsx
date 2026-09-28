@@ -12,6 +12,7 @@ import { crashFallback } from './views/ErrorExperience/ErrorExperience.jsx'
 
 import { LocationProvider } from './contexts/LocationContext.jsx'
 import { reportClientError } from './utils/errorReporting.js'
+import { installPageVisibilityFlag } from './utils/motion.js'
 
 /**
  * The failures no React boundary can see.
@@ -70,6 +71,9 @@ globalThis.addEventListener?.('unhandledrejection', (event) => {
 // crash experience with working links. That covers the case the App-level
 // boundary cannot: a throw in the shell itself (session handling, navigation,
 // the auth screens), which is outside the boundary scoped to <main>.
+/* Pauses the looping animations while the tab is hidden; see `utils/motion.js`. */
+installPageVisibilityFlag()
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary

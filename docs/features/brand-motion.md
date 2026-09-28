@@ -95,6 +95,12 @@ link: the class is added and removed 561ms apart, and the link rests as plain
 | App shell sidebar brand link (`src/App.jsx`) | micro-pass | hover / `:focus-visible` |
 | Welcome (`src/views/Welcome.jsx`) | signature, on the tile it already showed | first visit per browser session |
 | OAuth callback (`src/views/OAuthCallback.jsx`) | loader, replacing `.auth-spinner` | while the provider round-trip completes |
+| App start, session restore, route chunk (`FullPageWait`) | loader | once the wait passes 1s |
+| Data export being generated (`DataExportCard`) | loader, replacing a spinning clock | while the export is compiled |
+| Hours credited, application accepted, certificate issued (`InlineConfirmation`) | success, on `BrandMark variant="inline"` | the first time each is seen, once |
+
+The last four rows were added by the interface-motion work; see
+[`interface-motion.md`](interface-motion.md) for how "first time" is decided.
 
 Welcome's guard is `sessionStorage`, not the app's session model: the front door
 is signed out, so there is no account to hang a preference on, and a new tab is
@@ -107,8 +113,11 @@ static rather than animating on every mount.
   about the empty thing — a calendar, a roster, a shield. Replacing that with the
   brand mark would swap meaning for branding. Behaviour G (idle) stays available
   in the stylesheet and unapplied. This is a product decision, not an omission.
-- **The success beat is not attached to anything yet**, and that is a finding
-  rather than a preference. Of the three approved categories:
+- **The success beat was not attached to anything at first**, and that was a
+  finding rather than a preference. It is attached now, through the
+  prerequisite named below: `InlineConfirmation` plus `BrandMark
+  variant="inline"` (see [`interface-motion.md`](interface-motion.md) §4). What
+  follows is the original finding. Of the three approved categories:
   - *hours credited* — the real transitions (`EventAttendance`'s save and
     close-out) confirm with a **toast**, and the frozen system excludes toasts
     ("the system is for the mark, not for UI chrome"). The inline banner beside

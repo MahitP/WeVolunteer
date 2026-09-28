@@ -12,7 +12,8 @@ import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExp
 import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
 import useOnline from './hooks/useOnline';
-import LoadingSkeleton from './components/common/LoadingSkeleton';
+import FullPageWait from './components/common/FullPageWait';
+import { useReplayClass } from './utils/motion';
 import PersonaPreviewBanner from './components/admin/PersonaPreviewBanner';
 import AppNotices from './components/notifications/AppNotices';
 import AccountProfile from './views/AccountProfile';
@@ -63,14 +64,13 @@ const ErrorGallery = import.meta.env.DEV
 /**
  * Fallback for a route whose chunk is still arriving.
  *
- * The padding is inline with a spacing token rather than a new class, because
- * the signed-out and public branches render this OUTSIDE `.page` (which supplies
- * padding in the authenticated shell) and would otherwise show a skeleton flush
- * against the viewport edge.
+ * A route-level wait, so it gets the brand loader once it has run past a
+ * second — see `FullPageWait`. The shape of the page that is coming is not
+ * known here (it is the chunk being fetched), which is why this is not a
+ * skeleton. `.full-page-wait` supplies its own padding because the signed-out
+ * and public branches render this OUTSIDE `.page`.
  */
-const RouteFallback = () => (
-  <div style={{ padding: 'var(--s6)' }}><LoadingSkeleton heights={[200, 400]} /></div>
-);
+const RouteFallback = () => <FullPageWait label="Loading this page…" />;
 
 /**
  * Who the shell is talking to, derived from capabilities rather than a role name.
@@ -1099,12 +1099,13 @@ function deniedRoute(pathname, user) {
 export default function App() {
   const [toasts, setToasts] = useState([]);
 
+  /* Each toast owns its own clock (`Toasts.jsx`): it pauses while read, and a
+     failure stays until it is dismissed. The queue only adds and removes. */
   const addToast = (message, type = 'info') => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
   };
-  const removeToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
+  const removeToast = React.useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   return (
     <SessionProvider addToast={addToast}>
@@ -1119,6 +1120,9 @@ function AppShell({ toasts, addToast, removeToast }) {
   /* The brand link's one-shot micro-pass; see the hook and `.wv-micro`. */
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  /* Restarts the route entrance on `<main>` on each navigation. Declared up
+     here with the other hooks: this component returns early further down. */
+  const routeFadeRef = useReplayClass(location.pathname, 'route-enter');
 
   const {
     currentUser, setCurrentUser, isCheckingSession, refresh: refreshAll, signOut,
@@ -1568,11 +1572,7 @@ function AppShell({ toasts, addToast, removeToast }) {
 
   /* ── Session check ─────────────────────────────────────────── */
   if (isCheckingSession) {
-    return (
-      <div style={{ maxWidth: 800, margin: '0 auto', paddingTop: 'var(--s8)' }}>
-        <LoadingSkeleton heights={[40, 120, 300, 100]} />
-      </div>
-    );
+    return <FullPageWait label="Loading WeVolunteer…" />;
   }
 
   /* Public routes (certificate verification, the privacy notice) bypass auth
@@ -2057,7 +2057,9 @@ function AppShell({ toasts, addToast, removeToast }) {
           </div>
         </header>
 
-        <main className="page" id="main-content" tabIndex={-1}>
+        {/* The route's content fades in over 160ms on each navigation; the
+            sidebar and header around it stay still (index.css, "B9"). */}
+        <main className="page" id="main-content" tabIndex={-1} ref={routeFadeRef}>
           {/* Above the route content and inside every page, because a preview
               narrows capabilities — so the surfaces that would otherwise host the
               way out are the first ones it removes. See the component header. */}

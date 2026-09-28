@@ -1,4 +1,5 @@
 import React from 'react';
+import TintOnChange from './common/TintOnChange';
 
 /**
  * Capacity, shown one way across the whole product.
@@ -32,7 +33,7 @@ export function Seats({
               get. This separator is the text-layer equivalent of the visual gap,
               and it means the reading is correct even where CSS does not apply. */}
           <span className="sr-only"> · </span>
-          <span className={isFull ? 'strong' : ''}>{label}</span>
+          <TintOnChange value={label} className={isFull ? 'strong' : ''}>{label}</TintOnChange>
         </div>
         <div className="meter">
           <div className={`meter-fill ${isFull ? 'full' : ''}`} style={{
@@ -50,7 +51,7 @@ export function Seats({
         return <span key={i} className={`seat ${i < safeFilled ? isMine ? 'mine' : '' : 'open'}`} />;
       })}
       </span>
-      {showLabel && <span className={`seats-label ${isFull ? 'full' : ''}`}>{label}</span>}
+      {showLabel && <TintOnChange value={label} className={`seats-label ${isFull ? 'full' : ''}`}>{label}</TintOnChange>}
     </div>;
 }
 

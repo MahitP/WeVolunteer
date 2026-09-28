@@ -5,6 +5,7 @@ import LoadingSkeleton from './common/LoadingSkeleton';
 import ConfirmDialog from './common/ConfirmDialog';
 import EmptyState from './common/EmptyState';
 import { formatDay, formatHours, formatTimeRange } from '../utils/helpers';
+import BusyButton from './common/BusyButton';
 export default function EventAttendance({
   event,
   acceptedApps,
@@ -434,11 +435,15 @@ export default function EventAttendance({
             could change is final, so the only thing the button could produce is
             a 409. */}
         {markableApps.length > 0 && !closedOut && (
-          <button className="btn btn-secondary" onClick={submitAttendance} disabled={submitting || closingOut || markedCount === 0 || correctionCount > 0 && !attendanceReason.trim()}>
-            {submitting
-              ? 'Saving…'
-              : `Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
-          </button>
+          <BusyButton
+            className="btn btn-secondary"
+            onClick={submitAttendance}
+            busy={submitting}
+            busyLabel="Saving…"
+            disabled={closingOut || markedCount === 0 || correctionCount > 0 && !attendanceReason.trim()}
+          >
+            {`Credit hours to ${presentCount} volunteer${presentCount !== 1 ? 's' : ''}`}
+          </BusyButton>
         )}
 
         {/**

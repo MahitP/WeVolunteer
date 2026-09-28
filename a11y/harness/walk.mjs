@@ -144,8 +144,13 @@ export async function forEachRoute(
        * the sweep, and whatever it reports about a stuck page is a true finding
        * about a stuck page.
        */
+      /* `.full-page-wait` is the other loading state: a route chunk or the
+         session check, which shows nothing for a second and then the brand
+         loader (`FullPageWait`). It has no skeleton to wait out, so without it
+         here the sweep measured the wait itself — and reported the two routes
+         that are supposed to be unmeasurable as measured. */
       await page.waitForFunction(
-        () => !document.querySelector('.skeleton, .premium-skeleton'),
+        () => !document.querySelector('.skeleton, .premium-skeleton, .full-page-wait'),
         undefined,
         { timeout: 10000 },
       ).catch(() => {});

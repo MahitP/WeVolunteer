@@ -835,6 +835,20 @@ time { font-variant-numeric: tabular-nums; }
   overflow: visible;
 }
 
+/* The mark without its tile (`BrandMark variant="inline"`), for a confirmation
+   sitting in a line of text. Its height is the mark's rendered height, held at
+   exactly the 32px floor below which the stroke thickens and nothing may
+   animate; the width is that height in the mark's 86 x 89 viewBox proportion.
+   The stroke is `currentColor`, and follows the theme's brand green. */
+.brand-mark-inline {
+  display: block;
+  flex-shrink: 0;
+  width: calc(32px * 86 / 89);
+  height: 32px;
+  overflow: visible;
+  color: var(--brand);
+}
+
 /* The wordmark. A vector drawing, so its height is its size; the width follows
    from the viewBox. `flex-shrink: 0` because squeezing it would distort the
    letters rather than wrap them. */
@@ -13883,3 +13897,180 @@ a.btn {
      number carry the information, and a 40px track carries none of it. */
   .owner-usage-track { display: none; }
 }
+
+/* ==========================================================================
+   Interface motion
+   ==========================================================================
+   The application's own motion, as distinct from the brand's (`wvMotion.css`,
+   frozen, never edited from here). The rule this section follows: where the
+   app already has a motion for a kind of surface, that motion is reused
+   unchanged — `fade`, `rise`, `pop-up`, `fade-in`, `slide-up` and the `--t-*`
+   tokens above. A new keyframe exists only where nothing did.
+
+   Only `transform` and `opacity` move, plus colour changes of 150ms or less.
+   Never `backdrop-filter`, `box-shadow`, layout properties or custom
+   properties: those repaint every frame, which is felt most on the older phones
+   and school laptops this product is used on.
+
+   Every animated selector in this section is listed again in BOTH reduced-
+   motion blocks at its end — the operating system's query and the reader's own
+   `data-motion` setting. There is no value that animates against either.
+   `src/interfaceMotion.test.js` fails the build when one is missing. */
+
+/* ── Surfaces that had no motion, given the one their kind already uses ── */
+
+/* Floating menus and popovers: the `.popover` entrance. */
+.profile-menu-list-floating,
+.dp-pop,
+.welly-mode-panel { animation: rise var(--t-fast); }
+
+/* A small listbox under a field: the tooltip/small-menu entrance. */
+.location-results { animation: pop-up var(--t-fast); }
+
+/* Welly's history drawer and its backdrop: the overlay fade. It is a side
+   drawer, not a bottom sheet, so `slide-up` would move it the wrong way. */
+.welly-drawer-backdrop,
+.welly-drawer-sheet { animation: fade var(--t-mid); }
+
+/* Inline content revealed in place — an expanded audit record, the Discover
+   filters. `.reveal-in` is for a disclosure whose panel has no class of its
+   own worth naming. */
+.audit-full,
+.reveal-in { animation: fade-in var(--t-mid); }
+
+/* ── Full-page waits (`FullPageWait`) ── */
+
+.full-page-wait {
+  min-height: 60vh;
+  padding: var(--s6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  text-align: center;
+}
+
+/* ── B3: a dialog's exit (`playDialogExit`) ──
+   The entrance is unchanged (`fade` on the overlay, `rise` on the panel, or
+   `slide-up` as a phone sheet). The exit is quicker than the entrance and moves
+   nothing: 160ms of opacity on the accelerating curve, played on an inert copy
+   of the overlay after the real dialog has gone. The copy's children must not
+   replay their own entrances while it fades. `backdrop-filter` is not animated;
+   it simply goes with the overlay's opacity. */
+.modal-overlay.modal-exit {
+  animation: dialog-out 160ms cubic-bezier(0.3, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+.modal-overlay.modal-exit * { animation: none; }
+@keyframes dialog-out { to { opacity: 0; } }
+
+/* ── B4: a toast's exit ──
+   The entrance stays `toastin var(--t-mid)`. The exit is 150ms of opacity; the
+   toast is removed when it ends (`Toasts.jsx`). */
+.toast.toast-leaving { animation: toast-out 150ms cubic-bezier(0.3, 0, 1, 1) forwards; }
+@keyframes toast-out { to { opacity: 0; } }
+
+/* ── B5: lists that filter or re-sort (`withViewTransition`) ──
+   Discover, the applicant order and the notification filters commit their
+   update inside a same-document view transition; each row carries its own
+   `view-transition-name` (`rowTransitionStyle`). A surviving row moves to its
+   new place over 220ms on the decelerating curve; a leaving row fades in
+   150ms. The page itself (`root`) is not crossfaded — only the rows move.
+   A browser without the API just updates the list. */
+::view-transition-group(*) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+::view-transition-old(*):only-child { animation-duration: 150ms; }
+::view-transition-old(root),
+::view-transition-new(root) { animation: none; }
+
+/* ── B6: toggles and status changes ──
+   A change of state is a change of colour over `--t-fast`, and nothing moves.
+   The attendance rows (`.check`) and the filter chips already do exactly this;
+   the status pill ("Awaiting decision" → "You're confirmed") did not, and
+   jumped. Its dot is `currentColor`, so one transition carries both. */
+.status { transition: color var(--t-fast); }
+
+/* ── B7: a total or a count that changes (`TintOnChange`) ──
+   The number changes in a single frame; for 150ms it wears the brand colour,
+   then returns to its own. Colour only — no count-up, no movement. */
+.value-tint { animation: value-tint 150ms ease-out; }
+@keyframes value-tint { from { color: var(--brand); } }
+
+/* ── B9: a route change ──
+   The main content area fades in over 160ms on each navigation — the existing
+   `fade`, restarted by `useReplayClass`. The sidebar and header are outside
+   `<main>` and stay still. A fade is not motion; it is stopped under reduced
+   motion anyway, like every entrance in this section. */
+.page.route-enter { animation: fade 160ms cubic-bezier(0.2, 0, 0, 1); }
+
+/* ── A skeleton is not shown for a wait shorter than 300ms ──
+   `LoadingSkeleton` lays its blocks out at once (so nothing jumps) and holds
+   them invisible and still until the threshold passes. */
+.skeleton.skeleton-waiting { opacity: 0; animation: none; }
+
+/* ── Nothing loops in a tab nobody can see ──
+   `data-page-hidden` is set by `installPageVisibilityFlag()` while
+   `document.hidden`. Pausing is not a new animation, so it needs no
+   reduced-motion entry; the brand loader's values are untouched, only its
+   play state. */
+:root[data-page-hidden] .skeleton,
+:root[data-page-hidden] .spin,
+:root[data-page-hidden] .wv-load-comet,
+:root[data-page-hidden] .wv-load-ghost { animation-play-state: paused; }
+
+/* ── B1: an inline confirmation (`InlineConfirmation`) ──
+   The success beat itself is `wvMotion.css`'s, unchanged; this only lays the
+   mark out beside the text it confirms. Not animated here, so it needs no
+   reduced-motion entry of its own — the beat's reduced rest is the brand
+   stylesheet's. */
+.inline-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+/* ── B2: a button waiting on the server (`BusyButton`) ──
+   The spinner is the existing `.spin`; this only places it. It is drawn only
+   after 300ms, and never under reduced motion (the label carries the wait). */
+.btn-busy-spinner { flex-shrink: 0; }
+
+/* ── Reduced motion, both triggers ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .profile-menu-list-floating,
+  .dp-pop,
+  .welly-mode-panel,
+  .location-results,
+  .welly-drawer-backdrop,
+  .welly-drawer-sheet,
+  .audit-full,
+  .reveal-in,
+  .modal-overlay.modal-exit,
+  .toast.toast-leaving,
+  .value-tint,
+  .page.route-enter { animation: none; }
+  .btn-busy-spinner { display: none; }
+  .status { transition: none; }
+  /* Rows no longer travel; they crossfade in place, which is not motion. */
+  ::view-transition-group(*) { animation-name: none; }
+}
+
+:root[data-motion='reduce'] .profile-menu-list-floating,
+:root[data-motion='reduce'] .dp-pop,
+:root[data-motion='reduce'] .welly-mode-panel,
+:root[data-motion='reduce'] .location-results,
+:root[data-motion='reduce'] .welly-drawer-backdrop,
+:root[data-motion='reduce'] .welly-drawer-sheet,
+:root[data-motion='reduce'] .audit-full,
+:root[data-motion='reduce'] .reveal-in,
+:root[data-motion='reduce'] .modal-overlay.modal-exit,
+:root[data-motion='reduce'] .toast.toast-leaving,
+:root[data-motion='reduce'] .value-tint,
+:root[data-motion='reduce'] .page.route-enter { animation: none; }
+:root[data-motion='reduce']::view-transition-group(*) { animation-name: none; }
+:root[data-motion='reduce'] .status { transition: none; }
+:root[data-motion='reduce'] .btn-busy-spinner { display: none; }

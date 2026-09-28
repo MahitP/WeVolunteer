@@ -3,6 +3,8 @@ import { Info, CalendarClock, CalendarPlus, QrCode } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
+import InlineConfirmation from './common/InlineConfirmation';
+import BusyButton from './common/BusyButton';
 import CheckInCodeModal from './CheckInCodeModal';
 
 /**
@@ -212,6 +214,15 @@ export default function EventShiftsTab({
                       {isStudent ? (
                         mine ? (
                           <div className="row" style={{ gap: 6 }}>
+                            {/* Acceptance is the organizer's act, so the volunteer
+                                meets it here: the first time this shift is seen
+                                confirmed, the success beat plays once beside the
+                                pill. Later visits show the pill alone. */}
+                            <InlineConfirmation
+                              userId={currentUser?.id}
+                              kind="application"
+                              itemKey={mine.status === 'accepted' ? String(mine.id) : null}
+                            >
                             <span className={`status ${
                               mine.status === 'accepted' ? 'status-ok'
                                 : mine.status === 'waitlisted' ? 'status-info'
@@ -224,6 +235,7 @@ export default function EventShiftsTab({
                                 rejected: 'Not accepted'
                               }[mine.status]}
                             </span>
+                            </InlineConfirmation>
                             {/**
                               * The two utilities are icons; the destructive one
                               * keeps its word.
@@ -349,9 +361,9 @@ export default function EventShiftsTab({
 
       {selectedSlots.length > 0 && (
         <div style={{ marginTop: 'var(--s4)' }} className="row-between">
-          <button className="btn btn-primary" onClick={() => sendApplication()} disabled={submitting}>
-            {submitting ? 'Sending…' : `Send application for ${selectedSlots.length} shift${selectedSlots.length !== 1 ? 's' : ''}`}
-          </button>
+          <BusyButton className="btn btn-primary" onClick={() => sendApplication()} busy={submitting} busyLabel="Sending…">
+            {`Send application for ${selectedSlots.length} shift${selectedSlots.length !== 1 ? 's' : ''}`}
+          </BusyButton>
           <span className="small dim">
             {formatHours(selectedSlots.reduce((sum, id) => sum + (event.slots.find(s => s.id === id)?.hours || 0), 0))} total
           </span>

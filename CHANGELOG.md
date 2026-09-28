@@ -32,6 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Added — interface motion, and the success beat's first real home
+
+The application moves a little now, in the places where movement tells you
+something. A dialog fades out as well as in. A toast waits while you are reading
+it, and a failure stays until you dismiss it. A button waiting on the server says
+what it is doing and cannot be pressed twice, and it shows a spinner only if the
+wait passes 300ms. Discover, the applicant order and the notification filters
+move rows to their new places instead of jumping. Status pills and totals change
+colour briefly and never count up. Long waits show the brand loader after a
+second instead of a flash of skeletons.
+
+The brand's success beat finally has somewhere to play. The first time a
+volunteer sees hours credited, an application accepted or a certificate issued,
+the mark completes once beside the text, and after that the text alone remains.
+Everything already confirmed when this shipped stays quiet.
+
+Nothing here moves for a reader who asked for less motion, whether they asked in
+their operating system or in WeVolunteer's own settings, and the brand's frozen
+motion values are unchanged. The details, including what was deliberately left
+out, are in `docs/features/interface-motion.md`.
+
 ### Fixed — switching to Welly AI and typing straight away
 
 Turning Welly AI on from the mode control and asking a question before the

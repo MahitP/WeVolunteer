@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Modal from '../Modal';
+import BusyButton from './BusyButton';
 
 /**
  * An in-app confirmation dialog, for actions that need a deliberate yes.
@@ -34,6 +35,9 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancel',
   destructive = false,
   busy = false,
+  /** What the confirm button says while `busy` — present progressive, naming
+   *  the act ("Withdrawing…"). Defaults to the generic word it always said. */
+  busyLabel = 'Working…',
   onConfirm,
   onCancel,
   /**
@@ -70,14 +74,14 @@ export default function ConfirmDialog({
           <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
-          <button
-            type="button"
+          <BusyButton
             className={destructive ? 'btn btn-danger-solid' : 'btn btn-primary'}
             onClick={onConfirm}
-            disabled={busy}
+            busy={busy}
+            busyLabel={busyLabel}
           >
-            {busy ? 'Working…' : confirmLabel}
-          </button>
+            {confirmLabel}
+          </BusyButton>
         </div>
       </div>
     </Modal>

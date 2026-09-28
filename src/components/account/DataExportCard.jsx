@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../utils/api';
-import { DownloadCloud, Clock, AlertTriangle, FileArchive, CheckCircle, Check, XCircle } from 'lucide-react';
+import { DownloadCloud, AlertTriangle, FileArchive, CheckCircle, Check, XCircle } from 'lucide-react';
 import Modal, { ModalHead } from '../Modal';
+import BrandMark from '../common/BrandMark';
 import { useStepUp } from '../auth/useStepUp';
 import { STEP_UP } from '../../utils/stepUp';
 
@@ -124,8 +125,11 @@ export default function DataExportCard({ addToast }) {
       return (
         <div className="stack-lg">
           <div style={{ textAlign: 'center', marginBottom: 'var(--s2)' }}>
-            <div style={{ background: 'var(--brand-tint)', padding: 'var(--s4)', borderRadius: 'var(--r-full)', display: 'inline-block', marginBottom: 'var(--s4)' }}>
-              <Clock size={40} color="var(--brand)" className="spin" />
+            {/* A long wait with no byte progress to show, so it gets the brand
+                loader rather than a spinning clock. The heading below says what
+                is happening; the mark stays decorative. */}
+            <div style={{ display: 'inline-block', marginBottom: 'var(--s4)' }}>
+              <BrandMark size="lg" motion="loader" />
             </div>
             <h3 style={{ fontSize: '1.5rem', fontWeight: '700' }}>Preparing Export...</h3>
             <p className="lead" style={{ marginTop: 'var(--s3)', maxWidth: '400px', margin: 'var(--s3) auto 0' }}>

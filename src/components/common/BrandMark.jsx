@@ -12,6 +12,15 @@ import {
  */
 const TILE_PX = { md: 32, lg: 64 };
 
+/**
+ * The rendered height, in px, of the tile-less inline mark (`variant="inline"`).
+ *
+ * Exactly the 32px floor, not a round number chosen for the layout: it is the
+ * smallest mark that draws the frozen 12.5 stroke, and therefore the smallest
+ * that may animate. `.brand-mark-inline` in index.css sets the same height.
+ */
+const INLINE_MARK_PX = 32;
+
 /** The behaviours a mark on its own can actually perform. */
 const SUPPORTED_MOTION = ['signature', 'lockup', 'loader', 'micro', 'success'];
 
@@ -76,12 +85,39 @@ const STROKE = {
  * `motion="micro"` additionally requires the interactive ancestor to carry
  * `.wv-micro` (and, off a card surface, its own `--wv-sweep`); the pass is a gap
  * painted in the surface colour, which only that ancestor knows.
+ *
+ * `variant="inline"` draws the mark with no tile, at exactly the 32px floor —
+ * see the branch below and `InlineConfirmation`, its one caller.
  */
-export default function BrandMark({ label, size, motion = 'none' }) {
+export default function BrandMark({ label, size, motion = 'none', variant }) {
+  const inline = variant === 'inline';
   const tile = size === 'lg' ? TILE_PX.lg : TILE_PX.md;
-  const markHeightPx = tile * TILE_MARK_RATIO;
+  const markHeightPx = inline ? INLINE_MARK_PX : tile * TILE_MARK_RATIO;
   const strokeWidth = markStrokeFor(markHeightPx);
   const behaviour = resolveMotion(motion, { supported: SUPPORTED_MOTION, markHeightPx });
+
+  /* ── `variant="inline"`: the mark without its tile ──
+     For a confirmation sitting in a row of text, where a 64px tile — the
+     smallest tile whose mark may animate — would dwarf the line it confirms
+     (brand-motion.md §5 names this variant as the prerequisite). Same path,
+     same stroke rules, same motion classes; only the tile is gone, and the
+     stroke takes the surrounding text colour (`currentColor`), set to the brand
+     green by `.brand-mark-inline`. `size` does not apply: the inline mark is
+     always drawn at the 32px floor. */
+  if (inline) {
+    return (
+      <svg
+        className="brand-mark-inline"
+        viewBox={MARK_VIEWBOX}
+        aria-hidden={label ? undefined : 'true'}
+        role={label ? 'img' : undefined}
+        aria-label={label}
+        focusable="false"
+      >
+        <MarkBody behaviour={behaviour} strokeWidth={strokeWidth} />
+      </svg>
+    );
+  }
 
   return (
     <span

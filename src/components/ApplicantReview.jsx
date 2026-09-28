@@ -3,6 +3,7 @@ import { Check, Clock4, Ban, ArrowUpDown, Sparkles, AlertCircle } from 'lucide-r
 import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
 import { organizerBadges } from '../utils/badgeOrder';
 import { MIN_EVIDENCE } from '../reliabilityEvidence';
+import { rowTransitionStyle, withViewTransition } from '../utils/motion';
 
 /**
  * The screen where an organizer decides who gets a spot.
@@ -58,7 +59,7 @@ export default function ApplicantReview({
         <label className="row small s-a19c85">
           <ArrowUpDown size={14} className="s-c4c3e3" />
           <span className="dim nowrap">Order by</span>
-          <select className="select" value={sortKey} onChange={e => setSortKey(e.target.value)} aria-label="Order applicants by">
+          <select className="select" value={sortKey} onChange={e => { const next = e.target.value; withViewTransition(() => setSortKey(next)); }} aria-label="Order applicants by">
             {Object.entries(SORTS).map(([key, {
             label
           }]) => <option key={key} value={key}>{label}</option>)}
@@ -146,9 +147,11 @@ export default function ApplicantReview({
            they do not have. */
         const shown = isNew ? [] : organizerBadges(v.badges);
         const isSelected = selectedIds.has(app.id);
-        return <div key={app.id} className={`list-row ${isSelected ? 'selected' : ''}`} style={isSelected ? {
-          backgroundColor: 'var(--brand-tint)'
-        } : {}}>
+        /* Named so a re-sort moves each applicant to their new place. */
+        return <div key={app.id} className={`list-row ${isSelected ? 'selected' : ''}`} style={{
+          ...rowTransitionStyle('app', app.id),
+          ...(isSelected ? { backgroundColor: 'var(--brand-tint)' } : {})
+        }}>
               {onBulkDecide && <input type="checkbox" checked={isSelected} onChange={e => {
             const next = new Set(selectedIds);
             if (e.target.checked) next.add(app.id);else next.delete(app.id);

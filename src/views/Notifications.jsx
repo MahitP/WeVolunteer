@@ -7,6 +7,7 @@ import { notificationMeta, NOTIFICATION_FILTERS, groupByDay, groupNotifications 
 import { subscribeSocket } from '../services/socket';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
+import { rowTransitionStyle, withViewTransition } from '../utils/motion';
 
 /**
  * The full notification history. The bell answers "anything new?"; this page
@@ -126,7 +127,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
               key={f.id}
               className="chip"
               aria-pressed={filter === f.id}
-              onClick={() => setFilter(f.id)}
+              onClick={() => withViewTransition(() => setFilter(f.id))}
             >
               {f.label}
               {countFor(f) > 0 && <span className="dim"> {countFor(f)}</span>}
@@ -135,7 +136,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
         </div>
 
         <label className="check" style={{ padding: '0.375rem 0.625rem', border: 'none', marginLeft: 'auto' }}>
-          <input type="checkbox" checked={unreadOnly} onChange={e => setUnreadOnly(e.target.checked)} />
+          <input type="checkbox" checked={unreadOnly} onChange={e => { const next = e.target.checked; withViewTransition(() => setUnreadOnly(next)); }} />
           <span className="small nowrap">Unread only</span>
         </label>
 
@@ -191,7 +192,7 @@ export default function Notifications({ onViewEvent, onCountChange }) {
                       onKeyDown={clickable ? (e) => {
                         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(n); }
                       } : undefined}
-                      style={{ cursor: clickable ? 'pointer' : 'default', padding: '16px 20px' }}
+                      style={{ ...rowTransitionStyle('nt', n.id), cursor: clickable ? 'pointer' : 'default', padding: '16px 20px' }}
                     >
                       <div className={`premium-notif-icon tone-${meta.tone} ${isCritical ? 'tone-critical' : ''}`}>
                         <Icon size={18} />

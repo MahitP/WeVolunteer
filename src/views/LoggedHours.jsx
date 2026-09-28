@@ -43,6 +43,8 @@ import { formatHours, formatDay } from '../utils/helpers';
 import EmptyState from '../components/common/EmptyState';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import InlineConfirmation from '../components/common/InlineConfirmation';
+import TintOnChange from '../components/common/TintOnChange';
 
 export default function LoggedHours({ currentUser, addToast }) {
   const [record, setRecord] = useState(null);
@@ -131,7 +133,7 @@ export default function LoggedHours({ currentUser, addToast }) {
       <div className="grid grid-2 loggedhours-totals">
         <div className="card card-pad stack-xs">
           <span className="eyebrow">Confirmed by an organizer</span>
-          <span className="stat-value">{formatHours(credited)}</span>
+          <TintOnChange value={credited} className="stat-value">{formatHours(credited)}</TintOnChange>
           <span className="small muted">
             {attended.length} {attended.length === 1 ? 'shift' : 'shifts'} on WeVolunteer. This is
             the figure on your profile, certificates and transcript.
@@ -139,7 +141,7 @@ export default function LoggedHours({ currentUser, addToast }) {
         </div>
         <div className="card card-pad stack-xs">
           <span className="eyebrow">Self-reported by you</span>
-          <span className="stat-value">{formatHours(selfReported)}</span>
+          <TintOnChange value={selfReported} className="stat-value">{formatHours(selfReported)}</TintOnChange>
           <span className="small muted">
             {external.length} external {external.length === 1 ? 'entry' : 'entries'}. Kept for your
             own history — not counted towards WeVolunteer hours or awards.
@@ -178,9 +180,18 @@ export default function LoggedHours({ currentUser, addToast }) {
                       service, and hiding the row would make the list disagree
                       with the dashboard. It says so instead of showing "0 hrs",
                       which reads as a mistake. */}
-                  <span className="hourspill">
-                    {c.creditsHours ? `+${formatHours(c.hoursAwarded)}` : 'No hours'}
-                  </span>
+                  {/* The first time a credited shift is seen here, the brand's
+                      success beat plays once beside its hours; on every later
+                      visit the pill is all there is. See InlineConfirmation. */}
+                  <InlineConfirmation
+                    userId={currentUser?.id}
+                    kind="hours"
+                    itemKey={c.creditsHours ? `${c.eventId}:${c.startDatetime}` : null}
+                  >
+                    <span className="hourspill">
+                      {c.creditsHours ? `+${formatHours(c.hoursAwarded)}` : 'No hours'}
+                    </span>
+                  </InlineConfirmation>
                 </li>
               ))}
             </ul>

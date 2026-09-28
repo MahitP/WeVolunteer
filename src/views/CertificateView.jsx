@@ -7,6 +7,7 @@ import EmptyState from '../components/common/EmptyState';
 import ActionsMenu from '../components/common/ActionsMenu';
 import CertificateDocument from '../components/CertificateDocument';
 import CertificateShareDialog from '../components/CertificateShareDialog';
+import InlineConfirmation from '../components/common/InlineConfirmation';
 import { formatDay, formatHours } from '../utils/helpers';
 import { trackAmplitudeEvent } from '../utils/analytics';
 import { EVENT } from '../../server/analyticsEvents.js';
@@ -174,6 +175,20 @@ export default function CertificateView({ currentUser, addToast }) {
             {hoursLabel} · {formatDay(certificate.endDatetime)}
             {certificate.organizationName ? ` · ${certificate.organizationName}` : ''}
           </p>
+          {/* "Certificate issued" is one of the three moments the success beat
+              is for. It plays the first time this certificate is opened here,
+              and never again; the line itself stays, as plain text. Inside the
+              `no-print` header, so the printed certificate is untouched. */}
+          {certificate.issuedAt && (
+            <InlineConfirmation
+              userId={currentUser?.id}
+              kind="certificate"
+              itemKey={certificate.code}
+              className="small"
+            >
+              <span>Issued {formatDay(certificate.issuedAt)}</span>
+            </InlineConfirmation>
+          )}
         </div>
 
         <div className="certificate-actions">

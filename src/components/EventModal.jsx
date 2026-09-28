@@ -31,6 +31,7 @@ import AttendeeList from './AttendeeList';
 import ReportModal from './ReportModal';
 import Modal from './Modal';
 import { organizationPath } from '../utils/organizationUrl';
+import BusyButton from './common/BusyButton';
 
 
 export default function EventModal({
@@ -695,6 +696,7 @@ export default function EventModal({
             </div>
 
             <div
+              key={tab}
               className="tabpanel"
               role="tabpanel"
               id={`tabpanel-${tab}`}
@@ -1028,9 +1030,9 @@ function ConflictDialog({ conflict, eventTitle, submitting, onCancel, onContinue
         <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>
           {isConfirmed ? 'Keep my current shift' : 'Leave it for now'}
         </button>
-        <button className="btn btn-primary" onClick={onContinue} disabled={submitting}>
-          {submitting ? 'Applying…' : 'Apply to this shift too'}
-        </button>
+        <BusyButton className="btn btn-primary" onClick={onContinue} busy={submitting} busyLabel="Applying…">
+          Apply to this shift too
+        </BusyButton>
       </div>
     </Modal>,
     document.body
@@ -1083,9 +1085,9 @@ function RedrawReasonModal({ runNumber, reason, onChange, submitting, onCancel, 
 
       <div className="modal-foot">
         <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button className="btn btn-primary" onClick={onConfirm} disabled={!canSubmit}>
-          {submitting ? 'Running…' : `Run draw ${runNumber}`}
-        </button>
+        <BusyButton className="btn btn-primary" onClick={onConfirm} busy={submitting} busyLabel="Running…" disabled={!canSubmit}>
+          {`Run draw ${runNumber}`}
+        </BusyButton>
       </div>
     </Modal>
   );
