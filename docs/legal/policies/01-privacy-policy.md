@@ -56,6 +56,36 @@ name, the postal address, the vendor names) arrive as configuration and the page
 incomplete until they do. This draft supplies the text those config values should hold. There are
 no district-specific facts — that branch is gone.
 
+**PENDING CORRECTION — analytics is now asked for. Staged here, deliberately not applied.**
+
+Line ~189 of the published body reads "is **off unless you switch it on** in Settings →
+Privacy, **we never prompt you to**, and you can". The clause "we never prompt you to"
+became false on 2026-09-28, when a consent prompt shipped: `analytics_consent` starts
+`null`, nothing ever asked, and every production account sat at `null` — so the feature was
+reachable only by somebody who already knew it existed. "Nobody found the switch" is not
+"everybody declined".
+
+The replacement clause, ready to drop in:
+
+> is **off unless you switch it on**, we ask once shortly after you sign in and never
+> again, and you can
+
+**Why this has not been applied.** This document has an acceptance row, and it belongs to a
+student — a minor who read this page and agreed to it on 2026-09-14. Rewriting the words
+underneath somebody's consent is a decision about a consent record, not an edit. The
+machinery agrees and does not merely advise: migration 070 refuses to clear any
+`(slug, version)` with an acceptance, and `syncLegalDocuments` then blocks the boot rather
+than republishing over it. Verified on 2026-09-28 by planting an acceptance row and watching
+it refuse.
+
+The Cookie and Tracking Notice carried the same false claim and WAS corrected the same day
+(migration 070), because nobody has ever accepted it. That asymmetry is the rule working,
+not an inconsistency.
+
+**Apply this at launch**, in the same pass as the CARTO passage below, when the reset clears
+the acceptance and the correction costs nobody their consent record. Both are on the launch
+checklist.
+
 ---
 
 ## Draft

@@ -78,6 +78,7 @@ import eventSlotSummary from './066_event_slot_summary.js';
 import searchTrigramIndexes from './067_search_trigram_indexes.js';
 import resyncAuditCorrectedLegalHashes from './068_resync_audit_corrected_legal_hashes.js';
 import resyncCookieNoticeMapSection from './069_resync_cookie_notice_map_section.js';
+import resyncCookieNoticeConsentPrompt from './070_resync_cookie_notice_consent_prompt.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -494,6 +495,7 @@ export const MIGRATIONS = [
    * extension.
    */
   searchTrigramIndexes, resyncAuditCorrectedLegalHashes, resyncCookieNoticeMapSection,
+  resyncCookieNoticeConsentPrompt,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

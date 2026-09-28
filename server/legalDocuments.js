@@ -448,7 +448,7 @@ export const LEGAL_DOCUMENTS = [
           MAP_TILES_CARTO_KEY unset the upstream is OpenStreetMap. The notice
           was describing a third-party exposure that no longer exists, which is
           the safe direction to be wrong in and still wrong. */
-    contentHash: 'a053f9ef54c03d2d9c199f0ef6e72851070fa1c13ef7a5aa448c2843bc8982c9',
+    contentHash: 'e88c163b85ce29e90d10a6742c379f6b48f13d7649a3928341ae23bbec104572',
     bundledWith: null,
   },
   {

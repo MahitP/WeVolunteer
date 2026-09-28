@@ -46,9 +46,11 @@ the episode above is the argument for it.
 switch it on.** No advertising cookies, no pixels, no fingerprinting, no cross-site tracking,
 and nothing sold to anybody — ever, regardless of any setting.
 
-There is one thing you *can* switch on: **usage analytics**, which is off until you turn it on
-in **Settings → Privacy**. It is described in full below, including what it collects and who
-receives it. If you never touch that switch, no analytics company hears about you at all.
+There is one thing you *can* switch on: **usage analytics**, which is off until you turn it on.
+We ask you once, shortly after you sign in, and you can also find the switch any time in
+**Settings → Privacy**. It is described in full below, including what it collects and who
+receives it. Being asked is not being opted in — if you say no, or never answer, no analytics
+company hears about you at all.
 
 This page explains what we do store, so you can check that rather than take our word.
 
@@ -132,9 +134,19 @@ device and tells us nothing; from that point you are in their app and their term
 ## Usage analytics — off unless you turn it on
 
 There is one optional feature that shares information with an outside company, and this
-section describes it completely. **It is off for everyone by default.** We do not ask you to
-turn it on, there is no pop-up, and nothing in the app nags you about it. You will only ever
-have it on if you went looking for it in **Settings → Privacy** and switched it on yourself.
+section describes it completely. **It is off for everyone by default**, and it stays off
+until you say yes.
+
+**We ask you once.** Shortly after you sign in, a message appears with two buttons — *No
+thanks* and *Yes, that is fine* — and neither is highlighted over the other. Nothing is
+ticked for you. **If you say no, that is the end of it: the question does not come back**,
+and you will not be asked again on another day or another device. If you say yes, you can
+turn it off again whenever you like in **Settings → Privacy**, and it stops immediately
+rather than at your next sign-in.
+
+We ask rather than leaving the switch to be found because for a long time nobody found it,
+which meant nobody had actually chosen either way. Asking once is not the same as nagging,
+and it is not the same as assuming: until you answer, the answer is no.
 
 **Who receives it.** [Amplitude](https://amplitude.com), a product-analytics company.
 
