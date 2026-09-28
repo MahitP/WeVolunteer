@@ -531,6 +531,60 @@ describe('the release path does not reintroduce a credential on the host', () =>
     expect(src).toContain('WEV_APP_DIR');
   });
 
+  /**
+   * Build-time configuration reaches the build.
+   *
+   * ── The defect ──
+   *
+   * Vite INLINES `import.meta.env.VITE_*` when the bundle is built. `cmd_build`
+   * ran `npm run build` with none of them, so every `VITE_*` key in
+   * /etc/wevolunteer/wevolunteer.env was silently ignored.
+   *
+   * `src/utils/analytics.js` wrote down the consequence before it happened — "a
+   * deploy that forgot the variable looks identical to a deploy with analytics
+   * deliberately switched off" — and production was exactly that:
+   * VITE_AMPLITUDE_API_KEY was configured on the host and appeared in no bundle
+   * ever built. Verified 2026-09-28 by searching the live dist/ for the
+   * configured value. Nothing reported it, because nothing was looking.
+   *
+   * ── Why the negative assertion matters more than the positive one ──
+   *
+   * The lazy fix is `set -a; source "$ENV_FILE"`, which works and also puts
+   * DATABASE_URL and the SMTP password into the environment of every build
+   * plugin. Vite would not inline them, so nothing would look wrong — which is
+   * what makes it worth forbidding in a test rather than a comment.
+   */
+  describe('build-time configuration', () => {
+    const build = () => fnBody(code(provision), 'cmd_build');
+
+    it('passes VITE_* from the env file to the build', () => {
+      const body = build();
+      expect(body).toMatch(/VITE_\[A-Za-z0-9_\]\+=/);
+      expect(body).toMatch(/env "\$\{vite_vars\[@\]\}" npm/);
+      expect(body).toContain('$ENV_FILE');
+    });
+
+    it('passes ONLY VITE_*, never the whole env file', () => {
+      /* $ENV_FILE holds DATABASE_URL and the SMTP password. A blanket source
+         hands both to anything the build runs. */
+      const body = build();
+      expect(body).not.toMatch(/set -a/);
+      expect(body).not.toMatch(/^\s*(source|\.)\s+"\$ENV_FILE"/m);
+    });
+
+    it('checks that what it passed actually reached the bundle', () => {
+      /* Inlining fails silently. The whole reason this went unnoticed for
+         months is that nothing compared the input to the output. */
+      const body = build();
+      expect(body).toContain('$APP_DIR/dist');
+      expect(body).toMatch(/not found in the bundle/);
+    });
+
+    it('says so when there are none, instead of looking successful', () => {
+      expect(build()).toMatch(/no VITE_\* variables/);
+    });
+  });
+
   it('lets nginx traverse to uploaded pictures without listing anything', () => {
     /* nginx serves /uploads from /var/lib/wevolunteer/uploads as www-data. With
        both directories 0750 wev:wev every picture was a 403 in production. */

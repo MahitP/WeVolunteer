@@ -438,9 +438,74 @@ cmd_build() {
   # here produces "vite: not found" and no dist/. The runtime does not need
   # them — but the build does, and the build happens on this host.
   npm --prefix "$APP_DIR" ci --no-audit --no-fund
-  npm --prefix "$APP_DIR" run build
+
+  # ── Build-time configuration ──
+  #
+  # Vite INLINES import.meta.env.VITE_* at build time. A variable that is unset
+  # when the bundle is built is not a lookup that fails later — it is the literal
+  # `undefined` in the shipped file, and there is no way to set it afterwards
+  # short of rebuilding.
+  #
+  # This step used to run `npm run build` with none of them, so every VITE_*
+  # variable in $ENV_FILE was silently ignored. src/utils/analytics.js predicted
+  # the consequence in its own header — "a deploy that forgot the variable looks
+  # identical to a deploy with analytics deliberately switched off" — and that is
+  # precisely what production was: VITE_AMPLITUDE_API_KEY had been configured on
+  # the host since the analytics work, and the key was in no bundle ever built.
+  # Nothing reported it, because nothing could.
+  #
+  # ONLY the VITE_-prefixed keys are passed, never the whole file. Vite would
+  # ignore the rest anyway, but $ENV_FILE also holds DATABASE_URL and the SMTP
+  # password, and `set -a; source "$ENV_FILE"` would put both in the environment
+  # of every build plugin for the sake of convenience. The narrow thing is as
+  # easy to write and does not have to be re-audited when a plugin is added.
+  local vite_vars=() vite_names=""
+  if [ -f "$ENV_FILE" ]; then
+    while IFS= read -r line; do
+      # Strip one layer of surrounding quotes from the VALUE: `KEY="v"` in the
+      # env file must reach the build as `v`, not as `"v"` — which would be
+      # inlined complete with quotation marks and match nothing.
+      local k=${line%%=*} v=${line#*=}
+      v=${v%\"}; v=${v#\"}
+      v=${v%\'}; v=${v#\'}
+      vite_vars+=("$k=$v")
+      vite_names="$vite_names $k"
+    done < <(grep -E '^VITE_[A-Za-z0-9_]+=' "$ENV_FILE" || true)
+  fi
+
+  if [ ${#vite_vars[@]} -gt 0 ]; then
+    # NAMES only. The values are compiled into a public bundle, so they are not
+    # secrets — but a deploy log is read over shoulders and copied into tickets,
+    # and there is no reason to put them there.
+    ok "build-time variables:${vite_names}"
+    env "${vite_vars[@]}" npm --prefix "$APP_DIR" run build
+  else
+    warn "no VITE_* variables in $ENV_FILE — the bundle is built with defaults"
+    npm --prefix "$APP_DIR" run build
+  fi
+
   [ -f "$APP_DIR/dist/index.html" ] || die "build produced no dist/index.html"
   ok "dist built ($(du -sh "$APP_DIR/dist" | cut -f1))"
+
+  # Proof, not assumption. Inlining is silent when it does not happen, so every
+  # variable that was passed is checked for in the output. A value that is
+  # legitimately absent — an empty string, or a flag whose default already
+  # matched — warns rather than fails; one that vanished entirely is worth
+  # somebody looking at before it becomes another year of missing analytics.
+  local missing=""
+  local pair name value
+  for pair in "${vite_vars[@]:-}"; do
+    [ -n "$pair" ] || continue
+    name=${pair%%=*}; value=${pair#*=}
+    [ -n "$value" ] || continue
+    grep -rqF -- "$value" "$APP_DIR/dist" 2>/dev/null || missing="$missing $name"
+  done
+  if [ -n "$missing" ]; then
+    warn "set in $ENV_FILE but not found in the bundle:$missing"
+    warn "if one of those is meant to change behaviour, the build did not receive it."
+  elif [ ${#vite_vars[@]} -gt 0 ]; then
+    ok "every build-time variable reached the bundle"
+  fi
 
   # Now drop the build-only tree. The service runs `server/server.js`, which
   # needs production dependencies only, and leaving ~400 dev packages on a
