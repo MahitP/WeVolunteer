@@ -25,6 +25,30 @@ import ModerationCenter from './ModerationCenter';
 import { APP_ROUTES } from '../routes/index.jsx';
 import { can, ROLE } from '../authz';
 
+/**
+ * The page asks the server whether the Admin Responsibilities Policy is
+ * outstanding, and renders NEITHER the gate nor the tiles until it answers — a
+ * flash of tiles that then vanish is worse than a moment of nothing.
+ *
+ * So every test here has to resolve that call. `accepted: true` is the ordinary
+ * state and the one the tile assertions below are about; the gated state has its
+ * own suite in `server/routes.adminResponsibilities.test.js`, where it is
+ * exercised against the real gate rather than a mock.
+ */
+vi.mock('../utils/api', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      startPersonaPreview: vi.fn(async () => ({ ok: true })),
+      fetchAdminResponsibilities: vi.fn(async () => ({
+        required: true, accepted: true, documents: [], withheld: [],
+      })),
+    },
+  };
+});
+
 /** SUPER_ONLY capabilities need the super-admin role, not an admin flag. */
 const SUPER_ROLE = ROLE.SUPER_ADMIN;
 
@@ -291,13 +315,6 @@ describe('the persona preview control', () => {
 /* `ModerationCenter` imports the NAMED export (`import { api }`), so the mock
    has to replace that binding — replacing a default export leaves the component
    calling the real one, which fails the fetch and never reaches the navigate. */
-vi.mock('../utils/api', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    api: { ...actual.api, startPersonaPreview: vi.fn(async () => ({ ok: true })) },
-  };
-});
 
 describe('starting a persona preview', () => {
   const Probe = () => {

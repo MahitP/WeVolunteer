@@ -65,7 +65,6 @@ const AboutUs = React.lazy(() => import('../views/AboutUs'));
 const LegalEditor = React.lazy(() => import('../views/legal/LegalEditor'));
 const OrganizerAgreement = React.lazy(() => import('../views/legal/OrganizerAgreement'));
 const StudentOrganizerAgreement = React.lazy(() => import('../views/legal/StudentOrganizerAgreement'));
-const AdminResponsibilities = React.lazy(() => import('../views/legal/AdminResponsibilities'));
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
@@ -372,14 +371,6 @@ export const APP_ROUTES = [
    * server/studentOrganizerAgreement.js.
    */
   { path: '/student-organizer-agreement', element: <StudentOrganizerAgreement /> },
-  /**
-   * The same again, for administrators — and ungated for a sharper version of the
-   * same reason. `can()` checks `withheld` BEFORE the `super_admin` wildcard, so
-   * this is the only agreement gate in the product that reaches the platform
-   * owner. A capability requirement here would leave them no way back into their
-   * own instance short of `bin/`. See server/adminResponsibilitiesPolicy.js.
-   */
-  { path: '/admin-responsibilities', element: <AdminResponsibilities /> },
   /* Error triage. `error.read` is SUPER_ONLY, so `can()` refuses it before it
      consults per-user grants — no capability grant can reach this route, and
      the nav entry that points at it is hidden by the same capability. */
@@ -387,7 +378,11 @@ export const APP_ROUTES = [
   /* The hub. `report.resolve` is the capability an ordinary administrator holds
      that makes any of this relevant to them; each tile then requires its own,
      and each destination refuses independently. */
-  { path: '/admin/moderation', element: <ModerationCenter />, requiredCap: 'report.resolve' },
+  /* `showWhenWithheld`: this page renders the Admin Responsibilities gate, and
+     that policy withholds `report.resolve` — the very capability this route
+     requires. Without the flag the gate refused entry to itself. See
+     `routeCapSatisfied` in App.jsx. */
+  { path: '/admin/moderation', element: <ModerationCenter />, requiredCap: 'report.resolve', showWhenWithheld: true },
   { path: '/admin/appeals', element: <AdminAppeals />, requiredCap: 'appeal.review' },
   /* The community impact figures. `analytics.impact` is administrative — held by
      `admin` and `super_admin` and by nobody below — and it is the same word the

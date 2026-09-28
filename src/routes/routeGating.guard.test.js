@@ -64,8 +64,8 @@ const UNGATED_TABLES = [
  * text. Calling it could only demonstrate the keys a chosen fixture happens to
  * exercise.
  */
-function deniedRouteBody() {
-  const start = APP_JSX.indexOf('function deniedRoute(');
+function functionBody(name) {
+  const start = APP_JSX.indexOf(`function ${name}(`);
   if (start === -1) return null;
 
   // Brace-match from the opening brace so the scan cannot silently read a
@@ -80,6 +80,22 @@ function deniedRouteBody() {
     }
   }
   return null;
+}
+
+/**
+ * The text the gate rules actually live in.
+ *
+ * `deniedRoute` delegates its capability check to `routeCapSatisfied`, so both
+ * bodies are scanned. The property under test is unchanged — "which route keys
+ * does the gate look at" — but scanning `deniedRoute` alone would now report
+ * `requiredCap` itself as decorative, which is the guard failing rather than the
+ * code. They are read together because they are one rule split across two
+ * functions, so the element ternary can apply exactly the same one.
+ */
+function deniedRouteBody() {
+  const denied = functionBody('deniedRoute');
+  if (denied === null) return null;
+  return denied + (functionBody('routeCapSatisfied') ?? '');
 }
 
 describe('route gating cannot become decorative', () => {

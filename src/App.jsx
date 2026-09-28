@@ -398,7 +398,10 @@ const NAV = [
      `tabForPath` deliberately still maps all six paths. It is not derived from
      NAV and never was; a path with no rail entry still needs a tab id so the
      page gets its own title and no rail item is wrongly highlighted. */
-  { id: 'moderation', path: '/admin/moderation', label: 'Admin', icon: ShieldCheck, requiredCap: 'report.resolve' },
+  /* `showWhenWithheld`: the Admin page is where an administrator accepts the
+     Admin Responsibilities Policy, and that policy withholds `report.resolve`.
+     Without this the gate hides its own remedy. See navItemsFor. */
+  { id: 'moderation', path: '/admin/moderation', label: 'Admin', icon: ShieldCheck, requiredCap: 'report.resolve', showWhenWithheld: true },
 
   /* ── Secondary: reachable, not resident ──────────────────────────────────
 
@@ -569,7 +572,6 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/portfolio')) return 'portfolio';
   if (pathname.startsWith('/checkin')) return 'checkin';
   if (pathname.startsWith('/organizer-agreement')) return 'organizerAgreement';
-  if (pathname.startsWith('/admin-responsibilities')) return 'adminResponsibilities';
   if (pathname.startsWith('/student-organizer-agreement')) return 'studentOrganizerAgreement';
   if (pathname.startsWith('/messages')) return 'messages';
   /* Before `/admin/appeals`? No — different prefixes, no conflict. But it must
@@ -658,7 +660,23 @@ export function navItemsFor(user) {
   const dashboard = DASHBOARD_NAV[personaFor(user)];
   return [
     ...(dashboard ? [{ id: 'dashboard', path: '/', ...dashboard }] : []),
-    ...NAV.filter(n => (n.requiredCapAny ?? [n.requiredCap]).some(cap => can(user, cap)))
+    /**
+     * Withheld hides an entry — with one declared exception.
+     *
+     * Hiding is the right default and there are tests on it: an organizer who has
+     * not accepted their agreement loses Messages and Welly from the nav, because
+     * offering a door that will 403 teaches the reader the product is broken.
+     *
+     * The Admin entry is different in kind. It is gated on `report.resolve`,
+     * which the Admin Responsibilities Policy withholds — so hiding it hid the
+     * page that CONTAINS the way to get it back, and the only route to the policy
+     * was knowing the URL. An entry whose destination resolves its own withholding
+     * has to stay reachable, and `showWhenWithheld` is how that is declared on the
+     * one entry rather than inferred for all of them.
+     */
+    ...NAV.filter(n => (n.requiredCapAny ?? [n.requiredCap]).some(
+      cap => can(user, cap) || (n.showWhenWithheld && (user?.withheld ?? []).includes(cap))
+    ))
   ].filter(n => !n.requiresVerified || user.verified);
 }
 
@@ -1008,14 +1026,42 @@ function shellServes(pathname) {
  * same drift the other way round. The two lists below must stay identical to the
  * element ternary further down.
  */
+/**
+ * Whether a route's capability requirement is satisfied — including the one
+ * declared exception.
+ *
+ * `showWhenWithheld` means "this page is where the withholding is resolved".
+ * The Admin page is gated on `report.resolve`, and the Admin Responsibilities
+ * Policy withholds exactly that — so without this the gate refused entry to the
+ * page that CONTAINS the gate, and an administrator who had not accepted met
+ * "Your badge doesn't open this one" with no way forward. Found by opening the
+ * page in a browser; the suite was green throughout, because no test navigated
+ * there as an account holding that capability withheld.
+ *
+ * Withheld is not the same as never held. A student has no `report.resolve` and
+ * is refused exactly as before. An administrator has one that is paused, and the
+ * page behind it exists to say so and offer the way back. Every action on it is
+ * re-checked server-side, so this widens what may be SEEN, never what may be DONE.
+ *
+ * Shared by `deniedRoute` and the element ternary, because the comment on that
+ * pair is right that two copies of this rule drift — and the drift would be a
+ * page reachable by one path and refused by the other.
+ */
+function routeCapSatisfied(route, user) {
+  const withheld = user?.withheld ?? [];
+  const held = cap => can(user, cap) || (route.showWhenWithheld && withheld.includes(cap));
+  if (route.requiredCap && !held(route.requiredCap)) return false;
+  if (route.requiredCapAny?.length && !route.requiredCapAny.some(held)) return false;
+  return true;
+}
+
 function deniedRoute(pathname, user) {
   const matched = matchRoutes(APP_ROUTES.map(r => ({ path: r.path, route: r })), pathname);
   const route = matched?.[matched.length - 1]?.route?.route;
   if (!route) return null;
 
   if (route.requiresVerified && !user.verified) return route;
-  if (route.requiredCap && !can(user, route.requiredCap)) return route;
-  if (route.requiredCapAny?.length && !route.requiredCapAny.some(c => can(user, c))) return route;
+  if (!routeCapSatisfied(route, user)) return route;
   return null;
 }
 
@@ -1793,7 +1839,6 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/settings': { currentUser, addToast, onProfileChange: refreshAll },
     '/report-issue': { currentUser, addToast },
     '/organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
-    '/admin-responsibilities': { currentUser, addToast, onAccepted: refreshAll },
     /* Same three. `refreshAll` is what makes the released capabilities visible
        to the navigation without a sign-out. */
     '/student-organizer-agreement': { currentUser, addToast, onAccepted: refreshAll },
@@ -1818,7 +1863,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/legal': { addToast },
     '/admin/impact': {},
     '/owner': { addToast },
-    '/admin/moderation': { currentUser, onPreviewStarted: refreshAll }
+    '/admin/moderation': { currentUser, addToast, onPreviewStarted: refreshAll }
   };
 
   /** Where a route the user cannot reach sends them. Unchanged from the ternaries. */
@@ -2105,14 +2150,14 @@ function AppShell({ toasts, addToast, removeToast }) {
                       ? deniedFallback(route)
                       : (route.requiredCap || route.requiredCapAny?.length)
                         ? (
-                          <Can
-                            user={currentUser}
-                            cap={route.requiredCap}
-                            capAny={route.requiredCapAny}
-                            fallback={deniedFallback(route)}
-                          >
-                            {withProps(route, appRouteProps)}
-                          </Can>
+                          /* `routeCapSatisfied` rather than `<Can>`, so this
+                             branch and `deniedRoute` apply ONE rule — including
+                             the `showWhenWithheld` exception, which `<Can>`
+                             knows nothing about. The comment above this pair is
+                             right that two copies drift; this is them sharing. */
+                          routeCapSatisfied(route, currentUser)
+                            ? withProps(route, appRouteProps)
+                            : deniedFallback(route)
                         )
                         : withProps(route, appRouteProps)
                   }

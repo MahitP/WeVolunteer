@@ -8167,6 +8167,79 @@ input:disabled + .premium-slider {
 .oa-undertaking input { width: 20px; height: 20px; margin-top: 2px; flex: none; }
 .oa-undertaking + .oa-undertaking { border-top: 1px solid var(--border); }
 
+/* ── The Admin Responsibilities gate, rendered inside the Admin page ─────────
+   It reuses `.oa-fieldset` / `.oa-undertaking` above, because the acknowledgement
+   form is the same object in both places and a second set of rules would drift
+   from the first. What is new here is the document in a bounded scroller: the
+   policy is long, and rendered as an ordinary page it pushed the boxes several
+   screens below the text they refer to — which is how people accept without
+   reading. */
+.apg-head { display: flex; gap: var(--s4); align-items: flex-start; }
+.apg-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--r-sm);
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+.apg-title { font-family: var(--font-display); font-weight: 600; }
+
+.apg-paused {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn, var(--brand));
+  border-radius: var(--r-sm);
+  padding: var(--s4);
+  background: var(--surface-2);
+}
+.apg-paused .strong { display: flex; align-items: center; gap: var(--s2); }
+.apg-paused-list {
+  /* Two columns where there is room: six short items in one column is a tall
+     list that reads as longer than it is. */
+  columns: 2;
+  column-gap: var(--s5);
+  margin: var(--s3) 0 0;
+  padding-left: var(--s5);
+  color: var(--ink-2);
+}
+.apg-paused-list li { break-inside: avoid; margin-bottom: var(--s1); }
+.apg-paused-note { margin-top: var(--s3); }
+
+.apg-doc { overflow: hidden; }
+.apg-doc-head {
+  padding: var(--s4) var(--s5);
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
+}
+.apg-doc-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+.apg-doc-scroll {
+  /* Tall enough to read a section without feeling like a peephole, short enough
+     that the acknowledgements stay reachable on a laptop. */
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: var(--s5);
+  /* `.policy-body` caps its own measure at 68ch; this keeps that and simply
+     bounds the height. */
+}
+.apg-doc-scroll:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+
+.apg-actions { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; }
+
+@media (max-width: 700px) {
+  /* One column on a phone: two columns of three words each is unreadable. */
+  .apg-paused-list { columns: 1; }
+  .apg-doc-scroll { max-height: 20rem; padding: var(--s4); }
+  .apg-head { gap: var(--s3); }
+}
+
 /* The banner an organizer sees on their dashboard while the agreement is
    outstanding. It is a link, so the whole block is the target. */
 .oa-banner {

@@ -34,13 +34,14 @@
  * An administrator sees three tiles; the platform owner sees seven. That
  * difference is the authority boundary, drawn honestly.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge,
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
+import AdminPolicyGate from '../components/legal/AdminPolicyGate';
 
 /**
  * Every administrative destination, with the capability that opens it.
@@ -274,7 +275,7 @@ const PERSONAS = [
    */
 ];
 
-export default function ModerationCenter({ currentUser, onPreviewStarted }) {
+export default function ModerationCenter({ currentUser, addToast, onPreviewStarted }) {
   const areas = AREAS.filter(a => can(currentUser, a.cap));
   const [persona, setPersona] = useState(PERSONAS[0].id);
   /* Named in the action so the button says what pressing it will do, rather than
@@ -318,6 +319,23 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
     }
   };
 
+  /**
+   * Whether administration is paused on this account.
+   *
+   * Read from `currentUser.withheld`, which `/api/auth/me` already carries, so it
+   * is known at first render. An earlier version asked the server on mount and
+   * rendered neither the gate nor the tiles until the answer came back — correct,
+   * but it made the page's whole content depend on a round trip, and a page that
+   * is briefly empty for everyone is a worse trade than the flash it avoided.
+   *
+   * `report.resolve` is the Admin entry's own requirement and one of the fourteen
+   * the policy withholds, so its presence in that list is exactly the question
+   * "would these tiles 403". The gate below re-reads the real status from the
+   * server before offering anything, so this is a layout decision, never an
+   * authorization one — the server refuses regardless of what this renders.
+   */
+  const adminPaused = (currentUser?.withheld ?? []).includes('report.resolve');
+
   return (
     <div className="page">
       <header className="page-head">
@@ -326,9 +344,34 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
             describe it to each other. */}
         <h2 className="page-title">Admin</h2>
         <p className="lead">
-          The administrative areas this account can open. Each one re-checks your access when you get there.
+          {adminPaused
+            ? 'Administration is paused on this account until the Admin Responsibilities Policy is accepted.'
+            : 'The administrative areas this account can open. Each one re-checks your access when you get there.'}
         </p>
       </header>
+
+      {/**
+        * The gate replaces everything below it rather than sitting beside it.
+        *
+        * Every tile leads somewhere that would answer 403, and a page offering a
+        * door it knows is locked teaches the reader the product is broken rather
+        * than that they have something to do.
+        */}
+      {adminPaused && (
+        <AdminPolicyGate
+          currentUser={currentUser}
+          addToast={addToast}
+          /* Refetching the session is the whole of it: `withheld` comes back
+             empty, `adminPaused` recomputes false on the next render, and the
+             tiles replace the gate. No local flag to fall out of step with
+             the server — the same reason `startPreview` refetches rather
+             than patching state. */
+          onAccepted={onPreviewStarted}
+        />
+      )}
+
+      {!adminPaused && (
+        <>
 
       {/*
         * ── Previewing as somebody else ──
@@ -430,6 +473,8 @@ export default function ModerationCenter({ currentUser, onPreviewStarted }) {
           </li>
         ))}
       </ul>
+        </>
+      )}
     </div>
   );
 }
