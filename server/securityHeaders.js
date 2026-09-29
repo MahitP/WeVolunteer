@@ -60,32 +60,33 @@ export const HELMET_OPTIONS = {
        * error that names WebAssembly rather than the misconfiguration.
        */
       /**
-       * `static.cloudflareinsights.com` is DELIBERATELY ABSENT. Do not add it.
+       * `static.cloudflareinsights.com` — allowed by the owner's decision of
+       * 2026-09-29, and it carries a disclosure obligation that travels with it.
        *
-       * Cloudflare injects its Web Analytics beacon into HTML as it passes
-       * through the proxy, and this directive blocks it. That produces a CSP
-       * error in every visitor's console, which looks like a bug and is the
-       * reason somebody will eventually try to "fix" it by adding the host
-       * here. Adding it would be the wrong fix, and worse than the noise:
+       * Cloudflare injects its Web Analytics beacon into HTML at the edge. This
+       * directive used to block it, which logged a CSP error on every page load;
+       * the owner chose to keep the analytics rather than switch it off in the
+       * dashboard. Allowing it here is what makes that choice actually work.
        *
-       *   - Allowing the beacon means Cloudflare starts receiving visitor data
-       *     — IP, page, user agent — from a platform used by minors.
-       *   - The Cookie and Tracking Notice names every third party that
-       *     receives anything and says analytics is the only one, off unless
-       *     you switch it on. The Privacy Policy says the same. Both would
-       *     become false the moment the beacon loads.
-       *   - The Privacy Policy **cannot currently be corrected**: it carries a
-       *     student's acceptance row, and `syncLegalDocuments` refuses to
-       *     republish over one. So this would create a false statement in a
-       *     document that cannot be fixed until the launch reset.
+       * **What changed, and why the documents had to change with it.** The
+       * beacon sends client-side page and timing data to Cloudflare. Cloudflare
+       * already proxies every request and terminates TLS, so it was the most
+       * unavoidable third party in the stack before this line existed — and it
+       * was named in neither the Cookie Notice nor the Privacy Policy. Allowing
+       * the beacon did not create that gap; it made it impossible to keep
+       * ignoring. Both documents now describe Cloudflare's role.
        *
-       * The console error is cosmetic. The alternative is an undisclosed
-       * third-party tracker contradicting two published documents, one of them
-       * unfixable. **The correct fix is to turn Web Analytics off in the
-       * Cloudflare dashboard**, which removes the injection at source — not to
-       * widen this list. Observed and diagnosed 2026-09-29.
+       * **If you ever remove this line**, the Cookie Notice's Cloudflare section
+       * has to change with it — it says the beacon runs. A CSP that silently
+       * stops matching a published document is the failure this comment exists
+       * to prevent, in whichever direction it happens.
        */
-      scriptSrc: ["'self'", "'wasm-unsafe-eval'", 'https://cdn.amplitude.com'],
+      scriptSrc: [
+        "'self'",
+        "'wasm-unsafe-eval'",
+        'https://cdn.amplitude.com',
+        'https://static.cloudflareinsights.com',
+      ],
 
       /**
        * Session Replay compresses in a worker created from a blob.
@@ -141,6 +142,18 @@ export const HELMET_OPTIONS = {
         'https://sr-client-cfg.amplitude.com',
         'https://gs.amplitude.com',
         'https://cdn.amplitude.com',
+
+        /**
+         * Where the Cloudflare beacon reports to.
+         *
+         * `static.cloudflareinsights.com` in `script-src` only lets the script
+         * LOAD. It POSTs its measurements to `cloudflareinsights.com/cdn-cgi/rum`,
+         * a different host, and without this line the script runs and every
+         * report is refused — which is worse than blocking it outright, because
+         * the console error moves rather than disappearing and the analytics
+         * still collect nothing. Allow both or neither.
+         */
+        'https://cloudflareinsights.com',
 
         /**
          * Where the on-device AI models are downloaded from.

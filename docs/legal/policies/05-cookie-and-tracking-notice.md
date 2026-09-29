@@ -43,7 +43,11 @@ the episode above is the argument for it.
 **Version 1.0 · Last updated 2026-08-06**
 
 **Short version: nothing about how you use WeVolunteer is shared with anyone unless you
-switch it on.** No advertising cookies, no pixels, no fingerprinting, no cross-site tracking,
+switch it on** — with one exception we cannot switch off for you and have written down in
+full below: **Cloudflare**, the network that carries every request to this site and measures
+how fast pages load. It never receives anything from your account.
+
+**Everything else:** No advertising cookies, no pixels, no fingerprinting, no cross-site tracking,
 and nothing sold to anybody — ever, regardless of any setting.
 
 There is one thing you *can* switch on: **usage analytics**, which is off until you turn it on.
@@ -130,6 +134,32 @@ is no column anywhere in WeVolunteer that holds a person's location.
 **Tapping "Get directions"** hands the *event's* address to the maps app on your device —
 Apple Maps, Google Maps, or whatever you have chosen as your default. That happens on your
 device and tells us nothing; from that point you are in their app and their terms apply.
+
+## Cloudflare — how this site reaches you at all
+
+Every request to WeVolunteer travels through **[Cloudflare](https://www.cloudflare.com)**
+before it reaches our server. They are the network that keeps the site online and blocks
+attacks against it, and there is no version of using WeVolunteer that does not involve them —
+so this section is not about a choice you can make, but about being told.
+
+**What Cloudflare necessarily sees**, because it carries the traffic: your IP address, which
+page you asked for, your browser and device type, and roughly where in the world you are
+connecting from. Any company that delivers a website sees this; it is how a request is routed
+back to you.
+
+**Cloudflare also measures how pages perform**, using a small script called Web Analytics.
+It records which page was opened and how long it took to load. **It does not use cookies, it
+does not follow you to other websites, and it does not build a profile of you.** It is on for
+everybody and there is no switch for it, which is exactly why it is written down here — it
+measures pages, not people.
+
+**What Cloudflare never receives from us:** your name, your email, your hours, your messages,
+your certificates, or anything else from your account. The page-performance script cannot read
+them, and we do not send them.
+
+This is different from the analytics in the next section, and the difference is the one that
+matters: **Cloudflare keeps the site working and is not optional. The next one is optional,
+off by default, and about how you personally use the app.**
 
 ## Usage analytics — off unless you turn it on
 

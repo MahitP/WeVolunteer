@@ -122,40 +122,54 @@ describe('the nginx site config', () => {
     expect(code(CONF)).not.toMatch(/add_header\s+Cache-Control\s+"public[^"]*immutable"\s+always/);
   });
 
-  it('does not admit the Cloudflare Insights beacon, however tempting', () => {
+  it('discloses Cloudflare wherever the beacon is allowed', () => {
     /**
-     * Cloudflare injects `static.cloudflareinsights.com/beacon.min.js` into HTML
-     * at the edge, and this CSP blocks it — which logs a console error on every
-     * page load for every visitor. That looks exactly like a bug, so somebody
-     * will eventually "fix" it by adding the host to script-src. This is the
-     * test that stops them, because a comment in the source did not feel like
-     * enough for a change that is one line and reads as tidying up.
+     * This test used to forbid `static.cloudflareinsights.com` outright. The
+     * owner decided on 2026-09-29 to keep Cloudflare Web Analytics, so it now
+     * enforces the obligation that comes with allowing it instead of the
+     * prohibition.
      *
-     * Allowing it would send visitor IP, page and user agent to Cloudflare from
-     * a platform used by minors — and both the Cookie and Tracking Notice and
-     * the Privacy Policy state that analytics is the only third party that
-     * receives anything, and only if you switch it on. Both would become false.
+     * The rule it holds: **if the CSP lets Cloudflare receive data, the Cookie
+     * Notice must say so.** A tracker nobody disclosed is the actual harm; the
+     * CSP line is only how it becomes possible. Either both change or neither
+     * does — including in the removal direction, because a notice describing a
+     * beacon that no longer runs is wrong in the other direction.
      *
-     * The Privacy Policy is the part that makes this worse than an ordinary
-     * documentation slip: it carries a student's acceptance row, so
-     * `syncLegalDocuments` refuses to republish over it. The false statement
-     * could not be corrected until the launch reset.
-     *
-     * The correct fix is switching Web Analytics off in the Cloudflare
-     * dashboard, which stops the injection at source. If that has been done and
-     * this test is now in the way, delete it — but check the two documents
-     * first.
+     * Two hosts, not one: the script LOADS from static.cloudflareinsights.com
+     * and REPORTS to cloudflareinsights.com. Allowing only the first leaves the
+     * script running and every report refused, which collects nothing and still
+     * logs an error.
      */
-    for (const src of [code(CONF), code(readFileSync(path.join(ROOT, 'server/securityHeaders.js'), 'utf8'))]) {
-      const csp = src.slice(src.indexOf('script-src') > -1 ? 0 : 0);
+    /* The HEADERS snippet, not CONF — CONF is deploy/nginx/wevolunteers.conf,
+       the site config, which contains no CSP at all. The first version of this
+       test read CONF, matched nothing, and passed vacuously while the notice
+       was still silent about Cloudflare. A guard that cannot fail is worse than
+       no guard, because it is counted. */
+    const conf = code(readFileSync(
+      path.join(ROOT, 'deploy/nginx/wevolunteers-security-headers.conf'), 'utf8',
+    ));
+    const notice = readFileSync(
+      path.join(ROOT, 'docs/legal/policies/05-cookie-and-tracking-notice.md'), 'utf8',
+    );
+
+    const loads = /script-src[^;"]*static\.cloudflareinsights\.com/.test(conf);
+    const reports = /connect-src[^;"]*[^.]cloudflareinsights\.com/.test(conf);
+
+    expect(
+      loads === reports,
+      'the beacon is half-allowed. It loads from static.cloudflareinsights.com '
+      + 'and reports to cloudflareinsights.com; allowing one without the other '
+      + 'means it runs and collects nothing while still logging a CSP error.',
+    ).toBe(true);
+
+    if (loads) {
       expect(
-        /script-src[^;"]*cloudflareinsights/.test(csp)
-        || /scriptSrc:[^\]]*cloudflareinsights/.test(csp),
-        'cloudflareinsights was added to script-src. See this test for why that '
-        + 'is the wrong fix — turn Web Analytics off in the Cloudflare dashboard '
-        + 'instead, and read the Cookie Notice and Privacy Policy before deciding '
-        + 'otherwise.',
-      ).toBe(false);
+        /cloudflare/i.test(notice),
+        'the CSP allows the Cloudflare beacon but the Cookie and Tracking Notice '
+        + 'does not mention Cloudflare. That notice tells readers exactly which '
+        + 'third parties receive anything, and it is read by students and their '
+        + 'guardians. Disclose it there, or remove the CSP entries.',
+      ).toBe(true);
     }
   });
 

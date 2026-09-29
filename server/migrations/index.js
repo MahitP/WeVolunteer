@@ -79,6 +79,7 @@ import searchTrigramIndexes from './067_search_trigram_indexes.js';
 import resyncAuditCorrectedLegalHashes from './068_resync_audit_corrected_legal_hashes.js';
 import resyncCookieNoticeMapSection from './069_resync_cookie_notice_map_section.js';
 import resyncCookieNoticeConsentPrompt from './070_resync_cookie_notice_consent_prompt.js';
+import resyncCookieNoticeCloudflare from './071_resync_cookie_notice_cloudflare.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -496,6 +497,7 @@ export const MIGRATIONS = [
    */
   searchTrigramIndexes, resyncAuditCorrectedLegalHashes, resyncCookieNoticeMapSection,
   resyncCookieNoticeConsentPrompt,
+  resyncCookieNoticeCloudflare,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

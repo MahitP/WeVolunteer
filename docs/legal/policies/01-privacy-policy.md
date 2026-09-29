@@ -56,7 +56,30 @@ name, the postal address, the vendor names) arrive as configuration and the page
 incomplete until they do. This draft supplies the text those config values should hold. There are
 no district-specific facts — that branch is gone.
 
-**PENDING CORRECTION — analytics is now asked for. Staged here, deliberately not applied.**
+**PENDING CORRECTION 2 — Cloudflare is not named anywhere in this document, and it
+should be.** Staged here, deliberately not applied, for the reason given under correction 1.
+
+Cloudflare proxies every request to WeVolunteer and terminates TLS. It has always seen every
+student's IP address, requested page and user agent — the most unavoidable third party in the
+stack — and this policy's subprocessor table does not list it. That gap predates any recent
+change. It became visible on 2026-09-29 when the owner chose to keep Cloudflare Web Analytics
+rather than switch it off, which adds client-side page-timing data to the same recipient.
+
+The Cookie and Tracking Notice WAS corrected the same day (migration 071) and now carries a
+full "Cloudflare — how this site reaches you at all" section. Copy that section's substance
+into this document's third-party table at launch: Cloudflare receives IP, page, browser and
+approximate region as a consequence of carrying the traffic, plus page-load timing from Web
+Analytics; it receives nothing from a user's account, uses no cookies for this, and there is
+no switch because the site cannot be served without it.
+
+**Until that is applied, this document is silent about a third party that receives data on
+every single request.** That is the sharpest of the reasons to do the launch-time pass
+promptly, and it is recorded here rather than only on the checklist so that anybody editing
+this file sees it.
+
+---
+
+**PENDING CORRECTION 1 — analytics is now asked for. Staged here, deliberately not applied.**
 
 Line ~189 of the published body reads "is **off unless you switch it on** in Settings →
 Privacy, **we never prompt you to**, and you can". The clause "we never prompt you to"

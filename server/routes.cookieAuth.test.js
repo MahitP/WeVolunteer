@@ -32,7 +32,7 @@ describe('Content-Security-Policy', () => {
     expect(csp).toBeTruthy();
   });
 
-  it('restricts script to self and one named third party', async () => {
+  it('restricts script to self and two named third parties', async () => {
     const res = await fetch(`${srv.base}/health`);
     const csp = res.headers.get('content-security-policy');
 
@@ -51,11 +51,36 @@ describe('Content-Security-Policy', () => {
      *
      * `'wasm-unsafe-eval'` was added for on-device AI: without it the browser
      * refuses to compile the inference runtime's WebAssembly module and the
-     * feature cannot start. It is a keyword, not an origin — the origin list is
-     * still exactly one third party.
+     * feature cannot start. It is a keyword, not an origin.
+     *
+     * ── The second origin, and the argument for it ──
+     *
+     * `static.cloudflareinsights.com` was added 2026-09-29. This test demanded
+     * the argument and it is made here, because the paragraph above promised it
+     * would be.
+     *
+     * Cloudflare injects its Web Analytics beacon into HTML at the edge. The CSP
+     * used to block it, which logged an error in every visitor's console. The
+     * owner chose to keep the analytics rather than switch it off in the
+     * dashboard, so the origin is listed to make that choice work.
+     *
+     * What makes it acceptable is not that it is small, but WHO it is.
+     * Cloudflare already proxies every request and terminates TLS — it sees
+     * every student's IP, page and user agent before our server does. This
+     * origin adds page-timing data to a party that is already in the path
+     * unavoidably; it does not introduce a new one. Compare Amplitude above,
+     * which is genuinely optional and inert until somebody consents.
+     *
+     * The obligation that came with it is enforced elsewhere:
+     * `nginxSecurityHeaders.test.js` fails if this origin is allowed while the
+     * Cookie and Tracking Notice does not name Cloudflare. The notice gained a
+     * full section and migration 071 republished it.
+     *
+     * **A THIRD origin should still fail this test** and be argued for on its
+     * own merits. That rule has not been relaxed — it has just been met once.
      */
     expect(directive(csp, 'script-src'))
-      .toBe("script-src 'self' 'wasm-unsafe-eval' https://cdn.amplitude.com");
+      .toBe("script-src 'self' 'wasm-unsafe-eval' https://cdn.amplitude.com https://static.cloudflareinsights.com");
   });
 
   it('still refuses inline and eval', async () => {
