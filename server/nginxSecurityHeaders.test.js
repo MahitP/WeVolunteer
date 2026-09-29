@@ -122,6 +122,43 @@ describe('the nginx site config', () => {
     expect(code(CONF)).not.toMatch(/add_header\s+Cache-Control\s+"public[^"]*immutable"\s+always/);
   });
 
+  it('does not admit the Cloudflare Insights beacon, however tempting', () => {
+    /**
+     * Cloudflare injects `static.cloudflareinsights.com/beacon.min.js` into HTML
+     * at the edge, and this CSP blocks it — which logs a console error on every
+     * page load for every visitor. That looks exactly like a bug, so somebody
+     * will eventually "fix" it by adding the host to script-src. This is the
+     * test that stops them, because a comment in the source did not feel like
+     * enough for a change that is one line and reads as tidying up.
+     *
+     * Allowing it would send visitor IP, page and user agent to Cloudflare from
+     * a platform used by minors — and both the Cookie and Tracking Notice and
+     * the Privacy Policy state that analytics is the only third party that
+     * receives anything, and only if you switch it on. Both would become false.
+     *
+     * The Privacy Policy is the part that makes this worse than an ordinary
+     * documentation slip: it carries a student's acceptance row, so
+     * `syncLegalDocuments` refuses to republish over it. The false statement
+     * could not be corrected until the launch reset.
+     *
+     * The correct fix is switching Web Analytics off in the Cloudflare
+     * dashboard, which stops the injection at source. If that has been done and
+     * this test is now in the way, delete it — but check the two documents
+     * first.
+     */
+    for (const src of [code(CONF), code(readFileSync(path.join(ROOT, 'server/securityHeaders.js'), 'utf8'))]) {
+      const csp = src.slice(src.indexOf('script-src') > -1 ? 0 : 0);
+      expect(
+        /script-src[^;"]*cloudflareinsights/.test(csp)
+        || /scriptSrc:[^\]]*cloudflareinsights/.test(csp),
+        'cloudflareinsights was added to script-src. See this test for why that '
+        + 'is the wrong fix — turn Web Analytics off in the Cloudflare dashboard '
+        + 'instead, and read the Cookie Notice and Privacy Policy before deciding '
+        + 'otherwise.',
+      ).toBe(false);
+    }
+  });
+
   it('is provisioned: the snippet is installed before nginx -t', () => {
     const provision = code(readFileSync(path.join(ROOT, 'deploy/provision.sh'), 'utf8'));
     const install = provision.indexOf('/etc/nginx/snippets/wevolunteers-security-headers.conf');

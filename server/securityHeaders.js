@@ -59,6 +59,32 @@ export const HELMET_OPTIONS = {
        * page renders, and every model load is refused by the browser with an
        * error that names WebAssembly rather than the misconfiguration.
        */
+      /**
+       * `static.cloudflareinsights.com` is DELIBERATELY ABSENT. Do not add it.
+       *
+       * Cloudflare injects its Web Analytics beacon into HTML as it passes
+       * through the proxy, and this directive blocks it. That produces a CSP
+       * error in every visitor's console, which looks like a bug and is the
+       * reason somebody will eventually try to "fix" it by adding the host
+       * here. Adding it would be the wrong fix, and worse than the noise:
+       *
+       *   - Allowing the beacon means Cloudflare starts receiving visitor data
+       *     — IP, page, user agent — from a platform used by minors.
+       *   - The Cookie and Tracking Notice names every third party that
+       *     receives anything and says analytics is the only one, off unless
+       *     you switch it on. The Privacy Policy says the same. Both would
+       *     become false the moment the beacon loads.
+       *   - The Privacy Policy **cannot currently be corrected**: it carries a
+       *     student's acceptance row, and `syncLegalDocuments` refuses to
+       *     republish over one. So this would create a false statement in a
+       *     document that cannot be fixed until the launch reset.
+       *
+       * The console error is cosmetic. The alternative is an undisclosed
+       * third-party tracker contradicting two published documents, one of them
+       * unfixable. **The correct fix is to turn Web Analytics off in the
+       * Cloudflare dashboard**, which removes the injection at source — not to
+       * widen this list. Observed and diagnosed 2026-09-29.
+       */
       scriptSrc: ["'self'", "'wasm-unsafe-eval'", 'https://cdn.amplitude.com'],
 
       /**
