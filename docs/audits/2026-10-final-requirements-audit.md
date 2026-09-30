@@ -492,3 +492,35 @@ administrator six primary entries (Dashboard, Discover, Calendar, Messages,
 Welly, Admin) — the same count an owner already has. That is the owner's own
 second option in FX-12 ("scrollable horizontally … scrolling reveals the three
 dots"), but the fit guard has to be updated deliberately rather than tripped.
+
+
+---
+
+## Phase 2 — Runtime verification (in progress, paused 2026-09-30)
+
+Started on a throwaway database with every outside service switched off (Better Stack, tracing, Pinecone, Amplitude, Upstash, Resend/SMTP), so no quota was spent and no mail was sent. Findings so far, verbatim from the working notes:
+
+## Findings
+- A11 runtime proof: grant-ownership promoted two example.com addresses without objection.
+- W1 Welcome.jsx:141/147 "Your information is only shared with the organizers of shifts you apply to." FALSE since public profiles (P2-18). Published, signed-out. Posture B.
+- W2 index.html has an empty #root: blank dark screen until the bundle runs. Add an inline pre-mount placeholder (brand tile) — FX-52.
+- W3 "Run by {SCHOOL_NAME}" renders when VITE_SCHOOL_NAME is set without "WeVolunteer" — false under Posture B. Owner-action: check production build env.
+- W4 Login email placeholder truncated at 375px ("…your usernam").
+- CK-11 MISREAD like CK-12: "Waiting on a reply" section (VolunteerDashboard.jsx:279-300, only when pending>0) renders ABOVE the hours card. Owner asked hours box above it. a5bbf6c swapped strip tiles instead. Fix: move hours card above Waiting section; restore tile order Upcoming / Awaiting reply / Shifts completed.
+- FX-30 leftover confirmed at runtime: dashboard "Browse opportunities".
+
+## Confirmed visually (Done·V)
+- FX-52 welcome renders at 375 (after dev compile); FX-56 login fits, MS logo contained.
+- FX-39 confirmed shifts: View / Can't make it only.
+- FX-11 next-shift card: muted brand green in dark mode.
+- FX-18 root cause read: dash-split collapses under the two-column width.
+- Mobile bar student: Dashboard, Discover, Calendar, Messages, Welly, More — fits 375.
+
+## Needs lived-in data (recheck after Phase 3)
+- FX-31/32/65/66 caps; FX-34 badge ordering; P2-26 charts; CK-11 with pending apps.
+
+### Phase 3 spike — PASSED
+
+`server/simulation/lifecycle.sim.js` (run: `npx vitest run --config vitest.simulation.config.js`) drives one event from creation to certificate through real routes with only `Date` faked: early QR refused, code at shift start, scan, credit, close-out, lock refuses a later change, certificate issued. 1.4 s. The week rehearsal will be built the same way; the fallback is not needed.
+
+**Next:** build `server/simulation/weekInTheLife.sim.js` (payload shapes for organizations, kick/ban `{mode, reason}`, appeals `{subject: organization_ban, organizationId, statement}`, reports `{targetType, targetId, reason, details}`, suspend `{reason}` already mapped), then finish the Phase 2 walkthrough on its lived-in data, then Phase 4 fixes.
