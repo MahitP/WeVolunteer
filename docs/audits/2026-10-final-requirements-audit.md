@@ -173,9 +173,9 @@ is **Reported** until Phase 1 promotes it.
 | FX-02 | Admin audit log styled properly | Done·R | `AdminAuditExplorer.jsx:213-243`; `index.css:9171`; `16b9867` | Sentences, severity, cards on mobile |
 | FX-03 | Suspension splash: red border, blurred app behind, unescapable, reason shown, can sign out, no global sign-out | Partial·V | `App.jsx:~1662-1681` ("reverted, for three reasons"); `SuspendedWall.jsx`; `authRoutes.js:1678-1695` | Reason + per-device sign-out done. Blur deliberately reverted; no red border. **Gate** — Ruling 1: red border over static blurred backdrop |
 | FX-04 | "New message" copy wrong for admins/organizers | Done·R | `components/messages/recipientCopy.js:60,87,122` | Copy derived from capabilities |
-| FX-05 | One Admin / SuperAdmin entry instead of many | Done·R | `App.jsx:433` | Single "Admin" → `/admin/moderation` |
-| FX-06 | "Create event" on the right of Opportunities for everyone who can; remove "New Event" from nav | Done·R | `BrowseEvents.jsx:593,691-694`; `App.jsx:397` | |
-| FX-07 | Owner pages only via the hub, never deleted: Community Impact, Appeals, Admin Roster, Audit Explorer, Errors, Platform Impact | Done·R | `ModerationCenter.jsx:77-140`; routes intact | Tile names ≠ page titles (see A10) |
+| FX-05 | One Admin / SuperAdmin entry instead of many | Done·V | `App.jsx:433` | Single "Admin" → `/admin/moderation` — P1: NAV table read: one Admin entry |
+| FX-06 | "Create event" on the right of Opportunities for everyone who can; remove "New Event" from nav | Done·V | `BrowseEvents.jsx:593,691-694`; `App.jsx:397` | P1: NAV comment + Discover header |
+| FX-07 | Owner pages only via the hub, never deleted: Community Impact, Appeals, Admin Roster, Audit Explorer, Errors, Platform Impact | Done·V | `ModerationCenter.jsx:77-140`; routes intact | Tile names ≠ page titles (see A10) — P1: all six routes registered; hub tiles present |
 | FX-08 | Mahit persona switch: owner / admin / organizer / student | Done·R | `server/routes/personaRoutes.js:79-82`; `PersonaPreviewBanner.jsx:39` | |
 | FX-09 | Mahit's handle is `@mahit`; delete any conflicting account; only two accounts matter | Partial·R | `bin/bootstrap-owners.mjs:77-78`; `server/config.js:414`; `accountValidation.js:119-137` | Nothing guarantees `@mahit`. **Deletion is Owner-action** — production holds real users; this audit deletes no accounts |
 | FX-10 | WeVolunteer platform account gets a special owner profile | Partial·R | `App.jsx:184-189,215-218`; `profileSerializer.js:115,143` | Keyed on role, so both super_admins get the same treatment |
@@ -189,22 +189,22 @@ is **Reported** until Phase 1 promotes it.
 | FX-18 | Dashboard zoom-out on mobile — investigate, fix only if real | Done·R | `index.html:38`; `e3c2190` | Zoom not blocked; sideways overflow fixed |
 | FX-19 | People/org search inside Opportunities; no Edit Profile item; edit button on profile; same layout | Done·V (owner-accepted) | `BrowseEvents.jsx:804`; `VolunteerProfile.jsx:135` | Edit opens a modal. **Gate** — Ruling 12: pop-up kept |
 | FX-20 | One logo in both themes; favicon; emails | Done·V (owner-accepted) | `BrandMark.jsx`; `public/favicon.svg`; `server/email.js:675` | Email tile draws a plain "W", not the checkmark-W (clients strip SVG). **Gate** — Ruling 12: letter-W tile kept |
-| FX-21 | Desktop: Profile not in nav, lives in avatar menu | Done·R | `App.jsx:480,2027` | |
+| FX-21 | Desktop: Profile not in nav, lives in avatar menu | Done·V | `App.jsx:480,2027` | P1: Profile is `secondary`, `accountOnly` |
 | FX-22 | Owners/partners get custom profiles; @mahit shows student info for colleges | Done·R | `App.jsx:215-218`; `VolunteerProfile.jsx:112`; `Distinction.jsx` | |
-| FX-23 | `@` → only users; `#` → only tagged opportunities/orgs | Done·R | `BrowseEvents.jsx:249-300` | |
+| FX-23 | `@` → only users; `#` → only tagged opportunities/orgs | Done·V | `BrowseEvents.jsx:249-300` | P1: sigil overrides type server-side |
 | FX-24 | Applicants show events signed up and attended | Done·R | `ApplicantReview.jsx:208-225` | Counts, never % |
 | FX-25 | Rename Opportunities tab, no longer than "Opportunities" | Done·R | `App.jsx:358` | "Discover". Organizers' page title says "Recruit" (FX-30) |
 | FX-26 | About Us once, own non-heart icon | Done·R | `Settings.jsx:592-637` | `Info` icon |
 | FX-27 | Org creation tags fail with "40 characters" | Done·R | `server/organizationTags.js:88-107`; `a9ded8d` | Root cause: `{tag,label}` objects |
-| FX-28 | Check-in and finalize hours — do they work, when? | Done·R | `attendance.js:29-34,477-553`; `attendanceRoutes.js:280-304` | Close-out only after every shift ends and everyone is accounted for |
+| FX-28 | Check-in and finalize hours — do they work, when? | Done·V | `attendance.js:29-34,477-553`; `attendanceRoutes.js:280-304` | Close-out only after every shift ends and everyone is accounted for — P1: lock re-read `FOR UPDATE`; refused before any other check |
 | FX-29 | Friends can message; copy says organizers **and** friends | Done·R | `messageRoutes.js:60-95`; `recipientCopy.js:123-125` | |
 | FX-30 | `/events` → `/discover`; no naming discrepancies | Partial·V | `VolunteerDashboard.jsx:274,435`; `OrganizerDashboard.jsx:344`; `CalendarView.jsx:371`; `ai/navigation.js:58` | No `/events` links remain; "Browse/Find opportunities" labels and "Recruit" do. **Gate** (N-13 declined these) — Ruling 5: "Discover" everywhere, incl. organizer title |
 | FX-31 | Dashboard service record capped + "show more" → page | Done·R | `VolunteerDashboard.jsx:556-561` | Cap 3 → `/hours` |
-| FX-32 | Profile service record capped + "show more" | Partial·R | `VolunteerProfile.jsx:261-267` | Cap 5, but on someone else's profile the link goes to **your** `/hours` (A3) |
+| FX-32 | Profile service record capped + "show more" | Partial·V | `VolunteerProfile.jsx:261-267` | Cap 5, but on someone else's profile the link goes to **your** `/hours` (A3) — P1: A3 confirmed: `moreHref="/hours"` regardless of `isSelf` |
 | FX-33 | Reliable Volunteer as a badge beside applicants, hover text; fair model (history, recent, decay, recovery, volume); first-time and inactive badges; lost below 90%; not an achievement | Partial·V | `server/reliability.js:61-96,222`; `ApplicantReview.jsx:142-205,238-262`; `c2f5fff` | Badge + decay + evidence floor + withdrawal done. No hover text; first-time is a tag; inactive badge declined; smoothing means exactly 90% never earns it. **Gate** — Ruling 4: hover text + first-timer badge |
 | FX-34 | Hour ladder 5…250+, streak badges, descending, interleaved, "show more" to a page; Early Supporter; other good achievements | Done·R | `server/scripts/seed_badges.js:103-218`; `utils/badgeOrder.js`; `BadgesList.jsx:126` | |
 | FX-35 | Transcript and certificate print properly, light and dark | Done·R | `index.css:4397`; `printIsolation.test.js` | Tests parse CSS only — **print preview in Phase 2** |
-| FX-36 | Transcript lists events (total hours each), not shifts | Partial·R | `VolunteerPortfolio.jsx:15-22,89,217` | Transcript done; a third document lists shifts (A7) |
+| FX-36 | Transcript lists events (total hours each), not shifts | Partial·V | `VolunteerPortfolio.jsx:15-22,89,217` | Transcript done; a third document lists shifts (A7) — P1: A7 confirmed |
 | FX-37 | Shift row cluttered | Done·R | `EventShiftsTab.jsx:239-314` | Icon buttons |
 | FX-38 | Organizer map: normal theme, not high contrast | Done·R | `location/basemap.js`; `dba4001` | |
 | FX-39 | Remove "Confirmed" pseudo-button from confirmed shifts | Done·R | `VolunteerDashboard.jsx:450-474` | |
@@ -213,7 +213,7 @@ is **Reported** until Phase 1 promotes it.
 | FX-42 | Organizers can kick before start only; never revoke hours | Done·R (owner-accepted) | `applicationRoutes.js:866-879,1024-1063` | Per shift, not per event (section C) — Ruling 12: per-shift kept |
 | FX-43 | Org managers can remove members | Done·R | `OrganizationPage.jsx:200-239` | See FX-59/71/73 |
 | FX-44 | Legal change → pop-up with changed lines + link; "your responsibility" clause; formatted email | Partial·R | `LegalUpdateNotice.jsx:157`; `LegalAcceptanceModal.jsx:136-237`; `notificationContent.js:62-69` | No responsibility clause — Terms §13 promises 30 days' notice instead. Wording is Owner-action (Posture B) |
-| FX-45 | Clarify certificate vs transcript | Partial·R | `App.jsx:770,798`; `CertificatesPage.jsx:90-105` | Only implied; plus the third document (A7) |
+| FX-45 | Clarify certificate vs transcript | Partial·V | `App.jsx:770,798`; `CertificatesPage.jsx:90-105` | Only implied; plus the third document (A7) — P1: A7 confirmed — a third document is the confusion |
 | FX-46 | Certificate prints both names above the lines: Volunteer / Program Coordinator | Done·R | `CertificateDocument.jsx:115-124`; `certificatePdf.js:221-227` | |
 | FX-47 | Transcript prints without a white background | Done·R | `index.css:4397` | Print preview Phase 2 |
 | FX-48 | Transcript signature: Mahit Pulavarthi, Founder of WeVolunteer | Done·R | `src/config.js:72-74`; `VolunteerPortfolio.jsx:270-279` | |
@@ -232,17 +232,17 @@ is **Reported** until Phase 1 promotes it.
 | FX-61 | Transcript name sits on the line; certificates unchanged | Done·R | `transcriptSignature.test.js:62-121` | |
 | FX-62 | Discover date box stretched for some events | Done·R | `dateChipGeometry.test.js` | Cause was height, not width |
 | FX-63 | Org-ban appeals seen by all org organizers, at the bottom | Done·R | `AppealInbox.jsx`; `OrganizationPage.jsx:776-777` | |
-| FX-64 | Achievements "See all" → `/profile/badges` or `/users/@user/badges` | Partial·R | `VolunteerProfile.jsx:194`; `PublicProfile.jsx:441` | `/users/@undefined/badges` when no username (A4) |
+| FX-64 | Achievements "See all" → `/profile/badges` or `/users/@user/badges` | Partial·V | `VolunteerProfile.jsx:194`; `PublicProfile.jsx:441` | `/users/@undefined/badges` when no username (A4) — P1: A4 confirmed |
 | FX-65 | Certificates capped + see all | Done·R | `VolunteerProfile.jsx:370-375` | |
 | FX-66 | Same cap for shifts and certificates | Done·R | `PreviewList.jsx:60` | |
-| FX-67 | Others' certificates visible, not downloadable; transcript hidden; privacy for hours and certificates; `/users/@user/hours` | Done·R | `PublicCertificates.jsx:118-135`; `certificateRoutes.js:115-117,181-183` | |
+| FX-67 | Others' certificates visible, not downloadable; transcript hidden; privacy for hours and certificates; `/users/@user/hours` | Done·V | `PublicCertificates.jsx:118-135`; `certificateRoutes.js:115-117,181-183` | P1: view and PDF via `getCertificateForOwner`; `/portfolio` needs `portfolio.write` |
 | FX-68 | Tag limits: 15 popular filter chips; 4 per event card | Done·R | `eventTags.js:261`; `EventCard.jsx:92` | Stale comment "three" (A14) |
 | FX-69 | Appeal button beside Join when banned | Done·R | `JoinAction.jsx:97-118` | |
-| FX-70 | Join → Appeal when banned; disabled once sent; 5 per 30 days; organizers can report appeal spam | Partial·R | `appealsRoutes.js:42-43,400` | No way to report appeal spam |
+| FX-70 | Join → Appeal when banned; disabled once sent; 5 per 30 days; organizers can report appeal spam | Partial·V | `appealsRoutes.js:42-43,400` | No way to report appeal spam — P1: 5 per 30 days verified (`APPEAL_WINDOW_MAX`) |
 | FX-71 | One settings button per member → promote/demote (label by role), kick, ban | Done·R | `OrganizationPage.jsx:200-239,1000` | |
 | FX-72 | Do event tags exist? | Done·R | `server/eventTags.js` | 8 max, 30 chars |
 | FX-73 | Member Manage button opened nothing | Done·R | `OrganizationPage.jsx:1000` | Click-through in Phase 2 |
-| FX-74 | `mailto:` links don't work | Partial·R | `Settings.jsx:546-566` | Remain in `AboutUs.jsx:459`, `OrganizerProfile.jsx:120` (A9) |
+| FX-74 | `mailto:` links don't work | Partial·V | `Settings.jsx:546-566` | Remain in `AboutUs.jsx:459`, `OrganizerProfile.jsx:120` (A9) — P1: A9 confirmed; the certificate share dialog's mailto is a deliberate share-by-email option and stays |
 | FX-75 | Report-a-problem page with category dropdown and screenshots | Partial·R | `ReportIssue.jsx:194-206`; `issueRoutes.js:97` | No screenshot upload |
 
 ### CK — "Issues to check" (14)
@@ -251,16 +251,16 @@ is **Reported** until Phase 1 promotes it.
 |---|---|---|---|---|
 | CK-01 | 2FA "Internal Server Error"; email always offered; recovery codes always a fallback; save codes as .txt or .png | Done·R (owner-accepted) | `fb934d0`; migration 055 (`f26f827`); `twoFactor.noFiveHundred.test.js`; `recoveryCodeExport.js:126,146` | Two root causes fixed. Email offered only for a *confirmed* address (section C). .txt and .png both exist — Ruling 12: email 2FA for confirmed addresses kept |
 | CK-02 | No 500 for email, authenticator or recovery codes | Done·R | `twoFactor.noFiveHundred.test.js:112-300`; `routes.2faEmail.test.js:332` | Browser end-to-end in Phase 2 |
-| CK-03 | "9 codes remaining" after an authenticator sign-in | Done·R | `authRoutes.js:1400-1430`; `ae4fe03` | Count was right; copy now explains it |
+| CK-03 | "9 codes remaining" after an authenticator sign-in | Done·V | `authRoutes.js:1400-1430`; `ae4fe03` | Count was right; copy now explains it — P1: count computed only when a recovery code is spent |
 | CK-04 | Removing the authenticator still showed it | Done·R | `fd47c47`; `0d18cd4`; `TwoFactorSetup.jsx:342` | |
 | CK-05 | Change-email dialog can't be closed; check every dialog | Done·R | `VerifyIdentityModal.jsx:385`; `ae4fe03` | 7 overlays use `useModal` without `Modal` — each tested in Phase 2 |
-| CK-06 | Adding a second factor doesn't reset recovery codes | Done·R | `twoFactorRoutes.js:244-275` | |
+| CK-06 | Adding a second factor doesn't reset recovery codes | Done·V | `twoFactorRoutes.js:244-275` | P1: codes issued only when none exist |
 | CK-07 | AI mode available to everyone under `npm run dev` | Partial·V | `vite.config.js:69`; `server/authz.js:131,217,346` | Works on desktop; **iPhone/iPad get none** (A13) — Ruling 7: iPhone opt-in to Balanced |
 | CK-08 | 2FA still 500s (repeat, "serious") | Dup | — | → CK-01/02 |
 | CK-09 | Banned: red "Appeal" with ban text; sent → grey with clock; icons on buttons | Done·R | `JoinAction.jsx:97-118` | |
 | CK-10 | Banned-member list with unban (Discord-style) | Done·R | `BannedMembers.jsx:18-148` | |
 | CK-11 | Student dashboard: hours box above the stat strip | Done·R | `VolunteerDashboard.jsx:322,363,373-395`; `a5bbf6c` | |
-| CK-12 | Organizer dashboard: stat strip above "Ready when you are" | **Regressed·R** | `OrganizerDashboard.jsx:469-545` | Card renders above; the test asserts nothing about order (A1) |
+| CK-12 | Organizer dashboard: stat strip above "Ready when you are" | Regressed·V | `OrganizerDashboard.jsx:469-545` | Card renders above; the test asserts nothing about order (A1) — P1: Misread in `a5bbf6c`: "review hours box" taken as the Awaiting-review tile; the owner pasted the close-out card as that box. Card must go below the strip, and the tile swap (not asked for — "keep everything as is") reverted |
 | CK-13 | Welly's advanced model won't start | Done·R | `ai/runtime/modelCache.js`; `083b7d1`; `1295a1e` | Truncated 986 MB download reused forever |
 | CK-14 | Welly creates real events by conversation, explains refusals in plain English | Done·R | `ai/eventDraft.js:358,600-650`; `ai/eventCreation.test.js` | Conversation quality needs a live run |
 
@@ -334,11 +334,11 @@ is **Reported** until Phase 1 promotes it.
 | LG-02 | DMCA policy? EULA? | Partial·V | `docs/legal/13-ACCEPTABLE-USE-AND-ABUSE-REVIEW.md:25-135`; Terms :383 | DMCA procedure in Terms; agent registration is Owner-action; EULA rejected as the wrong instrument — Ruling 13: separate AUP to draft; EULA asked separately |
 | LG-03 | Factor pending applications into Auto Select; cap at 10 events | Declined-by-owner | `server/config.js:435-455`; `applicationRoutes.js:623-635`; `services/autoSelect.js:160-231` | Cap done; pending not weighed. **Gate** — Ruling 10: cap kept, no Auto Select penalty |
 | LG-04 | Does the legal text cover DDoS, automation, disruption? Is automation fair? AUP needed? | Partial·V | Terms §4 (`02-terms-of-service.md:159-224`) | AUP folded into Terms (section C) — Ruling 13: separate AUP |
-| LG-05 | No XSS from user content; Welly prompt injection | Done·R | no `dangerouslySetInnerHTML`; `policyMarkdown.js`; `WellyMessage.jsx:90-127`; `ai/indirectInjection.test.js` | |
+| LG-05 | No XSS from user content; Welly prompt injection | Done·V | no `dangerouslySetInnerHTML`; `policyMarkdown.js`; `WellyMessage.jsx:90-127`; `ai/indirectInjection.test.js` | P1: zero `dangerouslySetInnerHTML`, zero `innerHTML =` in `src/` |
 | LG-06 | Profile picture "under 5kb" and safe | Done·R (owner-accepted) | `profilePictureRoutes.js:118-222` | 5 MB upload; stored as ≤5 KB 192 px WebP — quality check Phase 2 — Ruling 12: 5 KB stored kept |
 | LG-07 | Regroup the Legal Center | Done·R | `legal/LegalCenter.jsx:63-108` | 13 documents in 4 groups |
-| LG-08 | Hours final after close-out; correctable before | Done·R | `attendance.js:477-553` | Matches 09-21 1A |
-| LG-09 | Applications closing after the event (Sep 5 vs Aug 18) | Partial·R | `server/validation.js:33-39`; `CreateEvent.jsx:269-272` | Refused both sides, but client `>=` vs server `>` (A5) |
+| LG-08 | Hours final after close-out; correctable before | Done·V | `attendance.js:477-553` | Matches 09-21 1A — P1: `finalizeAttendance` is the only writer; lock is its floor |
+| LG-09 | Applications closing after the event (Sep 5 vs Aug 18) | Partial·V | `server/validation.js:33-39`; `CreateEvent.jsx:269-272` | Refused both sides, but client `>=` vs server `>` (A5) — P1: A5 confirmed |
 | LG-10 | Category list too narrow, badly grouped | Done·R | `server/eventCategories.js:68-126` | 16 in 6 groups |
 | LG-11 | Application-close field uses the custom picker; click opens it | Partial·V | `CreateEvent.jsx:444-462`; `DatePicker.jsx:82-90` | Still accepts typing; time is native. **Gate** — Ruling 8 |
 | LG-12 | "Select / Selected" until Apply; Apply easy to find | Done·R | `EventShiftsTab.jsx:319-365` | Placement judged Phase 2 |
@@ -446,3 +446,49 @@ Listed, not performed.
 - Search Console property and sitemap submission (FE-02).
 - Run the demonstration-record seed against production, if still wanted (FX-55).
 - Deploys. This audit commits locally and never pushes.
+
+
+---
+
+## Phase 1 — Static verification
+
+**Method, and one deliberate change of order.** The decision-gate items were
+verified first, so the owner could rule while the rest was checked; the gate
+closed the same day. Then the fourteen defects (A1–A14), then the logic that
+the rest of the product leans on — the close-out lock, removal before a shift,
+certificate and transcript privacy, the appeal window, recovery-code
+accounting, raw-HTML sinks. Those are graded **V** in the ledger with the line
+that makes each true.
+
+What remains at **R** after this pass is, almost entirely, *presence*: a button
+exists, a page renders, a label reads a certain way. Reading source is weak
+evidence for presence and strong evidence is a screenshot, so those items are
+confirmed in Phase 2 in the browser rather than twice.
+
+### Defects — verification record
+
+| # | Result | What was read |
+|---|---|---|
+| A1 | **Confirmed, and wider than reported** | `OrganizerDashboard.jsx:469-545`: the close-out card renders before `<section className="stats">`. The commit that "fixed" CK-12 (`a5bbf6c`) read "the review hours box" as the *Awaiting review* tile and swapped two tiles — while its own message describes "the close-out card below", which it never was. The owner's message names the box by pasting it: it is the close-out card. |
+| A2 | Confirmed | `ProfileMenu.jsx:150` → `/settings?section=notifications`; `App.jsx:457` (phone sheet) → `/notifications` |
+| A3 | Confirmed | `VolunteerProfile.jsx:266` `moreHref="/hours"` unconditionally |
+| A4 | Confirmed | `VolunteerProfile.jsx:194` interpolates `volunteer?.username` with no fallback |
+| A5 | Confirmed | client `>=` refuses equality (`CreateEvent.jsx:269`); server refuses only `>` and its message says "on or before" (`validation.js:115`) |
+| A6 | **Withdrawn** | see the gate |
+| A7 | Confirmed | `VolunteerDashboard.jsx:645-700`: "Certificate of Community Service", one table row per shift, no verification code |
+| A8 | Confirmed | `seed-qa-profile.mjs:57-61` refuses three basenames; `bin/lib/db-safety.mjs` already has the content-based `refuseNonDisposableDatabase`. Ruling 1 needs a *second*, deliberately production-capable tool for the owner's demonstration record, so the fix is a split, not a swap |
+| A9 | Confirmed | `AboutUs.jsx:459`, `OrganizerProfile.jsx:120` (which also exposes the organizer's address) |
+| A10 | Confirmed | Welly calls the hub "Moderation Center" (`ai/navigation.js:154`); tiles read "Administrators" and "Audit trail" against the owner's "Admin Roster" and "Audit Explorer" |
+| A11 | Confirmed by triage; fix is ruling 6 | — |
+| A12 | Confirmed | CHANGELOG never names migration 055 or the table it repaired |
+| A13 | Resolved by ruling 7 | `models.js:53-67`: the 200 MB iOS ceiling is "derived from reported failures rather than measured on hardware" |
+| A14 | To confirm while fixing | — |
+
+### A note on the mobile bar
+
+The phone bar is a scrolling strip with a pinned `⋯`; `mobileNavFit.test.js`
+records that five entries fit at 375 px and six scroll. Ruling 2 gives an
+administrator six primary entries (Dashboard, Discover, Calendar, Messages,
+Welly, Admin) — the same count an owner already has. That is the owner's own
+second option in FX-12 ("scrollable horizontally … scrolling reveals the three
+dots"), but the fit guard has to be updated deliberately rather than tripped.
