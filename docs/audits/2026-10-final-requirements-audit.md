@@ -301,7 +301,7 @@ is **Reported** until Phase 1 promotes it.
 | P2-25 | Owner legal editor: versions only go up, green Save / red Discard, from Settings | Done·R | `legal/LegalEditor.jsx:42,785,794`; `legalAdminRoutes.js:210` | |
 | P2-26 | Better dashboard graphs | Reported | `ServiceInsights.jsx`; `BarChart.jsx` | Judged in Phase 2/5 |
 | P2-27 | Near-me filter; location as a maps link; calendar location; weather | Done·R | `BrowseEvents.jsx:33-91`; `LocationLink.jsx:27-60`; `ics.js:17-21`; `WeatherSummary.jsx` | |
-| P2-28 | QR: @username + time, 5-min expiry, only after start; organizer scan only after start; manual kept | Done·V | `checkinTokens.js:32-38`; `CheckInCodeModal.jsx:125-160`; `attendanceRoutes.js:56,869` | Organizer check-in opens 2 h before the first shift. **Gate** (A6) — A6 withdrawn: QR code exists only after the volunteer's shift starts |
+| P2-28 | QR: @username + time, 5-min expiry, only after start; organizer scan only after start; manual kept | Partial·V | `checkinTokens.js:32-38`; `CheckInCodeModal.jsx:125-160`; `attendanceRoutes.js:56,869` | Organizer check-in opens 2 h before the first shift. **Gate** (A6) — A6 withdrawn: QR code exists only after the volunteer's shift starts — **P3: reopened by R1 — every code shows the name, not @username** |
 | P2-29 | Hours per organization; org tags vs regular tags; an org prefix? | Done·V | `organizationHours.js`; `directoryRoutes.js:278-320` | Per-org hours done; `#` shares one namespace. **Gate** — Org hours use organization_id, never tags |
 | P2-30 | On-device LLM; recommendations ("Suggested for you", keep icon); distance; near-me sort; AI tag suggestions | Done·R | `ai/models.js:98-190`; `BrowseEvents.jsx:704,982`; `TagSuggestions.jsx:62` | Qwen2.5 0.5B / 1.5B; SmolLM2-135M not used for chat |
 | P2-31 | Scan a paper certificate → prefill external hours | Partial·R | `ai/certificate/extract.js:124-137` | PDF text layer only; no OCR for photos |
@@ -524,3 +524,82 @@ Started on a throwaway database with every outside service switched off (Better 
 `server/simulation/lifecycle.sim.js` (run: `npx vitest run --config vitest.simulation.config.js`) drives one event from creation to certificate through real routes with only `Date` faked: early QR refused, code at shift start, scan, credit, close-out, lock refuses a later change, certificate issued. 1.4 s. The week rehearsal will be built the same way; the fallback is not needed.
 
 **Next:** build `server/simulation/weekInTheLife.sim.js` (payload shapes for organizations, kick/ban `{mode, reason}`, appeals `{subject: organization_ban, organizationId, statement}`, reports `{targetType, targetId, reason, details}`, suspend `{reason}` already mapped), then finish the Phase 2 walkthrough on its lived-in data, then Phase 4 fixes.
+
+
+---
+
+## Phase 3 — The week in the life (run 2026-09-30)
+
+`server/simulation/weekInTheLife.sim.js`, run by
+`npx vitest run --config vitest.simulation.config.js` — deliberately outside
+`npm test`. It moves `Date` (never the rows) through seven simulated days
+ending yesterday, and every write goes through a route a person could call.
+
+**Cast:** 100 students (grades 9–12, a third in private mode), 10 organizer
+sign-ups (7 approved, 1 denied, 2 left pending), the demo organizer and
+administrator, and two owners — one of them "Mahit", who is also a student and
+both applies to events and hosts one.
+
+**What they did:** 200 friend requests (152 accepted); three clubs (open,
+request-to-join, invite-only by share link) with 66 memberships;
+announcements, replies, and the replies switch turned off and on; 20 events
+over five days with tags, club links, one not-for-credit and one Auto Select;
+449 applications against the 10-event pending cap; organizers accepting,
+waitlisting and rejecting; withdrawals; removals the evening before a shift and
+refused ones after it started; QR check-in (86 codes scanned), manual check-in
+and no-shows; credit with left-early hour adjustments; close-outs and the lock;
+80 messages in 40 conversations; 33 external-hours entries; a kick, two bans
+(one without a reason, refused), a rejoin, an appeal, a duplicate appeal, an
+appeal decision and a lifted ban; a report, a suspension that confined the
+account, and a suspension appeal; certificate privacy between students and
+public verification; and six upcoming events relative to today.
+
+**Engines:** SQLite and PostgreSQL 17. Both **zero anomalies**; totals within
+one attendance row of each other (row order differs between engines, which
+changes who is first on a roster).
+
+### Invariants — checked after every simulated day, both engines
+
+| Invariant | Result |
+|---|---|
+| Hours ledger agrees with attendance (`verifyLedgerParity`, the app's own check) | Held every day |
+| No shift over capacity | Held — 104 acceptances refused as "shift full" |
+| No credit for a shift that has not started | Held |
+| Pending-application cap (10 events) | Refused the 11th with `application_limit_reached` |
+| Close-out lock | 15 of 15 post-close-out changes refused `409` |
+| Removal after a shift starts | Refused every time |
+
+### What the rehearsal found in the product
+
+| # | Finding | Evidence | Severity |
+|---|---|---|---|
+| **R1** | **Every QR check-in code shows the volunteer's name, never their @username** — the owner's explicit request in P2-28. The route reads `req.user.username`, but `authenticateToken` builds `req.user` from a query that does not select `username` (`server/utils.js`), so the field is always undefined and the fallback always fires. Static reading graded this "present"; only running it shows the data never arrives. It is the only read of that missing field in `server/` | 86 of 86 codes, both engines; `attendanceRoutes.js:799`; `utils.js` `req.user = {…}` | Medium — a named owner request, silently not delivered |
+| **R2** | An expired or unverifiable session is answered **403** "Invalid or expired token", where every other session failure is 401. The client compensates at its session probe (`api.js:500-512`), so in normal use nobody sees it; after a `JWT_SECRET` rotation, requests made mid-session would read "You do not have permission to do that" | `server/utils.js` `authenticateToken` | Low — auth-adjacent; *security-review* if changed |
+
+**P2-28 is therefore reopened: Partial·V.**
+
+### What the rehearsal corrected in the rehearsal
+
+Recorded because a rehearsal that reports its own mistakes as product defects
+is worse than none. First runs showed 271 anomalies; every one was traced:
+
+- Deadlines fall 30 h before a shift, so applying on day 1 was too late for
+  day-2 events — the app was right to refuse.
+- Every event started at 09:00, so the app's overlap rule (correctly) blocked
+  most applications and the pending cap was never reached.
+- Payload vocabulary: join-request decisions are `accept`/`reject`, and the
+  request id is `requestId` (`id` is the user); club-appeal decisions are
+  `stands`/`reversed`; a share link's token lives in its `path`.
+- A second appeal while one is pending returns `200 {duplicate: true}` with the
+  existing id, by design — not an acceptance.
+- Close-out needs *every* confirmed volunteer accounted for, including one
+  promoted from the waitlist after a removal; the rehearsal now reads the live
+  roster, as an organizer's screen does.
+- The clock had moved backwards between events; the week is now one monotonic
+  timeline per day.
+
+### The lived-in database
+
+The SQLite run leaves a copy of the week (126 accounts, 29 events, 449
+applications, ~120 attended shifts, ~190 credited hours, 2,694 notifications)
+for the Phase 2 walkthroughs, which resume on it.
