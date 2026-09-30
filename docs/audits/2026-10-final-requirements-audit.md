@@ -603,3 +603,54 @@ is worse than none. First runs showed 271 anomalies; every one was traced:
 The SQLite run leaves a copy of the week (126 accounts, 29 events, 449
 applications, ~120 attended shifts, ~190 credited hours, 2,694 notifications)
 for the Phase 2 walkthroughs, which resume on it.
+
+
+---
+
+## Phase 2 — Runtime verification (on the lived-in week)
+
+The walkthrough resumed on a copy of the Phase 3 database, as a student (7
+credited shifts, 2 awaiting a reply), an organizer who ran five events, a club
+manager, and the owner — phone (375×812), phone sideways (812×375) and laptop
+(1440×900). Every outside service was off. Certificates and transcripts were
+printed to PDF through headless Chromium in both themes, with background
+graphics off (the browser default), rather than judged from the stylesheet.
+
+### Confirmed in the browser
+
+FX-01 (403 is a full-screen takeover on a phone, a laptop, and a phone held
+sideways — the button is on-screen at 291 px of 375, where the predecessor
+found it 396 px below the fold) · FX-02 (the audit trail reads as sentences in
+stacked cards on a phone; "kept for one year" is true — a retention worker
+sweeps at 365 days and a trigger blocks every other delete) · FX-11 · FX-18
+(root cause read) · FX-29 · FX-31/32/65/66 (caps of 3 and 5, same floor for
+shifts and certificates) · FX-35/53 (printing isolates the document, and light
+and dark print byte-identical PDFs) · FX-36 (transcript lists events) · FX-39 ·
+FX-41 (newest message at the bottom of a real thread) · FX-46 (both names above
+the lines) · FX-48/61 (signature on the line, "Founder of WeVolunteer") · FX-50 ·
+FX-51 (the new-message control is a compact "+") · FX-52/56 · FX-63 (appeals
+box at the bottom with its history) · FX-71/73 (one Manage button, menu with
+Promote to Student Organizer / Remove / Ban) · CK-10 (banned list with Unban) ·
+P2-41 (Welly Chat answered a student's hours correctly from her record) ·
+P2-48 (starting a preview lands on the dashboard).
+
+### New findings
+
+| # | Finding | Evidence | Kind |
+|---|---|---|---|
+| **W1** | The signed-out Welcome page says "Your information is only shared with the organizers of shifts you apply to." Profiles have been public since P2-18, so this is false — and it is published, to parents, under Posture B | `Welcome.jsx:141,147` | Defect — copy |
+| **W2** | `index.html` has an empty root, so the page is blank dark until the bundle runs — the "blank screen" FX-52 asked about, on a slow phone connection | `index.html` | Defect — add a pre-mount placeholder |
+| W3 | "Run by {SCHOOL_NAME}" renders whenever a production build sets `VITE_SCHOOL_NAME` without "WeVolunteer" in it — false under Posture B | `Welcome.jsx:74,135` | Owner-action: check the production build env |
+| W4 | The login field's placeholder is cut off at 375 px ("…your usernam") | Login | Polish |
+| **N1** | A not-for-credit event (P2-20) shows "+0 hrs credited", "+0 hrs" in the service record, and issues a **certificate reading "0 hrs"** | dashboard, profile, `/certificates` | **Owner ruling** |
+| **N2** | Discover shows the posted-count line twice for students — two lead paragraphs both render | `BrowseEvents.jsx:627,653` | Defect |
+| **N3** | Discover's search box sits at 973 px on an 812 px phone — below the location banner, both counts, the organizations button and all of "Suggested for you". The owner asked for it "on top of the Opportunities page"; no recorded reason for the placement exists | `BrowseEvents.jsx` | Gap — FX-19 Partial |
+| **N4** | Opening a conversation on a phone leaves the "Messages" page header above the thread and puts the reply box at 850 px, behind the tab bar — the one thing a person came to do is off-screen. Welly, on the same phone, pins its input correctly | `Messages.jsx`, `ConversationPane.jsx` | Defect — mobile |
+| **N5** | The organizer dashboard's "Your volunteers" shows each student's **grade**, although all of them are in private mode, which the owner said hides grade | organizer dashboard | **Owner ruling** — organizers may have an operational need |
+| **N6** | "Your volunteers" is uncapped — 22 rows here, hundreds for a busy organizer | organizer dashboard | Defect — the FX-31 cap principle |
+| **N7** | The applicant row hides the "X of Y attended" counts until a volunteer has **4** confirmed commitments (`MIN_EVIDENCE`), showing "New volunteer" instead. That serves the owner's fairness concern (FX-33) and works against his raw-counts request (FX-24/P2-17) | `ApplicantReview.jsx:144`, `server/reliability.js:85` | **Owner ruling** |
+| **N8** | The owner profile says "**Runs WeVolunteer for the district**" — false under Posture B | owner profile | Defect — copy |
+| **N9** | At 375 px the sixth primary entry (the owner's "Admin") is clipped at the edge ("Ac…") before the pinned `⋯`. Ruling 2 gives administrators six entries too | phone bar | Defect — fit six |
+| **N10** | Error pages show the drawn wordmark alone, not the tile + name lockup the owner asked for everywhere (P2-47) | 403 page | Defect — branding consistency |
+| **N11** | A club page's member list is uncapped (39 rows) before the manager's tools | organization page | Defect — cap |
+| **N12** | The transcript prints on a cream panel. An earlier fix read the owner's "print it without the white background" as "it printed as bare white paper" and added the panel on purpose; the words can equally mean "remove the box behind it". The PDFs he attached at the time are not in the paste | `index.css` `.transcript` print rule, `9a2465b` | **Owner ruling**, with the print in front of him |
