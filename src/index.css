@@ -1024,6 +1024,10 @@ time { font-variant-numeric: tabular-nums; }
  */
 :root {
   --topbar-h: 65px;
+  /* The phone tab bar (`.mobilenav`, under 700px): 56px of items plus its 1px
+     top rule, not counting the safe-area inset, which callers add themselves.
+     Re-measure with `document.querySelector('nav.mobilenav').offsetHeight`. */
+  --mobilenav-h: 57px;
 }
 
 .topbar {
@@ -4595,6 +4599,14 @@ a.list-row:hover { text-decoration: none; }
 
 /* ── Layout shell ──────────────────────────────────────────────────────── */
 
+.messages-page { padding-top: var(--s5); }
+.messages-head {
+  margin-bottom: var(--s2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .messages-layout {
   display: flex;
   /* `dvh`, not `vh`. `100vh` is the TALLEST the viewport ever gets, so with
@@ -4602,7 +4614,14 @@ a.list-row:hover { text-decoration: none; }
      and pushed the composer and the newest messages underneath it. This
      stylesheet already makes that argument in three other places; the Messages
      block was the one that was missed. */
-  height: calc(100dvh - 150px);
+  /* Measured from where the layout actually starts (`--thread-top`, set by
+     Messages.jsx), so the composer ends a margin above the bottom of the
+     screen at any width. The fixed `100dvh - 150px` it replaces put the
+     composer below the fold on a laptop. */
+  /* A default until Messages.jsx measures the real start; the inline value it
+     sets on this element outranks it. */
+  --thread-top: 150px;
+  height: calc(100dvh - var(--thread-top) - var(--s5));
   min-height: 400px;
   max-height: 850px;
   background: var(--surface);
@@ -5367,7 +5386,8 @@ a.list-row:hover { text-decoration: none; }
 
 @media (max-width: 768px) {
   .messages-layout {
-    height: calc(100dvh - 140px);
+    --thread-top: 140px;
+    height: calc(100dvh - var(--thread-top));
     max-height: none;
     border: none;
     border-radius: 0;
@@ -5395,6 +5415,31 @@ a.list-row:hover { text-decoration: none; }
   .messages-list { padding: var(--s3); }
 
   .composer-area { padding: var(--s2) var(--s3) calc(var(--s2) + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* A conversation open on a phone is the whole screen between the top bar and
+   the tab bar, the way a messaging app's is. The page heading goes — the
+   thread's own header already has the back button and the other person's
+   name — and the layout takes exactly the space that is left, so the reply box
+   sits just above the tab bar instead of behind it (measured at 850px on an
+   812px screen before). The tab bar's own safe-area padding is added here; the
+   composer's is not needed while the bar is below it. */
+@media (max-width: 700px) {
+  /* The conversation list, too, stops at the tab bar rather than under it. */
+  .messages-layout {
+    height: calc(100dvh - var(--thread-top) - var(--mobilenav-h) - env(safe-area-inset-bottom, 0px));
+  }
+  .messages-page.thread-open { padding-top: 0; padding-bottom: 0; }
+  /* The shell's own page padding, which sat as a 20px band above the thread
+     and a 92px one below it. */
+  main.page:has(> .messages-page.thread-open) { padding-top: 0; padding-bottom: 0; }
+  .messages-page.thread-open .messages-head { display: none; }
+  /* `--thread-top` is measured by Messages.jsx. */
+  .messages-page.thread-open .messages-layout {
+    height: calc(100dvh - var(--thread-top) - var(--mobilenav-h) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+  }
+  .messages-page.thread-open .composer-area { padding-bottom: var(--s2); }
 }
 
 /* ==========================================================================

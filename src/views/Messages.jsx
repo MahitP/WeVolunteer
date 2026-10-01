@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { MessageSquare, Plus } from 'lucide-react';
 import { api } from "../utils/api";
 import { subscribeSocket, unsubscribeSocket } from '../services/socket';
@@ -23,6 +23,29 @@ export default function Messages() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isMobilePaneVisible, setIsMobilePaneVisible] = useState(false);
+  const layoutRef = useRef(null);
+
+  /**
+   * On a phone, an open conversation runs from wherever it starts to the top of
+   * the tab bar — measured, not assumed. What sits above it varies: the shell's
+   * own padding, a notice banner, the demo bar in a demo build, a top bar whose
+   * height follows its content. A fixed budget (`100dvh - 140px`) put the reply
+   * box behind the tab bar at 850px on an 812px screen. So the page goes to the
+   * top, the thread's actual start is read, and the stylesheet does the rest
+   * with `--thread-top`. See src/messagesMobileThread.test.js.
+   */
+  useLayoutEffect(() => {
+    const place = () => {
+      const el = layoutRef.current;
+      if (!el) return;
+      el.style.setProperty('--thread-top', `${Math.max(0, Math.round(el.getBoundingClientRect().top + window.scrollY))}px`);
+    };
+    /* Opening a conversation on a phone starts it at the top of the screen. */
+    if (isMobilePaneVisible && window.matchMedia?.('(max-width: 700px)')?.matches) window.scrollTo(0, 0);
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [isMobilePaneVisible]);
   const [isOffline, setIsOffline] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
 
@@ -136,7 +159,10 @@ export default function Messages() {
   };
 
   return (
-    <div className="page" style={{ paddingTop: 'var(--s5)' }}>
+    /* `thread-open` lets the stylesheet give an open conversation the whole
+       phone screen between the top bar and the tab bar; see
+       src/messagesMobileThread.test.js. */
+    <div className={`page messages-page${isMobilePaneVisible ? ' thread-open' : ''}`}>
       {showPicker && (
         <RecipientPicker
           user={api.getCurrentCachedUser()}
@@ -144,7 +170,9 @@ export default function Messages() {
           onSelect={handleSelectRecipient}
         />
       )}
-      <div className="page-head" style={{ marginBottom: 'var(--s2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {/* Styled by class, not inline: an inline `display` would outrank the
+          phone rule that hides this row while a conversation is open. */}
+      <div className="page-head messages-head">
         <h2 className="page-title">
           Messages
           {isOffline && (
@@ -181,7 +209,7 @@ export default function Messages() {
           <span className="btn-label-wide">New Message</span>
         </button>
       </div>
-      <div className="messages-layout">
+      <div className="messages-layout" ref={layoutRef}>
         <div className={`messages-sidebar ${isMobilePaneVisible ? 'mobile-hidden' : ''}`}>
           <ConversationList 
             conversations={conversations} 
