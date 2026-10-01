@@ -357,39 +357,26 @@ const NAV = [
      in routes/index.jsx — but nothing in the product points there any more. */
   { id: 'browse', path: '/discover', label: 'Discover', icon: Compass, requiredCap: 'event.view' },
   /**
-   * ── Who the calendar is for, and why the gate is narrower than the route ──
+   * ── Who the calendar is for ──
    *
-   * The route requires `event.view`, which every role holds; this entry
-   * requires `event.apply` or `event.create`. So `admin` and `partner` can open
-   * the page and are not sent there, and that is a decision rather than an
-   * oversight — owner decision 6A of the 2026-09-21 audit, recorded here because
-   * the evidence pulls both ways and the next reader will notice the same
-   * things.
+   * Volunteers (`event.apply`), organizers (`event.create`) and administrators
+   * (`event.moderate`). The route itself requires only `event.view`; a partner
+   * can open it and is not sent there.
    *
-   * Pulling one way: an `event.moderate` holder gets the UNFILTERED event index
-   * (`SessionProvider`), `scope` defaults to `all`, and `CalendarView`'s
-   * non-organizer branch draws a deadline for every open event — so the page
-   * genuinely behaves as a district calendar for admin and super_admin, and
-   * `PAGE_META.staff` calls it "Events across the district and when they close".
-   * Welly will navigate there on `event.view` too.
+   * Administrators were left off until 2026-09-30. The predecessor audit's
+   * decision 6A kept the page "reachable directly and through Welly, not
+   * surfaced in navigation", on the argument that this entry is about doing —
+   * turning up to shifts or running them — and an administrator does neither.
+   * That decision was the audit's, not the owner's, and the owner's own admin
+   * bar lists Calendar (FX-12). He ruled it back in (ruling 2).
    *
-   * Pulling the other: this gate is about DOING — turning up to shifts or
-   * running them — and an administrator does neither. The unfiltered index is
-   * justified in its own comment by the review queue, not by this page, so the
-   * district behaviour is inherited rather than designed. `staff` is shared with
-   * super_admin, who holds `event.apply` through the wildcard and does have the
-   * entry, so the title is earned without admin. And the admin rail is pinned
-   * exactly in `App.shellByRole.test.jsx`, in a file that explains every other
-   * presence and absence and says nothing about this one.
-   *
-   * Nothing in the repository designs a district calendar, and a route working
-   * is not evidence that it was meant to be promoted. So the gate stays as it
-   * is: reachable directly and through Welly, not surfaced in navigation. If
-   * that is ever revisited, the thing to decide first is whether `/calendar`
-   * shows you your own commitments or the district's schedule — the gate and
-   * the `staff` subtitle currently answer that differently.
+   * What an administrator sees is the district's schedule: an `event.moderate`
+   * holder gets the unfiltered event index (`SessionProvider`), `scope`
+   * defaults to `all`, and `CalendarView`'s non-organizer branch draws a
+   * deadline for every open event — which is what `PAGE_META.staff` already
+   * calls it, "Events across the district and when they close".
    */
-  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create'] },
+  { id: 'calendar', path: '/calendar', label: 'Calendar', icon: CalendarDays, requiredCapAny: ['event.apply', 'event.create', 'event.moderate'] },
   { id: 'messages', path: '/messages', label: 'Messages', icon: MessageSquare, requiredCap: 'message.send' },
   { id: 'welly', path: '/welly', label: 'Welly', icon: Sparkles, requiredCap: 'assistant.use' },
   /* "New event" is deliberately NOT a nav entry.
@@ -2245,14 +2232,14 @@ function AppShell({ toasts, addToast, removeToast }) {
         * and the entry that fell off the end for administrators was `Admin` — the
         * one they opened the phone for. Scrolling removes the ceiling instead of
         * arguing about where to put it: five entries fit on any current phone,
-        * six or seven scroll, and none of them is ever demoted to a menu by
-        * arithmetic.
+        * six fit from 360px up once the bar is drawn dense (`mobilenav-dense`),
+        * and none of them is ever demoted to a menu by arithmetic.
         *
         * The `⋯` button is OUTSIDE the scroller so it cannot scroll away. It is
         * the one control whose position has to be predictable, because it is how
         * you reach anything you cannot currently see.
         */}
-      <nav className="mobilenav" aria-label="Main">
+      <nav className={`mobilenav${primaryNavItems.length > 5 ? ' mobilenav-dense' : ''}`} aria-label="Main">
         <div className="mobilenav-scroll" ref={mobileNavScrollRef}>
           {primaryNavItems.map(({ id, path, label, icon: Icon }) => (
             <button

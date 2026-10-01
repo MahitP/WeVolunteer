@@ -93,7 +93,10 @@ const MEDIA = mediaBlocks();
  */
 function declaredPx(selector, prop, body) {
   const plain = body.replace(/\/\*[\s\S]*?\*\//g, '');
-  const rule = new RegExp(`\\.${selector}\\s*\\{([^{}]*)\\}`, 'g');
+  /* Anchored at the start of a rule — after `}` or the block's opening —
+     so `.mobilenav-item` does not also match `.mobilenav-dense .mobilenav-item`
+     and report the dense floor as everybody's. */
+  const rule = new RegExp(`(?<=(?:^|\\})\\s*)\\.${selector}\\s*\\{([^{}]*)\\}`, 'g');
   let value = null;
   let match;
   while ((match = rule.exec(plain)) !== null) {
@@ -158,14 +161,33 @@ describe('the mobile bar is sized for the destinations that exist', () => {
 
     for (const viewport of PHONE_WIDTHS) {
       const count = primary.length;
-      /* An owner's sixth entry is the one case that is allowed to scroll — the
-         strip exists for it, and `data-overflow` puts a fade on the edge that
-         has something behind it. Everybody else must fit outright. */
-      if (count > 5) continue;
+      /**
+       * Six destinations — an administrator's and an owner's bar, since the
+       * owner ruled Calendar back onto the admin bar (ruling 2) — are drawn
+       * dense: no side padding, a 3.25rem floor, and a 2.75rem `⋯` (the 44px
+       * tap minimum). At 375px the sixth entry, "Admin", used to sit cut off
+       * at the edge (N9).
+       *
+       * The floor has to hold the widest label as well as add up, and jsdom
+       * cannot measure text, so that half is a recorded measurement: at the
+       * bar's 10px, "Dashboard" renders 51px wide (Browser pane, 2026-10-01),
+       * inside the 52px floor.
+       *
+       * 320px is the one width allowed to scroll a six-entry bar: 6 × 52 + 44
+       * is 356, and a narrower floor would cut "Dashboard". The strip exists
+       * for that case, and `data-overflow` puts a fade on the edge with
+       * something behind it.
+       */
+      const dense = count > 5;
+      if (dense && viewport < 360) continue;
 
       it(`fits ${name}'s ${count} destinations at ${viewport}px`, () => {
-        const item = itemWidthAt(viewport, 'mobilenav-item');
-        const more = itemWidthAt(viewport, 'mobilenav-more');
+        const item = dense
+          ? itemWidthAt(viewport, 'mobilenav-dense \\.mobilenav-item')
+          : itemWidthAt(viewport, 'mobilenav-item');
+        const more = dense
+          ? itemWidthAt(viewport, 'mobilenav-dense \\.mobilenav-more')
+          : itemWidthAt(viewport, 'mobilenav-more');
         expect(item, 'no item floor resolved').not.toBeNull();
         expect(more, 'no ⋯ floor resolved').not.toBeNull();
 
@@ -178,6 +200,18 @@ describe('the mobile bar is sized for the destinations that exist', () => {
       });
     }
   }
+});
+
+describe('a six-entry bar is marked dense', () => {
+  it('adds the dense class when there are more than five primary entries', () => {
+    const app = readFileSync(path.join(process.cwd(), 'src/App.jsx'), 'utf8');
+    expect(app).toMatch(/className=\{`mobilenav\$\{primaryNavItems\.length > 5 \? ' mobilenav-dense' : ''\}`\}/);
+  });
+
+  it('keeps the dense floor wide enough for "Dashboard" and the ⋯ at the tap minimum', () => {
+    expect(itemWidthAt(375, 'mobilenav-dense \\.mobilenav-item')).toBeGreaterThanOrEqual(52);
+    expect(itemWidthAt(375, 'mobilenav-dense \\.mobilenav-more')).toBeGreaterThanOrEqual(44);
+  });
 });
 
 describe('the overflow cue is driven by measurement, not by a guess', () => {

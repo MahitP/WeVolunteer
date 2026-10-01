@@ -206,7 +206,14 @@ describe('navigation, per role', () => {
      * This list is exact rather than a `toContain`, so the entry cannot return
      * unnoticed — which is exactly how it got here the first time.
      */
-    ['admin', ['Dashboard', 'Discover', 'Messages', 'Welly', 'Admin', 'Notifications', 'Profile']]
+    /**
+     * `Calendar` for administrators (ruling 2, 2026-09-30). The predecessor
+     * audit's 6A kept it off this rail; that decision was the audit's, not the
+     * owner's, and the owner's admin bar lists it: "Dashboard, Opportunities,
+     * Calendar, Messages, Admin" (FX-12). An administrator's calendar is the
+     * district's schedule — every platform event.
+     */
+    ['admin', ['Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin', 'Notifications', 'Profile']]
   ])('%s nav is what its capabilities justify', (role, expected) => {
     expect(navItemsFor(USER(role)).map(n => n.label)).toEqual(expected);
   });
@@ -327,7 +334,7 @@ describe('navigation, per role', () => {
     await screen.findByTestId('admin-dash');
     /* Profile absent for the same reason as above — the account menu holds it. */
     expect(sidebarLabels()).toEqual([
-      'Dashboard', 'Discover', 'Messages', 'Welly', 'Admin', 'Notifications',
+      'Dashboard', 'Discover', 'Calendar', 'Messages', 'Welly', 'Admin', 'Notifications',
     ]);
   });
 

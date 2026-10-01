@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { PAGE_META, tabForPath } from './App.jsx';
+import { PAGE_META, tabForPath, navItemsFor } from './App.jsx';
 import { APP_ROUTES } from './routes/index.jsx';
 import { CAPABILITIES } from '../server/authz.js';
 
@@ -102,11 +100,13 @@ describe('the partner calendar, specifically', () => {
   });
 
   it('is still absent from the partner rail', () => {
-    /* Titling a page is not promoting it. Owner decision 6B kept the route
-       reachable and unpromoted; `App.shellByRole.test.jsx` pins the rail itself,
-       and this asserts the two halves are not confused for each other. */
-    const src = readFileSync(path.resolve(__dirname, './App.jsx'), 'utf8');
-    const navEntry = src.match(/id: 'calendar'[^\n]*\n/)?.[0] ?? '';
-    expect(navEntry).toMatch(/requiredCapAny: \['event\.apply', 'event\.create'\]/);
+    /* Titling a page is not promoting it. Decision 6B kept the route reachable
+       and unpromoted for partners; `App.shellByRole.test.jsx` pins the rail
+       itself, and this asserts the two halves are not confused for each other.
+       Asserted on the rail rather than on the gate's source text: the gate
+       gained `event.moderate` when the owner gave administrators Calendar
+       (ruling 2), and a partner holds none of the three. */
+    const partner = { id: 'p', role: 'partner', withheld: [], verified: true };
+    expect(navItemsFor(partner).map(n => n.label)).not.toContain('Calendar');
   });
 });

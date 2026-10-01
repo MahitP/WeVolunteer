@@ -4112,6 +4112,20 @@ a.list-row:hover { text-decoration: none; }
   }
 
   /**
+   * Six destinations, drawn dense (N9, ruling 2).
+   *
+   * An administrator's bar and an owner's have six primary entries — Calendar
+   * joined the administrator's on the owner's ruling — and at 375px six 3.75rem
+   * items need 360px of a 323px strip, so "Admin" sat cut off at the edge.
+   * Dense drops the side padding, floors each entry at 3.25rem and narrows the
+   * `⋯` to 2.75rem, the 44px tap minimum: 6 × 52 + 44 = 356px, which fits from
+   * 360px up. The floor is set by the widest label, "Dashboard", which renders
+   * 51px wide at this size. Below 360px the strip scrolls with its fade.
+   */
+  .mobilenav-dense .mobilenav-item { min-width: 3.25rem; padding-left: 0; padding-right: 0; }
+  .mobilenav-dense .mobilenav-more { min-width: 2.75rem; }
+
+  /**
    * A cue that the strip has more in it, on the side it actually has more on.
    *
    * This was a `max-width: 360px` media query — a guess about when the bar

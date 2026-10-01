@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, CalendarDays, MapPin, Clock } from 'lucide-react';
 import { formatHours, formatTimeRange, formatDay, haversineDistance } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
+import { can } from '../authz.js';
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
@@ -13,6 +14,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
  *   pending  — you applied, awaiting a decision (amber/warn)
  *   deadline — applications close that day (warn)
  *   hosting  — an event you run (brand, organizer view)
+ *   scheduled — any event's shift (brand, administrator view)
  */
 const KIND_META = {
   shift: {
@@ -34,6 +36,10 @@ const KIND_META = {
   hosting: {
     tone: 'brand',
     label: 'You are hosting'
+  },
+  scheduled: {
+    tone: 'brand',
+    label: 'Event shift'
   }
 };
 const dayKey = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -55,6 +61,20 @@ export default function CalendarView({
   const [viewMode, setViewMode] = useState('month'); // 'month' or 'week'
   const [filter, setFilter] = useState('all'); // 'all', 'upcoming', 'pending', 'history'
   const isOrganizer = currentUser?.role === 'organizer';
+  /**
+   * An administrator's calendar is the district's schedule (ruling 2).
+   *
+   * The owner put Calendar back on the administrator's bar and said what it
+   * shows: every event on the platform. Anybody who was not an organizer used
+   * to get the volunteer's view, so an administrator — who applies to nothing —
+   * saw only "Applications close" markers, under a legend about their own
+   * confirmed shifts. `event.moderate` is the administrator's capability, and
+   * an organizer never holds it.
+   */
+  const isDistrict = !isOrganizer && can(currentUser, 'event.moderate');
+  /* The organizer's and the administrator's views share a layout: no
+     "Awaiting" or "History", because neither is the reader's own record. */
+  const isSchedule = isOrganizer || isDistrict;
   const { location: myLocation } = useLocationContext();
 
   /** Everything with a date, flattened into calendar entries. */
@@ -66,6 +86,33 @@ export default function CalendarView({
         for (const slot of event.slots || []) {
           out.push({
             kind: 'hosting',
+            date: new Date(slot.startDatetime),
+            event,
+            title: event.title,
+            detail: slot.name,
+            startDatetime: slot.startDatetime,
+            endDatetime: slot.endDatetime
+          });
+        }
+        if (event.applicationDeadline && event.status === 'open') {
+          out.push({
+            kind: 'deadline',
+            date: new Date(event.applicationDeadline),
+            event,
+            title: event.title,
+            detail: 'Applications close'
+          });
+        }
+      }
+      return out;
+    }
+
+    if (isDistrict) {
+      for (const event of events) {
+        if (event.status === 'cancelled') continue;
+        for (const slot of event.slots || []) {
+          out.push({
+            kind: 'scheduled',
             date: new Date(slot.startDatetime),
             event,
             title: event.title,
@@ -133,7 +180,7 @@ export default function CalendarView({
       });
     }
     return out;
-  }, [events, applications, currentUser, isOrganizer]);
+  }, [events, applications, currentUser, isOrganizer, isDistrict]);
 
   /**
    * Distance attached once, here, rather than computed inside `EntryRow`.
@@ -160,7 +207,7 @@ export default function CalendarView({
   const filteredEntries = useMemo(() => {
     const all = entriesWithDistance;
     if (filter === 'all') return all;
-    if (filter === 'upcoming') return all.filter(e => e.kind === 'shift' || e.kind === 'hosting');
+    if (filter === 'upcoming') return all.filter(e => e.kind === 'shift' || e.kind === 'hosting' || e.kind === 'scheduled');
     if (filter === 'pending') return all.filter(e => e.kind === 'pending' || e.kind === 'deadline');
     if (filter === 'history') return all.filter(e => e.kind === 'history');
     return all;
@@ -254,7 +301,7 @@ export default function CalendarView({
     setSelected(now);
   };
   
-  const agendaUpcoming = useMemo(() => entries.filter(e => (e.kind === 'shift' || e.kind === 'hosting') && e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())).sort((a, b) => a.date - b.date).slice(0, 5), [entries, today]);
+  const agendaUpcoming = useMemo(() => entries.filter(e => (e.kind === 'shift' || e.kind === 'hosting' || e.kind === 'scheduled') && e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())).sort((a, b) => a.date - b.date).slice(0, 5), [entries, today]);
   const agendaPending = useMemo(() => entries.filter(e => (e.kind === 'pending' || e.kind === 'deadline') && e.date >= new Date(today.getFullYear(), today.getMonth(), today.getDate())).sort((a, b) => a.date - b.date).slice(0, 5), [entries, today]);
   const agendaHistory = useMemo(() => entries.filter(e => e.kind === 'history').sort((a, b) => b.date - a.date).slice(0, 5), [entries]);
   
@@ -303,7 +350,7 @@ export default function CalendarView({
         </div>
 
         <div className="row row-wrap small dim s-4f3bdc">
-          {(isOrganizer ? ['hosting', 'deadline'] : ['shift', 'pending', 'history']).map(k => <span key={k} className="row s-a39dc0">
+          {(isOrganizer ? ['hosting', 'deadline'] : isDistrict ? ['scheduled', 'deadline'] : ['shift', 'pending', 'history']).map(k => <span key={k} className="row s-a39dc0">
               <span className={`cal-key tone-${KIND_META[k].tone}`} />
               {KIND_META[k].label}
             </span>)}
@@ -312,7 +359,7 @@ export default function CalendarView({
 
       <div className="row" style={{ gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
         {['all', 'upcoming', 'pending', 'history'].map(f => {
-           if (isOrganizer && (f === 'pending' || f === 'history')) return null;
+           if (isSchedule && (f === 'pending' || f === 'history')) return null;
            const labels = { all: 'Everything', upcoming: 'Upcoming', pending: 'Awaiting', history: 'History' };
            return (
              <button 
@@ -380,14 +427,16 @@ export default function CalendarView({
                   <span className="empty-icon"><CalendarDays size={18} /></span>
                   <h3 style={{ color: 'var(--ink)' }}>Nothing scheduled</h3>
                   <p>
-                    {isOrganizer ? 'Events you host will appear here once you post them.' : 'Shifts you are accepted for will appear here.'}
+                    {isOrganizer ? 'Events you host will appear here once you post them.'
+                      : isDistrict ? 'Events posted on WeVolunteer will appear here.'
+                      : 'Shifts you are accepted for will appear here.'}
                   </p>
                 </div> : <div className="list">
                   {agendaUpcoming.map((e, i) => <EntryRow key={i} entry={e} onViewEvent={onViewEvent} showDate />)}
                 </div>}
             </section>
             
-            {!isOrganizer && (
+            {!isSchedule && (
               /* `row-wrap`, and a flex-basis rather than a bare `flex: 1`.
                  `.row` is `nowrap`, and `flex: 1` is `flex: 1 1 0%` with
                  `min-width: auto` — so neither column could shrink below its own
