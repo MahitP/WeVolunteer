@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck, Award
+  FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck, Award, Plus
 } from 'lucide-react';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
@@ -490,15 +490,14 @@ export default function VolunteerDashboard({
               * them.
               */}
             {/**
-              * The entry point to Logged hours — and deliberately the ONLY one
-              * in the shell.
+              * The entry points to the student's record: the full log, and the
+              * form that adds to it.
               *
-              * It replaced "Log external hours", which pointed straight at the
-              * form. The full log is the better destination from here: it holds
-              * the external form's own entry point, it shows this same history
-              * complete rather than truncated, and it is where the question a
-              * student has while looking at this list ("how much have I actually
-              * done?") is answered.
+              * "Log external hours" had been replaced by "My logged hours" alone;
+              * the owner asked for both (P2-21, ruling 3), the logging button
+              * styled like an organizer's Create event. The account menu no
+              * longer carries "My hours", so this header is where the record
+              * starts.
               *
               * There is no rail entry and no mobile tab for it, which is the
               * point: the navigation should get shorter, not longer, and a page
@@ -528,12 +527,20 @@ export default function VolunteerDashboard({
                 * side in the hours card would have made two differently-named
                 * buttons for two different documents a pixel apart.
                 */}
+              <div className="section-actions">
               <Link className="btn btn-secondary btn-sm section-action" to="/certificates">
                 <Award size={14} aria-hidden="true" /> My certificates
               </Link>
               <Link className="btn btn-secondary btn-sm section-action" to="/hours">
                 <History size={14} aria-hidden="true" /> My logged hours
               </Link>
+              {/* The owner's P2-21 and ruling 3: a "Log external hours" button
+                  "exactly like" the organizer's Create event — primary, with
+                  the plus — beside the log it adds to. */}
+              <Link className="btn btn-primary btn-sm section-action" to="/hours/external">
+                <Plus size={14} aria-hidden="true" /> Log external hours
+              </Link>
+              </div>
             </div>
             <div className="card card-pad">
               {completed.length === 0 ? (

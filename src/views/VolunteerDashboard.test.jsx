@@ -132,3 +132,21 @@ describe('VolunteerDashboard', () => {
     await waitFor(() => expect(screen.queryByText(/Your next shift/i)).toBeNull());
   });
 });
+
+/**
+ * Ruling 3 (2026-09-30), the owner's P2-21: "Volunteers should have the button
+ * like how organizers have the create new event button … a log external hours
+ * button exactly like the same button." It sits beside "My logged hours", as
+ * the primary action of the service-history header — and the account menu no
+ * longer carries "My hours", so this header is where a student's record starts.
+ */
+describe('the service-history header', () => {
+  it('offers "Log external hours" as its primary action, beside "My logged hours"', () => {
+    renderDashboard();
+    const log = screen.getByRole('link', { name: /Log external hours/i });
+    expect(log).toHaveAttribute('href', '/hours/external');
+    expect(log.className).toMatch(/btn-primary/);
+    expect(screen.getByRole('link', { name: /My logged hours/i })).toHaveAttribute('href', '/hours');
+  });
+});
+

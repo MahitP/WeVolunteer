@@ -1,4 +1,4 @@
-import { Clock, Settings as SettingsIcon } from 'lucide-react';
+import { Settings as SettingsIcon } from 'lucide-react';
 
 /**
  * The destinations the account control offers, declared once.
@@ -41,33 +41,14 @@ import { Clock, Settings as SettingsIcon } from 'lucide-react';
  * and both surfaces style it apart for that reason.
  */
 export const ACCOUNT_MENU_ITEMS = [
-  /**
-   * A student's own volunteering record.
-   *
-   * ── Why it is promoted, and why only this one ──
-   *
-   * The record lives across five destinations — `/hours`, `/certificates`,
-   * `/portfolio`, `/profile/badges` and `/profile` — each with a documented
-   * reason to exist, and none of them was in the rail or in either account
-   * control. They hang off buttons on the dashboard and the profile, so a
-   * student who had navigated away had to find the dashboard again before they
-   * could answer "where is my volunteering history".
-   *
-   * `/hours` is the right one of the five to promote: it is the whole record,
-   * WeVolunteer and self-reported together, and the other four are linked from
-   * it or from the profile beside it. Promoting all five would move the problem
-   * into the menu.
-   *
-   * NOT added to the navigation rail. The primary tier is capped at six on
-   * purpose — the mobile bar draws every primary entry — and this is somewhere
-   * people go to read rather than the next step in a task.
-   *
-   * `portfolio.write` is the capability `/hours` itself requires: students and
-   * the owner hold it; organizers, administrators and partners do not. An
-   * unconditional entry would offer three roles a page that answers 403, and a
-   * menu item that appears and then refuses is worse than an absent one.
+  /*
+   * "My hours" was here, promoted so a student who had wandered off could find
+   * their volunteering history from any page. The owner ruled it out on
+   * 2026-09-30 (ruling 3, FX-17): this menu is exactly Profile, Notifications,
+   * Settings and Sign Out, in his words, twice. The history is reached from the
+   * dashboard ("My logged hours", beside "Log external hours") and from the
+   * profile ("Show all N shifts").
    */
-  { id: 'hours', path: '/hours', label: 'My hours', icon: Clock, requiredCap: 'portfolio.write' },
   /**
    * Settings, which every role reaches and which therefore declares no
    * capability. `/settings` has no `requiredCap` in the route table either, and

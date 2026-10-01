@@ -147,12 +147,12 @@ export default function ProfileMenu({ user, onSignOut }) {
             <UserRound size={15} /> Profile
           </button>
           
-          <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/settings?section=notifications')}>
+          <button className="menu-item" role="menuitem" onClick={() => handleNavigate('/notifications')}>
             <Bell size={15} /> Notifications
           </button>
 
           {/**
-            * The shared account destinations — "My hours" and Settings.
+            * The shared account destinations — Settings (see src/accountMenu.js).
             *
             * They come AFTER Profile and Notifications, which is also the shape
             * the `⋯` sheet has: the two entries that mirror NAV first, then the

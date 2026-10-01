@@ -102,25 +102,17 @@ describe('the account menu offers Profile, and does not offer editing', () => {
    * is the point of this case: the menu is small on purpose, and the way it
    * stops being small is one reasonable addition at a time.
    */
-  it('lists exactly Profile, Notifications, My hours, Settings and Sign Out', () => {
+  /* The owner's words (FX-17, FX-21) and his ruling of 2026-09-30 (ruling 3):
+     exactly these four. "My hours" was a fifth for students; it left the menu
+     for the dashboard. */
+  it('lists exactly Profile, Notifications, Settings and Sign Out', () => {
     fireEvent.click(document.querySelector('.userchip'));
     const items = screen.getAllByRole('menuitem').map(b => b.textContent.trim());
-    /* Profile and Notifications mirror NAV entries; My hours and Settings are
-       the shared account destinations from src/accountMenu.js. That is also the
-       order the mobile `⋯` sheet renders in, so the two controls agree on
-       sequence as well as contents. */
-    expect(items).toEqual(['Profile', 'Notifications', 'My hours', 'Settings', 'Sign Out']);
+    expect(items).toEqual(['Profile', 'Notifications', 'Settings', 'Sign Out']);
   });
 
-  /**
-   * And it is gated on the capability the destination itself requires.
-   *
-   * `/hours` is `portfolio.write`, held by students and the owner and NOT by
-   * organizers, administrators or partners. An unconditional entry would offer
-   * three roles a page that answers 403 — a menu item that appears and then
-   * refuses is worse than an absent one.
-   */
-  it('withholds My hours from a role that cannot open it', () => {
+  /** The same four for every role: nothing in it is role-specific any more. */
+  it('is the same four items for an organizer', () => {
     cleanup();
     render(
       <MemoryRouter>
@@ -132,7 +124,6 @@ describe('the account menu offers Profile, and does not offer editing', () => {
     );
     fireEvent.click(document.querySelector('.userchip'));
     const items = screen.getAllByRole('menuitem').map(b => b.textContent.trim());
-    expect(items).not.toContain('My hours');
     expect(items).toEqual(['Profile', 'Notifications', 'Settings', 'Sign Out']);
   });
 
@@ -292,7 +283,6 @@ describe('the shared account destinations', () => {
      loops above pass over nothing and report success. */
   it('has shared items to check', async () => {
     const { ACCOUNT_MENU_ITEMS } = await import('./accountMenu.js');
-    expect(ACCOUNT_MENU_ITEMS.length).toBeGreaterThan(1);
-    expect(ACCOUNT_MENU_ITEMS.some(i => i.requiredCap)).toBe(true);
+    expect(ACCOUNT_MENU_ITEMS.length).toBeGreaterThan(0);
   });
 });

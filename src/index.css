@@ -1106,6 +1106,14 @@ time { font-variant-numeric: tabular-nums; }
   background: var(--rule);
 }
 .section-head .section-action { flex-shrink: 0; }
+/* Several actions in one header: grouped, so on a phone they wrap as a row of
+   their own under the heading instead of one beside it and the rest stranded
+   below with the rule trailing after them. */
+.section-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+@media (max-width: 700px) {
+  .section-head:has(> .section-actions)::after { order: 1; }
+  .section-head > .section-actions { order: 2; flex-basis: 100%; }
+}
 
 /* — Mobile bottom navigation ——————————————————— */
 
