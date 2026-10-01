@@ -35,6 +35,10 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
   );
 
   const selected = models.find(m => m.id === selectedId) || null;
+  /* On iPhone and iPad the model is offered as an experiment (ruling 7), and
+     the download waits for the student to say they understand that. */
+  const [understood, setUnderstood] = useState(false);
+  const blocked = capability.experimental && !understood;
 
   return (
     <Modal onClose={onClose} label="Set up Welly AI" size="lg">
@@ -83,7 +87,22 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
         <section className="stack-sm">
           <h3>Choose a model</h3>
 
-          {capability.reason && (
+          {capability.experimental ? (
+            <div className="alert alert-warn" role="note">
+              <div className="stack-xs">
+                <span className="alert-title">Experimental on this device</span>
+                <span>{capability.reason}</span>
+                <label className="row" style={{ alignItems: 'flex-start', gap: 'var(--s2)' }}>
+                  <input
+                    type="checkbox"
+                    checked={understood}
+                    onChange={e => setUnderstood(e.target.checked)}
+                  />
+                  <span>I understand this is experimental on my device</span>
+                </label>
+              </div>
+            </div>
+          ) : capability.reason && (
             <p className="dim small">{capability.reason}</p>
           )}
 
@@ -148,8 +167,8 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
         <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
         <button
           className="btn btn-primary"
-          disabled={!selected}
-          onClick={() => selected && onConfirm(selected)}
+          disabled={!selected || blocked}
+          onClick={() => selected && !blocked && onConfirm(selected)}
         >
           {selected
             ? <>Download {formatBytes(selected.bytes)} and turn on</>

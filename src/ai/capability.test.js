@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectCapability, offerableModels } from './capability.js';
-import { IOS_MAX_MODEL_BYTES, MODELS } from './models.js';
+import { IOS_MAX_MODEL_BYTES, IOS_EXPERIMENTAL_MAX_BYTES, MODELS } from './models.js';
 
 /** A stand-in for `navigator`, so device profiles can be tested without one. */
 function nav({ ua = 'Mozilla/5.0 (X11; Linux x86_64)', touch = 0, gpu = false, memory, cores = 4 } = {}) {
@@ -28,7 +28,7 @@ describe('iOS detection', () => {
      */
     const cap = detectCapability(nav({ ua: IPADOS, touch: 5 }));
     expect(cap.isIOS).toBe(true);
-    expect(cap.maxBytes).toBe(IOS_MAX_MODEL_BYTES);
+    expect(cap.experimental).toBe(true);
   });
 
   it('does not mistake a real Mac for an iPad', () => {
@@ -40,33 +40,39 @@ describe('iOS detection', () => {
 });
 
 describe('what iOS is offered', () => {
-  it('offers no assistant at all, and says why', () => {
-    /**
-     * A deliberate consequence, not an oversight.
-     *
-     * The only model under the iOS memory ceiling is SmolLM2-135M, and that
-     * model was withdrawn from conversation after it answered a student who had
-     * zero hours by repeating its own instructions back — turning a correct
-     * result into an apparent failure.
-     *
-     * So iPhone and iPad currently get nothing. That is the honest position: no
-     * assistant is better than one that misreports a correct answer. It
-     * reverses the moment a small model converses acceptably, which is a
-     * measurement rather than a decision.
-     */
+  /**
+   * The Balanced model, as an experiment the student opts into (ruling 7).
+   *
+   * The only model under the iOS memory ceiling is SmolLM2-135M, and it was
+   * withdrawn from conversation after it answered a student who had zero hours
+   * by repeating its own instructions back. So iPhone and iPad got nothing at
+   * all — for a phone-first student app, the largest gap in the feature (A13).
+   *
+   * The 200 MB ceiling that rules Balanced out was "derived from reported
+   * failures rather than measured on hardware". The owner ruled: offer Balanced
+   * on these devices behind a clear "experimental on this device" warning. The
+   * ceiling stays as the size known to be safe; Advanced, at nearly a gigabyte,
+   * is still not offered.
+   */
+  it('offers the Balanced model, marked experimental, and says why', () => {
     const cap = detectCapability(nav({ ua: IPHONE, touch: 5, memory: 8, cores: 8, gpu: true }));
 
-    expect(cap.supported).toBe(false);
-    expect(cap.recommendedTier).toBeNull();
-    expect(cap.reason).toMatch(/memory/i);
-    expect(offerableModels(cap)).toEqual([]);
+    expect(cap.supported).toBe(true);
+    expect(cap.experimental).toBe(true);
+    expect(cap.recommendedTier).toBe('balanced');
+    expect(cap.reason).toMatch(/experimental/i);
+    expect(offerableModels(cap).map(m => m.tier)).toEqual(['balanced']);
   });
 
-  it('still recognises the device and applies the ceiling', () => {
-    /* Detection and the ceiling are unchanged; only the outcome moved. */
+  it('never offers the Advanced model on iOS', () => {
     const cap = detectCapability(nav({ ua: IPHONE, touch: 5 }));
-    expect(cap.isIOS).toBe(true);
-    expect(cap.maxBytes).toBe(IOS_MAX_MODEL_BYTES);
+    expect(offerableModels(cap).some(m => m.tier === 'advanced')).toBe(false);
+    expect(cap.maxBytes).toBe(IOS_EXPERIMENTAL_MAX_BYTES);
+    expect(IOS_EXPERIMENTAL_MAX_BYTES).toBeGreaterThan(IOS_MAX_MODEL_BYTES);
+  });
+
+  it('is not experimental anywhere else', () => {
+    expect(detectCapability(nav({ ua: MAC, touch: 0, memory: 16, gpu: true })).experimental).toBe(false);
   });
 });
 

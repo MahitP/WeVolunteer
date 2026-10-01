@@ -16,6 +16,7 @@ import {
   detectCapability,
 } from '../ai';
 import { readPreferences, writePreferences } from '../ai/preferences';
+import { isLocalAIEnabled } from '../ai';
 import WellyModeControl from '../components/ai/WellyModeControl';
 import {
   getConversations,
@@ -1477,6 +1478,10 @@ export default function WellyView({ currentUser = null, onViewDetails = null }) 
               Welly is a prototype for volunteering questions. It makes mistakes,
               so check anything that matters, and it never changes anything without
               your confirmation. Please don’t type personal details here.
+              {/* Ruling 14, verbatim and on one line so it can be found as
+                  written. Only in a build that ships Welly AI: one without it
+                  must not name the engine anywhere. */}
+              {isLocalAIEnabled() && <>{' '}With Welly AI on, what you type stays on your device; lookups use WeVolunteer like the rest of the app.</>}
             </span>
             <span className="welly-footer-short">
               Welly is a prototype and makes mistakes. Please don’t type personal

@@ -67,6 +67,22 @@ export const MODEL_BASE_URL = 'https://huggingface.co';
 export const IOS_MAX_MODEL_BYTES = 200 * 1024 * 1024;
 
 /**
+ * The largest model iOS may be offered as an EXPERIMENT the student opts into.
+ *
+ * The ceiling above admits only the 135M model, which is withheld from
+ * conversation, so iPhone and iPad were offered nothing — for a phone-first
+ * student app, the largest gap in the feature (A13). The owner ruled (ruling 7)
+ * that Balanced is offered on these devices behind a clear "experimental on
+ * this device" warning, because the ceiling above was never measured.
+ *
+ * 512 MiB admits Balanced (491 MB) and not Advanced (986 MB): a model twice the
+ * size of anything reported to work is a different risk from one that may.
+ * When real devices have been tested, this and the ceiling above should become
+ * one measured number.
+ */
+export const IOS_EXPERIMENTAL_MAX_BYTES = 512 * 1024 * 1024;
+
+/**
  * Above this size a model is verified by length alone, not by digest.
  *
  * WebCrypto has no incremental digest. `crypto.subtle.digest()` is one-shot and

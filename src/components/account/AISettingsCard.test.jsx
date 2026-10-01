@@ -248,3 +248,36 @@ describe('once a model is installed', () => {
     expect(window.localStorage.getItem('wevol-theme')).toBe('dark');
   });
 });
+
+/**
+ * Arriving from the Welly AI offer on Discover (ruling 7).
+ *
+ * "Set up Welly AI" links to `/settings?section=privacy&setup=1#welly-ai`. A
+ * button that only scrolled to another button would make the student find and
+ * press it twice; `setup=1` opens the setup dialog itself. Nothing downloads
+ * until they choose a model and confirm.
+ */
+describe('arriving from the offer', () => {
+  it('opens the setup dialog, and downloads nothing on its own', () => {
+    window.history.pushState({}, '', '/settings?section=privacy&setup=1#welly-ai');
+    Element.prototype.scrollIntoView ??= () => {};
+    try {
+      renderCard();
+      expect(screen.getByRole('dialog', { name: /set up welly ai/i })).toBeInTheDocument();
+      expect(storage.downloadModel).not.toHaveBeenCalled();
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+
+  it('does not open it on an ordinary visit to the section', () => {
+    window.history.pushState({}, '', '/settings?section=privacy#welly-ai');
+    Element.prototype.scrollIntoView ??= () => {};
+    try {
+      renderCard();
+      expect(screen.queryByRole('dialog', { name: /set up welly ai/i })).toBeNull();
+    } finally {
+      window.history.pushState({}, '', '/');
+    }
+  });
+});

@@ -43,6 +43,7 @@ import { CATEGORY_GROUPS } from '../eventCategories';
 import { organizationPath } from '../utils/organizationUrl';
 import { coarsen } from '../utils/coarsePosition';
 import { withViewTransition } from '../utils/motion';
+import WellyOfferBanner from '../components/ai/WellyOfferBanner';
 /**
  * The category filter is a grouped select, not a row of chips.
  *
@@ -759,6 +760,9 @@ export default function BrowseEvents({
             was 973px down, below the whole of this strip. They still come
             before the firehose — the shortest path to a good match for a
             student who has not typed anything — and step aside once they have. */}
+        {/* "Enable AI mode?" where the suggestions are (ruling 7). It renders
+            nothing unless this device can run Welly AI and it is not on. */}
+        {!query.trim() && <WellyOfferBanner currentUser={currentUser} />}
         {recommended.length > 0 && !query.trim() && <section>
             <div className="section-head">
               <h2 className="row s-a19c85">

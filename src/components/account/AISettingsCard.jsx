@@ -104,6 +104,13 @@ export default function AISettingsCard({ addToast }) {
   useEffect(() => {
     if (window.location.hash !== '#welly-ai') return;
     cardRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    /* From the Welly AI offer on Discover (ruling 7): `setup=1` opens the
+       setup dialog straight away, so "Set up Welly AI" does what it says. */
+    if (new URLSearchParams(window.location.search).get('setup') === '1'
+      && capability.supported && !readPreferences().enabled) {
+      setPicking(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const download = useCallback(async (model) => {

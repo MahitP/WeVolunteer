@@ -23,7 +23,7 @@
  * decision and not a refactor.
  */
 
-import { IOS_MAX_MODEL_BYTES, MODELS } from './models.js';
+import { IOS_MAX_MODEL_BYTES, IOS_EXPERIMENTAL_MAX_BYTES, MODELS } from './models.js';
 
 /**
  * iPadOS 13 and later identify as Macintosh, deliberately, to receive desktop
@@ -109,6 +109,7 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
       maxBytes: 0,
       webgpu: false,
       isIOS: false,
+      experimental: false,
       deviceMemoryGB: null,
     };
   }
@@ -118,8 +119,27 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
   const cores = Number(nav.hardwareConcurrency || 0);
   const deviceMemoryGB = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null;
 
-  const maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
-  const fits = MODELS.filter(m => fitsDevice(m, { maxBytes, deviceMemoryGB }));
+  let maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
+  let fits = MODELS.filter(m => fitsDevice(m, { maxBytes, deviceMemoryGB }));
+
+  /**
+   * iPhone and iPad: Balanced, as an experiment (ruling 7).
+   *
+   * Nothing conversational fits under the iOS ceiling, so these devices were
+   * offered nothing. The ceiling was derived from reported failures, never
+   * measured, and the owner ruled that Balanced is offered behind a clear
+   * warning. `experimental` is what the setup dialog keys that warning — and
+   * the student's explicit agreement to it — on.
+   */
+  let experimental = false;
+  if (isIOS && fits.length === 0) {
+    const tried = MODELS.filter(m => fitsDevice(m, { maxBytes: IOS_EXPERIMENTAL_MAX_BYTES, deviceMemoryGB }));
+    if (tried.length > 0) {
+      experimental = true;
+      maxBytes = IOS_EXPERIMENTAL_MAX_BYTES;
+      fits = tried;
+    }
+  }
 
   if (fits.length === 0) {
     return {
@@ -132,6 +152,7 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
       maxBytes,
       webgpu,
       isIOS,
+      experimental: false,
       deviceMemoryGB,
     };
   }
@@ -142,16 +163,21 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
   const recommendedTier = fits.some(m => m.tier === wanted) ? wanted : fits[0].tier;
 
   let reason = null;
-  if (isIOS) {
+  if (experimental) {
+    reason =
+      'Experimental on iPhone and iPad. Safari gives a web page limited memory, and this '
+      + 'model has not been tested on these devices. If it is too big for yours, the page '
+      + 'will reload during setup or while Welly answers. Nothing else is affected, and you '
+      + 'can turn it off again in Settings.';
+  } else if (isIOS) {
     /**
      * Unreachable today, and kept rather than deleted.
      *
-     * Reaching here needs `fits` to be non-empty, and on iOS it never is:
-     * `fitsDevice` rejects a model that is not `conversational`, and the only
-     * model under `IOS_MAX_MODEL_BYTES` (200 MB) is the 105 MB `fast` tier,
-     * which is withheld from conversation. So every iPhone and iPad takes the
-     * `fits.length === 0` return above instead, and is told the assistant is
-     * not available here — not this sentence.
+     * Reaching here needs a conversational model under `IOS_MAX_MODEL_BYTES`
+     * (200 MB), and there is none: the only model that small is the 105 MB
+     * `fast` tier, which is withheld from conversation. So every iPhone and
+     * iPad takes the experimental branch above instead, and is told so — not
+     * this sentence.
      *
      * Left in place because it is defensive rather than dead: raising the
      * ceiling, or adding a small conversational model, makes it both reachable
@@ -168,7 +194,7 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
       + 'will be slower.';
   }
 
-  return { supported: true, reason, recommendedTier, maxBytes, webgpu, isIOS, deviceMemoryGB };
+  return { supported: true, reason, recommendedTier, maxBytes, webgpu, isIOS, experimental, deviceMemoryGB };
 }
 
 /**
