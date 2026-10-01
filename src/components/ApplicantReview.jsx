@@ -6,6 +6,19 @@ import { MIN_EVIDENCE } from '../reliabilityEvidence';
 import { rowTransitionStyle, withViewTransition } from '../utils/motion';
 
 /**
+ * What a badge means, on hover (ruling 4).
+ *
+ * The Reliable badge in words the owner chose, and never as a percentage: the
+ * smoothing behind it puts a steady 90% attender just below the line, so "90%"
+ * would be false about exactly the people nearest to it. Its stored
+ * description is written to the student ("you signed up for"); this is the
+ * organizer reading about somebody else. Other badges use their description.
+ */
+const RELIABLE_HOVER = 'Consistently shows up for the shifts they take';
+const FIRST_TIMER_HOVER = 'Their first event on WeVolunteer';
+const badgeHover = (b) => (b?.criteria_type === 'attendance_rate' ? RELIABLE_HOVER : (b?.description || undefined));
+
+/**
  * The screen where an organizer decides who gets a spot.
  *
  * Everything shown is decision-relevant: how many hours someone already has,
@@ -142,9 +155,12 @@ export default function ApplicantReview({
         const confirmedCommitments = (v.eventsAttended ?? 0) + (v.eventsAbsent ?? 0);
         const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
         const isNew = confirmedCommitments < MIN_EVIDENCE;
-        /* A first-timer's row is a status line, so it carries no badges — an
-           Early Supporter chip beside "First event" would read as experience
-           they do not have. */
+        /* No past commitment at all: nothing to count, so the first-time
+           volunteer badge stands in for "0 of 0 attended" (ruling 4). */
+        const isFirstTimer = completedCommitments === 0;
+        /* A new volunteer's row is a status line, so it carries no other
+           badges — an Early Supporter chip beside the first-timer badge would
+           read as experience they do not have. */
         const shown = isNew ? [] : organizerBadges(v.badges);
         const isSelected = selectedIds.has(app.id);
         /* Named so a re-sort moves each applicant to their new place. */
@@ -180,10 +196,15 @@ export default function ApplicantReview({
                     * icon is decorative; the name carries the meaning, so both
                     * are rendered rather than the glyph alone.
                     */}
-                  {shown.length > 0 && (
+                  {(shown.length > 0 || isFirstTimer) && (
                     <span style={{ marginTop: 2, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      {isFirstTimer && (
+                        <span className="tag" style={{ padding: '1px 4px', fontSize: 10 }} title={FIRST_TIMER_HOVER}>
+                          <Sparkles size={10} aria-hidden="true" /> First-time volunteer
+                        </span>
+                      )}
                       {shown.map(b => (
-                        <span key={b.name} className="tag" style={{ padding: '1px 4px', fontSize: 10 }}>
+                        <span key={b.name} className="tag" style={{ padding: '1px 4px', fontSize: 10 }} title={badgeHover(b)}>
                           <span aria-hidden="true">{b.icon}</span> {b.name}
                         </span>
                       ))}
@@ -201,9 +222,19 @@ export default function ApplicantReview({
               </div>
               
               <div className="s-0c206e">
-                {isNew ? <span className="tag tag-brand">
-                    <Sparkles size={10} /> {completedCommitments === 0 ? 'First event' : 'New volunteer'}
-                  </span> : <>
+                {/**
+                  * The counts, always (ruling 18).
+                  *
+                  * Below `MIN_EVIDENCE` confirmed commitments this column used
+                  * to hide them behind a "New volunteer" tag, so one missed
+                  * shift could not read as a verdict. That served the owner's
+                  * fairness concern and worked against his request for raw
+                  * counts; he ruled for the counts, with the tag beside them.
+                  * The unconfirmed-shifts line below is what still keeps
+                  * paperwork from reading as absence. A first-timer has nothing
+                  * to count and carries the first-time badge instead.
+                  */}
+                {isFirstTimer ? <div className="small dim">No past shifts</div> : <>
                     {/**
                       * Signed up versus attended — the follow-through question.
                       *
@@ -224,6 +255,11 @@ export default function ApplicantReview({
                     <div className="small tnum">
                       {v.eventsAttended ?? v.completedEvents} of {v.eventsSignedUp ?? v.completedEvents} attended
                     </div>
+                    {isNew && (
+                      <span className="tag tag-brand">
+                        <Sparkles size={10} aria-hidden="true" /> New volunteer
+                      </span>
+                    )}
                     {/**
                       * Why the gap is what it is.
                       *

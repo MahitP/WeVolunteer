@@ -139,80 +139,89 @@ describe('when somebody last served', () => {
   });
 });
 
-describe('too little history to say anything', () => {
-  it('says "First event" rather than "0 of 0 attended"', () => {
+/**
+ * The counts, always (ruling 18), and a first-timer badge (ruling 4).
+ *
+ * These cases used to pin the opposite: below `MIN_EVIDENCE` confirmed
+ * commitments the row hid "X of Y attended" behind a "New volunteer" tag,
+ * because "0 of 1 attended" is one shift's worth of evidence presented as a
+ * character reference. That served the owner's fairness concern (FX-33) and
+ * worked against his request for raw counts (FX-24, P2-17), so it went to him
+ * (N7). He ruled: always show the counts, with the "New volunteer" tag beside
+ * them under four confirmed shifts. The Reliable badge keeps its floor of four.
+ *
+ * What still guards the fairness concern is the line beside the counts that
+ * names shifts no organizer confirmed, so "0 of 4" with four unconfirmed reads
+ * as paperwork, not as four absences.
+ *
+ * A volunteer with no past commitment at all has nothing to count — "0 of 0
+ * attended" says nothing — so they get the first-time volunteer badge the owner
+ * asked for instead.
+ */
+describe('the counts, and the tag beside them', () => {
+  it('gives a first-timer the first-time volunteer badge rather than "0 of 0 attended"', () => {
     draw([applicant({}, { eventsSignedUp: 0, eventsAttended: 0, completedEvents: 0 })]);
-    expect(screen.getByText(/First event/)).toBeInTheDocument();
+    const first = screen.getByText(/First-time volunteer/);
+    expect(first.closest('[title]')).toHaveAttribute('title', 'Their first event on WeVolunteer');
     expect(screen.queryByText(/attended/)).not.toBeInTheDocument();
   });
 
-  it('says "New volunteer" for one or two commitments rather than a damning ratio', () => {
-    /* "0 of 1 attended" is one shift's worth of evidence presented as a
-       character reference. */
-    const { container } = draw([applicant({}, { eventsSignedUp: 1, eventsAttended: 0, completedEvents: 1 })]);
-
+  it('shows the counts for one commitment, with "New volunteer" beside them', () => {
+    const { container } = draw([applicant({}, { eventsSignedUp: 1, eventsAttended: 0, eventsAbsent: 1, completedEvents: 0 })]);
+    expect(screen.getByText('0 of 1 attended')).toBeInTheDocument();
     /* Scoped to the status chip: the sort dropdown also offers "New volunteers
        first", and matching that instead would pass whatever the row said. */
     expect(container.querySelector('.tag-brand').textContent).toMatch(/New volunteer/);
-    expect(screen.queryByText('0 of 1 attended')).not.toBeInTheDocument();
   });
 
-  /**
-   * ── The floor is MIN_EVIDENCE, and it counts CONFIRMED commitments ──
-   *
-   * This case used to read "once there are three completed commitments", and
-   * three was one of the numbers `reliability.js` was written to abolish: "the
-   * badge's five-signup floor, the applicant row's three-commitment floor, and
-   * the smoother's prior weight of five — three numbers answering one question,
-   * in three files, disagreeing. `MIN_EVIDENCE` is the one that remains, and
-   * every surface reads it." This surface did not.
-   *
-   * The quantity was wrong as well as the number. The gate read
-   * `eventsSignedUp`, which counts every commitment whose shift has ENDED
-   * whether or not an organizer ever confirmed it; the model's floor is on
-   * commitments with a recorded outcome. `eventsAwaitingRecord` exists in this
-   * very payload to keep those apart, "because reading the second as the first
-   * is the specific unfairness this whole set of definitions exists to
-   * prevent."
-   */
-  it('shows the counts once there are MIN_EVIDENCE confirmed commitments', () => {
-    draw([applicant({}, {
-      eventsSignedUp: 4, eventsAttended: 3, eventsAbsent: 1,
-      eventsAwaitingRecord: 0, completedEvents: 3,
-    })]);
-    expect(screen.getByText('3 of 4 attended')).toBeInTheDocument();
-  });
-
-  it('still says "New volunteer" at three confirmed, one short of the floor', () => {
+  it('still tags "New volunteer" at three confirmed, one short of the floor', () => {
     const { container } = draw([applicant({}, {
       eventsSignedUp: 3, eventsAttended: 2, eventsAbsent: 1,
       eventsAwaitingRecord: 0, completedEvents: 2,
     })]);
+    expect(screen.getByText('2 of 3 attended')).toBeInTheDocument();
     expect(container.querySelector('.tag-brand').textContent).toMatch(/New volunteer/);
-    expect(screen.queryByText('2 of 3 attended')).not.toBeInTheDocument();
   });
 
-  it('does not read unconfirmed commitments as evidence', () => {
-    /**
-     * The case the old gate got wrong in the direction that matters. Four
-     * commitments whose shifts have ended and which NOBODY has confirmed is no
-     * evidence at all — but `eventsSignedUp` counted them, so the row showed
-     * "0 of 4 attended" about a volunteer whose organizers had simply not
-     * finished their paperwork.
-     */
+  it('drops the tag at MIN_EVIDENCE confirmed commitments', () => {
     const { container } = draw([applicant({}, {
+      eventsSignedUp: 4, eventsAttended: 3, eventsAbsent: 1,
+      eventsAwaitingRecord: 0, completedEvents: 3,
+    })]);
+    expect(screen.getByText('3 of 4 attended')).toBeInTheDocument();
+    expect(container.querySelector('.tag-brand')).toBeNull();
+  });
+
+  it('names unconfirmed commitments beside the counts, so they do not read as absences', () => {
+    draw([applicant({}, {
       eventsSignedUp: 4, eventsAttended: 0, eventsAbsent: 0,
       eventsAwaitingRecord: 4, completedEvents: 0,
     })]);
-    expect(container.querySelector('.tag-brand').textContent).toMatch(/New volunteer|First event/);
-    expect(screen.queryByText('0 of 4 attended')).not.toBeInTheDocument();
+    expect(screen.getByText('0 of 4 attended')).toBeInTheDocument();
+    expect(screen.getByText('4 not confirmed by an organizer')).toBeInTheDocument();
   });
 
-  it('shows no badges for a first-timer, because the row is a status line', () => {
-    /* A brand-new volunteer can hold Early Supporter. Showing it beside "First
-       event" would look like experience they do not have. */
+  it('shows a first-timer no other badge, because the row is a status line', () => {
+    /* A brand-new volunteer can hold Early Supporter. Showing it beside the
+       first-timer badge would look like experience they do not have. */
     draw([applicant({}, { eventsSignedUp: 0, eventsAttended: 0, completedEvents: 0, badges: [EARLY] })]);
     expect(screen.queryByText('Early Supporter')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * What the Reliable badge means, on hover (ruling 4).
+ *
+ * Honest wording, never "90%": the smoothing behind the badge puts a steady 90%
+ * attender just below the line, so a percentage would be false about the very
+ * people closest to it.
+ */
+describe('hover text', () => {
+  it('says what the Reliable badge means, in words', () => {
+    draw([applicant({}, { badges: [RELIABLE] })]);
+    const chip = screen.getByText('Reliable Volunteer').closest('[title]');
+    expect(chip).toHaveAttribute('title', 'Consistently shows up for the shifts they take');
+    expect(chip.getAttribute('title')).not.toMatch(/%/);
   });
 });
 
