@@ -152,7 +152,7 @@ describe('the profile headline', () => {
 
     it('accepts the write', async () => {
       const res = await srv.call('PATCH', '/api/auth/profile', {
-        headline: 'Runs WeVolunteer for the district.',
+        headline: 'Runs WeVolunteer.',
         highlights: ['Built the platform', 'Still a student'],
       }, ownerCookie);
       expect(res.status).toBe(200);
@@ -162,7 +162,7 @@ describe('the profile headline', () => {
       await db.prepare(`UPDATE users SET profile_visibility = 'private' WHERE id = ?`).run(ownerId);
       const res = await srv.call('GET', '/api/users/by-username/theowner', undefined, viewer);
       expect(res.status).toBe(200);
-      expect(res.body.profile.headline).toBe('Runs WeVolunteer for the district.');
+      expect(res.body.profile.headline).toBe('Runs WeVolunteer.');
       expect(res.body.profile.highlights).toEqual(['Built the platform', 'Still a student']);
       expect(res.body.profile.distinction.kind).toBe('owner');
     });

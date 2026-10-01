@@ -24,7 +24,7 @@ import { DistinctionBanner, DistinctionTag } from './Distinction';
 const OWNER = {
   kind: 'owner',
   label: 'Platform owner',
-  blurb: 'Runs WeVolunteer for the district.',
+  blurb: 'Runs WeVolunteer.',
   description: 'This account runs WeVolunteer.',
   highlightsLabel: 'What this account does here',
 };

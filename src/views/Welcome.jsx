@@ -72,6 +72,9 @@ export default function Welcome() {
    * that does not name an organisation rather than one that names it twice.
    */
   const named = SCHOOL_NAME && !SCHOOL_NAME.includes(APP_NAME);
+  const PRIVACY_STATEMENT = 'Profiles are seen only by people signed in to WeVolunteer. '
+    + 'Your email, school and grade go to the organizers of shifts you apply to; other members '
+    + 'see your school and grade only if you choose to show them.';
   const intro = named
     ? `${APP_NAME} is how ${SCHOOL_NAME} posts volunteer shifts and keeps track of service hours — in one place, verified by the people running each event.`
     : `${APP_NAME} is where your school and local organizations post volunteer shifts, and where your service hours are kept — verified by the people running each event.`;
@@ -136,15 +139,20 @@ export default function Welcome() {
               <span>Run by {SCHOOL_NAME}</span>
             </span>
           )}
-          {PRIVACY_URL ? (
+          {/* Each clause is checkable: profiles need a signed-in member
+              (directory.read); email, school and grade reach organizers through
+              the roster export; other members see school and grade only on a
+              public profile, and sign-up never makes one public. The previous
+              line said information went ONLY to organizers, which public
+              profiles made false. See Welcome.privacyClaim.test.jsx. */}
+          {PRIVACY_STATEMENT}
+          {PRIVACY_URL && (
             <>
-              Your information is only shared with the organizers of shifts you apply to.{' '}
+              {' '}
               <a className="auth-link" href={PRIVACY_URL} target="_blank" rel="noopener noreferrer">
                 Read the privacy notice
               </a>
             </>
-          ) : (
-            'Your information is only shared with the organizers of shifts you apply to.'
           )}
         </p>
       </main>

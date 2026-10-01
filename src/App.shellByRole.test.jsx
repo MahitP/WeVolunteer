@@ -67,7 +67,7 @@ vi.mock('./components/NotificationsBell', () => ({ default: () => <div data-test
  * the same role for the same reason, rather than pinned per test.
  */
 const DISTINCTION = {
-  super_admin: { kind: 'owner', label: 'Platform owner', blurb: 'Runs WeVolunteer for the district.' },
+  super_admin: { kind: 'owner', label: 'Platform owner', blurb: 'Runs WeVolunteer.' },
   partner: { kind: 'partner', label: 'Community partner', blurb: 'An outside organization that works with WeVolunteer.' },
 };
 

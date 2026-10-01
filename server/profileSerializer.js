@@ -115,7 +115,9 @@ const DISTINCTIONS = {
   super_admin: {
     kind: 'owner',
     label: 'Platform owner',
-    blurb: 'Runs WeVolunteer for the district.',
+    /* Not "for the district": the platform is operated independently
+       (Posture B), and this line is shown to every member. */
+    blurb: 'Runs WeVolunteer.',
     description:
       'This account runs WeVolunteer — the person responsible for how the '
       + 'platform works, what it does with your information, and the policies in '
