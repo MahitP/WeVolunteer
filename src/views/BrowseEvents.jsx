@@ -659,33 +659,20 @@ export default function BrowseEvents({
                 that page without it would have left creating a club reachable
                 from nowhere at all. */}
             {/**
-              * "Your organizations", not "Organizations".
+              * "Organizations" — the owner's word for this button (ruling 5,
+              * 2026-09-30), and the name Welly uses for the same page.
               *
-              * This button said "Organizations" while the scope control forty
-              * pixels below it also says "Organizations" — one navigates to the
-              * clubs you run or belong to, the other filters these search
-              * results to clubs. Two destinations, one word, adjacent.
-              *
-              * That is the fault this page was already corrected for once: the
-              * rail entry became "Discover" because "Opportunities" was
-              * "simultaneously the name of the whole destination and of one of
-              * the four scope tabs inside it". The same reasoning had not been
-              * applied to the other instance of it on the same screen.
-              *
-              * "Your organizations" rather than "My clubs", and that is a
-              * terminology decision rather than a preference. "Organization" is
-              * this product's canonical noun — 614 occurrences across the
-              * user-facing views, the page heading, and every PAGE_META entry —
-              * while "club" appears only as plain-English gloss inside
-              * supporting prose ("A club or group posting opportunities").
-              * Introducing "clubs" as a LABEL would create a second name for
-              * the canonical concept, which is the problem, not the fix. The
-              * possessive is what disambiguates, and it matches the page it
-              * opens, which groups by "You manage" and "You belong to".
+              * It was "Your organizations" for a recorded reason: the scope
+              * control below also says "Organizations", and filters these
+              * results to clubs, so one word names two things on one screen.
+              * The owner ruled with that on the table. What separates them is
+              * form — this is a button with the organization icon, the other
+              * is one of four scope tabs — and the page it opens is headed by
+              * "You manage" and "You belong to", which says whose clubs they are.
               */}
             {canSeeOrganizations && (
               <Link to="/organizations" className="btn btn-secondary">
-                <Building2 size={16} aria-hidden="true" /> Your organizations
+                <Building2 size={16} aria-hidden="true" /> Organizations
               </Link>
             )}
             {canCreate && (

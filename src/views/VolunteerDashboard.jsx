@@ -271,7 +271,7 @@ export default function VolunteerDashboard({
             </p>
           </div>
           <button className="btn btn-primary" onClick={() => setActiveTab('browse')}>
-            Find opportunities <ArrowRight size={15} />
+            Discover <ArrowRight size={15} />
           </button>
         </section>
       )}
@@ -426,7 +426,7 @@ export default function VolunteerDashboard({
                 message="Once an organizer confirms you for a shift, it will show up here."
                 action={
                   <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('browse')}>
-                    Browse opportunities
+                    Discover
                   </button>
                 }
               />

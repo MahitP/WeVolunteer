@@ -202,7 +202,7 @@ describe('the way out matches the session and the kind', () => {
   it('offers in-app links to someone signed in', () => {
     at({ kind: '404', theme: 'board' });
     expect(screen.getByRole('link', { name: /dashboard/i })).toHaveAttribute('href', '/');
-    expect(screen.getByRole('link', { name: /browse open shifts/i })).toHaveAttribute('href', '/discover');
+    expect(screen.getByRole('link', { name: /^Discover$/i })).toHaveAttribute('href', '/discover');
   });
 
   /**
@@ -212,13 +212,13 @@ describe('the way out matches the session and the kind', () => {
   it('offers only the start page to someone signed out', () => {
     at({ kind: '404', signedIn: false, theme: 'board' });
     expect(screen.getByRole('link', { name: /start page/i })).toHaveAttribute('href', '/welcome');
-    expect(screen.queryByRole('link', { name: /browse open shifts/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Discover$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /dashboard/i })).not.toBeInTheDocument();
   });
 
-  it('does not offer "browse open shifts" on a permission refusal', () => {
+  it('does not offer Discover on a permission refusal', () => {
     at({ kind: '403', theme: 'board' });
-    expect(screen.queryByRole('link', { name: /browse open shifts/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^Discover$/i })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
   });
 

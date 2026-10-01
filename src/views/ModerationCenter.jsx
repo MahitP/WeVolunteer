@@ -93,7 +93,7 @@ export const AREAS = [
     to: '/admin/roster',
     cap: 'admin.create',
     icon: UserCog,
-    title: 'Administrators',
+    title: 'Admin Roster',
     blurb: 'Who holds administrative access, who has been invited, and how to grant or take it away.',
   },
   {
@@ -101,7 +101,7 @@ export const AREAS = [
     to: '/admin/audit-logs',
     cap: 'audit.read',
     icon: Activity,
-    title: 'Audit trail',
+    title: 'Audit Explorer',
     blurb: 'Every administrative action, who took it, and when. Append-only.',
   },
   {
@@ -117,7 +117,7 @@ export const AREAS = [
     to: '/impact',
     cap: 'analytics.impact',
     icon: Sprout,
-    title: 'Community impact',
+    title: 'Community Impact',
     blurb: 'What the programme has added up to — hours served, causes supported and who took part. '
       + 'Held by every administrator.',
   },
@@ -125,7 +125,7 @@ export const AREAS = [
    * Platform Impact is a DIFFERENT page from the one above, and the two tiles
    * sit next to each other so the difference is legible rather than implied.
    *
-   * Community impact is the programme's story, behind `analytics.impact`, which
+   * Community Impact is the programme's story, behind `analytics.impact`, which
    * every administrator holds. This one is behind `analytics.platform`, which is
    * SUPER_ONLY: it carries the month series and the figure definitions, and its
    * audience is the one account that can already read every user record. They

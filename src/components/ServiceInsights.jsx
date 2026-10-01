@@ -161,7 +161,7 @@ function InsightsBody({ insights, setActiveTab }) {
         message="Once an organizer confirms you attended, your hours, your milestones and the months you volunteered all show up here."
         action={
           setActiveTab
-            ? <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('browse')}>Browse opportunities</button>
+            ? <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('browse')}>Discover</button>
             : null
         }
       />

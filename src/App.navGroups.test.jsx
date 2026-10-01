@@ -168,7 +168,7 @@ describe('navSectionsFor', () => {
    * hub, and the second half is what makes the first half safe.
    */
   const MOVED = [
-    { label: 'Community impact', to: '/impact' },
+    { label: 'Community Impact', to: '/impact' },
     { label: 'Appeals', to: '/admin/appeals' },
     { label: 'Admin Roster', to: '/admin/roster' },
     { label: 'Audit Explorer', to: '/admin/audit-logs' },

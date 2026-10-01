@@ -55,7 +55,7 @@ export const DESTINATIONS = Object.freeze({
   },
   discover: {
     path: '/discover',
-    label: 'Discover Opportunities',
+    label: 'Discover',
     capability: 'event.view',
     patterns: [/\b(discover|opportunities|find events|browse events|volunteer opportunities)\b/i],
   },
@@ -115,7 +115,7 @@ export const DESTINATIONS = Object.freeze({
   },
   organizations: {
     path: '/organizations',
-    label: 'Organizations & Clubs',
+    label: 'Organizations',
     capability: 'organization.join',
     patterns: [/\b(my\s+)?(organizations|clubs|groups)\b/i],
   },
@@ -151,19 +151,19 @@ export const DESTINATIONS = Object.freeze({
   },
   admin_moderation: {
     path: '/admin/moderation',
-    label: 'Moderation Center',
+    label: 'Admin',
     capability: 'report.resolve',
     patterns: [/\bmoderation(\s+center)?\b/i, /\breports\b/i],
   },
   admin_appeals: {
     path: '/admin/appeals',
-    label: 'Appeals Review',
+    label: 'Appeals',
     capability: 'appeal.review',
     patterns: [/\badmin\s+appeals\b/i, /\breview appeals\b/i],
   },
   admin_roster: {
     path: '/admin/roster',
-    label: 'Administrator Roster',
+    label: 'Admin Roster',
     capability: 'admin.create',
     patterns: [/\b(admin(istrator)?\s+)?roster\b/i],
   },
@@ -175,7 +175,7 @@ export const DESTINATIONS = Object.freeze({
   },
   admin_impact: {
     path: '/admin/impact',
-    label: 'Platform Impact Analytics',
+    label: 'Platform Impact',
     capability: 'analytics.platform',
     patterns: [/\b(platform\s+)?impact\b/i, /\banalytics\b/i],
   },

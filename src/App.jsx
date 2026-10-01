@@ -817,7 +817,7 @@ export const PAGE_META = {
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
     volunteers: { title: 'Your volunteers', sub: 'Everyone who has volunteered at your events' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
-    browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
+    browse: { title: 'Discover', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
     /* See the note in the partner block: this page is reachable by every
        signed-in account and was described for two personas out of four. */
@@ -845,7 +845,7 @@ export const PAGE_META = {
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
     welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
-    roster: { title: 'Administrator roster', sub: 'Who holds administrative access' },
+    roster: { title: 'Admin Roster', sub: 'Who holds administrative access' },
     badges: { title: 'Badges', sub: 'What the platform recognises, and who holds what' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
        so no other persona can reach the page and an entry under one would be a
@@ -856,9 +856,8 @@ export const PAGE_META = {
        into two personas. It disagreed with the rail item that opens the page
        ("Discover") and it named a third of what the page holds — the same
        two faults the volunteer entry above was already corrected for. The
-       organizer's "Recruit" is left alone: it is a deliberate persona title
-       naming what an organizer comes here to DO, and its subtitle already says
-       all three. */
+       organizer's page was "Recruit" until the owner ruled (2026-09-30) that
+       it is "Discover" for every persona, like the rail item that opens it. */
     browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
@@ -871,7 +870,7 @@ export const PAGE_META = {
        all while every role could reach it, so the topbar fell back to the
        application name and the one page of figures was the one page with no
        title. */
-    impact: { title: 'Community impact', sub: 'What the programme has done, counted from confirmed attendance' },
+    impact: { title: 'Community Impact', sub: 'What the programme has done, counted from confirmed attendance' },
     adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' },
@@ -907,9 +906,8 @@ export const PAGE_META = {
        into two personas. It disagreed with the rail item that opens the page
        ("Discover") and it named a third of what the page holds — the same
        two faults the volunteer entry above was already corrected for. The
-       organizer's "Recruit" is left alone: it is a deliberate persona title
-       naming what an organizer comes here to DO, and its subtitle already says
-       all three. */
+       organizer's page was "Recruit" until the owner ruled (2026-09-30) that
+       it is "Discover" for every persona, like the rail item that opens it. */
     browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
     /**
      * `profile` was missing, and partner is the role the distinguished profile
@@ -2165,7 +2163,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                 ) : (
                   <EmptyState
                     title="No dashboard for this account"
-                    message="This account type does not have a dashboard yet. Browse opportunities from the navigation, or change your account settings."
+                    message="This account type does not have a dashboard yet. Open Discover from the navigation, or change your account settings."
                   />
                 )
               } />

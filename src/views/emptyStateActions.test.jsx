@@ -45,7 +45,7 @@ vi.mock('../utils/api', () => ({ api: apiMock }));
 const STUDENT = { id: 'u1', name: 'Leo Chen', role: 'student', verified: true, withheld: [] };
 
 describe('the calendar on a day with nothing on it', () => {
-  it('offers the browse it suggests', () => {
+  it('offers the Discover it suggests', () => {
     render(
       <MemoryRouter>
         <LocationProvider>
@@ -61,7 +61,7 @@ describe('the calendar on a day with nothing on it', () => {
     fireEvent.click(dayCells[15]);
 
     expect(screen.getByText(/Nothing on this day/i)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: /browse opportunities/i });
+    const link = screen.getByRole('link', { name: /^Discover$/i });
     expect(link).toHaveAttribute('href', '/discover');
   });
 });
@@ -70,7 +70,7 @@ describe('an organizer waiting to be approved', () => {
   const PENDING = { id: 'u2', name: 'Jordan Whitfield', email: 'j@example.org',
     role: 'organizer', verified: false, withheld: [] };
 
-  it('offers the browse it suggests', () => {
+  it('offers the Discover it suggests', () => {
     render(
       <MemoryRouter>
         <OrganizerDashboard
@@ -82,7 +82,7 @@ describe('an organizer waiting to be approved', () => {
     );
 
     expect(screen.getByText(/awaiting approval/i)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: /browse opportunities/i });
+    const link = screen.getByRole('link', { name: /^Discover$/i });
     expect(link).toHaveAttribute('href', '/discover');
   });
 

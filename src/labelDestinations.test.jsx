@@ -17,7 +17,8 @@ import path from 'node:path';
  *
  * ── Why this one is decidable from the repository ──
  *
- * The product already has a name for `/organizations` — "Your organizations" —
+ * The product already has a name for `/organizations` — "Your organizations",
+ * since ruled "Organizations" by the owner —
  * so the collision resolves without anyone choosing new wording: "Browse
  * organizations" keeps the meaning it already has in the other two places, the
  * platform-wide search. That also happens to be the better destination for the
@@ -73,9 +74,11 @@ describe('"Browse organizations"', () => {
     ).toEqual(['/discover?find=organizations']);
   });
 
-  it('leaves "Your organizations" as the name for the page it already named', () => {
+  /* "Your organizations" until the owner ruled (2026-09-30, ruling 5) that the
+     button is "Organizations". Still one label, one page. */
+  it('keeps "Organizations" as the name for the page it already named', () => {
     const yours = FILES.flatMap(f => links(read(f)))
-      .filter(l => /^your organizations$/i.test(l.label));
+      .filter(l => /^organizations$/i.test(l.label));
     expect(yours.length).toBeGreaterThan(0);
     for (const l of yours) expect(l.to).toBe('/organizations');
   });

@@ -416,7 +416,7 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
              `/organizations`, which is the clubs this reader is already in.
              Two reasons, and they agree. "Browse organizations" already means
              the search in `OrganizationsHome`, while `/organizations` is
-             already called "Your organizations" on Discover's action row, so
+             already called "Organizations" on Discover's action row, so
              pointing this at `/organizations` gave one label two pages and one
              page two labels. And the destination is better on its own terms:
              somebody who followed a club link that no longer resolves wants to

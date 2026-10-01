@@ -329,12 +329,12 @@ export default function OrganizerDashboard({
         <h3>Your organizer account is awaiting approval</h3>
         <p>
           A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
-          you can post events. You can browse opportunities in the meantime.
+          you can post events. You can look around Discover in the meantime.
         </p>
         {/* The sentence above says what to do next and this card used to offer
             nothing to do it with — on the one screen every organizer sees
             between registering and being approved. */}
-        <Link to="/discover" className="btn btn-primary btn-sm">Browse opportunities</Link>
+        <Link to="/discover" className="btn btn-primary btn-sm">Discover</Link>
         <div className="alert alert-info s-2db5ef">
           <span>
             <span className="alert-title">Testing the demo?</span>{' '}

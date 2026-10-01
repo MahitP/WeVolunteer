@@ -94,8 +94,8 @@ describe('the Moderation Center', () => {
     /* Every one of these is SUPER_ONLY. `can()` refuses them before it consults
        per-user grants, so an administrator cannot reach them by any route — and
        offering the tile would be the product advertising a refusal. */
-    expect(names.some(n => n.includes('Administrators'))).toBe(false);
-    expect(names.some(n => n.includes('Audit trail'))).toBe(false);
+    expect(names.some(n => n.includes('Admin Roster'))).toBe(false);
+    expect(names.some(n => n.includes('Audit Explorer'))).toBe(false);
     expect(names.some(n => n.includes('Errors'))).toBe(false);
     expect(names.some(n => n.includes('Platform Impact'))).toBe(false);
   });
@@ -113,7 +113,7 @@ describe('the Moderation Center', () => {
     }
     expect(ownerPaths.length).toBeGreaterThan(adminPaths.length);
 
-    for (const name of ['Administrators', 'Audit trail', 'Errors', 'Platform Impact']) {
+    for (const name of ['Admin Roster', 'Audit Explorer', 'Errors', 'Platform Impact']) {
       expect(owner.some(t => t.text.includes(name)), `owner should be offered ${name}`).toBe(true);
     }
   });

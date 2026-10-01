@@ -255,7 +255,7 @@ export default function ErrorExperience({
                 <ArrowLeft size={15} /> Back to my dashboard
               </Link>
               {kind === '404' && (
-                <Link className="btn btn-secondary" to="/discover">Browse open shifts</Link>
+                <Link className="btn btn-secondary" to="/discover">Discover</Link>
               )}
             </>
           ) : (
