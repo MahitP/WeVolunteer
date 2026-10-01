@@ -32,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Added — a check that the live database has the shape the code expects
+
+`node bin/schema-check.mjs <database>` opens a database read-only and compares it
+with one built from the migrations — columns, declared types, primary keys and
+every unique key — separating migrations not yet applied from real drift. It
+exists because of an outage this changelog never recorded:
+
+**Two-factor sign-in failed for every method on the pilot database (fixed by
+migration 055).** `tfa_login_attempts` had been created there outside the
+migration system, keyed on `preauth_jti`. Migration 025's `CREATE TABLE IF NOT
+EXISTS` saw the name and did nothing, so `INSERT … ON CONFLICT(token_hash)` threw
+before any authenticator, email or recovery code was checked, and the user saw
+"Internal Server Error". Migration 055 rebuilt the table to the shape the code
+uses; it landed inside an unrelated test commit (`f26f827`) and was never
+written up. Run the check after every deploy — see the release checklist, §6b.
+
 ### Added — interface motion, and the success beat's first real home
 
 The application moves a little now, in the places where movement tells you

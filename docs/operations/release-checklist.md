@@ -323,6 +323,23 @@ person remembering. Migrations run automatically and unattended at boot
       a rebuild is the one change where a stale rehearsal is not good enough.
       **v1.3 contains one: migration 032 rebuilds `external_hours`.**
 
+### 6b — Does the live database have the shape the code expects?
+
+The longest 2FA outage this platform has had was a table in the live database
+that no migration had built: `tfa_login_attempts`, keyed on the wrong column,
+which `CREATE TABLE IF NOT EXISTS` then left alone. Every second-factor sign-in
+threw. No test can see this, because tests build fresh databases.
+
+- [ ] After the new release has booted (so its migrations have run), on the host:
+      ```bash
+      node bin/schema-check.mjs /var/lib/wevolunteer/wevolunteer.db
+      ```
+      It opens the database **read-only** and compares it with one built from the
+      migrations: columns, types, primary keys and every unique key. `OK` passes.
+      Migrations listed as *not yet applied* mean the server has not restarted
+      since the deploy. A **DRIFT** list with nothing pending is a real mismatch:
+      repair it with an additive migration, as 055 did, never by hand.
+
 ---
 
 ## 7 — Operational visibility
