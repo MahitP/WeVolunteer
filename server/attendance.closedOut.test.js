@@ -283,7 +283,10 @@ describe('hours are final once the organizer closes them out', () => {
         email: 'closeout.other@example.net', grade: 'Adult',
         role: 'organizer', password: 'TestPass123!',
       });
-      const res = await closeOut(eventId, outsider);
+      /* `.cookie`: passing the whole sign-up result sent "[object Object]" as the
+         session, which the server rejected as unverifiable — with the same 403
+         as "not your event", so this never reached the check it names. */
+      const res = await closeOut(eventId, outsider.cookie);
 
       expect(res.status).toBe(403);
       expect((await closedOutAt(eventId)).at).toBeFalsy();

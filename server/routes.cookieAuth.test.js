@@ -267,7 +267,8 @@ describe('authenticateToken accepts the session cookie', () => {
     const res = await fetch(`${srv.base}/api/auth/me`, {
       headers: { 'Cookie': 'wev_session=not-a-valid-jwt' }
     });
-    expect(res.status).toBe(403);
+    // 401, like every other session the server cannot accept.
+    expect(res.status).toBe(401);
   });
 });
 

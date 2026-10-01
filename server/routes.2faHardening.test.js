@@ -47,8 +47,10 @@ describe('2FA Security Hardening Regressions', () => {
       const forgedToken = jwt.sign({ id: 'user-student-1', email: 'leo.chen@example.com' }, 'wrong-secret');
       
       const res = await srv.call('GET', '/api/auth/me', undefined, forgedToken);
-      
-      expect(res.status).toBe(403);
+
+      /* 401: an unverifiable session is an authentication failure (see
+         routes.session.test.js for why this is no longer 403). */
+      expect(res.status).toBe(401);
     });
   });
 

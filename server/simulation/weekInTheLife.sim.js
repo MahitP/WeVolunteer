@@ -85,9 +85,9 @@ describe('a week in the life', () => {
    */
   async function as(p, method, url, body, headers) {
     let res = await srv.call(method, url, body, await session(p), headers);
-    /* 403 as well: an expired token is answered 403 "Invalid or expired token"
-       (recorded as rehearsal finding R2), not 401. */
-    if (res.status === 401 || (res.status === 403 && /expired token/i.test(res.body?.error || ''))) {
+    /* An expired session answers 401 (it answered 403 until rehearsal finding
+       R2 was fixed). */
+    if (res.status === 401) {
       p.cookie = null;
       res = await srv.call(method, url, body, await session(p), headers);
     }

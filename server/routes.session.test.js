@@ -114,19 +114,40 @@ describe('authenticateToken: reads identity from the database', () => {
     expect(res.body.success).toBe(true);
   });
 
-  it('still returns 403 for a forged token (wrong signing secret)', async () => {
+  /**
+   * A session the server cannot verify is an authentication failure: 401, the
+   * same answer as a missing, revoked or deleted-account session.
+   *
+   * These answered 403 "Invalid or expired token". 403 means "you are known and
+   * not allowed", and the client reads it that way: mid-session, every call
+   * after a signing-secret rotation — which is a containment step in the
+   * breach runbook — said "You do not have permission to do that" instead of
+   * signing the person out. Found by the week-long rehearsal, whose sessions
+   * outlived their tokens.
+   */
+  it('returns 401 for a forged token (wrong signing secret)', async () => {
     const forged = jwt.sign(
       { id: 'user-student-1', role: 'admin', email: 'x@example.org', name: 'Nobody' },
       'not-the-real-secret',
       { expiresIn: '7d' }
     );
     const res = await srv.call('GET', '/api/auth/me', undefined, forged);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
-  it('still returns 403 for garbage in the Authorization header', async () => {
+  it('returns 401 for garbage in the Authorization header', async () => {
     const res = await srv.call('GET', '/api/auth/me', undefined, 'garbage');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for an expired token, so the client signs the person out', async () => {
+    const expired = jwt.sign(
+      { id: 'user-student-1', role: 'student', email: 'x@example.org', name: 'Nobody', tokenVersion: 0 },
+      'test-secret-not-for-production',
+      { expiresIn: -60 }
+    );
+    const res = await srv.call('GET', '/api/auth/me', undefined, expired);
+    expect(res.status).toBe(401);
   });
 });
 
