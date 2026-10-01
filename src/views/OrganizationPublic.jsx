@@ -12,6 +12,7 @@ import { api } from '../utils/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { APP_NAME } from '../config';
 import { joinPolicySentence } from '../organizationPolicy';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * An organization at its canonical public address, `/organizations/@robotics`.
@@ -73,6 +74,9 @@ export default function OrganizationPublic() {
    * alone rather than flashing a name in and out.
    */
   useDocumentTitle(state.organization?.name);
+  /* A club of students: shareable by link, never listed by a search engine
+     (FE-02). */
+  usePageMeta({ noindex: true });
 
   useEffect(() => {
     if (!isHandle) return undefined;

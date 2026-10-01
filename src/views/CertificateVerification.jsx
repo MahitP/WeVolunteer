@@ -7,6 +7,7 @@ import { NO_HOURS_LABEL } from '../utils/serviceRecord';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import BrandLockup from '../components/common/BrandLockup';
 import useDocumentTitle from '../hooks/useDocumentTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * Shape of a certificate code, for rejecting obvious nonsense without a round
@@ -131,6 +132,12 @@ export default function CertificateVerification() {
         : status === 'loading' ? 'Checking a certificate'
           : 'Check a certificate',
   );
+  /* The entry form is the public front of verification and may be indexed;
+     a result names a student and never may (FE-02). */
+  usePageMeta({
+    description: 'Check a WeVolunteer certificate: type its code to see whether it is genuine.',
+    noindex: Boolean(code),
+  });
 
   useEffect(() => {
     let cancelled = false;

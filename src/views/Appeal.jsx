@@ -27,6 +27,7 @@ import { AlertTriangle, ShieldOff, CheckCircle2 } from 'lucide-react';
 import { api } from '../utils/api';
 import BrandMark from '../components/common/BrandMark';
 import { APPEALS_EMAIL } from '../config';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /* Was a module-local literal that shadowed the real config export, so a
    deployment could change the support address everywhere except the page
@@ -64,6 +65,9 @@ export default function Appeal() {
       : submitted ? 'Your appeal'
         : 'Appeal a decision',
   );
+
+  /* Carries a person: kept out of search indexes (FE-02). */
+  usePageMeta({ noindex: true });
 
   // Focus moves to the heading whenever the page changes meaning. Without it a
   // screen-reader user hears nothing at the exact moments this page swaps its

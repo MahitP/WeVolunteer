@@ -5,6 +5,7 @@ import { api } from '../../utils/api';
 /* Shared, so the reason it parses a plain date rather than a timestamp lives in
    one place. See legalDates.js. */
 import { formatLegalDate } from './legalDates';
+import { usePageMeta } from '../../hooks/usePageMeta';
 
 /**
  * The Legal Center hub: every published document, in one place, reachable
@@ -120,6 +121,7 @@ function matches(doc, query) {
 }
 
 export default function LegalCenter() {
+  usePageMeta({ description: 'The WeVolunteer Legal Center: the terms, policies and guidelines everybody on the platform is held to.' });
   const [documents, setDocuments] = React.useState(null);
   const [error, setError] = React.useState(null);
   const [query, setQuery] = React.useState('');

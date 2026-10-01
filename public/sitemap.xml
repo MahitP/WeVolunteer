@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The pages robots.txt lets a crawler read. Legal documents: one per
+     server/legalDocuments.js entry; src/seo.test.jsx keeps the two in step. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://app.wevolunteers.org/</loc></url>
+  <url><loc>https://app.wevolunteers.org/about</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/terms-of-service</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/community-guidelines</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/privacy-policy</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/organizer-agreement</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/student-organizer-agreement</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/youth-safety-guidelines</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/certificate-verification-policy</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/volunteer-record-policy</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/data-deletion-policy</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/cookie-and-tracking-notice</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/admin-responsibilities-policy</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/ai-and-on-device-processing</loc></url>
+  <url><loc>https://app.wevolunteers.org/legal/accessibility-statement</loc></url>
+  <url><loc>https://app.wevolunteers.org/verify</loc></url>
+  <url><loc>https://app.wevolunteers.org/signup</loc></url>
+  <url><loc>https://app.wevolunteers.org/login</loc></url>
+</urlset>

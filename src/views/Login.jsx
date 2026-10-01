@@ -6,12 +6,14 @@ import ProviderButtons from '../components/auth/ProviderButtons';
 import { useStepUp } from '../components/auth/useStepUp';
 import { STEP_UP } from '../utils/stepUp';
 import { DEMO_MODE } from '../config';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /** "google" → "Google". Provider names are lowercase keys on the wire. */
 const providerLabel = (provider) =>
   provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : 'that provider';
 
 export default function Login({ onLoginSuccess, addToast }) {
+  usePageMeta({ description: 'Sign in to WeVolunteer.' });
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [tfaToken, setTfaToken] = useState('');

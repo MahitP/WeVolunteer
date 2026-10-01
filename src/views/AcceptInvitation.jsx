@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, LogIn, ShieldAlert, ShieldCheck } from 'lu
 import { api } from '../utils/api';
 import { useSession } from '../session/SessionProvider';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * Redeeming an administrator invitation.
@@ -77,6 +78,9 @@ export default function AcceptInvitation() {
   const [error, setError] = useState('');
 
   useDocumentTitle('Administrator invitation');
+
+  /* Carries a person: kept out of search indexes (FE-02). */
+  usePageMeta({ noindex: true });
 
   /**
    * Focus lands on the heading whenever the page changes what it is saying.

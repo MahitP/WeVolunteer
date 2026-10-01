@@ -8,6 +8,7 @@ import PolicyBody from '../../components/legal/PolicyBody';
    one place. See legalDates.js. */
 import { formatLegalDate } from './legalDates';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import { usePageMeta } from '../../hooks/usePageMeta';
 
 /**
  * One published document, with its version, effective date and contents list.
@@ -130,6 +131,7 @@ export default function LegalDocument() {
     || (failure === 'missing' ? 'No such document' : null)
     || (failure === 'unavailable' ? 'Document unavailable' : null)
   );
+  usePageMeta({ description: doc?.title ? `WeVolunteer's ${doc.title}, as published in the Legal Center.` : undefined });
 
   const contents = React.useMemo(
     () => (doc?.markdown ? tableOfContents(parsePolicyMarkdown(doc.markdown)) : []),

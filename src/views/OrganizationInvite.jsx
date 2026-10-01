@@ -17,6 +17,7 @@ import { useSession } from '../session/SessionProvider';
 import { rememberPendingInvite } from '../utils/pendingInvite';
 import { joinPolicySentence } from '../organizationPolicy';
 import { organizationPath } from '../utils/organizationUrl';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * What an invitation link opens.
@@ -65,6 +66,9 @@ export default function OrganizationInvite() {
    * alone rather than flashing a name in and out.
    */
   useDocumentTitle(state.organization?.name);
+
+  /* Carries a person: kept out of search indexes (FE-02). */
+  usePageMeta({ noindex: true });
 
   useEffect(() => {
     let cancelled = false;

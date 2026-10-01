@@ -1,0 +1,32 @@
+# WeVolunteer
+#
+# Its members are children. Crawlers may read the front door and the published
+# documents, and nothing that carries a person: no profile, no club page, no
+# certificate result, no appeal or invitation. Pages that do carry one also say
+# noindex themselves (src/hooks/usePageMeta.js), because this file is advice.
+
+User-agent: *
+Allow: /$
+Allow: /welcome$
+Allow: /about$
+Allow: /legal
+Allow: /verify$
+Allow: /login$
+Allow: /signup$
+
+# What those pages need to render: the app bundle, its stylesheets and icons,
+# and the public documents the Legal Center fetches.
+Allow: /assets/
+Allow: /boot.css
+Allow: /theme.js
+Allow: /a11y-prefs.js
+Allow: /favicon.svg
+Allow: /mark.svg
+Allow: /site.webmanifest
+Allow: /app-icon
+Allow: /apple-touch-icon.png
+Allow: /api/legal/documents
+
+Disallow: /
+
+Sitemap: https://app.wevolunteers.org/sitemap.xml

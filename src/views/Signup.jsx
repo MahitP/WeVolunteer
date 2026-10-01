@@ -5,6 +5,7 @@ import { PRIVACY_URL } from '../config';
 import { AlertCircle, ArrowLeft, Mail, Check, X, Loader2, Eye, EyeOff } from 'lucide-react';
 import ProviderButtons from '../components/auth/ProviderButtons';
 import DatePicker from '../components/common/DatePicker';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 const AVATARS = ['👤', '🧑‍💻', '👩‍⚕️', '🧑‍🎨', '👩‍🎓', '👩‍💼', '🦁', '🦉', '🦊', '🎨'];
 
@@ -150,6 +151,7 @@ function RuleList({ rules, value, describedById }) {
 }
 
 export default function Signup({ onSignupSuccess, addToast }) {
+  usePageMeta({ description: 'Create a WeVolunteer account to sign up for volunteer shifts and keep a record of your hours.' });
   const navigate = useNavigate();
   const location = useLocation();
 

@@ -6,6 +6,7 @@ import { api } from '../utils/api';
 import { avatarColorValue } from '../utils/avatarColors';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 import CopyableEmail from '../components/common/CopyableEmail';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * About Us — what WeVolunteer is for.
@@ -152,6 +153,7 @@ export default function AboutUs() {
      live: h1 "About WeVolunteer", tab "Dashboard". Same defect as `/verify`;
      see the note in CertificateVerification.jsx. */
   useDocumentTitle('About');
+  usePageMeta({ description: 'About WeVolunteer: volunteer sign-ups and verified service hours for students, organizers and schools.' });
 
   return (
     /* `main`, not a bare div, and `aria-labelledby` pointing at the h1 —

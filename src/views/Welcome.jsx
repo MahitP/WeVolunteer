@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { APP_NAME, SCHOOL_NAME, PRIVACY_URL } from '../config';
 import { ArrowRight, Search, CalendarCheck, Award, Lock } from 'lucide-react';
 import BrandMark from '../components/common/BrandMark';
+import { usePageMeta } from '../hooks/usePageMeta';
 
 /**
  * What the three things the product actually does are, in the order a student
@@ -62,6 +63,7 @@ function useFirstVisitSignature() {
 }
 
 export default function Welcome() {
+  usePageMeta({ description: 'WeVolunteer: find volunteer shifts near you, sign up, and keep a record of hours your organizers confirm.' });
   const navigate = useNavigate();
   const playSignature = useFirstVisitSignature();
 
