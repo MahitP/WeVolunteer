@@ -1678,6 +1678,11 @@ time { font-variant-numeric: tabular-nums; }
   gap: var(--s4);
   margin-top: var(--s4);
 }
+/* The row's gap spaces its fields; the stacking margin `.field + .field`
+   adds would push the second column 16px below the first. Every row that
+   paired a select with a date showed it, and CreateEvent zeroed it field by
+   field instead. */
+.field-row > .field { margin-top: 0; }
 
 /* Checkbox / radio as a selectable row — big touch target */
 .check {
@@ -11767,6 +11772,15 @@ input:disabled + .premium-slider {
 /* The certificate-vs-transcript note above the document (FX-45): the
    toolbar's width, so it lines up with the buttons it sits under. */
 .transcript-explainer { max-width: 800px; margin-top: var(--s3); }
+
+/* The calendar's "Go to date" (ruling 8): narrow enough to sit beside Today
+   and the Month/Week switch without wrapping the toolbar on a laptop. */
+.cal-goto { width: 10.5rem; flex: 0 0 auto; }
+
+/* A day and a time (DateTimeField, ruling 8). When it is the whole content
+   of a `.field`, the row's own top margin would push it below its
+   neighbours. */
+.field > .datetime-field:first-child { margin-top: 0; }
 
 .transcript {
   max-width: 800px;

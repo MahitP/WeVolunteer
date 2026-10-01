@@ -8,6 +8,7 @@ import { api } from '../../utils/api';
 import { publicUrl, APP_NAME } from '../../config';
 import { formatDay } from '../../utils/helpers';
 import { organizationPath } from '../../utils/organizationUrl';
+import DatePicker from '../common/DatePicker';
 
 /**
  * Sharing a club: its public address, and its invitation links.
@@ -693,7 +694,7 @@ function ExpiryControl({ link, busy, onExpiry }) {
         close();
       }}
     >
-      <label className="label" htmlFor={inputId}>Stop working after</label>
+
       {/**
         * `min` and `max`, because the server refuses outside them.
         *
@@ -706,15 +707,15 @@ function ExpiryControl({ link, busy, onExpiry }) {
         * without it focus fell to the document inside an open modal and a
         * keyboard user had to Tab from the top of the dialog to find it.
         */}
-      <input
+      <DatePicker
         id={inputId}
-        className="input"
-        type="date"
+        label="Stop working after"
         value={value}
         min={EXPIRY_MIN()}
         max={EXPIRY_MAX()}
-        onChange={e => setValue(e.target.value)}
-        aria-describedby={`${inputId}-hint`}
+        onChange={setValue}
+        describedBy={`${inputId}-hint`}
+        openOnClick
         autoFocus
       />
       <p id={`${inputId}-hint`} className="muted small">
@@ -768,18 +769,15 @@ function NewLinkForm({ busy, onCreate, onCancel }) {
         later.
       </p>
 
-      <label className="label" htmlFor="org-new-link-expiry">
-        Stop working after <span className="muted">(optional)</span>
-      </label>
-      <input
+      <DatePicker
         id="org-new-link-expiry"
-        className="input"
-        type="date"
+        label="Stop working after (optional)"
         value={expires}
         min={EXPIRY_MIN()}
         max={EXPIRY_MAX()}
-        onChange={e => setExpires(e.target.value)}
-        aria-describedby="org-new-link-expiry-hint"
+        onChange={setExpires}
+        describedBy="org-new-link-expiry-hint"
+        openOnClick
       />
       <p id="org-new-link-expiry-hint" className="muted small">
         {expires

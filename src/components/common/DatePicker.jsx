@@ -80,6 +80,11 @@ import { AlertCircle, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
  * @param {string}   [props.placeholder]
  * @param {string}   [props.locale]         overrides the ambient locale; tests pin it
  * @param {boolean}  [props.openOnClick]    clicking the text box opens the calendar
+ * @param {boolean}  [props.autoFocus]      focus the text box on mount
+ * @param {boolean}  [props.invalid]        mark the box invalid when the caller shows its own error
+ * @param {string}   [props.errorMessageId] the id of that error, for `aria-errormessage`
+ * @param {object|function} [props.ref]     reaches the text box (React 19 passes `ref` as a prop),
+ *                                          so a form that focuses a field on a save error still can
  *
  * ── Why `openOnClick` is opt-in rather than the behaviour ──
  *
@@ -250,6 +255,10 @@ export default function DatePicker({
   placeholder = 'YYYY-MM-DD',
   locale,
   openOnClick = false,
+  autoFocus = false,
+  invalid = false,
+  errorMessageId,
+  ref: forwardedRef,
 }) {
   const reactId = useId();
   const inputId = id || `dp-${reactId}`;
@@ -502,9 +511,14 @@ export default function DatePicker({
 
       <div className="dp-control">
         <input
-          ref={inputRef}
+          ref={(el) => {
+            inputRef.current = el;
+            if (typeof forwardedRef === 'function') forwardedRef(el);
+            else if (forwardedRef) forwardedRef.current = el;
+          }}
           id={inputId}
           name={name}
+          autoFocus={autoFocus}
           type="text"
           inputMode="numeric"
           autoComplete="off"
@@ -513,7 +527,8 @@ export default function DatePicker({
           placeholder={placeholder}
           required={required}
           disabled={disabled}
-          aria-invalid={error ? 'true' : undefined}
+          aria-invalid={error || invalid ? 'true' : undefined}
+          aria-errormessage={errorMessageId || undefined}
           aria-describedby={describedByIds || undefined}
           /**
            * `aria-haspopup`, but NOT `aria-expanded`.

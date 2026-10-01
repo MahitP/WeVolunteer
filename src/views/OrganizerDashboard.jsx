@@ -15,6 +15,7 @@ import { can } from '../authz';
 import { rosterOf, downloadRosterCsv } from '../utils/volunteerRoster';
 import VolunteerRosterRow from '../components/organizer/VolunteerRosterRow';
 import PreviewList from '../components/common/PreviewList';
+import DateTimeField from '../components/common/DateTimeField';
 
 /** How many volunteers the dashboard shows before "Show all". */
 const ROSTER_PREVIEW = 6;
@@ -732,11 +733,16 @@ export default function OrganizerDashboard({
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor="qe-deadline">Applications close</label>
-                  <input id="qe-deadline" type="datetime-local" className="input" value={editForm.applicationDeadline || ''} onChange={e => setEditForm(f => ({
-              ...f,
-              applicationDeadline: e.target.value
-            }))} />
+                  {/* The app's date picker and a time box, not the browser's
+                      datetime control (ruling 8). */}
+                  <DateTimeField
+                    id="qe-deadline"
+                    label="Applications close"
+                    timeLabel="Closing time"
+                    value={editForm.applicationDeadline || ''}
+                    defaultTime="17:00"
+                    onChange={v => setEditForm(f => ({ ...f, applicationDeadline: v }))}
+                  />
                 </div>
               </div>
 

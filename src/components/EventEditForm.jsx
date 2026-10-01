@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertCircle, Plus, Trash2 } from 'lucide-react';
 import { isoToLocalInput } from '../utils/helpers';
+import DateTimeField from './common/DateTimeField';
 import { LocationPicker } from './location';
 import { CATEGORY_GROUPS } from '../eventCategories';
 
@@ -153,12 +154,17 @@ export default function EventEditForm({
           </select>
         </div>
         <div className="field">
-          <label htmlFor="ev-deadline">Applications close</label>
-          <input id="ev-deadline" type="datetime-local" className="input" value={isoToLocalInput(editForm.applicationDeadline)} aria-invalid={!!editErrors.applicationDeadline} onChange={e => setEditForm(f => ({
-          ...f,
-          applicationDeadline: e.target.value
-        }))} />
-          {editErrors.applicationDeadline && <span className="field-error"><AlertCircle size={12} />{editErrors.applicationDeadline}</span>}
+          {/* The app's date picker and a time box, not the browser's
+              datetime control (ruling 8). The picker shows the error. */}
+          <DateTimeField
+            id="ev-deadline"
+            label="Applications close"
+            timeLabel="Closing time"
+            value={isoToLocalInput(editForm.applicationDeadline)}
+            defaultTime="17:00"
+            error={editErrors.applicationDeadline || ''}
+            onChange={v => setEditForm(f => ({ ...f, applicationDeadline: v }))}
+          />
         </div>
       </div>
 
@@ -246,16 +252,24 @@ export default function EventEditForm({
               </div>
             </div>
 
-            <div className="field-row">
-              <div className="field">
-                <label>Starts</label>
-                <input type="datetime-local" className="input" value={isoToLocalInput(slot.startDatetime)} onChange={e => changeSlot(i, 'startDatetime', e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Ends</label>
-                <input type="datetime-local" className="input" value={isoToLocalInput(slot.endDatetime)} onChange={e => changeSlot(i, 'endDatetime', e.target.value)} />
-              </div>
-            </div>
+            {/* Two named halves each, where these were two unlabelled browser
+                datetime controls: the labels had no `htmlFor`, so neither box
+                had a name a screen reader could read. */}
+            <DateTimeField
+              id={`ev-slot-${i}-start`}
+              label="Starts"
+              timeLabel="Start time"
+              value={isoToLocalInput(slot.startDatetime)}
+              onChange={v => changeSlot(i, 'startDatetime', v)}
+            />
+            <DateTimeField
+              id={`ev-slot-${i}-end`}
+              label="Ends"
+              timeLabel="End time"
+              value={isoToLocalInput(slot.endDatetime)}
+              defaultTime="11:00"
+              onChange={v => changeSlot(i, 'endDatetime', v)}
+            />
             {editErrors[`slot-${i}-time`] && <span className="field-error s-57a71b">
                 <AlertCircle size={12} />{editErrors[`slot-${i}-time`]}
               </span>}

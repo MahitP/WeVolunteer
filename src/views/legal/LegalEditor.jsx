@@ -10,6 +10,7 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import PolicyBody from '../../components/legal/PolicyBody';
 import { parsePolicyMarkdown, isSafeHref } from '../../utils/policyMarkdown';
 import { formatLegalDate, todayIso, latestEffectiveIso, isoPlusDays } from './legalDates';
+import DatePicker from '../../components/common/DatePicker';
 
 /**
  * The Legal Center editor — owner only.
@@ -726,28 +727,26 @@ export default function LegalEditor({ addToast }) {
                 </div>
 
                 <div className="legal-editor-effective">
-                  <label className="label" htmlFor="legal-effective">Takes effect</label>
-                  <input
+                  {/* The app's date picker, not the browser's (ruling 8: "basically
+                      everywhere"). `min` and `max` refuse out-of-range dates
+                      before a round trip — UX only, the server owns the answer.
+                      Save is deliberately NOT gated on this: `dirty` means the
+                      BODY changed, and a second condition would make a valid
+                      save impossible to explain when the button stayed grey.
+                      The ref still reaches the text box, so a save error can
+                      put focus here. */}
+                  <DatePicker
                     id="legal-effective"
                     ref={effectiveRef}
-                    type="date"
-                    className="input"
+                    label="Takes effect"
                     value={effectiveAt}
-                    onChange={e => setEffectiveAt(e.target.value)}
-                    /* The native picker refuses the out-of-range dates before a
-                       round trip. UX only — the server owns the answer, and a
-                       browser without `type="date"` support simply falls back to
-                       text and meets the same refusal. Save is deliberately NOT
-                       gated on this: `dirty` means the BODY changed, and adding
-                       a second condition would make a valid save impossible to
-                       explain when the button stayed grey. */
+                    onChange={setEffectiveAt}
                     min={materialNotice ? materialNotice.earliest : todayIso()}
                     max={latestEffectiveIso()}
-                    aria-describedby="legal-effective-hint"
-                    aria-invalid={
-                      saveErrorField === 'effectiveAt' || insideNoticePeriod || undefined
-                    }
-                    aria-errormessage={saveErrorField === 'effectiveAt' ? 'legal-save-error' : undefined}
+                    describedBy="legal-effective-hint"
+                    invalid={saveErrorField === 'effectiveAt' || insideNoticePeriod}
+                    errorMessageId={saveErrorField === 'effectiveAt' ? 'legal-save-error' : undefined}
+                    openOnClick
                   />
                   {/* Says what the field does, not what it sounds like it does.
                       Resolution takes the newest revision, never the one whose

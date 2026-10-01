@@ -267,14 +267,26 @@ describe('LegalEditor', () => {
      * and a second condition would make a valid save impossible to explain when
      * the button stayed grey.
      */
+    /* The field is the app's date picker now (ruling 8), whose text box carries
+       no `min`/`max` attributes — a text input cannot validly have them — so the
+       bounds are asserted by what the control does: a day outside them is
+       refused, and the edges are accepted. */
     it('bounds the date picker to the range the server accepts', async () => {
       renderEditor();
       const dateInput = await screen.findByLabelText('Takes effect');
+      const min = todayIso();
+      const max = latestEffectiveIso();
+      const initial = dateInput.value;
 
-      const min = dateInput.getAttribute('min');
-      const max = dateInput.getAttribute('max');
-      expect(min, 'no earlier than today').toBe(todayIso());
-      expect(max, 'no more than a year ahead').toBe(latestEffectiveIso());
+      for (const outside of [isoPlusDays(-1), isoPlusDays(MAX_EFFECTIVE_DAYS_AHEAD + 1)]) {
+        fireEvent.change(dateInput, { target: { value: outside } });
+        fireEvent.blur(dateInput);
+        expect(dateInput, `${outside} is outside the range`).toHaveValue(initial);
+      }
+      fireEvent.change(dateInput, { target: { value: max } });
+      expect(dateInput, 'the last day is allowed').toHaveValue(max);
+      fireEvent.change(dateInput, { target: { value: min } });
+      expect(dateInput, 'today is allowed').toHaveValue(min);
 
       /* A year, counted in days, so the constant and the control cannot drift. */
       const days = (Date.parse(`${max}T00:00:00Z`) - Date.parse(`${min}T00:00:00Z`)) / 86400000;
@@ -445,10 +457,13 @@ describe('LegalEditor', () => {
      */
     it('moves the date picker floor to 30 days out', async () => {
       await openSignup();
-      expect(dateBox()).toHaveAttribute('min', todayIso());
-
       setVersion('2.0.0');
-      await waitFor(() => expect(dateBox()).toHaveAttribute('min', isoPlusDays(30)));
+      const before = dateBox().value;
+      fireEvent.change(dateBox(), { target: { value: isoPlusDays(29) } });
+      fireEvent.blur(dateBox());
+      expect(dateBox(), 'inside the notice period').toHaveValue(before);
+      fireEvent.change(dateBox(), { target: { value: isoPlusDays(30) } });
+      expect(dateBox(), 'the first day it may take effect').toHaveValue(isoPlusDays(30));
     });
 
     it('marks the date invalid while it is inside the notice period', async () => {

@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, CalendarDays, MapPin, Clock } from 'lucide-r
 import { formatHours, formatTimeRange, formatDay, haversineDistance } from '../utils/helpers';
 import { useLocationContext } from '../contexts/LocationContext';
 import { can } from '../authz.js';
+import DatePicker from '../components/common/DatePicker';
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
@@ -295,6 +296,21 @@ export default function CalendarView({
     }
     setSelected(null);
   };
+  /**
+   * Jump to a date (ruling 8). The owner asked for the app's date picker "for
+   * the pick date in calendar" too; with only month arrows, a date half a year
+   * out was six clicks and a squint. Choosing one moves the grid to its month
+   * — or its week — and selects the day, the same as clicking it.
+   */
+  const [jumpDate, setJumpDate] = useState('');
+  const jumpTo = (iso) => {
+    setJumpDate(iso);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+    if (!m) return;
+    const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    setCursor(date);
+    setSelected(date);
+  };
   const goToday = () => {
     const now = new Date();
     setCursor(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
@@ -318,6 +334,8 @@ export default function CalendarView({
         </div>
 
         <div className="row">
+          <label className="sr-only" htmlFor="cal-goto">Go to date</label>
+          <DatePicker id="cal-goto" className="cal-goto" value={jumpDate} onChange={jumpTo} placeholder="Go to date" openOnClick />
           <button className="btn btn-ghost btn-sm" onClick={goToday} aria-current={dayKey(cursor) === dayKey(today) ? 'date' : undefined}>Today</button>
           <div className="row" style={{ background: 'var(--surface-3)', borderRadius: 'var(--r-md)', padding: 2, border: '1px solid var(--rule)' }}>
             {/* No class for the active state: the inline style below already
