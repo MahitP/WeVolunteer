@@ -30,4 +30,4 @@
  * what makes this safe to pull into the browser bundle.
  * `serverModuleBoundary.test.js` is what keeps that true.
  */
-export { validateEventPayload, MAX_SLOT_HOURS } from '../server/validation.js';
+export { validateEventPayload, deadlineAfterFirstShift, MAX_SLOT_HOURS } from '../server/validation.js';

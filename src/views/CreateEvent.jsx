@@ -9,6 +9,7 @@ import DatePicker from '../components/common/DatePicker';
 import { CATEGORY_GROUPS } from '../eventCategories';
 import { api } from '../utils/api';
 import { can } from '../authz';
+import { deadlineAfterFirstShift } from '../eventRules';
 export default function CreateEvent({
   onSubmitEvent,
   addToast,
@@ -268,8 +269,9 @@ export default function CreateEvent({
     }
     if (applicationDeadline && slots.length > 0) {
       const first = new Date([...slots].sort((a, b) => a.startDatetime.localeCompare(b.startDatetime))[0].startDatetime);
-      if (new Date(applicationDeadline) >= first) {
-        next.applicationDeadline = 'The deadline has to be before the first shift starts';
+      /* The server's rule, not a copy: on or before the first shift's start. */
+      if (deadlineAfterFirstShift(new Date(applicationDeadline).getTime(), first.getTime())) {
+        next.applicationDeadline = 'The deadline has to be on or before the first shift starts';
       }
     }
     setErrors(next);

@@ -28,6 +28,16 @@ const MAX_MAX_SPOTS = 100;
  * at the duration check below.
  */
 export const MAX_SLOT_HOURS = 24;
+
+/**
+ * The application deadline may be on or before the first shift's start; this
+ * says whether it is after. Named and exported so the create form uses this
+ * rule rather than a copy of it — its copy said `>=` and refused a deadline the
+ * server accepts (src/deadlineRule.test.js).
+ */
+export function deadlineAfterFirstShift(deadlineMs, firstStartMs) {
+  return deadlineMs > firstStartMs;
+}
 const MAX_SLOT_DURATION_MS = MAX_SLOT_HOURS * 3600000;
 
 export function validateEventPayload({ title, description, location, instructions, applicationDeadline, slots, address, latitude, longitude }) {
@@ -111,7 +121,7 @@ export function validateEventPayload({ title, description, location, instruction
     if (startMs < earliestStartMs) earliestStartMs = startMs;
   }
 
-  if (deadlineMs > earliestStartMs) {
+  if (deadlineAfterFirstShift(deadlineMs, earliestStartMs)) {
     return { ok: false, error: 'The application deadline must be on or before the first shift starts.' };
   }
 
