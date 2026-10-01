@@ -14,7 +14,7 @@
  * ── The safety rule, which is the whole reason this is a script ──
  *
  * It REFUSES to touch a database it was not pointed at explicitly, and refuses
- * outright if that path looks like the pilot or production database. Seeding
+ * outright any database whose CONTENTS say it is real (see below). Seeding
  * fabricated attendance into real data would put hours on a real student's
  * transcript, which is the one thing this repository is most careful about.
  *
@@ -29,12 +29,16 @@
  * this creates events, slots, applications and attendance, and then asks the
  * real evaluator to do what it would do.
  *
- * That also means the profile is TRUE: every figure on it is derived from the
- * same ledger a real account's would be.
+ * Every figure on the profile is then derived from attendance exactly as a real
+ * account's is. One difference, by construction: the rows are inserted
+ * directly, not through `finalizeAttendance`, so the hours ledger has no entries
+ * for them until the server's boot backfill writes them. That is acceptable only
+ * because this runs on disposable databases — it is not how real hours move.
  */
 
 import path from 'node:path';
 import process from 'node:process';
+import { refuseProduction, refuseNonSqliteEngine, refuseNonDisposableDatabase } from './lib/db-safety.mjs';
 
 const args = process.argv.slice(2);
 const emailArg = args.indexOf('--email');
@@ -48,19 +52,21 @@ if (!dbPath) {
 }
 
 /**
- * The names that mean "this is not a scratch database".
+ * Refuse real data by what it contains, never by what the file is called.
  *
- * Checked on the resolved basename so `../pilot.db`, `./pilot.db` and an
- * absolute path all trip it. A refusal here costs a rerun with a different
- * path; a false negative costs somebody's real service record.
+ * This used to refuse three basenames — `pilot.db`, `production.db`,
+ * `wevolunteer.db` — and so accepted a copy of real data under any other name.
+ * The repository root holds exactly such copies (`pilot-backup-…db`,
+ * `pilot.db.backup-…`) carrying minors' records. The shared guard recognises a
+ * real database by its contents — an owner account, a deleted account's
+ * tombstone, an administrative audit record — and refuses production and
+ * PostgreSQL outright, where this script's synchronous writes do not belong.
  */
-const FORBIDDEN = ['pilot.db', 'production.db', 'wevolunteer.db'];
-const base = path.basename(path.resolve(dbPath));
-if (FORBIDDEN.includes(base)) {
-  console.error(`Refusing to run against ${base}. This script fabricates attendance.`);
-  console.error('Point WEV_DB_PATH at a throwaway copy instead.');
-  process.exit(1);
-}
+const EFFECT = 'It WRITES fabricated events, accepted applications and credited attendance, '
+  + 'and moves the account\'s join date back 400 days.';
+refuseProduction({ tool: 'QA profile seed', effect: EFFECT });
+refuseNonSqliteEngine({ tool: 'QA profile seed', effect: EFFECT });
+refuseNonDisposableDatabase({ tool: 'QA profile seed', dbPath: path.resolve(dbPath), effect: EFFECT });
 
 const { db } = await import('../server/db.js');
 const { badgeService } = await import('../server/services/badgeService.js');
