@@ -116,33 +116,31 @@ beforeEach(() => {
 });
 
 describe('the organizer dashboard summary tiles', () => {
-  it('reads Active events, Volunteers confirmed, Hours credited, Awaiting review', () => {
+  /* The owner's own order, pasted in his request (CK-12): "ACTIVE EVENTS,
+     VOLUNTEERS CONFIRMED, AWAITING REVIEW, HOURS CREDITED … keep everything as
+     is". An earlier change swapped the last two after reading "the review hours
+     box" as the Awaiting-review tile; it was the close-out card (see below). */
+  it('reads Active events, Volunteers confirmed, Awaiting review, Hours credited — the owner\'s order', () => {
     const { container } = draw();
     expect(tiles(container).map(([label]) => label)).toEqual([
       'Active events',
       'Volunteers confirmed',
-      'Hours credited',
       'Awaiting review',
+      'Hours credited',
     ]);
-  });
-
-  it('puts Hours credited above Awaiting review, which is the change', () => {
-    const { container } = draw();
-    const labels = tiles(container).map(([label]) => label);
-    expect(labels.indexOf('Hours credited')).toBeLessThan(labels.indexOf('Awaiting review'));
   });
 
   it('keeps each figure with the label it belongs to', async () => {
     const { container } = draw();
     /* The credited total arrives from `fetchOrganizerStats` after mount, so the
        assertion waits for it rather than reading the 0 it starts at. */
-    await waitFor(() => expect(tiles(container)[2][1]).toMatch(/236/));
+    await waitFor(() => expect(tiles(container)[3][1]).toMatch(/236/));
 
     const drawn = tiles(container);
     expect(drawn[0]).toEqual(['Active events', '1']);
     expect(drawn[1]).toEqual(['Volunteers confirmed', '2']);
-    expect(drawn[2][0]).toBe('Hours credited');
-    expect(drawn[3]).toEqual(['Awaiting review', '2']);
+    expect(drawn[2]).toEqual(['Awaiting review', '2']);
+    expect(drawn[3][0]).toBe('Hours credited');
   });
 
   it('keeps the shift-assignment note under Volunteers confirmed', () => {
@@ -185,6 +183,20 @@ describe('the hours review section below the tiles', () => {
       endDatetime: '2026-07-02T17:00:00.000Z',
     }),
   ];
+
+  /* CK-12, the request itself: "This box should be above the review hours box.
+     I'll send the review hours box below" — and what he sent was the close-out
+     card ("READY WHEN YOU ARE … Review hours"). Nothing asserted this before,
+     which is how a change claiming to fix it could leave the card on top. */
+  it('draws the summary strip ABOVE the close-out card', () => {
+    const { container } = draw(finished());
+    const strip = [...container.querySelectorAll('.stats')]
+      .find(s => s.querySelectorAll('.stat').length === 4);
+    const card = screen.getByText(/finished events with\s+hours not closed out/i).closest('section');
+    expect(strip).toBeTruthy();
+    expect(card).toBeTruthy();
+    expect(strip.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 
   it('still reports the events whose hours are not closed out', () => {
     draw(finished());

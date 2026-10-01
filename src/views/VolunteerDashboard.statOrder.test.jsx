@@ -102,19 +102,32 @@ beforeEach(() => {
 });
 
 describe('the volunteer dashboard summary tiles', () => {
-  it('reads Upcoming, then Shifts completed, then Awaiting reply', () => {
+  /* The owner's own order, pasted in his request (CK-11): "UPCOMING, AWAITING
+     REPLY, SHIFTS COMPLETED … Keep everything else as is". An earlier change
+     reordered these tiles after reading the request as being about them; it was
+     about the hours box and the "Waiting on a reply" SECTION (see below). */
+  it('reads Upcoming, then Awaiting reply, then Shifts completed — the owner\'s order', () => {
     const { container } = draw();
     expect(tiles(container).map(([label]) => label)).toEqual([
       'Upcoming',
-      'Shifts completed',
       'Awaiting reply',
+      'Shifts completed',
     ]);
   });
 
-  it('puts Shifts completed above Awaiting reply, which is the change', () => {
+  /* CK-11, the request itself: "This box should be Above waiting for reply not
+     below the waiting for reply section". The box is the hours card he pasted
+     ("SERVICE HOURS THIS YEAR … How hours are credited"); the section is
+     "Waiting on a reply", which renders only when something is pending — and
+     he had two applications pending when he wrote it. */
+  it('draws the hours box ABOVE the "Waiting on a reply" section', () => {
     const { container } = draw();
-    const labels = tiles(container).map(([label]) => label);
-    expect(labels.indexOf('Shifts completed')).toBeLessThan(labels.indexOf('Awaiting reply'));
+    const hours = screen.getByText(/Service hours this year/i).closest('section, .card');
+    const waiting = screen.getByRole('heading', { name: /Waiting on a reply/i }).closest('section');
+    expect(hours, 'fixture: the hours box renders').toBeTruthy();
+    expect(waiting, 'fixture: a pending application renders the section').toBeTruthy();
+    expect(hours.compareDocumentPosition(waiting) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    void container;
   });
 
   /**
@@ -126,8 +139,8 @@ describe('the volunteer dashboard summary tiles', () => {
     const { container } = draw();
     expect(tiles(container)).toEqual([
       ['Upcoming', '1'],
-      ['Shifts completed', '3'],
       ['Awaiting reply', '2'],
+      ['Shifts completed', '3'],
     ]);
   });
 

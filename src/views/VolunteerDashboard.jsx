@@ -276,45 +276,10 @@ export default function VolunteerDashboard({
         </section>
       )}
 
-      {/* ── Awaiting a decision: second, because it's the other thing a
-             student is actually wondering about ── */}
-      {pending.length > 0 && (
-        <section>
-          <div className="section-head">
-            <h2>Waiting on a reply</h2>
-            <span className="section-action small dim">{pending.length}</span>
-          </div>
-          <div className="list">
-            {pending.map(({ app, event, slot }) => (
-              <div key={app.id} className="list-row">
-                <DateChip iso={slot?.startDatetime} />
-                <div className="truncate" style={{ flex: 1 }}>
-                  <div className="person-name truncate">{event.title}</div>
-                  <div className="person-meta truncate tnum">
-                    {slot?.name} · {formatDay(slot?.startDatetime)}, {formatTimeRange(slot?.startDatetime, slot?.endDatetime)}
-                  </div>
-                </div>
-                <span className={`status ${app.status === 'waitlisted' ? 'status-info' : 'status-pending'}`}>
-                  {app.status === 'waitlisted' ? 'Waitlisted' : 'Awaiting decision'}
-                </span>
-                <button className="btn btn-ghost btn-sm" onClick={() => onViewDetails(event)}>View</button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => handleWithdraw(app, event.title, false)}
-                  disabled={withdrawingId === app.id}
-                >
-                  <Ban size={13} /> Withdraw
-                </button>
-              </div>
-            ))}
-          </div>
-          <p className="small dim" style={{ marginTop: 'var(--s2)' }}>
-            Organizers review each application. You'll get a notification as soon as they decide.
-          </p>
-        </section>
-      )}
-
-      {/* ── Hours: the number students are actually here for ── */}
+      {/* ── Hours: the number students are actually here for ──
+             Above "Waiting on a reply", by the owner's request (CK-11): "This box
+             should be Above waiting for reply not below the waiting for reply
+             section" — the box being this card, which he pasted to name it. */}
       <section className="card">
         <div className="card-body">
           <div className="row-between row-wrap" style={{ marginBottom: 'var(--s3)' }}>
@@ -375,28 +340,57 @@ export default function VolunteerDashboard({
             <div className="stat-label">Upcoming</div>
             <div className="stat-value">{upcoming.length}</div>
           </div>
-          {/**
-            * Shifts completed sits between Upcoming and Awaiting reply.
-            *
-            * The three read as one sentence about the reader's standing, and
-            * the middle slot is the one that gets looked at: what is booked,
-            * what has been done, and only then what is still waiting on
-            * somebody else. "Awaiting reply" is the least settled of the three
-            * and is the right place to end.
-            *
-            * Order only. The labels, the figures and the arithmetic behind them
-            * are untouched.
-            */}
-          <div className="stat">
-            <div className="stat-label">Shifts completed</div>
-            <div className="stat-value">{completed.length}</div>
-          </div>
+          {/* The owner's order (CK-11): Upcoming, Awaiting reply, Shifts
+              completed — "keep everything else as is". */}
           <div className="stat">
             <div className="stat-label">Awaiting reply</div>
             <div className="stat-value">{pending.length}</div>
           </div>
+          <div className="stat">
+            <div className="stat-label">Shifts completed</div>
+            <div className="stat-value">{completed.length}</div>
+          </div>
         </div>
       </section>
+
+      {/* ── Awaiting a decision: after the hours (CK-11) and before the
+             shifts, because it is the other thing a student is actually
+             wondering about ── */}
+      {pending.length > 0 && (
+        <section>
+          <div className="section-head">
+            <h2>Waiting on a reply</h2>
+            <span className="section-action small dim">{pending.length}</span>
+          </div>
+          <div className="list">
+            {pending.map(({ app, event, slot }) => (
+              <div key={app.id} className="list-row">
+                <DateChip iso={slot?.startDatetime} />
+                <div className="truncate" style={{ flex: 1 }}>
+                  <div className="person-name truncate">{event.title}</div>
+                  <div className="person-meta truncate tnum">
+                    {slot?.name} · {formatDay(slot?.startDatetime)}, {formatTimeRange(slot?.startDatetime, slot?.endDatetime)}
+                  </div>
+                </div>
+                <span className={`status ${app.status === 'waitlisted' ? 'status-info' : 'status-pending'}`}>
+                  {app.status === 'waitlisted' ? 'Waitlisted' : 'Awaiting decision'}
+                </span>
+                <button className="btn btn-ghost btn-sm" onClick={() => onViewDetails(event)}>View</button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleWithdraw(app, event.title, false)}
+                  disabled={withdrawingId === app.id}
+                >
+                  <Ban size={13} /> Withdraw
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="small dim" style={{ marginTop: 'var(--s2)' }}>
+            Organizers review each application. You'll get a notification as soon as they decide.
+          </p>
+        </section>
+      )}
 
       {/**
         * The two-column body. A CLASS, not an inline `gridTemplateColumns`.

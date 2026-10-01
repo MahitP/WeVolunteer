@@ -452,6 +452,30 @@ export default function OrganizerDashboard({
           </div>
         </section>}
 
+      {/* ── Programme at a glance ── */}
+      <section className="stats">
+        <div className="stat">
+          <div className="stat-label">Active events</div>
+          <div className="stat-value">{hosted.filter(e => e.status === 'open' || e.status === 'closed').length}</div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Volunteers confirmed</div>
+          <div className="stat-value">{uniqueVolunteers}</div>
+          <div className="stat-note">{acceptedApps.length} shift assignments</div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Awaiting review</div>
+          <div className="stat-value" style={{
+          color: pendingApps.length ? 'var(--warn)' : undefined
+        }}>
+            {pendingApps.length}
+          </div>
+        </div>
+        <div className="stat">
+          <div className="stat-label">Hours credited</div>
+          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
+        </div>
+      </section>
       {/**
         * ── Hours waiting to be made permanent ──
         *
@@ -461,8 +485,11 @@ export default function OrganizerDashboard({
         * deadline" and "2 events are ready whenever you are" cannot share one
         * headline without one of them lying.
         *
-        * Second, not first, for the same reason — the card above is about people
-        * who are stuck.
+        * After the applications card, for the same reason — that one is about
+        * people who are stuck. And after the summary strip too, by the owner's
+        * request (CK-12): "This box [the strip] should be above the review hours
+        * box" — the review hours box being this card, which he pasted to name
+        * it. `OrganizerDashboard.statOrder.test.jsx` asserts the order.
         *
         * The word is always "close out HOURS", never "close": this dashboard
         * already has a "Close sign-ups" control three sections down, and those
@@ -514,42 +541,6 @@ export default function OrganizerDashboard({
         </section>
       )}
 
-      {/* ── Programme at a glance ── */}
-      <section className="stats">
-        <div className="stat">
-          <div className="stat-label">Active events</div>
-          <div className="stat-value">{hosted.filter(e => e.status === 'open' || e.status === 'closed').length}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Volunteers confirmed</div>
-          <div className="stat-value">{uniqueVolunteers}</div>
-          <div className="stat-note">{acceptedApps.length} shift assignments</div>
-        </div>
-        {/**
-          * Hours credited sits above Awaiting review.
-          *
-          * The first three tiles are the settled record of the programme —
-          * events running, volunteers confirmed, hours credited — and the
-          * fourth is the only one that is a job still to do. Ending on it puts
-          * the outstanding work next to the review section directly below,
-          * rather than burying it between two totals.
-          *
-          * Order only. The figures, the warning colour on an outstanding count,
-          * and everything the review section does are untouched.
-          */}
-        <div className="stat">
-          <div className="stat-label">Hours credited</div>
-          <div className="stat-value accent">{formatHours(hoursCredited)}</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">Awaiting review</div>
-          <div className="stat-value" style={{
-          color: pendingApps.length ? 'var(--warn)' : undefined
-        }}>
-            {pendingApps.length}
-          </div>
-        </div>
-      </section>
 
       {/* ── Happening today ──────────────────────────────────────────────
           Check-in is the one screen used standing up, outdoors, on a phone,
