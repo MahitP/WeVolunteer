@@ -29,7 +29,7 @@ import {
   areFriends, relationshipState, viewerRelationshipState, requestFriend, acceptFriend,
   removeFriend, setUnilateral, clearUnilateral,
 } from '../relationships.js';
-import { formatOrganization } from '../organizations.js';
+import { formatOrganization, MEMBER_COUNT_SQL } from '../organizations.js';
 /* The tag vocabulary is shared with events, so `#nhs` means the same thing in
    both halves of discovery. */
 import { normaliseTag } from '../eventTags.js';
@@ -377,7 +377,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
     const rows = sigil === 'tag'
       ? await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               ${MEMBER_COUNT_SQL} AS "memberCount",
                (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
         WHERE o.status = 'active'
@@ -388,7 +388,7 @@ router.get('/api/directory/search', authenticateToken, requireCap('directory.rea
       `).all(tagKey, limit + 1, offset)
       : await db.prepare(`
         SELECT o.*,
-               (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+               ${MEMBER_COUNT_SQL} AS "memberCount",
                (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
         FROM organizations o
         WHERE o.status = 'active' AND (o.name ${LIKE} ? ESCAPE '\\' OR o.slug ${LIKE} ? ESCAPE '\\')

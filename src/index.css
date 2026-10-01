@@ -2133,6 +2133,13 @@ a.list-row:hover { text-decoration: none; }
    contrast failure created by de-emphasising text a muted token had already
    de-emphasised. The weight difference is what marks it as secondary. */
 .hourspill span { font-weight: 500; }
+/* An organizer's volunteer row. The name wraps rather than truncating: on a
+   phone the hours pill and the Profile button leave it a third of the row, and
+   the rehearsal showed "Aarav Sh…". The pill keeps its "total" — the figure is
+   the volunteer's platform-wide hours, and without the word it would read as
+   hours at this organizer's events, beside "1 shift with you". */
+.roster-person { min-width: 0; }
+.roster-person .person-name { overflow-wrap: anywhere; }
 
 /* ==========================================================================
    Stats

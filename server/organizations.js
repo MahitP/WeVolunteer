@@ -663,6 +663,23 @@ export function publicOrganization(row, { upcoming = [] } = {}) {
 }
 
 /**
+ * How many members an organization has, as a subquery on `o.id`.
+ *
+ * Active accounts only — the same rows the roster lists. It counted every
+ * membership row, and the roster lists only members whose account is active, so
+ * a club with one suspended student said 39 in its heading over a list of 38
+ * (N11). A suspended account is hidden from every roster; counting it described
+ * a member nobody could see.
+ *
+ * Every member count the product shows comes from here — the club page, the
+ * directory, search, the signed-out snapshot and the join/leave answers — so no
+ * two of them can disagree.
+ */
+export const MEMBER_COUNT_SQL = `(SELECT COUNT(*) FROM organization_members m
+    JOIN users u ON u.id = m.user_id
+   WHERE m.organization_id = o.id AND u.account_status = 'active')`;
+
+/**
  * The counts every organization payload carries, as a SELECT fragment.
  *
  * Shared by the two resolvers below so they cannot disagree about what a
@@ -672,7 +689,7 @@ export function publicOrganization(row, { upcoming = [] } = {}) {
  */
 const WITH_COUNTS = `
   SELECT o.*,
-         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+         ${MEMBER_COUNT_SQL} AS "memberCount",
          (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
     FROM organizations o
 `;
@@ -783,9 +800,11 @@ export async function publicOrganizationSnapshot(db, org, { upcomingLimit = 3, n
      `ORG_SELECT` uses — and only these two, because they are the only aggregate
      the projection publishes. */
   const counts = await db.prepare(`
-    SELECT (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = ?) AS "memberCount",
-           (SELECT COUNT(*) FROM events e WHERE e.organization_id = ?) AS "eventCount"
-  `).get(org.id, org.id);
+    SELECT ${MEMBER_COUNT_SQL} AS "memberCount",
+           (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
+      FROM organizations o
+     WHERE o.id = ?
+  `).get(org.id);
 
   /**
    * A few upcoming opportunities, by title and date.

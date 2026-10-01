@@ -889,7 +889,10 @@ export const api = {
   // ── Organizations ──────────────────────────────
   fetchOrganizations: async ({ mine = false, limit = 20, offset = 0 } = {}) =>
     apiFetch(`/api/organizations?mine=${mine}&limit=${limit}&offset=${offset}`),
-  fetchOrganization: async (key) => apiFetch(`/api/organizations/${encodeURIComponent(key)}`),
+  /* `membersFrom` reads a later page of the roster — the server sends a hundred
+     members per request. */
+  fetchOrganization: async (key, { membersFrom = 0 } = {}) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}${membersFrom > 0 ? `?membersFrom=${membersFrom}` : ''}`),
   createOrganization: async (body) => apiFetch('/api/organizations', { method: 'POST', body: JSON.stringify(body) }),
   updateOrganization: async (key, body) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}`, { method: 'PATCH', body: JSON.stringify(body) }),

@@ -25,7 +25,7 @@ import { recordAudit } from '../auditLog.js';
 import {
   validateOrganization, createOrganization, canManage, canHelpRun, MEMBER_ROLES,
   memberRoleOf, formatOrganization, publicOrganizationSnapshot, canInvite, uniqueSlug,
-  handleAvailable, publicOrganizationByHandle, organizationByKey,
+  handleAvailable, publicOrganizationByHandle, organizationByKey, MEMBER_COUNT_SQL,
 } from '../organizations.js';
 import { joinAffordance, affordanceAdmits, normaliseVisibility } from '../organizationPolicy.js';
 import {
@@ -65,10 +65,16 @@ import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning } from '../appea
 
 const router = express.Router();
 
+/** Where a roster page starts: a whole number, or the first page. */
+function parseRosterOffset(raw) {
+  const n = /^\d{1,6}$/.test(String(raw ?? '')) ? Number(raw) : 0;
+  return Number.isSafeInteger(n) ? n : 0;
+}
+
 /** Member and event counts, computed in the same statement as the row. */
 const ORG_SELECT = `
   SELECT o.*,
-         (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS "memberCount",
+         ${MEMBER_COUNT_SQL} AS "memberCount",
          (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) AS "eventCount"
   FROM organizations o
 `;
@@ -201,6 +207,16 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
    */
   const mayReadRoster = Boolean(membership) || mayManage;
 
+  /**
+   * A hundred at a time, never more.
+   *
+   * The club page needs ten; the full members page (N11) reads the rest with
+   * `membersFrom`, a hundred per request, behind the gate above — an outsider
+   * asking for a later page gets the same empty list as for the first. The
+   * order ends on `u.id` so that two members with the same name cannot swap
+   * places between requests and be listed twice or not at all.
+   */
+  const membersFrom = parseRosterOffset(req.query.membersFrom);
   const members = mayReadRoster ? await db.prepare(`
     SELECT u.id, u.username, u.name, u.avatar, u.avatar_color, u.profile_picture_url,
            u.role, u.location,
@@ -208,9 +224,9 @@ router.get('/api/organizations/:key', authenticateToken, requireCap('directory.r
     FROM organization_members m
     JOIN users u ON u.id = m.user_id
     WHERE m.organization_id = ? AND u.account_status = 'active'
-    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE nocase
-    LIMIT 100
-  `).all(row.id) : [];
+    ORDER BY CASE m.member_role WHEN 'manager' THEN 0 WHEN 'student_organizer' THEN 1 ELSE 2 END, u.name COLLATE nocase, u.id
+    LIMIT 100 OFFSET ?
+  `).all(row.id, membersFrom) : [];
 
   /**
    * Upcoming first, then recent past. Cancelled events are excluded: an
@@ -1071,7 +1087,7 @@ router.patch('/api/organizations/:key/members/:userId', authenticateToken, requi
 });
 
 async function countMembers(organizationId) {
-  return (await db.prepare('SELECT COUNT(*) AS n FROM organization_members WHERE organization_id = ?')
+  return (await db.prepare(`SELECT ${MEMBER_COUNT_SQL} AS n FROM organizations o WHERE o.id = ?`)
     .get(organizationId)).n;
 }
 

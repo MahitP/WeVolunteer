@@ -63,6 +63,9 @@ const ROUTES = {
   '/users/:handle/hours': { view: 'views/PublicServiceHistory.jsx', marked: true },
   '/organizations/:key': { view: 'views/OrganizationPage.jsx', marked: true },
   '/organizations/:key/edit': { view: 'views/OrganizationForm.jsx', marked: true },
+  /* The members view of the same page; an unknown key takes the page's own
+     not-found branch, which runs before the view is chosen. */
+  '/organizations/:key/members': { view: 'views/OrganizationPage.jsx', marked: true },
   '/organizations/invite/:token': { view: 'views/OrganizationInvite.jsx', marked: true },
   '/legal/:slug': { view: 'views/legal/LegalDocument.jsx', marked: true },
   '/certificates/:code': { view: 'views/CertificateView.jsx', marked: true },

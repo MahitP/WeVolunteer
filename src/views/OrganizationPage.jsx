@@ -35,7 +35,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   Building2, Users, CalendarDays, UserRound, LogOut, Settings2, Clock, UserMinus,
-  FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2, MailOpen, Check,
+  FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2, MailOpen, Check, ArrowLeft, ArrowRight,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -59,7 +59,10 @@ import { formatHours, formatDay } from '../utils/helpers';
 import ActionsMenu from '../components/common/ActionsMenu';
 import { organizationPath, organizationSubPath } from '../utils/organizationUrl';
 
-export default function OrganizationPage({ addToast, currentUser }) {
+/** Members shown on the club page before "Show all" (N11). */
+const MEMBERS_PREVIEW = 10;
+
+export default function OrganizationPage({ addToast, currentUser, view }) {
   const { key } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -71,11 +74,13 @@ export default function OrganizationPage({ addToast, currentUser }) {
   const [sharing, setSharing] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [rosterMore, setRosterMore] = useState('idle'); // 'idle' | 'loading' | 'end'
 
   const load = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setRosterMore('idle');
     api.fetchOrganization(key)
       .then(res => { if (!cancelled) setData(res); })
       .catch(err => { if (!cancelled) setError(err.status === 404 ? 'not_found' : err.message); })
@@ -99,7 +104,11 @@ export default function OrganizationPage({ addToast, currentUser }) {
    * them: pressing Back would otherwise land on the same page and redirect
    * again, which is a trap rather than a navigation.
    */
-  const canonical = data?.organization?.slug ? organizationPath(data.organization) : null;
+  const canonical = !data?.organization?.slug ? null
+    /* A sub-view keeps its segment. Without it, "Show all members" opened the
+       roster and this effect immediately sent the reader back to the club page. */
+    : view === 'members' ? organizationSubPath(data.organization, 'members')
+    : organizationPath(data.organization);
   useEffect(() => {
     if (!canonical) return;
     if (decodeURIComponent(location.pathname) !== decodeURIComponent(canonical)) {
@@ -505,6 +514,66 @@ export default function OrganizationPage({ addToast, currentUser }) {
     });
   }
 
+  /**
+   * The whole roster, on its own page (N11).
+   *
+   * The club page shows the first few members and links here — the owner's rule
+   * for long lists (FX-31). It is this component in a different view rather than
+   * a page of its own, so a manager's Manage menu and the remove/ban dialog
+   * behind it work on every member exactly as they do on the club page.
+   */
+  if (view === 'members') {
+    /* The server sends a hundred members per request, so a bigger club's
+       roster is read the rest of the way on demand. 'end' stops the button if
+       a page brings nobody new — somebody left between the two requests — so it
+       cannot sit there offering members that are not coming. */
+    const showMoreMembers = () => {
+      setRosterMore('loading');
+      api.fetchOrganization(key, { membersFrom: members.length })
+        .then(res => {
+          const seen = new Set(members.map(m => m.id));
+          const fresh = (res.members || []).filter(m => !seen.has(m.id));
+          setData(prev => ({ ...prev, members: [...prev.members, ...fresh] }));
+          setRosterMore(fresh.length ? 'idle' : 'end');
+        })
+        .catch(err => {
+          addToast(err.message || 'Could not load more members.', 'error');
+          setRosterMore('idle');
+        });
+    };
+    const rosterIncomplete = members.length < org.memberCount && rosterMore !== 'end';
+
+    return (
+      <div className="page stack-lg">
+        <div>
+          <Link to={organizationPath(org)} className="btn btn-ghost btn-sm loggedhours-back">
+            <ArrowLeft size={15} aria-hidden="true" /> Back to {org.name}
+          </Link>
+        </div>
+        <MemberRoster
+          org={org}
+          members={members}
+          viewer={viewer}
+          busy={busy}
+          isSelf={isSelf}
+          memberActions={memberActions}
+          onShowMore={rosterIncomplete ? showMoreMembers : null}
+          loadingMore={rosterMore === 'loading'}
+        />
+        {removing && (
+          <RemoveMemberDialog
+            member={removing}
+            organizationName={org.name}
+            busy={busy}
+            intent={removing.intent}
+            onCancel={() => setRemoving(null)}
+            onConfirm={opts => removeMember(removing, opts)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="page stack-lg">
       {/**
@@ -730,6 +799,8 @@ export default function OrganizationPage({ addToast, currentUser }) {
             busy={busy}
             isSelf={isSelf}
             memberActions={memberActions}
+            cap={MEMBERS_PREVIEW}
+            moreHref={organizationSubPath(org, 'members')}
           />
         </div>
 
@@ -916,8 +987,13 @@ function AboutOrganization({ org, policy }) {
  * unable to tell a club of forty from a club of nobody — which is precisely what
  * they are trying to work out before pressing Join.
  */
-function MemberRoster({ org, members, viewer, busy, isSelf, memberActions }) {
+function MemberRoster({
+  org, members, viewer, busy, isSelf, memberActions, cap, moreHref, onShowMore, loadingMore,
+}) {
   const hidden = members.length === 0 && org.memberCount > 0;
+  const shown = cap ? members.slice(0, cap) : members;
+  /* Against the count, not the list: the list holds at most one server page. */
+  const more = org.memberCount - shown.length;
 
   return (
     <section className="card" aria-labelledby="org-members-heading">
@@ -943,7 +1019,7 @@ function MemberRoster({ org, members, viewer, busy, isSelf, memberActions }) {
           />
         ) : (
           <ul className="list org-members">
-            {members.map(m => (
+            {shown.map(m => (
               <li key={m.id} className="list-row">
                 <Link
                   to={m.username ? `/users/@${m.username}` : `/users/id/${m.id}`}
@@ -1007,6 +1083,21 @@ function MemberRoster({ org, members, viewer, busy, isSelf, memberActions }) {
               </li>
             ))}
           </ul>
+        )}
+        {!hidden && more > 0 && moreHref && (
+          <Link to={moreHref} className="btn btn-secondary btn-sm preview-more">
+            Show all {org.memberCount} members <ArrowRight size={14} aria-hidden="true" />
+          </Link>
+        )}
+        {onShowMore && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm preview-more"
+            onClick={onShowMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? 'Loading…' : `Show more members (${members.length} of ${org.memberCount})`}
+          </button>
         )}
       </div>
     </section>

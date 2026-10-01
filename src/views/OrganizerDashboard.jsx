@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Calendar, Eye, Pencil, Trash2, Search, Copy, Download, ClipboardCheck, ShieldAlert, ShieldCheck, ArrowRight, Inbox, CalendarPlus, Lock, Unlock, AlertTriangle } from 'lucide-react';
-import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, gradeLabel, eventPermissions } from '../utils/helpers';
+import { formatHours, formatDay, formatTimeRange, isoToLocalInput, countdown, timeAgo, eventPermissions } from '../utils/helpers';
 import { api } from '../utils/api';
 import Modal, { ModalHead } from '../components/Modal';
 import { Seats, DateChip } from '../components/Seats';
@@ -12,7 +12,12 @@ import { CATEGORY_GROUPS } from '../eventCategories';
 import { can } from '../authz';
 /* Mirrored from the server so the two roster exports cannot disagree about what
    a safe cell is — the same reason src/authz.js imports server/authz.js. */
-import { csvCell } from '../../server/csv.js';
+import { rosterOf, downloadRosterCsv } from '../utils/volunteerRoster';
+import VolunteerRosterRow from '../components/organizer/VolunteerRosterRow';
+import PreviewList from '../components/common/PreviewList';
+
+/** How many volunteers the dashboard shows before "Show all". */
+const ROSTER_PREVIEW = 6;
 const TABS = [{
   id: 'active',
   label: 'Active'
@@ -206,19 +211,7 @@ export default function OrganizerDashboard({
     }
   };
   const downloadRosterCSV = () => {
-    const roster = rosterOf(acceptedApps);
-    const rows = [['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(csvCell).join(','), ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(csvCell).join(','))].join('\n');
-    const blob = new Blob([rows], {
-      type: 'text/csv;charset=utf-8;'
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'WeVolunteer_roster_ledger.csv');
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadRosterCsv(acceptedApps);
     addToast('Roster downloaded.', 'success');
   };
   const saveEdit = async e => {
@@ -688,23 +681,23 @@ export default function OrganizerDashboard({
             <span className="empty-icon"><Inbox size={18} /></span>
             <h3>No confirmed volunteers yet</h3>
             <p>Once you confirm applications, the people helping at your events show up here.</p>
-          </div> : <div className="list">
-            {rosterOf(acceptedApps).map(person => <div key={person.id} className="list-row">
-                <span className="avatar">{person.avatar || '👤'}</span>
-                <div className="truncate s-49cdf8">
-                  <div className="person-name truncate">{person.name}</div>
-                  <div className="person-meta truncate">
-                    {[gradeLabel(person.grade), `${person.shifts} shift${person.shifts !== 1 ? 's' : ''} with you`].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                <span className={`hourspill ${!person.hours ? 'zero' : ''}`}>
-                  {formatHours(person.hours)} <span>total</span>
-                </span>
-                <button className="btn btn-ghost btn-sm" onClick={() => onViewVolunteerProfile(person.volunteer)}>
-                  Profile
-                </button>
-              </div>)}
-          </div>}
+          </div> : (
+            /* Capped, with the rest on its own page — the owner's rule for every
+               long list (FX-31): "show more … to take them to the specific
+               webpage", never an expansion that grows the dashboard. A busy
+               organizer had every volunteer they ever confirmed here. */
+            <PreviewList
+              items={rosterOf(acceptedApps)}
+              cap={ROSTER_PREVIEW}
+              className="list"
+              label="volunteers"
+              moreHref="/volunteers"
+              moreLabel={`Show all ${rosterOf(acceptedApps).length} volunteers`}
+              renderItem={person => (
+                <VolunteerRosterRow key={person.id} person={person} onViewProfile={onViewVolunteerProfile} />
+              )}
+            />
+          )}
       </section>
 
       {/* ── Quick edit ── */}
@@ -828,24 +821,3 @@ export default function OrganizerDashboard({
     </div>;
 }
 
-/** Collapse shift assignments into one row per person. */
-function rosterOf(acceptedApps) {
-  const byUser = new Map();
-  for (const app of acceptedApps) {
-    const existing = byUser.get(app.userId);
-    if (existing) {
-      existing.shifts += 1;
-    } else {
-      byUser.set(app.userId, {
-        id: app.userId,
-        name: app.volunteer?.name,
-        avatar: app.volunteer?.avatar,
-        grade: app.volunteer?.grade,
-        hours: app.volunteer?.volunteeredHours || 0,
-        shifts: 1,
-        volunteer: app.volunteer
-      });
-    }
-  }
-  return [...byUser.values()].sort((a, b) => b.hours - a.hours);
-}

@@ -29,6 +29,7 @@ const Welcome = React.lazy(() => import('../views/Welcome'));
 const Signup = React.lazy(() => import('../views/Signup'));
 const BrowseEvents = React.lazy(() => import('../views/BrowseEvents'));
 const CreateEvent = React.lazy(() => import('../views/CreateEvent'));
+const OrganizerVolunteers = React.lazy(() => import('../views/OrganizerVolunteers'));
 const PublicProfile = React.lazy(() => import('../views/PublicProfile'));
 const OrganizationPage = React.lazy(() => import('../views/OrganizationPage'));
 const OrganizationInvite = React.lazy(() => import('../views/OrganizationInvite'));
@@ -203,6 +204,12 @@ export const APP_ROUTES = [
     requiresVerified: true,
   },
   { path: '/events/:id/edit', element: <RedirectToEvent /> },
+  /* The full roster behind the dashboard's "Show all N volunteers". Gated like
+     Create event: the people who can host are the people with volunteers. */
+  {
+    path: '/volunteers', element: <OrganizerVolunteers />,
+    requiredCapAny: ['event.create', 'organization.event.create'],
+  },
   /**
    * `requiredCapAny`, mirroring the endpoints this page calls.
    *
@@ -282,6 +289,9 @@ export const APP_ROUTES = [
   { path: '/organizations', element: <OrganizationsHome />, requiredCap: 'organization.join' },
   { path: '/organizations/new', element: <OrganizationForm />, requiredCap: 'organization.create', requiresVerified: true },
   { path: '/organizations/:key/edit', element: <OrganizationForm />, requiredCap: 'organization.manage.own' },
+  /* The full roster behind a club page's "Show all N members" (N11). Before
+     `/organizations/:key` for the same reason as `/edit`. */
+  { path: '/organizations/:key/members', element: <OrganizationPage view="members" />, requiredCap: 'directory.read' },
   { path: '/organizations/:key', element: <OrganizationPage />, requiredCap: 'directory.read' },
   /* Declared BEFORE `/hours`, so "external" is never matched as part of the log
      page — React Router ranks static segments first, but the ordering is stated

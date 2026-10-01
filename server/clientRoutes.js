@@ -80,6 +80,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/events/new',
   '/events/:id/edit',
   '/checkin/:eventId',
+  /* An organizer's full list of the volunteers who have served at their
+     events (N11). A literal path with no parameter: a report from it says an
+     organizer opened their own roster, and names nobody on it. */
+  '/volunteers',
   '/calendar',
   '/impact',
   '/admin/impact',
@@ -190,6 +194,10 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   '/organizations',
   '/organizations/new',
   '/organizations/:key/edit',
+  /* A club's full roster (N11). The `:key` cannot survive matching, and the
+     shape says only that somebody opened a club's member list — a page every
+     member of that club can open. */
+  '/organizations/:key/members',
   '/organizations/:key',
   /* The invitation link. Allowed under the rule this whole file rests on: the
      STORED value is the matched pattern, so the token cannot survive matching —

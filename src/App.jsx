@@ -583,6 +583,7 @@ export function tabForPath(pathname) {
   if (pathname.startsWith('/users')) return 'directory';
   if (pathname.startsWith('/organizations')) return 'organizations';
   /* Before `/hours`, which is a prefix of it. */
+  if (pathname.startsWith('/volunteers')) return 'volunteers';
   if (pathname.startsWith('/hours/external')) return 'externalHours';
   if (pathname.startsWith('/hours')) return 'loggedHours';
   /* Before `/certificates`, which is a prefix of it: without this the viewer
@@ -814,6 +815,7 @@ export const PAGE_META = {
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
+    volunteers: { title: 'Your volunteers', sub: 'Everyone who has volunteered at your events' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Recruit', sub: 'Events on the network, and the members and clubs behind them' },
     calendar: { title: 'Calendar', sub: 'Events you host and when applications close' },
@@ -838,6 +840,7 @@ export const PAGE_META = {
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
     create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
+    volunteers: { title: 'Your volunteers', sub: 'Everyone who has volunteered at your events' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
     welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
@@ -1800,6 +1803,7 @@ function AppShell({ toasts, addToast, removeToast }) {
        omitted, because `withProps` treats an omission as a forgotten entry. */
     '/events': {},
     '/events/new': { onSubmitEvent: handleCreateEvent, addToast, setActiveTab, currentUser },
+    '/volunteers': { currentUser, events, applications, onViewVolunteerProfile: viewVolunteer, addToast },
     '/events/:id/edit': {},
     '/checkin/:eventId': { currentUser, addToast },
     '/calendar': { currentUser, events, applications, onViewEvent: openEventById },
@@ -1841,6 +1845,7 @@ function AppShell({ toasts, addToast, removeToast }) {
     /* `currentUser` so the roster can tell which row is the reader's own —
        the manage menu is hidden there, because every action in it is either
        refused by the server for yourself or already offered as `Leave`. */
+    '/organizations/:key/members': { addToast, currentUser },
     '/organizations/:key': { addToast, currentUser },
     '/hours/external': { addToast },
     '/hours': { currentUser, addToast },
