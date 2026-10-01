@@ -654,3 +654,59 @@ P2-48 (starting a preview lands on the dashboard).
 | **N10** | Error pages show the drawn wordmark alone, not the tile + name lockup the owner asked for everywhere (P2-47) | 403 page | Defect — branding consistency |
 | **N11** | A club page's member list is uncapped (39 rows) before the manager's tools | organization page | Defect — cap |
 | **N12** | The transcript prints on a cream panel. An earlier fix read the owner's "print it without the white background" as "it printed as bare white paper" and added the panel on purpose; the words can equally mean "remove the box behind it". The PDFs he attached at the time are not in the paste | `index.css` `.transcript` print rule, `9a2465b` | **Owner ruling**, with the print in front of him |
+
+
+### Rulings on the Phase 2 questions (2026-09-30)
+
+| # | Item | Ruling |
+|---|---|---|
+| 15 | N12 / FX-47 transcript print | **Plain white, no panel** — the transcript prints straight onto the sheet; the certificate keeps its look. Reverses the cream panel added in `9a2465b`, which read the request the other way |
+| 16 | N1 / P2-20 events without hours | **Participation certificate** — "Attended · no hours" in place of "+0 hrs", and a verifiable *Certificate of Participation* with no hours line |
+| 17 | N5 grade in private mode | **Visible only to organizers the student applied to** — hidden from other students and the public |
+| 18 | N7 attendance counts | **Always show "X of Y attended"**, with the "New volunteer" tag beside it under four confirmed shifts; the Reliable badge keeps its floor of four |
+
+---
+
+## Phase 4 — Fix pass: the work list
+
+Ordered by consequence. Each item is one change with a regression test watched
+to fail first, a screenshot for anything visual, and *security-review* where
+marked 🔒.
+
+**Security and data integrity**
+1. 🔒 Ownership locked to the two owner addresses wherever `super_admin` is granted (A11, ruling 6)
+2. R1 — the QR code shows the @username (`req.user` never carried it)
+3. 🔒 R2 — an unverifiable session answers 401, like every other session failure
+4. Seed split: a QA seed that refuses any real database by content, and the owner's demonstration-record tool with its exclusions (A8, decision 1)
+5. A schema-shape check an operator can run against production, and the missing CHANGELOG entry for migration 055 (A12)
+
+**Broken or contradicting the owner's words**
+6. Dashboards: organizer strip above the close-out card; student hours box above "Waiting on a reply"; both tile orders restored (A1, CK-11, CK-12)
+7. Published claims that are false: Welcome (W1) and the owner profile's "for the district" (N8)
+8. Phone messaging: thread full-height, reply box pinned (N4)
+9. Discover: search at the top (N3), count once (N2)
+10. Small defects: A2, A3, A4, A5, A9, W2, W4
+11. Caps on long lists: organizer "Your volunteers" (N6), club members (N11)
+
+**The owner's rulings**
+12. Naming everywhere (ruling 5, A10)
+13. Admin Calendar and a six-entry phone bar that fits (ruling 2, N9)
+14. Account menu of four and the dashboard "Log external hours" button (ruling 3)
+15. Certificate vs transcript: one summary document, explained (A7, FX-45); plain-white transcript print (ruling 15)
+16. No-hour events: "Attended · no hours" and a Certificate of Participation (ruling 16)
+17. Applicant rows: counts always, reliability hover text, first-timer badge (rulings 4, 18); grade visibility check (ruling 17)
+18. Suspension: red border over a static backdrop (ruling 1)
+19. Date picker everywhere, calendar jump-to-date (ruling 8)
+20. Welly: offer banner, iPhone opt-in, precise disclaimer (rulings 7, 14)
+21. Install prompt (ruling 9)
+22. Lockup on error and public pages (N10)
+
+**Requested, never built**
+23. SEO: per-page descriptions, `robots.txt`, `sitemap.xml` (FE-02)
+24. Report-a-problem screenshots (FX-75)
+25. Identity-based owner profile and the `@mahit` guarantee (FX-09/10)
+26. Headline impact figure (P2-09); un-approve an organizer (P2-12); report appeal spam (FX-70)
+27. Google Calendar link (P2-04); send a certificate by direct message (SC-04); Owner Center checks for sign-in providers and Cloudflare (SC-09)
+28. Photo OCR for paper certificates (P2-31)
+29. Legal drafts for the owner to publish: the Acceptable Use Policy (ruling 13) and the "review changes" clause (FX-44)
+30. Stale documentation and dead code (A14)
