@@ -5,6 +5,7 @@ import readline from 'readline';
 import { fileURLToPath } from 'url';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 import { openPrivilegedDb } from './resolveDb.mjs';
+import { mayHoldOwnership, platformOwnerEmails } from '../server/ownerAllowlist.js';
 
 /**
  * Creates the platform's owner accounts, directly in the database.
@@ -101,6 +102,38 @@ async function main() {
      separately, which is where the duplicate came from. */
   const { db } = await openPrivilegedDb('bin/bootstrap-owners.mjs');
   await assertSystemActor(db);
+
+  /* All or nothing: one address off the list refuses the whole run, so a
+     bootstrap can never half-succeed. Checked after the database is resolved,
+     so a wrong target is still the first thing reported. See
+     server/ownerAllowlist.js. */
+  const refused = emails.filter(e => !mayHoldOwnership(e));
+  if (refused.length > 0) {
+    for (const e of refused) console.error(`Refused: ${e} is not one of the platform's owner addresses.`);
+    console.error(`Owners are limited to: ${platformOwnerEmails().join(', ') || '(nobody — PLATFORM_OWNER_EMAILS is empty)'}.`);
+    console.error('Nothing was changed. To change who may own the platform, set PLATFORM_OWNER_EMAILS on the host deliberately.');
+    process.exit(1);
+  }
+
+  /* An EXISTING account behind an allowlisted address must be one whose holder
+     has confirmed it. Otherwise whoever registered the address first — with a
+     password sign-up, which never proves the mailbox — would be promoted and
+     keep their credential. A new account is safe: it is created with no usable
+     password, so only the mailbox (via "Forgot password") can claim it. All or
+     nothing, before anything is written. */
+  const unconfirmed = [];
+  for (const e of emails) {
+    const existing = await db.prepare(
+      'SELECT role, email_verified FROM users WHERE email = ? COLLATE NOCASE'
+    ).get(e);
+    if (existing && existing.role !== 'super_admin' && Number(existing.email_verified) !== 1) unconfirmed.push(e);
+  }
+  if (unconfirmed.length > 0) {
+    for (const e of unconfirmed) console.error(`Refused: the account at ${e} exists, but its address has never been confirmed.`);
+    console.error('Nothing was changed. The holder of that address should confirm it (the link in the');
+    console.error('verification email) first. If the account is not theirs, remove it before bootstrapping.');
+    process.exit(1);
+  }
 
   console.log('');
   console.log('About to grant PLATFORM OWNERSHIP — full, unrestricted control over');

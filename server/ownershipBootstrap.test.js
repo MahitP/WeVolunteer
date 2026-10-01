@@ -55,24 +55,66 @@ beforeEach(async () => {
   }
 
   db.exec(`
-    INSERT INTO users (id, name, username, email, password_hash, role, verified, account_status, grade, created_at, token_version)
+    INSERT INTO users (id, name, username, email, password_hash, role, verified, email_verified, account_status, grade, created_at, token_version)
     VALUES 
-    ('u1', 'User 1', 'u1', 'u1@test.local', 'hash', 'student', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
-    ('u2', 'User 2', 'u2', 'unverified@test.local', 'hash', 'student', 0, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
-    ('u3', 'User 3', 'u3', 'suspended@test.local', 'hash', 'student', 1, 'suspended', 'Adult', '2000-01-01T00:00:00.000Z', 1),
-    ('u4', 'User 4', 'u4', 'admin@test.local', 'hash', 'admin', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
-    ('u5', 'User 5', 'u5', 'super1@test.local', 'hash', 'super_admin', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
-    ('u6', 'User 6', 'u6', 'super2@test.local', 'hash', 'super_admin', 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1)
+    ('u1', 'User 1', 'u1', 'u1@test.local', 'hash', 'student', 1, 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u2', 'User 2', 'u2', 'unverified@test.local', 'hash', 'student', 0, 0, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u3', 'User 3', 'u3', 'suspended@test.local', 'hash', 'student', 1, 1, 'suspended', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u4', 'User 4', 'u4', 'admin@test.local', 'hash', 'admin', 1, 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u5', 'User 5', 'u5', 'super1@test.local', 'hash', 'super_admin', 1, 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u6', 'User 6', 'u6', 'super2@test.local', 'hash', 'super_admin', 1, 1, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1),
+    ('u7', 'User 7', 'u7', 'unconfirmed@test.local', 'hash', 'student', 1, 0, 'active', 'Adult', '2000-01-01T00:00:00.000Z', 1)
   `);
 });
 
-function runCli(scriptPath, args, input = 'y\n') {
+/* The fixture's own owner list. Ownership can only ever be granted to an
+   address on `PLATFORM_OWNER_EMAILS`, so a test that grants it says which
+   addresses it means, exactly as an operator would. */
+const FIXTURE_OWNERS = 'u1@test.local,admin@test.local,super1@test.local,super2@test.local,unconfirmed@test.local';
+
+function runCli(scriptPath, args, input = 'y\n', env = { PLATFORM_OWNER_EMAILS: FIXTURE_OWNERS }) {
   return spawnSync(process.execPath, [scriptPath, ...args], {
-    env: { ...process.env, WEV_DB_PATH: dbPath },
+    env: { ...process.env, WEV_DB_PATH: dbPath, ...env },
     input,
     encoding: 'utf-8'
   });
 }
+
+describe('bin/grant-ownership.mjs and the owner allowlist', () => {
+  it('refuses an address that is not on the owner list', () => {
+    const res = runCli(grantScript, ['u1@test.local', 'reason'], 'y\n', { PLATFORM_OWNER_EMAILS: 'someone.else@test.local' });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/not one of the platform's owner addresses/);
+    expect(db.prepare("SELECT role FROM users WHERE email = 'u1@test.local'").get().role).toBe('student');
+  });
+
+  it('refuses under the default list, which names only the two owner accounts', () => {
+    const env = { ...process.env };
+    delete env.PLATFORM_OWNER_EMAILS;
+    const res = spawnSync(process.execPath, [grantScript, 'u1@test.local', 'reason'], {
+      env: { ...env, WEV_DB_PATH: dbPath }, input: 'y\n', encoding: 'utf-8',
+    });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/not one of the platform's owner addresses/);
+  });
+
+  /* The allowlist trusts an address; this is what makes the address mean
+     something. A password sign-up never proves it controls its mailbox, so
+     somebody who registered an owner's address before the owner did would
+     otherwise be promoted, with their own password. */
+  it('refuses an account whose address has never been confirmed', () => {
+    const res = runCli(grantScript, ['unconfirmed@test.local', 'reason']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/has never been confirmed/);
+    expect(db.prepare("SELECT role FROM users WHERE email = 'unconfirmed@test.local'").get().role).toBe('student');
+  });
+
+  it('grants to an address on the list', () => {
+    const res = runCli(grantScript, ['u1@test.local', 'reason']);
+    expect(res.status).toBe(0);
+    expect(db.prepare("SELECT role FROM users WHERE email = 'u1@test.local'").get().role).toBe('super_admin');
+  });
+});
 
 describe('bin/grant-ownership.mjs', () => {
   it('refuses to grant if user is missing', () => {

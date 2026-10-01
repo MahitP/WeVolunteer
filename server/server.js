@@ -130,6 +130,7 @@ import {
 } from './instanceLock.js';
 import { verifyPolicyFiles } from './legalContent.js';
 import { withLease, LEASES } from './schedulerLease.js';
+import { mayHoldOwnership } from './ownerAllowlist.js';
 
 initDatabase();
 /* Async because it writes through a transaction; see db.js. No-op outside DEMO_MODE. */
@@ -147,6 +148,18 @@ try {
     console.warn('[ownership] Use `node bin/grant-ownership.mjs` to bootstrap an owner.');
   } else if (count > 2) {
     console.warn(`[ownership] WARNING: Platform has ${count} owners. Expected 1 or 2.`);
+  }
+  /* An owner that is not on the allowlist is warned about, not removed: the
+     list can be wrong (a typo in PLATFORM_OWNER_EMAILS), and locking the only
+     owner out at boot would be worse than the problem. The CLIs are where the
+     list is enforced. See ownerAllowlist.js. */
+  /* Named by username and id, never by address: boot logs leave the host
+     (Better Stack), and an email address is personal data. */
+  const owners = await db.prepare("SELECT id, username, email FROM users WHERE role = 'super_admin'").all();
+  for (const { id, username, email } of owners) {
+    if (!mayHoldOwnership(email)) {
+      console.warn(`[ownership] WARNING: owner account @${username} (${id}) is not on PLATFORM_OWNER_EMAILS. Revoke it with bin/revoke-ownership.mjs, or add its address to the list deliberately.`);
+    }
   }
 } catch (err) {
   console.error('[ownership] Failed to verify owner count at startup:', err.message);

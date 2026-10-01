@@ -32,8 +32,12 @@ let db;
 const EMAIL = 'bootstrap-test-owner@example.invalid';
 const SECOND = 'bootstrap-test-second@example.invalid';
 
+/* The addresses this file bootstraps. Ownership is limited to
+   PLATFORM_OWNER_EMAILS, so the fixture names them as an operator would. */
+const FIXTURE_OWNERS = [EMAIL, SECOND, 'declined-owner@example.invalid', 'squatted-owner@example.invalid'].join(',');
+
 const run = (args, input = 'y\n') => execFileSync('node', [SCRIPT, ...args], {
-  env: { ...process.env, WEV_DB_PATH: dbPath },
+  env: { ...process.env, WEV_DB_PATH: dbPath, PLATFORM_OWNER_EMAILS: FIXTURE_OWNERS },
   input,
   encoding: 'utf8',
 });
@@ -162,5 +166,47 @@ describe('bootstrap-owners.mjs', () => {
     const addresses = src.match(/[\w.+-]+@[\w-]+\.[\w.]+/g) ?? [];
     const real = addresses.filter(a => !a.endsWith('.invalid') && !a.includes('example'));
     expect(real, 'an owner address is written into the script').toEqual([]);
+  });
+});
+
+
+describe('bootstrap-owners and the owner allowlist', () => {
+  it('refuses the whole run when any address is off the list, and changes nothing', () => {
+    const before = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'super_admin'").get().n;
+    let out = '';
+    try {
+      execFileSync('node', [SCRIPT, EMAIL, 'stranger@example.invalid'], {
+        env: { ...process.env, WEV_DB_PATH: dbPath, PLATFORM_OWNER_EMAILS: EMAIL },
+        input: 'y\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      out = String(err.stderr);
+      expect(err.status).toBe(1);
+    }
+    expect(out).toMatch(/stranger@example\.invalid is not one of the platform's owner addresses/);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'super_admin'").get().n).toBe(before);
+    expect(db.prepare("SELECT 1 FROM users WHERE email = 'stranger@example.invalid'").get()).toBeUndefined();
+  });
+});
+
+describe('bootstrap-owners and an address nobody has confirmed', () => {
+  it('refuses to promote an existing account whose address was never confirmed', () => {
+    db.prepare(`
+      INSERT INTO users (id, name, email, username, password_hash, grade, role, verified,
+                         email_verified, account_status, created_at, token_version)
+      VALUES ('u-squat', 'Got There First', 'squatted-owner@example.invalid', 'gotthere', ?, '11', 'student', 1, 0, 'active', ?, 0)
+    `).run(bcrypt.hashSync('squatters-password', 10), new Date().toISOString());
+
+    let stderr = '';
+    try {
+      run(['squatted-owner@example.invalid']);
+    } catch (err) {
+      stderr = String(err.stderr);
+      expect(err.status).toBe(1);
+    }
+    expect(stderr).toMatch(/has never been confirmed/);
+    const row = db.prepare("SELECT role, email_verified FROM users WHERE id = 'u-squat'").get();
+    expect(row.role).toBe('student');
+    expect(row.email_verified).toBe(0);
   });
 });

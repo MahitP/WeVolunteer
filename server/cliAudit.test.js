@@ -31,7 +31,8 @@ let dbPath, db;
 
 const run = (script, args, input = '') => execFileSync(
   'node', [path.join(ROOT, script), ...args],
-  { env: { ...process.env, WEV_DB_PATH: dbPath }, input, encoding: 'utf8' }
+  /* `cli-u3` is promoted below; ownership is limited to PLATFORM_OWNER_EMAILS. */
+  { env: { ...process.env, WEV_DB_PATH: dbPath, PLATFORM_OWNER_EMAILS: 'cli-u3@example.invalid' }, input, encoding: 'utf8' }
 );
 
 const addUser = (id, email, role = 'student') => {

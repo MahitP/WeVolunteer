@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 import { openPrivilegedDb } from './resolveDb.mjs';
+import { mayHoldOwnership, platformOwnerEmails } from '../server/ownerAllowlist.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -39,7 +40,7 @@ async function main() {
     const { db } = await openPrivilegedDb('bin/grant-ownership.mjs');
     await assertSystemActor(db);
 
-    const user = await db.prepare('SELECT id, role, verified, account_status FROM users WHERE email = ?').get(email);
+    const user = await db.prepare('SELECT id, role, verified, email_verified, account_status FROM users WHERE email = ?').get(email);
 
     if (!user) {
       console.error(`Error: User with email ${email} not found.`);
@@ -59,6 +60,28 @@ async function main() {
     if (user.role === 'super_admin') {
       console.log(`User ${email} is already a super administrator.`);
       process.exit(0);
+    }
+
+    /* Ownership is limited to the addresses on PLATFORM_OWNER_EMAILS — by
+       default the two owner accounts. Checked after the refusals above so each
+       of them still answers the question it was asked. See server/ownerAllowlist.js. */
+    /* The allowlist names an ADDRESS; this makes the account behind it the
+       person who controls that address. A password sign-up never proves its
+       mailbox, so somebody who registered an owner's address first would
+       otherwise be promoted — keeping their own password. Confirmation is a
+       link sent to the mailbox, which they cannot follow. */
+    if (Number(user.email_verified) !== 1 && user.role !== 'super_admin') {
+      console.error(`Refused: the address on this account (${email}) has never been confirmed.`);
+      console.error('Ownership requires an address its holder has proved they control. Ask them');
+      console.error('to confirm it (the link in the verification email), then run this again.');
+      process.exit(1);
+    }
+
+    if (!mayHoldOwnership(email)) {
+      console.error(`Refused: ${email} is not one of the platform's owner addresses.`);
+      console.error(`Owners are limited to: ${platformOwnerEmails().join(', ') || '(nobody — PLATFORM_OWNER_EMAILS is empty)'}.`);
+      console.error('To change who may own the platform, set PLATFORM_OWNER_EMAILS on the host deliberately.');
+      process.exit(1);
     }
 
     /**
