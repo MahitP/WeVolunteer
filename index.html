@@ -25,6 +25,8 @@
     -->
     <link rel="mask-icon" href="/mark.svg" color="#0f5a3a" />
     <link rel="manifest" href="/site.webmanifest" />
+    <!-- Styles the pre-mount placeholder in #root; inline styles are blocked by the CSP. -->
+    <link rel="stylesheet" href="/boot.css" />
     <meta name="theme-color" content="#0f5a3a" />
     <meta name="description" content="Volunteer scheduling and service-hour tracking for schools." />
     <!--
@@ -47,7 +49,8 @@
     <script src="/a11y-prefs.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot"><img class="boot-mark" src="/favicon.svg" alt="" width="56" height="56" /><span>WeVolunteer</span></div></div>
+    <noscript>WeVolunteer needs JavaScript to run. Turn it on in your browser's settings and reload this page.</noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
