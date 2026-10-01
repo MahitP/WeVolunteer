@@ -5,6 +5,7 @@ import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, countdown } from '../utils/helpers';
 import { DateChip } from '../components/Seats';
+import CopyableEmail from '../components/common/CopyableEmail';
 
 /**
  * The page a student checks before trusting an event.
@@ -117,9 +118,9 @@ export default function OrganizerProfile({ userId, onBack, onEditProfile, onView
 
             <div className="row row-wrap small dim" style={{ gap: 'var(--s4)', marginTop: 'var(--s3)' }}>
               {organizer.email && (
-                <a className="row" style={{ gap: 5 }} href={`mailto:${organizer.email}`}>
-                  <Mail size={12} /> {organizer.email}
-                </a>
+                <span className="row" style={{ gap: 5 }}>
+                  <Mail size={12} aria-hidden="true" /> <CopyableEmail address={organizer.email} />
+                </span>
               )}
               <span className="row" style={{ gap: 5 }}>
                 <CalendarClock size={12} /> Organizing since {formatDay(organizer.joinedAt)}

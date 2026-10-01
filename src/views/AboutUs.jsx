@@ -5,6 +5,7 @@ import { APP_NAME, SUPPORT_EMAIL, DOCUMENT_SIGNATORY_TITLE } from '../config';
 import { api } from '../utils/api';
 import { avatarColorValue } from '../utils/avatarColors';
 import useDocumentTitle from '../hooks/useDocumentTitle';
+import CopyableEmail from '../components/common/CopyableEmail';
 
 /**
  * About Us — what WeVolunteer is for.
@@ -455,8 +456,8 @@ export default function AboutUs() {
         {' · '}
         {SUPPORT_EMAIL ? (
           <>
-            Something here unclear or wrong?{' '}
-            <a className="policy-link" href={`mailto:${SUPPORT_EMAIL}`}>Write to us</a>
+            Something here unclear or wrong? Write to us at{' '}
+            <CopyableEmail address={SUPPORT_EMAIL} />
             {' — it goes to one person, and that is who will answer.'}
           </>
         ) : (
