@@ -6,6 +6,7 @@ import {
 import { APP_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
+import { NO_HOURS_LABEL } from '../utils/serviceRecord';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 import ServiceInsights from '../components/ServiceInsights';
@@ -568,9 +569,14 @@ export default function VolunteerDashboard({
                       <div className="timeline-date">{formatDay(slot?.startDatetime)}</div>
                       <div className="timeline-title">{event.title}</div>
                       <div className="timeline-meta">{slot?.name}</div>
-                      <div className="hourspill" style={{ marginTop: 6 }}>
-                        +{formatHours(app.attendance?.hoursAwarded)} <span>credited</span>
-                      </div>
+                      {event.creditsHours === false ? (
+                        /* An event that gives no hours (ruling 16): no "+0". */
+                        <div className="hourspill zero" style={{ marginTop: 6 }}>{NO_HOURS_LABEL}</div>
+                      ) : (
+                        <div className="hourspill" style={{ marginTop: 6 }}>
+                          +{formatHours(app.attendance?.hoursAwarded)} <span>credited</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 />

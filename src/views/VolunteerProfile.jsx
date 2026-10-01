@@ -5,6 +5,7 @@ import { DistinctionTag } from '../components/profile/Distinction';
 import EmptyState from '../components/common/EmptyState';
 import { api } from '../utils/api';
 import { formatHours, formatDay, formatTimeRange, gradeLabel, countdown } from '../utils/helpers';
+import { creditedLabel } from '../utils/serviceRecord';
 import { DateChip } from '../components/Seats';
 import PreviewList from '../components/common/PreviewList';
 import BadgesList from '../components/BadgesList';
@@ -289,7 +290,7 @@ export default function VolunteerProfile({
                         <MapPin size={11} /> {c.location}
                       </div>
                     </div>
-                    <span className="hourspill">+{formatHours(c.hours)}</span>
+                    <span className={`hourspill${c.creditsHours === false ? ' zero' : ''}`}>{creditedLabel(c)}</span>
                   </div>
                 )}
               />

@@ -86,18 +86,26 @@ export default function CertificateDocument({ certificate, volunteer, headingLev
       <div className="certificate-body">
         <div className="certificate-org">WeVolunteer Network</div>
         <div className="certificate-rule" />
-        <Heading className="certificate-title">Certificate of Community Service</Heading>
+        {/* A Certificate of Participation for an event that gives no hours
+            (ruling 16): no "0 hrs of verified community service". */}
+        <Heading className="certificate-title">
+          {certificate.participation ? 'Certificate of Participation' : 'Certificate of Community Service'}
+        </Heading>
 
         <p className="certificate-lede">This certifies that</p>
         <div className="certificate-name">{name}</div>
         {gradeLabel(grade) && <p className="certificate-sub">{gradeLabel(grade)}</p>}
 
-        <p className="certificate-lede">volunteered at</p>
+        <p className="certificate-lede">{certificate.participation ? 'took part in' : 'volunteered at'}</p>
         <div className="certificate-event">{certificate.title}</div>
         {context && <p className="certificate-sub">{context}</p>}
 
-        <div className="certificate-hours">{formatHours(certificate.hours)}</div>
-        <p className="certificate-sub">of verified community service</p>
+        {!certificate.participation && (
+          <>
+            <div className="certificate-hours">{formatHours(certificate.hours)}</div>
+            <p className="certificate-sub">of verified community service</p>
+          </>
+        )}
       </div>
 
       {/**

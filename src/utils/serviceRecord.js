@@ -29,6 +29,24 @@
  * done elsewhere, deliberately never added to credited hours at any layer.
  */
 
+import { formatHours } from './helpers';
+
+/**
+ * What an event that gives no hours says where hours would go (ruling 16).
+ *
+ * An organizer can post an event that credits no hours (P2-20), and every
+ * surface used to print the zero — "+0 hrs" — which reads as a mistake. The
+ * owner's wording replaces it. Decided by the event's flag, never by the
+ * number: zero at an hours-giving event (the volunteer left at once) is a
+ * fact about the volunteer and still reads "+0 hrs".
+ */
+export const NO_HOURS_LABEL = 'Attended · no hours';
+
+/** `+2 hrs`, or the no-hours wording. `creditsHours` absent means an ordinary event. */
+export function creditedLabel({ creditsHours, hours }) {
+  return creditsHours === false ? NO_HOURS_LABEL : `+${formatHours(hours)}`;
+}
+
 /**
  * One row per event, newest first.
  *
@@ -57,6 +75,9 @@ export function aggregateServiceByEvent(completed) {
         location: row.location ?? '',
         category: row.category ?? '',
         hours,
+        /* Carried so the transcript can say "No hours" for an event that
+           gives none rather than "0 hrs" (ruling 16). */
+        creditsHours: row.creditsHours !== false,
         shifts: 1,
         firstStart: row.startDatetime ?? null,
         lastEnd: row.endDatetime ?? null,

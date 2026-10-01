@@ -117,7 +117,9 @@ function ellipsise(text, font, size, maxWidth) {
  * @param {string} certificate.eventTitle
  * @param {string|null} [certificate.organizationName]
  * @param {string|null} [certificate.location]
- * @param {string} certificate.hoursLabel   e.g. "12 hours"
+ * @param {boolean} [certificate.participation]  an event that gives no hours:
+ *   a Certificate of Participation, with no hours line (ruling 16)
+ * @param {string|null} certificate.hoursLabel   e.g. "12 hours"; null for participation
  * @param {string} certificate.dateLabel    e.g. "14 March 2026"
  * @param {string} certificate.organizerName
  * @param {boolean} [certificate.organizerVerified]
@@ -145,7 +147,7 @@ export async function buildCertificatePdf(certificate) {
   c.rule(mid, y, 44, CERT_COLORS.accent, 2);
   y -= 34;
 
-  c.centered('Certificate of Community Service', mid, y, {
+  c.centered(certificate.participation ? 'Certificate of Participation' : 'Certificate of Community Service', mid, y, {
     font: 'Times-Bold', size: 27, color: CERT_COLORS.ink,
   });
   y -= 42;
@@ -177,7 +179,7 @@ export async function buildCertificatePdf(certificate) {
   }
   y -= 10;
 
-  c.centered('volunteered at', mid, y, { font: 'Times-Roman', size: 12, color: CERT_COLORS.ink2 });
+  c.centered(certificate.participation ? 'took part in' : 'volunteered at', mid, y, { font: 'Times-Roman', size: 12, color: CERT_COLORS.ink2 });
   y -= 28;
 
   for (const line of wrap(certificate.eventTitle, 'Times-Bold', 17, PAGE.width - 200, 2)) {
@@ -193,13 +195,17 @@ export async function buildCertificatePdf(certificate) {
   }
   y -= 8;
 
-  c.centered(certificate.hoursLabel, mid, y, {
-    font: 'Times-Bold', size: 24, color: CERT_COLORS.accent,
-  });
-  y -= 18;
-  c.centered('of verified community service', mid, y, {
-    font: 'Times-Roman', size: 10.5, color: CERT_COLORS.ink2,
-  });
+  /* No hours line on a Certificate of Participation: "0 hrs of verified
+     community service" certifies nothing and reads as a mistake (ruling 16). */
+  if (!certificate.participation) {
+    c.centered(certificate.hoursLabel, mid, y, {
+      font: 'Times-Bold', size: 24, color: CERT_COLORS.accent,
+    });
+    y -= 18;
+    c.centered('of verified community service', mid, y, {
+      font: 'Times-Roman', size: 10.5, color: CERT_COLORS.ink2,
+    });
+  }
 
   /**
    * Two signature blocks, at fixed positions near the foot.
@@ -275,9 +281,13 @@ export async function buildCertificatePdf(certificate) {
   c.qr(modules, qrLeft, 48, qrSize, CERT_COLORS.ink);
 
   return buildPdf(c, {
-    title: `Certificate of Community Service — ${certificate.eventTitle}`,
+    title: certificate.participation
+      ? `Certificate of Participation — ${certificate.eventTitle}`
+      : `Certificate of Community Service — ${certificate.eventTitle}`,
     author: 'WeVolunteer',
-    subject: `${certificate.hoursLabel} of verified community service`,
+    subject: certificate.participation
+      ? `Participation in ${certificate.eventTitle}`
+      : `${certificate.hoursLabel} of verified community service`,
   });
 }
 

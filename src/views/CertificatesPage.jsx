@@ -139,7 +139,7 @@ export default function CertificatesPage() {
               <span className="truncate" style={{ flex: 1 }}>
                 <span className="person-name truncate">{c.title}</span>
                 <span className="person-meta truncate tnum">
-                  {formatDay(c.endDatetime)} · {formatHours(c.hours)}
+                  {formatDay(c.endDatetime)} · {c.participation ? 'Participation' : formatHours(c.hours)}
                 </span>
                 {/**
                   * The event was called off after these hours were confirmed.

@@ -144,6 +144,10 @@ router.get('/api/certificates/:code', authenticateToken, async (req, res) => {
          certificate was issued, and the viewer says so. See the header of
          `getCertificateForOwner`. */
       eventCancelled: row.status === 'cancelled',
+      /* An event that gives no hours issues a Certificate of Participation
+         (ruling 16). From the event's flag, never from the number: somebody
+         credited 0 at an hours-giving event is a different thing. */
+      participation: Number(row.credits_hours) === 0,
       volunteer: {
         name: volunteer?.name ?? null,
         grade: volunteer?.grade ?? null,
@@ -196,7 +200,8 @@ router.get('/api/certificates/:code/pdf', authenticateToken, async (req, res) =>
       eventTitle: row.title,
       organizationName: row.organization_name ?? null,
       location: row.location ?? null,
-      hoursLabel: formatHours(row.hours),
+      participation: Number(row.credits_hours) === 0,
+      hoursLabel: Number(row.credits_hours) === 0 ? null : formatHours(row.hours),
       dateLabel: formatFullDate(row.last_end),
       organizerName: row.organizer_name || 'Organizer unavailable',
       organizerVerified: row.organizer_verified === 1,

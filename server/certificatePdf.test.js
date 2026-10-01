@@ -221,3 +221,28 @@ describe('the printed palette matches the on-screen document', () => {
     expect(token(cssToken)?.toLowerCase()).toBe(CERT_COLORS[key].toLowerCase());
   });
 });
+
+/**
+ * An event that gives no hours issues a Certificate of Participation (ruling
+ * 16). It used to issue a Certificate of Community Service reading "0 hrs …
+ * of verified community service", which certifies nothing and reads as a
+ * mistake to whoever is shown it.
+ */
+describe('a participation certificate', () => {
+  it('says it is one, and has no hours line', async () => {
+    const { text } = await textOf(await buildCertificatePdf(certificate({ participation: true, hoursLabel: null })));
+    expect(text).toContain('Certificate of Participation');
+    expect(text).toContain('took part in');
+    expect(text).toContain('Riverside Beach Cleanup (Saturday)');
+    expect(text).not.toContain('Community Service');
+    expect(text).not.toContain('of verified community service');
+    expect(text).not.toMatch(/\bhrs?\b/);
+  });
+
+  it('names itself the same way in the file\'s own properties', async () => {
+    const { doc } = await textOf(await buildCertificatePdf(certificate({ participation: true, hoursLabel: null })));
+    const { info } = await doc.getMetadata();
+    expect(info.Title).toMatch(/^Certificate of Participation/);
+    expect(info.Subject ?? '').not.toMatch(/hrs|hours/i);
+  });
+});

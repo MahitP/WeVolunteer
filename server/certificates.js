@@ -342,7 +342,7 @@ export async function getCertificateForOwner(db, code, userId) {
    * verify endpoint both carry.
    */
   const row = await db.prepare(`
-    SELECT e.id AS event_id, e.title, e.category, e.location, e.status,
+    SELECT e.id AS event_id, e.title, e.category, e.location, e.status, e.credits_hours,
            u.name AS organizer_name, u.verified AS organizer_verified,
            COALESCE(SUM(at.hours_awarded), 0) AS hours,
            COUNT(*) AS shifts,

@@ -423,7 +423,7 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
 router.get('/api/certificates', authenticateToken, async (req, res) => {
   try {
     const rows = await db.prepare(`
-      SELECT e.id as event_id, e.title, e.category, e.location, e.status,
+      SELECT e.id as event_id, e.title, e.category, e.location, e.status, e.credits_hours,
              u.name as organizer_name, u.verified as organizer_verified,
              COALESCE(SUM(at.hours_awarded), 0) as hours,
              COUNT(*) as shifts,
@@ -509,6 +509,9 @@ router.get('/api/certificates', authenticateToken, async (req, res) => {
       /* So the row can carry the sentence `CertificateView` carries: the
          document stays valid and its hours are not in the totals. */
       eventCancelled: r.status === 'cancelled',
+      /* A Certificate of Participation, from an event that gives no hours
+         (ruling 16). */
+      participation: Number(r.credits_hours) === 0,
     })));
   } catch (err) {
     console.error('Certificates error:', err);
@@ -635,18 +638,22 @@ router.get('/api/certificates/verify/:code', async (req, res) => {
     if (!cert) return res.status(404).json({ valid: false, error: 'No certificate matches that code' });
 
     if (cert.volunteer_name_snapshot) {
+      /* The event may be gone for a snapshot; without it there is no flag to
+         read, and the snapshot's own hours stand as they were issued. */
+      const event = await db.prepare('SELECT credits_hours FROM events WHERE id = ?').get(cert.event_id);
       return res.json({
         valid: true,
         volunteerName: cert.volunteer_name_snapshot,
         eventTitle: cert.event_name_snapshot,
         organizerName: cert.organization_snapshot,
         hours: Number(cert.hours_snapshot),
+        participation: event ? Number(event.credits_hours) === 0 : false,
         completedAt: cert.completed_at_snapshot
       });
     }
 
     const row = await db.prepare(`
-      SELECT u.name AS volunteer_name, e.title, org.name AS organizer_name,
+      SELECT u.name AS volunteer_name, e.title, e.credits_hours, org.name AS organizer_name,
              COALESCE(SUM(at.hours_awarded),0) AS hours, MAX(s.end_datetime) AS last_end
       FROM attendance at
       JOIN slots s ON at.slot_id = s.id
@@ -670,6 +677,9 @@ router.get('/api/certificates/verify/:code', async (req, res) => {
       eventTitle: row.title,
       organizerName: row.organizer_name,
       hours: Number(row.hours),
+      /* What the document is, so a reader checking it is told the same thing
+         the paper says: a Certificate of Participation carries no hours. */
+      participation: Number(row.credits_hours) === 0,
       completedAt: row.last_end
     });
   } catch {

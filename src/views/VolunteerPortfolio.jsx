@@ -247,7 +247,9 @@ export default function VolunteerPortfolio({ currentUser }) {
                         <span className="transcript-meta tnum">{e.shifts} shifts</span>
                       )}
                     </td>
-                    <td className="transcript-hours-col tnum">{formatHours(e.hours)}</td>
+                    {/* "No hours" for an event that gives none (ruling 16):
+                        it is on the record, and the zero is not a figure. */}
+                    <td className="transcript-hours-col tnum">{e.creditsHours === false ? 'No hours' : formatHours(e.hours)}</td>
                   </tr>
                 ))}
               </tbody>

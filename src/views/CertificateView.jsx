@@ -155,7 +155,8 @@ export default function CertificateView({ currentUser, addToast }) {
     );
   }
 
-  const hoursLabel = formatHours(certificate.hours);
+  /* A Certificate of Participation carries no hours (ruling 16). */
+  const hoursLabel = certificate.participation ? 'Participation' : formatHours(certificate.hours);
 
   return (
     <div className="page stack-lg">
@@ -226,7 +227,9 @@ export default function CertificateView({ currentUser, addToast }) {
       <p className="small dim row no-print certificate-note">
         <ShieldCheck size={14} aria-hidden="true" />
         <span>
-          Hours on this certificate were confirmed by the organizer after the event.
+          {certificate.participation
+            ? 'Your attendance was confirmed by the organizer after the event.'
+            : 'Hours on this certificate were confirmed by the organizer after the event.'}
           Anyone can check it at <span className="tnum">{certificate.verifyLabel}</span>.
         </span>
       </p>

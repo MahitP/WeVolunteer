@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../utils/api';
 import { ShieldCheck, ShieldAlert, Loader2, Calendar, Search } from 'lucide-react';
 import { formatDay, formatHours } from '../utils/helpers';
+import { NO_HOURS_LABEL } from '../utils/serviceRecord';
 import { APP_NAME, SCHOOL_NAME } from '../config';
 import Wordmark from '../components/common/Wordmark';
 import useDocumentTitle from '../hooks/useDocumentTitle';
@@ -307,7 +308,7 @@ export default function CertificateVerification() {
                 Verified Certificate
               </h1>
               <p className="lead" style={{ textAlign: 'center', marginBottom: 'var(--s5)' }}>
-                This is a valid {SCHOOL_NAME} community service record.
+                This is a valid {SCHOOL_NAME} {certData.participation ? 'participation' : 'community service'} record.
               </p>
 
               <div className="surface inset" style={{ padding: 'var(--s5)', borderRadius: 8, marginBottom: 'var(--s5)' }}>
@@ -316,12 +317,23 @@ export default function CertificateVerification() {
                     <div className="small dim">Student</div>
                     <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>{certData.volunteerName}</div>
                   </div>
-                  <div>
-                    <div className="small dim">Hours Credited</div>
-                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--brand)' }}>
-                      {formatHours(certData.hours)}
+                  {/* What the document is, as the paper says it (ruling 16): a
+                      Certificate of Participation carries no hours. */}
+                  {certData.participation ? (
+                    <div>
+                      <div className="small dim">Certificate of Participation</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--brand)' }}>
+                        {NO_HOURS_LABEL}
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div>
+                      <div className="small dim">Hours Credited</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--brand)' }}>
+                        {formatHours(certData.hours)}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <div className="small dim">Event</div>
                     <div style={{ fontWeight: 500 }}>{certData.eventTitle}</div>
