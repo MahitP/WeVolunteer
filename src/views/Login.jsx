@@ -1012,7 +1012,7 @@ export default function Login({ onLoginSuccess, addToast }) {
                   autoCapitalize="none"
                   autoCorrect="off"
                   spellCheck="false"
-                  placeholder="you@example.com or your username"
+                  placeholder="you@example.com"
                   value={identifier}
                   onChange={e => { setIdentifier(e.target.value); if (errorField === 'identifier') setErrorField(null); }}
                   aria-invalid={errorField === 'identifier'}
