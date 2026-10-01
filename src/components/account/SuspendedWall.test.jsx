@@ -166,3 +166,45 @@ describe('SuspendedWall', () => {
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 });
+
+/**
+ * The owner's look, without the live app behind it (ruling 1).
+ *
+ * He asked for a splash screen "with a like red boarder or smth blurred
+ * background app" (FX-03). The first attempt rendered the real shell under a
+ * blurred, inert overlay, and it was reverted for three reasons recorded in
+ * App.jsx: it moved the suspension check below the verification wall, `blur()`
+ * on the shell broke every fixed-position toast and modal, and it mounted the
+ * whole authenticated app for an account the server answers on four routes.
+ *
+ * So the backdrop is a silhouette: a few empty blocks shaped like the app,
+ * blurred, decorative, and holding nothing — no data, no text, no controls.
+ */
+describe('the wall\'s look (ruling 1)', () => {
+  it('sits over a decorative backdrop that carries nothing', async () => {
+    const { container } = renderWall();
+    const backdrop = container.querySelector('.suspended-backdrop');
+    expect(backdrop).not.toBeNull();
+    expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+    expect(backdrop.textContent.trim()).toBe('');
+    expect(backdrop.querySelectorAll('a, button, input, textarea, select, [tabindex]')).toHaveLength(0);
+  });
+
+  it('has a red border around the wall itself', () => {
+    const { container } = renderWall();
+    expect(container.querySelector('main.suspended-card')).not.toBeNull();
+  });
+
+  it('blurs the backdrop only, and nothing fixed lives inside it', async () => {
+    const { readFileSync } = await import('node:fs');
+    const css = readFileSync(`${process.cwd()}/src/index.css`, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const card = /\.suspended-card\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(card).toMatch(/border:\s*2px solid var\(--danger\)/);
+    const backdrop = /\.suspended-backdrop\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(backdrop).toMatch(/filter:\s*blur\(/);
+    expect(backdrop).toMatch(/pointer-events:\s*none/);
+    /* The blur is on the backdrop, never on the screen that holds the wall —
+       that is the containing-block trap the reverted version fell into. */
+    expect(css).not.toMatch(/\.suspended-screen\s*\{[^}]*filter:/);
+  });
+});

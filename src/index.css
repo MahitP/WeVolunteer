@@ -6504,6 +6504,59 @@ input:disabled + .premium-slider {
   margin-bottom: var(--s4);
 }
 .auth-icon-danger { background: var(--danger-tint); color: var(--danger); }
+
+/* ── The suspension wall (FX-03, ruling 1) ────────────────────────────────
+   A red-bordered card over a blurred silhouette of the app. The silhouette
+   is empty blocks, not the app: the live shell under a blur was reverted
+   because blur() on it captured every fixed-position toast and modal, and it
+   mounted the whole app for an account the server answers on four routes.
+   The blur is on the backdrop alone, never on the screen holding the card. */
+.suspended-screen {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.suspended-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: var(--s5);
+  padding: var(--s5);
+  filter: blur(12px);
+  opacity: 0.7;
+  pointer-events: none;
+}
+.suspended-rail,
+.suspended-block {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+.suspended-page {
+  display: grid;
+  grid-template-rows: 3.5rem 9rem 7rem minmax(0, 1fr);
+  gap: var(--s5);
+  min-height: 0;
+}
+.suspended-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s5);
+}
+.suspended-card {
+  background: var(--surface);
+  border: 2px solid var(--danger);
+  border-radius: var(--r-lg);
+  padding: var(--s8) var(--s6);
+  box-shadow: 0 0 0 6px var(--danger-tint);
+}
+@media (max-width: 700px) {
+  .suspended-backdrop { grid-template-columns: minmax(0, 1fr); padding: var(--s3); }
+  .suspended-rail { display: none; }
+  .suspended-row { grid-template-columns: minmax(0, 1fr); }
+}
 .auth-icon-warn { background: var(--warn-tint); color: var(--warn); }
 
 /* `.auth-spinner` and its `authSpin` keyframe are gone. Their only consumer was

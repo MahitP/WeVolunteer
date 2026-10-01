@@ -98,14 +98,40 @@ export default function SuspendedWall({ user, suspension, onSignOut }) {
   };
 
   return (
-    <div className="auth">
+    <div className="auth suspended-screen">
+      {/**
+        * The owner's "blurred background app" (FX-03, ruling 1), as a
+        * silhouette rather than the app.
+        *
+        * The first attempt rendered the real shell under a blurred, inert
+        * overlay and was reverted for the three reasons recorded in App.jsx:
+        * the suspension check moved below the verification wall, `blur()` on
+        * the shell broke every fixed-position toast and modal, and it mounted
+        * the authenticated app for an account the server answers on four
+        * routes. These are empty blocks shaped like the app — a rail, a bar,
+        * some cards — blurred and decorative. They hold no data, no text and
+        * no controls, and nothing in them is fixed-position.
+        */}
+      <div className="suspended-backdrop" aria-hidden="true">
+        <div className="suspended-rail" />
+        <div className="suspended-page">
+          <div className="suspended-block" />
+          <div className="suspended-block" />
+          <div className="suspended-row">
+            <div className="suspended-block" />
+            <div className="suspended-block" />
+            <div className="suspended-block" />
+          </div>
+          <div className="suspended-block" />
+        </div>
+      </div>
       {/* `.stack` on top of `.auth-form`: the form is a flex column with NO gap,
           so without it every section here butted straight into the next — the
           end-date line ran into the "Ask us to look again" heading with nothing
           between them. `.stack`'s var(--s4) is the same rhythm the rest of the
           product uses, rather than a margin invented for this screen. */}
       <main
-        className="auth-form auth-form-wide stack"
+        className="auth-form auth-form-wide stack suspended-card"
         aria-labelledby="suspended-heading"
       >
         <div className="auth-icon auth-icon-danger" aria-hidden="true">
