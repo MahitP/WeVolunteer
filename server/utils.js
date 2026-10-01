@@ -496,7 +496,10 @@ export function authenticateToken(req, res, next) {
    */
   jwt.verify(token, JWT_SECRET, async (err, decodedUser) => {
     try {
-    if (err) return res.status(403).json({ error: 'Invalid or expired token' });
+    /* 401, not 403: a session the server cannot verify — forged, expired, or
+       signed with a rotated secret — is an authentication failure, and the
+       client signs the person out on 401. 403 told them they lacked permission. */
+    if (err) return res.status(401).json({ error: 'Your session has expired. Please sign in again.', code: 'session_invalid' });
 
     // A preauth token must never be accepted as a full session token.
     if (decodedUser.preauth) {
@@ -513,7 +516,7 @@ export function authenticateToken(req, res, next) {
          columns were added to the schema and to `buildPrincipal` and did nothing
          at all on a real request until they were added HERE — while every unit
          test passed, because those build a principal from `SELECT *`. */
-      `SELECT id, role, email, name, email_verified, token_version, account_status,
+      `SELECT id, role, email, name, username, email_verified, token_version, account_status,
               suspended_until, suspended_at, suspension_reason,
               tfa_enabled, tfa_email_enabled,
               preview_persona, preview_expires_at
@@ -599,6 +602,11 @@ export function authenticateToken(req, res, next) {
       role: userRow.role,
       email: userRow.email,
       name: userRow.name,
+      /* Read by the check-in code, which shows the volunteer as @username (the
+         owner's request). It was absent from both this object and the query
+         above, so `req.user.username` was always undefined and every code fell
+         back to the display name — the trap the comment above the query names. */
+      username: userRow.username,
       email_verified: userRow.email_verified
     };
 

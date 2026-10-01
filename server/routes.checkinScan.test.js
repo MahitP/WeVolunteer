@@ -96,6 +96,18 @@ describe('QR check-in', () => {
       expect(new Date(res.body.expiresAt).getTime()).toBeGreaterThan(Date.now());
     });
 
+    /* P2-28, in the owner's words: the code shows "below @username". The
+       route asked `req.user.username`, which the session never carried, so
+       every code fell back to the display name — found by the week-long
+       rehearsal, 86 codes out of 86. */
+    it("names the volunteer by their @username, which is what the owner asked the code to show", async () => {
+      const res = await mint();
+      expect(res.status).toBe(200);
+      const { username } = await db.prepare('SELECT username FROM users WHERE email = ?').get(STUDENT);
+      expect(username, 'fixture: the demo student has a username').toBeTruthy();
+      expect(res.body.displayName).toBe(`@${username}`);
+    });
+
     it('stores only a hash, never the code itself', async () => {
       const res = await mint();
       const raw = res.body.token.slice('wev1:'.length);
