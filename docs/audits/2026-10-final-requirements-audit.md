@@ -727,10 +727,22 @@ marked 🔒.
 | 10 | Done | `8f656b2` (A2), `290552e` (A3, A4), `f20f4ab` (A5), `381f374` (A9), `b7375bc` (W2), `11f5803` (W4) | |
 | 11 | Done | `a1ec7c9` | Also fixed: the members page redirected to the club page; the count included suspended accounts (39 over a list of 38); the roster was capped at 100 with no way past it. The `?membersFrom=` paging sits behind the existing roster gate. Combined *security-review* pending |
 | 12 | Done | `e01e550` | `ownerNames.test.jsx` pins one name per page across hub tile, page title and Welly |
+| 13 | Done | `a339315`, `fa5cb5e` | Administrators get Calendar, showing every platform event (it showed only deadlines before); six entries fit from 360px. `fa5cb5e`: the phone bar's overflow fade had never been set on a real network |
 | 14 | Done | `8f656b2` | Account menu of four; "Log external hours" button on the student dashboard |
+| 15 | Done | `c32be23` | The third document is gone; the transcript prints white. The print rule had never applied (the screen rule outranked it), so the cream panel was the screen rule all along |
+| 16 | Done | `3373f79` | Certificate of Participation on screen, in the PDF and on /verify; "Attended · no hours" on dashboard, profile and transcript |
+| 17 | Done | `c237410` | Ruling 17 verified without change: grade is gated on hosting or `user.contact.read` |
+| 18 | Done | `17e6b86` | Silhouette backdrop, never the live app |
+| 19 | Done | `ac5ee35` | Also: `.field-row` second columns sat 16px low everywhere |
+| 20 | Done | `0c35281` | iOS Balanced under a 512 MiB experimental ceiling, opt-in |
+| 21 | Done | `4c4bb09` | PNG icons and an apple-touch-icon added; the button appears only when the browser offers installation |
+| 22 | Done | `c16a584` | `Wordmark` is now rendered nowhere; kept for the revamp hand-over |
 
 **Combined *security-review* before release-ready:** `0e74e2a`, `5784b79`
-(session middleware), `a1ec7c9` (roster paging on a privacy-gated route).
+(session middleware), `a1ec7c9` (roster paging on a privacy-gated route),
+`3373f79` (the public verify endpoint gains a field).
+
+Full suite at `ac5ee35`: 11,227 passed, 0 failed.
 
 **For the revamp hand-over (Phase 7):** on a phone, the organizer's volunteer
 row gives the name about a third of the width. It wraps now rather than
