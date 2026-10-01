@@ -37,7 +37,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge,
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge, LifeBuoy
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -79,6 +79,14 @@ export const AREAS = [
     icon: Scale,
     title: 'Appeals',
     blurb: 'Suspended people asking to be heard, aged against the five-working-day reply this platform promises them.',
+  },
+  {
+    id: 'issues',
+    to: '/admin/issues',
+    cap: 'report.resolve',
+    icon: LifeBuoy,
+    title: 'Reported problems',
+    blurb: 'What people sent from Report an Issue, with their screenshots. Security and privacy reports are read here only.',
   },
   {
     id: 'organizers',

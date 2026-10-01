@@ -16,6 +16,8 @@ export {
   MIN_DESCRIPTION,
   MAX_DESCRIPTION,
   validateIssue,
+  /* The staff view marks security and privacy reports the way the email does. */
+  isSensitive,
 } from '../server/issueReports.js';
 
 /**

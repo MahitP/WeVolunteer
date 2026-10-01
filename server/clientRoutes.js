@@ -105,6 +105,9 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
      nothing — so a report from here says only that somebody opened the index. */
   '/admin/moderation',
   '/admin/appeals',
+  /* Reported problems. A literal path; the reports are chosen on the page,
+     so a report from here names the screen and nobody in it. */
+  '/admin/issues',
   '/admin/audit-logs',
   '/admin/roster',
   /* Badge administration. A literal path with no parameter, and the person

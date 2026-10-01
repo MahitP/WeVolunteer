@@ -4,7 +4,7 @@
  * DO NOT EDIT. Run `node bin/generate-postgres-schema.mjs` instead, and read
  * that file's header for why this is derived rather than written.
  *
- * Contents: 70 tables, 107 indexes, 20 triggers
+ * Contents: 71 tables, 107 indexes, 20 triggers
  * (as 20 PL/pgSQL functions plus 20 triggers), and the
  * migration bookkeeping table.
  *
@@ -626,6 +626,16 @@ CREATE TABLE IF NOT EXISTS events (
          module's header for why this is the one derived value kept here. */
       first_slot_start TEXT, instructions TEXT, attendee_visibility TEXT NOT NULL DEFAULT 'accepted', address TEXT, latitude double precision, longitude double precision, organization_id TEXT REFERENCES organizations(id) ON DELETE SET NULL, credits_hours INTEGER NOT NULL DEFAULT 1, audience TEXT NOT NULL DEFAULT 'everyone', hours_closed_out_at TEXT, hours_closed_out_by TEXT,
       FOREIGN KEY(organizer_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+CREATE TABLE IF NOT EXISTS issue_report_screenshots (
+      issue_id    TEXT NOT NULL REFERENCES issue_reports(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL CHECK(position BETWEEN 1 AND 3),
+      mime_type   TEXT NOT NULL,
+      data        TEXT NOT NULL,
+      bytes       INTEGER NOT NULL,
+      created_at  TEXT NOT NULL,
+      PRIMARY KEY (issue_id, position)
     );
 
 CREATE TABLE IF NOT EXISTS moderation_actions (
@@ -1545,7 +1555,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 71;
+export const LATEST_MIGRATION_VERSION = 72;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

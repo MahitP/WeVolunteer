@@ -597,6 +597,7 @@ export function tabForPath(pathname) {
      recorded above, for the third time. */
   if (pathname.startsWith('/appeals')) return 'appealForm';
   if (pathname.startsWith('/admin/appeals')) return 'appeals';
+  if (pathname.startsWith('/admin/issues')) return 'issues';
   if (pathname.startsWith('/admin/moderation')) return 'moderation';
   if (pathname.startsWith('/admin/impact')) return 'adminImpact';
   if (pathname.startsWith('/owner')) return 'owner';
@@ -849,6 +850,7 @@ export const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
     appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' },
+    issues: { title: 'Reported problems', sub: 'What people sent from Report an Issue' },
     /* "Admin", matching the rail. A page whose title differs from the label the
        reader clicked to reach it makes them wonder whether they arrived. */
     moderation: { title: 'Admin', sub: 'Every administrative area you can open' },
@@ -1868,6 +1870,8 @@ function AppShell({ toasts, addToast, removeToast }) {
     '/admin/appeals': {
       userRole: currentUser.role,
     },
+    /* Reads its reports from the server; nothing from the shell. */
+    '/admin/issues': {},
     /* Deliberately empty. The form reads the session from the server and the
        case it is contesting from the URL, so there is nothing the shell knows
        that it needs. */

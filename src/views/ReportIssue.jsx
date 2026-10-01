@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LifeBuoy, Send, CheckCircle2, ShieldAlert, Flag } from 'lucide-react';
+import { LifeBuoy, Send, CheckCircle2, ShieldAlert, Flag, X } from 'lucide-react';
 import { api } from '../utils/api';
 import { ISSUE_CATEGORIES, ISSUE_CATEGORY_VALUES, MIN_DESCRIPTION, MAX_DESCRIPTION } from '../issueReports';
 import { APP_NAME } from '../config';
@@ -27,6 +27,10 @@ import { APP_NAME } from '../config';
  * escalated automatically. Sending conduct here would put it in a queue with
  * bug reports. The form says so, and links there.
  */
+/* The formats the server accepts, and how many it keeps (routes/issueRoutes.js). */
+const SCREENSHOT_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const MAX_SCREENSHOTS = 3;
+
 export default function ReportIssue({ currentUser, addToast }) {
   const location = useLocation();
 
@@ -54,6 +58,32 @@ export default function ReportIssue({ currentUser, addToast }) {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState(null);
+  /**
+   * Screenshots, three at most (FX-75). Held as files with a preview URL and
+   * sent after the report, against its reference: the report is what matters,
+   * so a screenshot that fails never costs the reporter what they wrote.
+   */
+  const [shots, setShots] = useState([]);
+  const [shotNote, setShotNote] = useState('');
+  /* Previews are released when one is removed, when the report is sent, and
+     on leaving — never on every change, which would blank the ones still
+     shown. */
+  const shotsRef = useRef(shots);
+  shotsRef.current = shots;
+  useEffect(() => () => shotsRef.current.forEach(s => URL.revokeObjectURL(s.url)), []);
+  const pickShots = (fileList) => {
+    const picked = [...(fileList || [])].filter(f => SCREENSHOT_TYPES.includes(f.type));
+    const room = MAX_SCREENSHOTS - shots.length;
+    setShotNote(picked.length > room ? 'You can attach three screenshots at most.' : '');
+    setShots(prev => [...prev, ...picked.slice(0, Math.max(0, room)).map(file => ({ file, url: URL.createObjectURL(file) }))]);
+  };
+  const removeShot = (index) => {
+    setShotNote('');
+    setShots(prev => {
+      if (prev[index]) URL.revokeObjectURL(prev[index].url);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
 
   const categoryRef = useRef(null);
   const descriptionRef = useRef(null);
@@ -110,7 +140,19 @@ export default function ReportIssue({ currentUser, addToast }) {
         description: trimmed,
         context: collectContext(),
       });
-      setReceipt(res);
+      const failed = [];
+      let attached = 0;
+      for (const { file } of shots) {
+        try {
+          await api.uploadIssueScreenshot(res.reference, file);
+          attached += 1;
+        } catch (err) {
+          failed.push({ name: file.name, reason: err?.message });
+        }
+      }
+      shots.forEach(sh => URL.revokeObjectURL(sh.url));
+      setShots([]);
+      setReceipt({ ...res, attached, failed });
     } catch (err) {
       if (err?.field) {
         setErrors({ [err.field]: err.message });
@@ -141,6 +183,16 @@ export default function ReportIssue({ currentUser, addToast }) {
             <span className="dim small">Reference</span>
             <span className="strong tnum" style={{ fontSize: '1.25rem' }}>{receipt.reference}</span>
           </p>
+          {receipt.attached > 0 && (
+            <p className="small">
+              {receipt.attached} screenshot{receipt.attached === 1 ? '' : 's'} attached.
+            </p>
+          )}
+          {receipt.failed?.map(f => (
+            <p key={f.name} className="small text-danger" role="alert">
+              {f.name} could not be attached{f.reason ? `: ${f.reason}` : '.'} The report itself was sent.
+            </p>
+          ))}
           <p className="small dim">
             Quote that reference if you write to us about this. We read every report; we cannot
             always reply to each one individually.
@@ -253,6 +305,38 @@ export default function ReportIssue({ currentUser, addToast }) {
           </span>
           {errors.description && (
             <span className="field-error" id="issue-description-error" role="alert">{errors.description}</span>
+          )}
+        </div>
+
+        <div className="field">
+          <label htmlFor="issue-screenshots">Screenshots <span className="muted">(optional)</span></label>
+          <input
+            id="issue-screenshots"
+            type="file"
+            className="input"
+            accept={SCREENSHOT_TYPES.join(',')}
+            multiple
+            disabled={shots.length >= MAX_SCREENSHOTS}
+            aria-describedby="issue-screenshots-hint"
+            onChange={(e) => { pickShots(e.target.files); e.target.value = ''; }}
+          />
+          <span className="field-hint" id="issue-screenshots-hint">
+            Up to three PNG, JPEG or WebP images. Only the people who read reports will see
+            them, so a screenshot that shows other people&rsquo;s details is fine to send.
+          </span>
+          {shotNote && <span className="field-error" role="status">{shotNote}</span>}
+          {shots.length > 0 && (
+            <ul className="issue-shots">
+              {shots.map((s, i) => (
+                <li key={s.url} className="issue-shot">
+                  <img src={s.url} alt="" />
+                  <span className="small truncate">{s.file.name}</span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeShot(i)} aria-label={`Remove ${s.file.name}`}>
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 

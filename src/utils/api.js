@@ -1223,6 +1223,24 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(report),
   }),
+  /* One screenshot onto a report the caller just filed (FX-75). Multipart, so
+     no Content-Type: the browser sets the boundary. The server re-encodes it
+     and refuses anything that is not an image. */
+  uploadIssueScreenshot: async (reference, file) => {
+    const formData = new FormData();
+    formData.append('screenshot', file);
+    const res = await fetch(`/api/issues/${encodeURIComponent(reference)}/screenshots`, {
+      method: 'POST', body: formData, credentials: 'include',
+    });
+    if (!res.ok) {
+      let err;
+      try { err = await res.json(); } catch { /* not JSON */ }
+      throw new ApiError(err?.error || 'That screenshot could not be attached.', { status: res.status });
+    }
+    return res.json();
+  },
+  /* The staff view of reported problems (report.resolve). */
+  fetchIssueReports: async () => apiFetch('/api/issues'),
   /* Somebody ELSE's certificates: metadata only. The server never emits the
      verification code on this route, so there is no download to withhold in the
      client — the difference is enforced where it cannot be bypassed. */

@@ -69,6 +69,7 @@ const StudentOrganizerAgreement = React.lazy(() => import('../views/legal/Studen
 const Appeal = React.lazy(() => import('../views/Appeal'));
 const NewAppeal = React.lazy(() => import('../views/NewAppeal'));
 const AdminAppeals = React.lazy(() => import('../views/AdminAppeals'));
+const AdminIssues = React.lazy(() => import('../views/AdminIssues'));
 const AdminAuditExplorer = React.lazy(() => import('../views/AdminAuditExplorer'));
 const ImpactDashboard = React.lazy(() => import('../views/ImpactDashboard.jsx'));
 const AdminRoster = React.lazy(() => import('../views/AdminRoster'));
@@ -394,6 +395,9 @@ export const APP_ROUTES = [
      `routeCapSatisfied` in App.jsx. */
   { path: '/admin/moderation', element: <ModerationCenter />, requiredCap: 'report.resolve', showWhenWithheld: true },
   { path: '/admin/appeals', element: <AdminAppeals />, requiredCap: 'appeal.review' },
+  /* Reported problems (N13): the page the security/privacy notification emails
+     point at, which did not exist. Same capability as the API behind it. */
+  { path: '/admin/issues', element: <AdminIssues />, requiredCap: 'report.resolve' },
   /* The community impact figures. `analytics.impact` is administrative — held by
      `admin` and `super_admin` and by nobody below — and it is the same word the
      nav entry and `GET /api/impact` name, so the rail, this guard and the server

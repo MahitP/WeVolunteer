@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Added — screenshots on a problem report, and somewhere staff can read reports
+
+Report an Issue takes up to three PNG, JPEG or WebP screenshots, attached by the
+person who filed the report within fifteen minutes. Each is decoded and
+re-encoded as WebP on arrival, which drops a photo's location metadata and
+refuses a file that only claims to be an image. **Migration 072** adds
+`issue_report_screenshots`: the images live in the database with its backups and
+access rules, never under `/uploads`, which nginx serves to anybody.
+
+There was no staff view of reports at all, although the email for a security or
+privacy report deliberately leaves the contents out and says to read it in the
+admin area. **Reported problems** is now a tile on the Admin hub
+(`/admin/issues`, `report.resolve`), and screenshots load only for that
+capability, with `Cache-Control: no-store`.
+
 ### Added — a check that the live database has the shape the code expects
 
 `node bin/schema-check.mjs <database>` opens a database read-only and compares it

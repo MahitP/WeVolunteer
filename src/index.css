@@ -11781,6 +11781,35 @@ input:disabled + .premium-slider {
 .install-share-glyph { vertical-align: -2px; }
 .install-card { margin-top: var(--s4); }
 
+/* Screenshots on a problem report (FX-75): the reporter's previews and the
+   staff view's thumbnails share one look. */
+.issue-shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  list-style: none;
+  margin: var(--s2) 0 0;
+  padding: 0;
+}
+.issue-shot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  width: 8rem;
+  min-width: 0;
+}
+.issue-shot img {
+  width: 100%;
+  height: 5.5rem;
+  object-fit: cover;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.issue-list { list-style: none; margin: 0; padding: 0; }
+.issue-head { gap: var(--s3); align-items: center; }
+.issue-description { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+
 /* A day and a time (DateTimeField, ruling 8). When it is the whole content
    of a `.field`, the row's own top margin would push it below its
    neighbours. */

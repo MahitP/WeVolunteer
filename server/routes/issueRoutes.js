@@ -1,5 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
+import sharp from 'sharp';
 import { db } from '../db.js';
 import { authenticateToken } from '../utils.js';
 import { requireCap } from '../authz.js';
@@ -16,6 +18,7 @@ import {
 import { createRedisLimitStore } from '../redis/limitStore.js';
 /* Server-only: these keys must not reach the browser bundle. See issueRouting.js. */
 import { replyToKeyFor } from '../issueRouting.js';
+import { reportForAttaching, countScreenshots, storeScreenshot, readScreenshot } from '../issueScreenshots.js';
 
 const router = express.Router();
 
@@ -156,6 +159,125 @@ router.post('/api/issues', authenticateToken, issueLimiter, async (req, res) => 
   });
 });
 
+/* ── Screenshots (FX-75) ─────────────────────────────────────────────────────
+ *
+ * The owner asked for a report page that can "include screenshots". A
+ * screenshot of somebody's screen is likely to hold their own personal data and
+ * other people's, so the rules are narrow:
+ *
+ *   • Only the person who filed a report may attach to it, and only while it is
+ *     fresh. Anybody else, and any report that does not exist, gets the same
+ *     404 — a distinguishable refusal would confirm a reference is real.
+ *   • Three per report (the table's key enforces it too), fifteen minutes from
+ *     filing, five megabytes in.
+ *   • Every image is decoded and re-encoded as WebP, at most 1600px on its
+ *     longest edge. The re-encode is what drops a photo's EXIF — where it was
+ *     taken — and what refuses a file that only claims to be an image: a
+ *     declared type is the uploader's word, the decode is the evidence.
+ *   • Stored in the database, never under /uploads, which nginx serves to
+ *     anybody with the address. Read back only through the route below, which
+ *     requires `report.resolve`.
+ */
+export const SCREENSHOT_LIMIT = 3;
+export const SCREENSHOT_WINDOW_MS = 15 * 60 * 1000;
+const SCREENSHOT_MAX_INPUT_BYTES = 5 * 1024 * 1024;
+const SCREENSHOT_EDGE = 1600;
+/* The same decode ceiling avatars use: a guard against a small file that
+   expands to an enormous bitmap. */
+const SCREENSHOT_MAX_PIXELS = 40 * 1000 * 1000;
+const SCREENSHOT_FORMATS = new Set(['png', 'jpeg', 'webp']);
+
+/* Refused uploads are still decoded, so they are bounded too. */
+const screenshotLimiter = rateLimit({
+  store: createRedisLimitStore({ name: 'issue-shot' }),
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => `issue-shot:${req.principal?.userId ?? 'anonymous'}`,
+  handler: (req, res) => res.status(429).json({
+    error: 'Too many screenshots in a short time. Your report is saved; you can email us the rest.',
+    code: 'rate_limited',
+  }),
+});
+
+const screenshotUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: SCREENSHOT_MAX_INPUT_BYTES, files: 1 },
+}).single('screenshot');
+
+/** multer's refusals, answered here rather than forwarded to the error handler. */
+function receiveScreenshot(req, res, next) {
+  screenshotUpload(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({
+        error: err.code === 'LIMIT_FILE_SIZE'
+          ? 'That image is larger than 5 MB. A screenshot is usually well under that.'
+          : 'Send one image at a time.',
+      });
+    }
+    return next(err);
+  });
+}
+
+/**
+ * POST /api/issues/:reference/screenshots — attach one image to your report.
+ */
+router.post('/api/issues/:reference/screenshots', authenticateToken, screenshotLimiter, receiveScreenshot, async (req, res) => {
+  const issue = await reportForAttaching(db, req.params.reference, req.principal.userId);
+  if (!issue) return res.status(404).json({ error: 'No report matches that reference.' });
+
+  if (Date.now() - Date.parse(issue.created_at) > SCREENSHOT_WINDOW_MS) {
+    return res.status(409).json({ error: 'Screenshots can be added for fifteen minutes after a report is sent.' });
+  }
+  const n = await countScreenshots(db, issue.id);
+  if (n >= SCREENSHOT_LIMIT) {
+    return res.status(409).json({ error: `A report can carry ${SCREENSHOT_LIMIT} screenshots.` });
+  }
+  if (!req.file?.buffer?.length) return res.status(400).json({ error: 'Choose an image to attach.' });
+
+  let encoded;
+  try {
+    const meta = await sharp(req.file.buffer, { limitInputPixels: SCREENSHOT_MAX_PIXELS }).metadata();
+    if (!SCREENSHOT_FORMATS.has(meta.format)) throw new Error('format');
+    encoded = await sharp(req.file.buffer, { limitInputPixels: SCREENSHOT_MAX_PIXELS })
+      .rotate()
+      .resize(SCREENSHOT_EDGE, SCREENSHOT_EDGE, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  } catch {
+    return res.status(400).json({ error: 'That file is not a PNG, JPEG or WebP image.' });
+  }
+
+  try {
+    await storeScreenshot(db, { issueId: issue.id, position: n + 1, mimeType: 'image/webp', bytes: encoded });
+  } catch (err) {
+    /* Two uploads racing for the same position: the key refused the second. */
+    console.warn('[issues] screenshot not stored:', err.message);
+    return res.status(409).json({ error: 'That screenshot could not be added. Try again.' });
+  }
+
+  return res.status(201).json({ position: n + 1 });
+});
+
+/**
+ * GET /api/issues/:id/screenshots/:position — one image, for staff.
+ *
+ * `report.resolve`, the capability that already reads reports. `no-store`, so
+ * a shared school computer does not keep a copy of somebody's screen in its
+ * cache. The bytes are only ever WebP this route encoded itself.
+ */
+router.get('/api/issues/:id/screenshots/:position', authenticateToken, requireCap('report.resolve'), async (req, res) => {
+  const shot = await readScreenshot(db, req.params.id, req.params.position);
+  if (!shot) return res.status(404).json({ error: 'No such screenshot.' });
+
+  res.setHeader('Content-Type', shot.mimeType);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('Content-Disposition', 'inline');
+  return res.send(shot.bytes);
+});
+
 /**
  * GET /api/issues — the staff view.
  *
@@ -166,7 +288,8 @@ router.post('/api/issues', authenticateToken, issueLimiter, async (req, res) => 
 router.get('/api/issues', authenticateToken, requireCap('report.resolve'), async (req, res) => {
   const rows = await db.prepare(`
     SELECT i.id, i.reference, i.category, i.description, i.context, i.status, i.created_at,
-           u.name AS reporter_name, u.username AS reporter_username
+           u.name AS reporter_name, u.username AS reporter_username,
+           (SELECT COUNT(*) FROM issue_report_screenshots s WHERE s.issue_id = i.id) AS screenshots
       FROM issue_reports i
       LEFT JOIN users u ON u.id = i.reporter_id
      ORDER BY i.created_at DESC
@@ -182,6 +305,7 @@ router.get('/api/issues', authenticateToken, requireCap('report.resolve'), async
       context: r.context ? JSON.parse(r.context) : null,
       status: r.status,
       createdAt: r.created_at,
+      screenshots: Number(r.screenshots) || 0,
       reporter: r.reporter_name ? { name: r.reporter_name, username: r.reporter_username } : null,
     })),
   });
