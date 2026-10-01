@@ -31,8 +31,7 @@
  * run against production — which is the point. SQLite only; on PostgreSQL the
  * schema is generated from the same migrations and checked by the drift test.
  */
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -48,9 +47,9 @@ if (!existsSync(target)) {
 
 /* ── The reference: what the migrations build ─────────────────────────────── */
 
-const refDir = mkdtempSync(path.join(tmpdir(), 'wev-schema-ref-'));
-const refPath = path.join(refDir, 'reference.db');
-process.env.WEV_DB_PATH = refPath;
+/* In memory, so this tool creates no file and has none to delete: it writes
+   nothing anywhere, which is what lets it be run against production. */
+process.env.WEV_DB_PATH = ':memory:';
 process.env.DATABASE_ENGINE = 'sqlite';
 process.env.DATABASE_URL = '';
 delete process.env.DEMO_MODE; // the reference holds shape, never demo rows
@@ -63,11 +62,12 @@ process.env.TFA_ENCRYPTION_KEY ||= randomBytes(32).toString('base64');
 
 const quietLog = console.log;
 console.log = () => {};
+let refDb;
 try {
   const { initDatabase, completeDatabaseInit, db } = await import('../server/db.js');
   initDatabase();
   await completeDatabaseInit();
-  db.close?.();
+  refDb = db;
 } finally {
   console.log = quietLog;
 }
@@ -76,22 +76,23 @@ try {
 
 const quote = (name) => `"${String(name).replace(/"/g, '""')}"`;
 
-function readSchema(dbPath, { readOnly }) {
-  const db = new DatabaseSync(readOnly ? `file:${path.resolve(dbPath)}?mode=ro` : dbPath, readOnly ? { readOnly: true } : {});
+/** `all(sql)` answers rows, now or as a promise — the reference is read through
+    the server's own connection, the target through a read-only one. */
+async function readSchema({ all }) {
   const tables = new Map();
-  const names = db.prepare(
+  const names = (await all(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-  ).all().map(r => r.name);
+  )).map(r => r.name);
   for (const name of names) {
-    const columns = new Map(db.prepare(`PRAGMA table_info(${quote(name)})`).all().map(c => [c.name, {
+    const columns = new Map((await all(`PRAGMA table_info(${quote(name)})`)).map(c => [c.name, {
       type: String(c.type || '').toUpperCase(),
       notnull: Number(c.notnull) === 1,
       pk: Number(c.pk),
     }]));
     const uniqueKeys = new Set();
-    for (const idx of db.prepare(`PRAGMA index_list(${quote(name)})`).all()) {
+    for (const idx of await all(`PRAGMA index_list(${quote(name)})`)) {
       if (Number(idx.unique) !== 1) continue;
-      const cols = db.prepare(`PRAGMA index_info(${quote(idx.name)})`).all().map(c => c.name);
+      const cols = (await all(`PRAGMA index_info(${quote(idx.name)})`)).map(c => c.name);
       uniqueKeys.add(`(${cols.join(', ')})${Number(idx.partial) === 1 ? ' partial' : ''}`);
     }
     /* A rowid table's INTEGER PRIMARY KEY has no index entry, so the primary key
@@ -100,28 +101,26 @@ function readSchema(dbPath, { readOnly }) {
     if (pkCols.length) uniqueKeys.add(`(${pkCols.join(', ')}) primary`);
     tables.set(name, { columns, uniqueKeys });
   }
-  db.close();
   return tables;
 }
 
-const reference = readSchema(refPath, { readOnly: false });
-const actual = readSchema(target, { readOnly: true });
+const targetDb = new DatabaseSync(`file:${path.resolve(target)}?mode=ro`, { readOnly: true });
+const reference = await readSchema({ all: (sql) => refDb.prepare(sql).all() });
+const actual = await readSchema({ all: (sql) => targetDb.prepare(sql).all() });
 
 /* Pending is not drift. A database a few migrations behind is the normal state
    of a server that has not booted since a deploy — it applies them on start.
    Only a difference the APPLIED migrations should have produced is drift. */
-function appliedVersions(dbPath, readOnly) {
+async function appliedVersions(all) {
   try {
-    const db = new DatabaseSync(readOnly ? `file:${path.resolve(dbPath)}?mode=ro` : dbPath, readOnly ? { readOnly: true } : {});
-    const rows = db.prepare('SELECT version FROM schema_migrations').all().map(r => Number(r.version));
-    db.close();
-    return new Set(rows);
+    return new Set((await all('SELECT version FROM schema_migrations')).map(r => Number(r.version)));
   } catch { return new Set(); }
 }
-const refVersions = appliedVersions(refPath, false);
-const gotVersions = appliedVersions(target, true);
+const refVersions = await appliedVersions((sql) => refDb.prepare(sql).all());
+const gotVersions = await appliedVersions((sql) => targetDb.prepare(sql).all());
 const pending = [...refVersions].filter(v => !gotVersions.has(v)).sort((a, b) => a - b);
-rmSync(refDir, { recursive: true, force: true });
+targetDb.close();
+refDb.close?.();
 
 /* ── Comparing ─────────────────────────────────────────────────────────────── */
 
