@@ -1334,9 +1334,15 @@ function AppShell({ toasts, addToast, removeToast }) {
    * is genuinely something to scroll to, disappears once you reach it, and
    * never dims the last item on a bar that fits.
    */
-  useEffect(() => {
-    const scroller = mobileNavScrollRef.current;
-    if (!scroller) return;
+  /* A callback ref rather than an effect. It was an effect keyed on
+     `currentUser`, and on a real network the user arrives one render before
+     the shell does — the session check sets the user, then waits on the data
+     fetches — so the effect fired while the loading screen was up, found no
+     bar, and never ran again. The cue was never set. A callback ref runs when
+     the bar itself mounts, whatever caused it to. */
+  const attachMobileNavScroll = React.useCallback((scroller) => {
+    mobileNavScrollRef.current = scroller;
+    if (!scroller) return undefined;
 
     const measure = () => {
       /* 2px of slack: sub-pixel layout rounding otherwise reports a permanent
@@ -1351,18 +1357,20 @@ function AppShell({ toasts, addToast, removeToast }) {
 
     measure();
     scroller.addEventListener('scroll', measure, { passive: true });
-    /* Covers rotation, a keyboard opening, and the entry list changing when the
-       reader's capabilities do — none of which fire a scroll event. */
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
+    /* Rotation and a keyboard opening resize the strip; the entry list
+       changing with the reader's capabilities changes what is inside it. None
+       of these fires a scroll event. */
+    const resized = new ResizeObserver(measure);
+    resized.observe(scroller);
+    const changed = new MutationObserver(measure);
+    changed.observe(scroller, { childList: true });
     return () => {
       scroller.removeEventListener('scroll', measure);
-      observer.disconnect();
+      resized.disconnect();
+      changed.disconnect();
+      if (mobileNavScrollRef.current === scroller) mobileNavScrollRef.current = null;
     };
-    /* `currentUser` rather than the item list: the entries are a pure function
-       of who is signed in, and the list itself is built after the early returns
-       further down, where a hook cannot go. */
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     if (!userMenuOpen) return;
@@ -2240,7 +2248,7 @@ function AppShell({ toasts, addToast, removeToast }) {
         * you reach anything you cannot currently see.
         */}
       <nav className={`mobilenav${primaryNavItems.length > 5 ? ' mobilenav-dense' : ''}`} aria-label="Main">
-        <div className="mobilenav-scroll" ref={mobileNavScrollRef}>
+        <div className="mobilenav-scroll" ref={attachMobileNavScroll}>
           {primaryNavItems.map(({ id, path, label, icon: Icon }) => (
             <button
               key={id + label}

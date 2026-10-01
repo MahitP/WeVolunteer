@@ -328,6 +328,30 @@ describe('navigation, per role', () => {
     expect(sidebarLabels(), 'Profile belongs to the account menu').not.toContain('Profile');
   });
 
+  /**
+   * The phone bar's "more this way" fade is set from a measurement, and the
+   * measurement has to run once the bar exists.
+   *
+   * It ran in an effect keyed on `currentUser`, and the bar is not in the DOM
+   * when that effect first fires — the shell is still loading — so it found no
+   * scroller, returned, and never ran again. `data-overflow` was never set, and
+   * a six-entry bar on a 320px phone scrolled with no cue (seen in the Browser
+   * pane, 2026-10-01). jsdom has no layout, so the value here is "none"; what
+   * is asserted is that it was measured at all.
+   */
+  it('measures the phone bar for its overflow cue once the bar is on screen', async () => {
+    signedInAs(USER('super_admin'));
+    /* On a real network the user arrives one render before the shell does:
+       the session check sets the user, then waits on these fetches. Mocks that
+       resolve at once let React draw both in one render and hid the defect. */
+    api.fetchEventsProgressive.mockImplementation(() => new Promise(r => setTimeout(() => r([]), 30)));
+    renderAt('/');
+    await screen.findByTestId('admin-dash');
+    await waitFor(() => {
+      expect(document.querySelector('.mobilenav-scroll')?.getAttribute('data-overflow')).toBe('none');
+    });
+  });
+
   it('renders the admin rail, including the Messages entry 018 made real', async () => {
     signedInAs(USER('admin'));
     renderAt('/');
