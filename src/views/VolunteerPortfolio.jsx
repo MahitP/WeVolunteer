@@ -158,13 +158,22 @@ export default function VolunteerPortfolio({ currentUser }) {
             <Printer size={16} aria-hidden="true" /> Print or save PDF
           </button>
         </div>
+        {/* The difference, said on the page (FX-45). The owner asked what
+            separates a transcript from a certificate; the answer was only
+            implied, and a third document muddied it until A7 removed it. Not
+            printed: it is about the page, not part of the document. */}
+        <p className="small dim mx-auto transcript-explainer">
+          Your transcript is your whole record on one page: every event you served at, with the
+          hours it earned — the document for a school or an employer. A certificate is for one
+          event, with a code anyone can check. <Link to="/certificates">See your certificates</Link>
+        </p>
       </div>
 
-      <article className="transcript" aria-label="Record of verified volunteer service">
+      <article className="transcript" aria-label="Transcript of verified volunteer service">
         <header className="transcript-head">
           <div>
             <p className="transcript-org">{APP_NAME}</p>
-            <h2 className="transcript-title">Record of Verified Service</h2>
+            <h2 className="transcript-title">Transcript of Verified Service</h2>
             {/* Named under the title rather than inside it, so the document is
                 recognisably the same record either way — a school office
                 comparing two of these should not have to read a heading twice

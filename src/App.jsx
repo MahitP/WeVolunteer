@@ -755,7 +755,7 @@ export const PAGE_META = {
     /* Public, and reachable by every persona from the Help area of Settings
        and from the footer of the signed-out screens. */
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
-    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
+    portfolio: { title: 'Transcript', sub: 'Every event you have served at, with its confirmed hours' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     dashboard: { title: 'Dashboard', sub: 'Your shifts, hours, and history' },
@@ -822,7 +822,7 @@ export const PAGE_META = {
     /* Public, and reachable by every persona from the Help area of Settings
        and from the footer of the signed-out screens. */
     legal: { title: 'Legal Center', sub: 'The documents that govern using WeVolunteer' },
-    portfolio: { title: 'Volunteer portfolio', sub: 'A printable record of your confirmed service' },
+    portfolio: { title: 'Transcript', sub: 'Every event you have served at, with its confirmed hours' },
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },

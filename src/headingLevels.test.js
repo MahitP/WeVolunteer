@@ -120,20 +120,6 @@ const STANDALONE = new Set([
   'views/ErrorExperience/ErrorExperience.jsx',
   'views/ErrorExperience/ErrorGallery.jsx',
 
-  /**
-   * The HOURS certificate — a different document from `CertificateDocument`,
-   * aggregating every shift rather than attesting to one event, and rendered
-   * inside a `Modal` rather than on a route of its own.
-   *
-   * Still exempt after `CertificateDocument` stopped being: its `h1` is inside a
-   * dialog, so it is not a second heading on a route the way that one was.
-   * Whether a dialog should carry an `h1` at all is a real question and a
-   * separate one — the modal's own head already says "Hours certificate" at
-   * `h2`, so the document heading below it is also out of order. Left alone
-   * here rather than changed in passing, because it is not this route's bug.
-   */
-  'views/VolunteerDashboard.jsx',
-
   /* No importers — flagged for separate cleanup, not rendered anywhere. */
   'components/EventHero.jsx',
 ]);

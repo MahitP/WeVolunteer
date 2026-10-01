@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  FileText, ArrowRight, Printer, X, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck, Award, Plus
+  FileText, ArrowRight, Ban, Trophy, MapPin, CalendarCheck, History, ShieldCheck, Award, Plus
 } from 'lucide-react';
-import { APP_NAME, SCHOOL_NAME } from '../config';
+import { APP_NAME } from '../config';
 import { formatHours, formatDay, formatTimeRange, countdown, haversineDistance } from '../utils/helpers';
 import { api } from '../utils/api';
-import Modal from '../components/Modal';
 import { DateChip } from '../components/Seats';
 import EmptyState from '../components/common/EmptyState';
 import ServiceInsights from '../components/ServiceInsights';
@@ -19,7 +18,6 @@ import VerifyCertificateAction from '../components/common/VerifyCertificateActio
 export default function VolunteerDashboard({
   currentUser, events = [], applications = [], addToast, setActiveTab, refreshEvents, refreshApplications, onViewDetails
 }) {
-  const [showCertificate, setShowCertificate] = useState(false);
   const [withdrawingId, setWithdrawingId] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
 
@@ -290,14 +288,19 @@ export default function VolunteerDashboard({
                 <span className="muted small">of {HOUR_GOAL} hr goal</span>
               </div>
             </div>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => setShowCertificate(true)}
-              disabled={completed.length === 0}
-              title={completed.length === 0 ? 'Complete a shift to earn a certificate' : undefined}
-            >
-              <FileText size={14} /> Hours certificate
-            </button>
+            {/**
+              * The transcript, not a document of its own (A7).
+              *
+              * This was "Hours certificate", and it opened a third document: a
+              * "Certificate of Community Service" listing every shift, with no
+              * verification code — the one certificate on the platform nobody
+              * could check, summarising the same service the transcript does,
+              * shift by shift where the owner asked for events (FX-36). There
+              * are two documents now, and this opens the summary one.
+              */}
+            <Link className="btn btn-secondary btn-sm" to="/portfolio">
+              <FileText size={14} aria-hidden="true" /> Transcript
+            </Link>
           </div>
 
           {/* The single number this product exists to communicate. As styled
@@ -601,13 +604,6 @@ export default function VolunteerDashboard({
         </div>
       </div>
 
-      {showCertificate && (
-        <CertificateModal
-          user={currentUser}
-          shifts={completed}
-          onClose={() => setShowCertificate(false)}
-        />
-      )}
     </div>
   );
 }
@@ -618,112 +614,4 @@ function buildBoard(leaderboard, myId) {
   if (top.some(e => e.id === myId)) return top;
   const me = leaderboard.find(e => e.id === myId);
   return me ? [...top, me] : top;
-}
-
-function CertificateModal({ user, shifts, onClose }) {
-  const total = shifts.reduce((sum, s) => sum + Number(s.app.attendance?.hoursAwarded || 0), 0);
-
-  /**
-   * Who stands behind this document.
-   *
-   * Unlike the per-event certificate, this one summarises service across many
-   * events and therefore often across many organizers. Naming one of them would
-   * be a claim they did not make — they confirmed their own event, not the
-   * total. So: one organizer gets named, several are counted, and when the
-   * shifts carry no organizer at all the programme itself is named, which is
-   * true of every row on the page.
-   */
-  const organizers = [...new Set(
-    shifts.map(s => s.event?.organizerName).filter(Boolean)
-  )];
-  const authorisedBy = organizers.length === 1
-    ? organizers[0]
-    : organizers.length > 1
-      ? `${SCHOOL_NAME} · ${organizers.length} organizers`
-      : SCHOOL_NAME;
-
-  return (
-    <Modal onClose={onClose} label="Hours certificate" size="lg">
-      <div className="modal-head no-print">
-        <div>
-          <h2>Hours certificate</h2>
-          <p className="lead">An official record of your completed service, ready to print or save as PDF.</p>
-        </div>
-        <button className="modal-close" onClick={onClose} aria-label="Close dialog"><X size={18} /></button>
-      </div>
-
-        <div className="modal-body certificate-canvas">
-          <div className="certificate" id="printable-certificate">
-            <div style={{ textAlign: 'center' }}>
-              <div className="certificate-org">{SCHOOL_NAME}</div>
-              <div className="certificate-rule" />
-              <h1 className="certificate-title">Certificate of Community Service</h1>
-              <p style={{ marginTop: 'var(--s5)', color: 'var(--certificate-ink-2)' }}>This certifies that</p>
-              <div className="certificate-name">{user.name}</div>
-              <p style={{ color: 'var(--certificate-ink-2)', maxWidth: '46ch', margin: '0 auto' }}>
-                completed volunteer service through the {SCHOOL_NAME} Volunteer Network,
-                totalling
-              </p>
-              <div className="certificate-hours" style={{ margin: 'var(--s4) 0' }}>{formatHours(total)}</div>
-            </div>
-
-            <table style={{ marginTop: 'var(--s8)' }}>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Event and role</th>
-                  <th>Location</th>
-                  <th style={{ textAlign: 'right' }}>Hours</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shifts.map(({ app, event, slot }) => (
-                  <tr key={app.id}>
-                    <td style={{ color: 'var(--certificate-ink-3)' }} className="tnum">{formatDay(slot?.startDatetime)}</td>
-                    <td><strong>{event.title}</strong> — {slot?.name}</td>
-                    <td style={{ color: 'var(--certificate-ink-3)' }}>{event.location?.split('(')[0]}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700 }} className="tnum">
-                      {formatHours(app.attendance?.hoursAwarded)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/**
-              * Names on the name lines, labels on the label lines.
-              *
-              * This block printed the strings "Volunteer signature" and
-              * "Program coordinator" inside `.certificate-sign` — which is the
-              * NAME slot: bold, dark, with the signature rule above it. The
-              * label slot, `.certificate-sign-label`, was not used at all. So
-              * the finished document had a caption where each name belonged and
-              * nothing anywhere that said who it was about or who stood behind
-              * it. Printed, it reads as two blank signature lines.
-              *
-              * `CertificateDocument.jsx` has had the right shape all along — name
-              * in `.certificate-sign`, caption in `.certificate-sign-label` —
-              * and this is now the same.
-              */}
-            <div className="row" style={{ marginTop: 'var(--s12)', gap: 'var(--s8)' }}>
-              <div style={{ flex: 1 }}>
-                <div className="certificate-sign">{user?.name || '—'}</div>
-                <div className="certificate-sign-label">Volunteer</div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <div className="certificate-sign">{authorisedBy}</div>
-                <div className="certificate-sign-label">Program Coordinator</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-      <div className="modal-foot no-print">
-        <button className="btn btn-secondary" onClick={onClose}>Close</button>
-        <button className="btn btn-primary" onClick={() => window.print()}>
-          <Printer size={15} /> Print or save as PDF
-        </button>
-      </div>
-    </Modal>
-  );
 }

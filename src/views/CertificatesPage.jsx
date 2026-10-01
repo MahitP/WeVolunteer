@@ -76,6 +76,12 @@ export default function CertificatesPage() {
         <h2 className="row page-title" style={{ gap: 8 }}>
           <Award size={20} style={{ color: 'var(--brand)' }} aria-hidden="true" /> Your certificates
         </h2>
+        {/* The difference, said on the page (FX-45), and the same two
+            sentences the transcript carries from the other side. */}
+        <p className="dim small">
+          Each certificate is for one event, with a code anyone can check. Your transcript is your
+          whole record on one page: every event and its hours. <Link to="/portfolio">Open your transcript</Link>
+        </p>
         {organizationSlug && (
           <p className="dim small">
             {organizationName

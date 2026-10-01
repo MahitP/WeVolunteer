@@ -4590,23 +4590,31 @@ a.list-row:hover { text-decoration: none; }
   }
 
   /**
-   * The transcript keeps its paper.
+   * The transcript prints straight onto the sheet: plain white, no panel.
    *
-   * This was `padding: 0`, which left the cream `--cert-bg` sitting tight
-   * behind the glyphs and nothing else — on a white sheet that reads as no
-   * document stock at all, which is exactly the "white background" complaint.
-   * The certificate does not have that problem because it is dense and
-   * centred, so its paper is visible between its own elements.
+   * The owner asked for it to print "without the white background". An
+   * earlier fix (9a2465b) read that as "it printed as bare white paper" and
+   * added a cream panel on purpose; the words read just as well the other
+   * way, as "remove the box behind it". He ruled with the print in front of
+   * him (ruling 15): no panel. The certificate keeps its cream paper — it is
+   * a different kind of document, and he asked for it to stay as it is.
    *
-   * Keeping the padding gives the transcript a real cream panel inside the
-   * `@page` margin, the same artefact the certificate produces. `border: none`
-   * stays — a 1px rule around a printed page is a screen affordance, and the
-   * paper's edge is the edge.
+   * `border: none` and no padding: the `@page` margin is the margin, and a
+   * 1px rule around a printed page is a screen affordance.
+   *
+   * Two classes, deliberately. This was `.transcript`, and the screen rule
+   * `.transcript { background: var(--cert-bg); padding: …; border: … }` sits
+   * later in the file at the same specificity — so on paper the screen rule
+   * won and nothing here ever applied. The panel 9a2465b described was the
+   * screen rule all along. Two classes outrank one wherever each one sits.
    */
-  .transcript {
+  .transcript-page .transcript {
     border: none;
-    padding: 14mm 12mm;
-    background: var(--cert-bg);
+    border-radius: 0;
+    padding: 0;
+    max-width: none;
+    margin: 0;
+    background: #fff;
   }
 
   /* Headers repeat on every sheet of a multi-page history, so a second page is
@@ -11702,6 +11710,10 @@ input:disabled + .premium-slider {
   max-width: 800px;
   margin: 0 auto var(--s5);
 }
+
+/* The certificate-vs-transcript note above the document (FX-45): the
+   toolbar's width, so it lines up with the buttons it sits under. */
+.transcript-explainer { max-width: 800px; margin-top: var(--s3); }
 
 .transcript {
   max-width: 800px;
