@@ -11,6 +11,18 @@ import BadgesList from '../components/BadgesList';
 import { Link } from 'react-router-dom';
 
 /**
+ * Where a profile's "see all" goes: your own pages on your own profile, the
+ * other person's public pages on theirs (which apply their privacy setting
+ * themselves), and nowhere — rather than `@undefined` — for an account with no
+ * username. Exported for profileSeeAll.test.jsx.
+ */
+const OWN_PAGE = { hours: '/hours', certificates: '/certificates', badges: '/profile/badges' };
+export function seeAllHref(kind, { isSelf, username }) {
+  if (isSelf) return OWN_PAGE[kind];
+  return username ? `/users/@${username}/${kind}` : null;
+}
+
+/**
  * A volunteer's record of service.
  *
  * Celebrates contribution without becoming social: no followers, no likes,
@@ -191,7 +203,7 @@ export default function VolunteerProfile({
             already looking at. */}
         <BadgesList
           userId={userId}
-          moreHref={isSelf ? '/profile/badges' : `/users/@${volunteer?.username}/badges`}
+          moreHref={seeAllHref('badges', { isSelf, username: volunteer?.username })}
         />
       </section>
 
@@ -263,7 +275,7 @@ export default function VolunteerProfile({
                 cap={5}
                 className="list"
                 label="completed shifts"
-                moreHref="/hours"
+                moreHref={seeAllHref('hours', { isSelf, username: volunteer?.username })}
                 moreLabel={`Show all ${completed.length} shifts`}
                 renderItem={(c, i) => (
                   <div key={`${c.eventId}-${c.startDatetime}-${i}`} className="list-row">
@@ -372,7 +384,7 @@ export default function VolunteerProfile({
                   cap={5}
                   className="list"
                   label="certificates"
-                  moreHref="/certificates"
+                  moreHref={seeAllHref('certificates', { isSelf, username: volunteer?.username })}
                   moreLabel={`Show all ${certificates.length} certificates`}
                   renderItem={(c) => (
                     /* A link to the certificate's own page, not a dialog. See

@@ -57,10 +57,16 @@ export default function PreviewList({
           <span className="sr-only">
             Showing {shown.length} of {total} {label}.
           </span>
-          <Link to={moreHref} className="btn btn-secondary btn-sm preview-more">
-            {moreLabel ?? `Show all ${total}`}
-            <ArrowRight size={14} aria-hidden="true" />
-          </Link>
+          {moreHref ? (
+            <Link to={moreHref} className="btn btn-secondary btn-sm preview-more">
+              {moreLabel ?? `Show all ${total}`}
+              <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          ) : (
+            /* Nowhere to send the reader (an account with no public address):
+               say how many more there are rather than render a dead link. */
+            <p className="small dim">and {hidden} more.</p>
+          )}
         </>
       )}
     </>
