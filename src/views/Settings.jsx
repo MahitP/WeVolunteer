@@ -18,6 +18,7 @@ import { useTheme } from '../hooks/useTheme';
 import { APP_NAME, SCHOOL_NAME, STUDENT_GUIDE_URL, ORGANIZER_GUIDE_URL } from '../config';
 import { can } from '../authz';
 import { Sun, Moon, SunMoon, ExternalLink, Scale, Info, FileSignature, LifeBuoy } from 'lucide-react';
+import InstallAppCard from '../components/account/InstallAppCard';
 
 export default function Settings({ currentUser, addToast, onProfileChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -231,6 +232,9 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                 ))}
               </div>
             </div>
+            {/* "Add to Home Screen" (ruling 9). Renders nothing on a browser
+                that offers no install and is not an iPhone or iPad. */}
+            <InstallAppCard />
           </SettingsSection>
         );
       case 'accessibility':

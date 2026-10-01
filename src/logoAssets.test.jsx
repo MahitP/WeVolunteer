@@ -175,9 +175,14 @@ describe('the static files carry the same drawing', () => {
     const manifest = JSON.parse(read('public/site.webmanifest'));
     expect(manifest.theme_color).toBe(FOREST);
     expect(manifest.background_color).toBe(FOREST);
+    /* The drawings first, then the same two rendered as PNG at the sizes
+       Chromium asks for before it will offer installation (ruling 9). */
     expect(manifest.icons.map(i => [i.src, i.purpose])).toEqual([
       ['/app-icon.svg', 'any'],
       ['/app-icon-maskable.svg', 'maskable'],
+      ['/app-icon-192.png', 'any'],
+      ['/app-icon-512.png', 'any'],
+      ['/app-icon-maskable-512.png', 'maskable'],
     ]);
     for (const icon of manifest.icons) expect(existsSync(path.join(ROOT, 'public', icon.src))).toBe(true);
   });

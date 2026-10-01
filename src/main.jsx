@@ -13,6 +13,7 @@ import { crashFallback } from './views/ErrorExperience/ErrorExperience.jsx'
 import { LocationProvider } from './contexts/LocationContext.jsx'
 import { reportClientError } from './utils/errorReporting.js'
 import { installPageVisibilityFlag } from './utils/motion.js'
+import { captureInstallPrompt } from './utils/installPrompt.js'
 
 /**
  * The failures no React boundary can see.
@@ -73,6 +74,10 @@ globalThis.addEventListener?.('unhandledrejection', (event) => {
 // the auth screens), which is outside the boundary scoped to <main>.
 /* Pauses the looping animations while the tab is hidden; see `utils/motion.js`. */
 installPageVisibilityFlag()
+
+/* Before the first render: the browser offers installation once, early, and a
+   Settings card mounted later would never hear it (P2-05, ruling 9). */
+captureInstallPrompt()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

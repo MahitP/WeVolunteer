@@ -17,13 +17,19 @@
       silhouette. It points at the bare mark, not the tiled favicon, whose
       silhouette is a plain square.
 
-      There is deliberately NO apple-touch-icon and no Open Graph image. Both
-      require a raster asset this repository does not carry, and Open Graph in
-      particular describes a page to a link preview on somebody else's service —
-      which is not something to add to a platform whose members are children and
-      whose profiles are gated behind a session for exactly that reason.
+      `apple-touch-icon` is the home-screen icon on iPhone and iPad, where the
+      owner asked for "Add to Home Screen" (ruling 9). Without it iOS uses a
+      screenshot of the page. It is the maskable drawing rendered at 180px with
+      no transparency, because iOS masks the corners itself and fills any
+      transparent pixel with black.
+
+      There is deliberately no Open Graph image: it describes a page to a link
+      preview on somebody else's service, which is not something to add to a
+      platform whose members are children and whose profiles are gated behind a
+      session for exactly that reason.
     -->
     <link rel="mask-icon" href="/mark.svg" color="#0f5a3a" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
     <!-- Styles the pre-mount placeholder in #root; inline styles are blocked by the CSP. -->
     <link rel="stylesheet" href="/boot.css" />

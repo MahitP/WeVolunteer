@@ -33,7 +33,7 @@ import { IOS_MAX_MODEL_BYTES, IOS_EXPERIMENTAL_MAX_BYTES, MODELS } from './model
  * Getting this wrong in the permissive direction is the expensive mistake: an
  * iPad treated as a Mac is offered a model that kills the tab.
  */
-function detectIOS(nav) {
+export function detectIOS(nav) {
   const ua = nav.userAgent || '';
   if (/iPad|iPhone|iPod/.test(ua)) return true;
   return /Mac/.test(ua) && Number(nav.maxTouchPoints || 0) > 1;

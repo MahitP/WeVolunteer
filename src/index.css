@@ -11777,6 +11777,10 @@ input:disabled + .premium-slider {
    and the Month/Week switch without wrapping the toolbar on a laptop. */
 .cal-goto { width: 10.5rem; flex: 0 0 auto; }
 
+/* The Share glyph inside the iPhone instructions, sat on the text line. */
+.install-share-glyph { vertical-align: -2px; }
+.install-card { margin-top: var(--s4); }
+
 /* A day and a time (DateTimeField, ruling 8). When it is the whole content
    of a `.field`, the row's own top margin would push it below its
    neighbours. */
