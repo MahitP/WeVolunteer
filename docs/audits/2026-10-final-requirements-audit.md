@@ -710,3 +710,29 @@ marked 🔒.
 28. Photo OCR for paper certificates (P2-31)
 29. Legal drafts for the owner to publish: the Acceptable Use Policy (ruling 13) and the "review changes" clause (FX-44)
 30. Stale documentation and dead code (A14)
+
+### Progress (2026-10-01)
+
+| # | Status | Commit(s) | Notes |
+|---|---|---|---|
+| 1 | Done | `5e231cd` | *security-review* run before commit |
+| 2 | Done | `0e74e2a` | R1. Joins the combined *security-review* below: the fix adds `username` to the session's user |
+| 3 | Done | `5784b79` | R2. Combined *security-review* pending |
+| 4 | Partial | `bb32bdb` | The QA seed refuses real data by content. The demonstration-record tool waits on an owner question: the marker has to be excluded in 26 files that read attendance, and the alternative is weighed in the question |
+| 5 | Done | `cc886fb`, `eeb5e56` | `eeb5e56` builds the reference in memory: the first version deleted a temp directory and failed the script-safety guard |
+| 6 | Done | `7c9cad1` | |
+| 7 | Done | `ef96802` | |
+| 8 | Done | `4b8c746` | |
+| 9 | Done | `44de711` | |
+| 10 | Done | `8f656b2` (A2), `290552e` (A3, A4), `f20f4ab` (A5), `381f374` (A9), `b7375bc` (W2), `11f5803` (W4) | |
+| 11 | Done | `a1ec7c9` | Also fixed: the members page redirected to the club page; the count included suspended accounts (39 over a list of 38); the roster was capped at 100 with no way past it. The `?membersFrom=` paging sits behind the existing roster gate. Combined *security-review* pending |
+| 12 | Done | `e01e550` | `ownerNames.test.jsx` pins one name per page across hub tile, page title and Welly |
+| 14 | Done | `8f656b2` | Account menu of four; "Log external hours" button on the student dashboard |
+
+**Combined *security-review* before release-ready:** `0e74e2a`, `5784b79`
+(session middleware), `a1ec7c9` (roster paging on a privacy-gated route).
+
+**For the revamp hand-over (Phase 7):** on a phone, the organizer's volunteer
+row gives the name about a third of the width. It wraps now rather than
+truncating, but the row would read better with the pill and Profile on a
+line of their own.
