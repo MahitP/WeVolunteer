@@ -21,7 +21,7 @@ import { THEMES } from './themes/index.js';
 import { KINDS, SERIOUS, RETRYABLE, weightFor } from './kinds';
 import { COPY } from './errorCopy';
 import { resetSeed } from './selector';
-import Wordmark from '../../components/common/Wordmark';
+import BrandLockup from '../../components/common/BrandLockup';
 
 const at = (props) =>
   render(<MemoryRouter><ErrorExperience {...props} /></MemoryRouter>);
@@ -83,9 +83,11 @@ describe('every theme, for every kind it is eligible for', () => {
     }
   });
 
+  /* In words now: the lockup's tile is decorative and the name beside it is
+     text (N10), where the drawn wordmark was one image named "WeVolunteer". */
   it.each(PAIRS)('%s / %s names the product', (theme, kind) => {
-    at({ theme, kind });
-    expect(screen.getByRole('img', { name: 'WeVolunteer' })).toBeInTheDocument();
+    const { container } = at({ theme, kind });
+    expect(container.querySelector('.err-mark .brand-name')).toHaveTextContent('WeVolunteer');
   });
 });
 
@@ -169,32 +171,37 @@ describe('weight matches severity', () => {
   });
 });
 
+/**
+ * The lockup, as everywhere else (N10).
+ *
+ * These pinned the drawn wordmark, which the app shell replaced with the
+ * owner's lockup on 2026-09-27 — "green box with small logo and the white text
+ * should be the name" (P2-47) — while the error screens kept the old one. The
+ * tile is decorative and the name is the text, so it is named once.
+ */
 describe('every experience is unmistakably WeVolunteer', () => {
-  it.each(PAIRS)('%s / %s carries the wordmark, named once', (theme, kind) => {
+  it.each(PAIRS)('%s / %s carries the lockup, named once', (theme, kind) => {
     const { container } = at({ theme, kind });
     const mark = container.querySelector('.err-mark');
 
-    expect(mark.querySelector('svg.wordmark'), 'no wordmark — the screen does not say whose it is').toBeTruthy();
-    // The wordmark's W is the mark. A tile beside it would print the W twice,
-    // and a second name would announce the product twice.
-    expect(mark.querySelector('.brand-mark')).toBeNull();
-    expect(mark.querySelectorAll('[role="img"], [aria-label]')).toHaveLength(1);
-    expect(mark.textContent).toBe('');
+    expect(mark.querySelector('.brand-mark'), 'no tile — the screen does not say whose it is').toBeTruthy();
+    expect(mark.querySelector('.brand-mark')).toHaveAttribute('aria-hidden', 'true');
+    expect(mark.querySelector('.brand-name')?.textContent).toBe('WeVolunteer');
+    expect(mark.querySelector('svg.wordmark')).toBeNull();
   });
 
   /**
-   * The same component the app shell and the certificate page render. A second
-   * hand-written copy of the markup is how one surface keeps the old mark after
-   * the others change — and the error screens, which nobody opens on purpose,
-   * are exactly the surface that gets forgotten.
+   * The same component the app shell renders. A second hand-written copy of
+   * the markup is how one surface keeps the old mark after the others change —
+   * and the error screens, which nobody opens on purpose, are exactly the
+   * surface that gets forgotten. That is what happened here.
    */
-  it('uses the shared wordmark rather than its own copy of the markup', () => {
-    const { container } = render(<MemoryRouter><Wordmark /></MemoryRouter>);
-    const shared = container.querySelector('.wordmark');
+  it('uses the shared lockup rather than its own copy of the markup', () => {
+    const { container } = render(<MemoryRouter><span className="probe"><BrandLockup /></span></MemoryRouter>);
+    const shared = container.querySelector('.probe').innerHTML;
     const { container: err } = at({ kind: '404', theme: 'board' });
-    const inError = err.querySelector('.err-mark .wordmark');
 
-    expect(inError.outerHTML).toBe(shared.outerHTML);
+    expect(err.querySelector('.err-mark').innerHTML).toBe(shared);
   });
 });
 

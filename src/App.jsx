@@ -7,7 +7,7 @@ import { DEMO_MODE, APP_NAME, SCHOOL_NAME } from './config';
 import DemoBar from './components/DemoBar';
 import NotificationsBell from './components/NotificationsBell';
 import ErrorBoundary from './components/ErrorBoundary';
-import BrandMark from './components/common/BrandMark';
+import BrandLockup from './components/common/BrandLockup';
 import ErrorExperience, { crashFallback } from './views/ErrorExperience/ErrorExperience';
 import { ERROR_ROUTES } from './views/ErrorExperience/kinds';
 import OfflineOverlay from './views/ErrorExperience/OfflineOverlay';
@@ -1991,14 +1991,10 @@ function AppShell({ toasts, addToast, removeToast }) {
               shown at every width, not only on the tablet rail, and the name
               beside it is set rather than drawn — so the W appears once as a
               badge and once as a letterform, which is the ordinary shape of a
-              lockup and is deliberate here. `Wordmark` still draws the combined
-              form and is still used where the product signs a page it does not
-              own: PublicOrganizationView and CertificateVerification. */}
-          <BrandMark />
-          <span className="brand-text">
-            <span className="brand-name">{APP_NAME}</span>
-            <span className="brand-sub">{SCHOOL_NAME}</span>
-          </span>
+              lockup and is deliberate here. `BrandLockup` is this markup, shared
+              with the error screens, /verify and a club's public page, which
+              kept the drawn wordmark until N10. */}
+          <BrandLockup sub={SCHOOL_NAME} />
         </a>
 
         {/**

@@ -5,7 +5,7 @@ import { ShieldCheck, ShieldAlert, Loader2, Calendar, Search } from 'lucide-reac
 import { formatDay, formatHours } from '../utils/helpers';
 import { NO_HOURS_LABEL } from '../utils/serviceRecord';
 import { APP_NAME, SCHOOL_NAME } from '../config';
-import Wordmark from '../components/common/Wordmark';
+import BrandLockup from '../components/common/BrandLockup';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 
 /**
@@ -192,10 +192,8 @@ export default function CertificateVerification() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--surface-2)' }}>
       <header className="topbar" style={{ justifyContent: 'center' }}>
         <a className="brand" href="/" style={{ pointerEvents: 'none' }}>
-          <span className="brand-text">
-            <Wordmark />
-            <span className="brand-sub">Verification</span>
-          </span>
+          {/* The same lockup as the app shell (N10). */}
+          <BrandLockup sub="Verification" />
         </a>
       </header>
 

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Building2, CalendarDays } from 'lucide-react';
 import OrganizationMasthead from './OrganizationMasthead';
 import EmptyState from '../common/EmptyState';
-import Wordmark from '../common/Wordmark';
+import BrandLockup from '../common/BrandLockup';
 import { APP_NAME } from '../../config';
 import { formatDay } from '../../utils/helpers';
 import './OrganizationExperience.css';
@@ -105,10 +105,8 @@ export function PublicOrganizationTopbar({ sub }) {
   return (
     <header className="topbar invite-topbar">
       <Link className="brand" to="/welcome">
-        <span className="brand-text">
-          <Wordmark />
-          <span className="brand-sub">{sub}</span>
-        </span>
+        {/* The same lockup as the app shell (N10). */}
+        <BrandLockup sub={sub} />
       </Link>
     </header>
   );
