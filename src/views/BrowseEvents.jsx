@@ -623,12 +623,6 @@ export default function BrowseEvents({
     setSelectedTags([]);
   };
   return <div className="stack-lg">
-      {isStudent && <div className="row-between row-wrap">
-          <p className="lead">
-            {total} opportunit{total === 1 ? 'y' : 'ies'} posted ·{' '}
-            <span className="strong">{formatHours(currentUser?.volunteeredHours || 0)}</span> credited to you so far
-          </p>
-        </div>}
 
       {/**
         * Posting an opportunity, where an organizer is already standing.
@@ -649,9 +643,15 @@ export default function BrowseEvents({
       {/* `row-between row-wrap` is the same pair the student summary above uses —
           no new class, because this needs no layout the shell does not already
           have, and an undefined class fails `noDanglingClasses.test.js`. */}
-      {(canCreate || canSeeOrganizations) && <div className="row-between row-wrap">
+      {/* One header row, and the count stated once. A student who could see
+          organizations used to get two lead lines saying the same number —
+          the student summary and this one — one above the other. */}
+      <div className="row-between row-wrap">
           <p className="lead">
             {total} opportunit{total === 1 ? 'y' : 'ies'} posted
+            {isStudent && <>
+              {' '}·{' '}<span className="strong">{formatHours(currentUser?.volunteeredHours || 0)}</span> credited to you so far
+            </>}
           </p>
           <div className="row row-wrap">
             {/* "New organization" moved here with the search it belongs beside.
@@ -694,80 +694,7 @@ export default function BrowseEvents({
               </Link>
             )}
           </div>
-        </div>}
-
-      {/* Suggestions come before the firehose — they're the shortest path to a
-          good match for a student who doesn't know where to start. */}
-      {recommended.length > 0 && <section>
-          <div className="section-head">
-            <h2 className="row s-a19c85">
-              <Sparkles size={15} className="s-89c83f" /> {hasMatches ? 'Suggested for you' : 'Upcoming opportunities'}
-            </h2>
-          </div>
-          <div className="grid grid-3">
-            {recommended.map(event => <button key={event.id} className="card card-link card-pad" onClick={() => onViewDetails(event)}>
-                <div className="eyebrow">{event.category}</div>
-                <div className="strong s-57eca1">{event.title}</div>
-                {/**
-                  * Every part of this line is conditional, because the
-                  * recommendations payload carries none of these fields.
-                  *
-                  * It used to render `{event.applicantCount} applied · up to
-                  * {formatHours(event.hoursAwarded)}` unguarded, which on this
-                  * card meant a leading blank and a false zero: "applied · up
-                  * to 0 hrs". The spots half was already guarded for exactly
-                  * this reason — an event with no shifts printed " of  spots
-                  * open" — and the other half was left behind.
-                  *
-                  * Stating nothing is right here. A suggestion card is an
-                  * invitation to open the event, and "0 hrs" is a reason not
-                  * to.
-                  */}
-                {(Number.isFinite(event.spotsRemaining) || Number.isFinite(event.applicantCount)
-                  || Number.isFinite(event.hoursAwarded) || typeof event.distance === 'number') && (
-                  <div className="small muted s-956c6f">
-                    {[
-                      Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots)
-                        ? `${event.spotsRemaining} of ${event.maxSpots} spots open` : null,
-                      Number.isFinite(event.applicantCount)
-                        ? `${event.applicantCount} applied` : null,
-                      Number.isFinite(event.hoursAwarded)
-                        ? `up to ${formatHours(event.hoursAwarded)}` : null,
-                      typeof event.distance === 'number'
-                        ? `${event.distance.toFixed(1)} mi away` : null,
-                    ].filter(Boolean).join(' · ')}
-                  </div>
-                )}
-
-                {/* Why this one. Rendered only when the server actually
-                    reported a reason, so a fallback suggestion — which has
-                    none — makes no claim about why it is there. */}
-                {(() => {
-                  /**
-                   * Distance is stated once, in the line above, and left out of
-                   * the chips.
-                   *
-                   * It genuinely is one of the ranking terms, so the server
-                   * returns it as a reason — but rendering it here as well put
-                   * "0.1 mi away" on the card twice, a few pixels apart. The
-                   * chips answer "why does this match me", which is about
-                   * interests and history; how far away it is is a fact about
-                   * the event and belongs with the other facts.
-                   */
-                  const chips = (event.reasons || [])
-                    .filter(r => r.kind !== 'distance')
-                    .map(reasonLabel)
-                    .filter(Boolean);
-                  if (!chips.length) return null;
-                  return (
-                    <ul className="chips rec-reasons" aria-label="Why this is suggested">
-                      {chips.map((label, i) => <li key={i} className="tag">{label}</li>)}
-                    </ul>
-                  );
-                })()}
-              </button>)}
-          </div>
-        </section>}
+        </div>
 
       <section>
         {error && <div className="alert alert-danger" role="alert" style={{ marginBottom: 'var(--s4)' }}>
@@ -839,6 +766,82 @@ export default function BrowseEvents({
                 : ''}
           </p>
         )}
+
+        {/* Suggestions sit under the search, not above it. The owner asked for
+            the search bar "on top of the Opportunities page"; on a phone it
+            was 973px down, below the whole of this strip. They still come
+            before the firehose — the shortest path to a good match for a
+            student who has not typed anything — and step aside once they have. */}
+        {recommended.length > 0 && !query.trim() && <section>
+            <div className="section-head">
+              <h2 className="row s-a19c85">
+                <Sparkles size={15} className="s-89c83f" /> {hasMatches ? 'Suggested for you' : 'Upcoming opportunities'}
+              </h2>
+            </div>
+            <div className="grid grid-3">
+              {recommended.map(event => <button key={event.id} className="card card-link card-pad" onClick={() => onViewDetails(event)}>
+                  <div className="eyebrow">{event.category}</div>
+                  <div className="strong s-57eca1">{event.title}</div>
+                  {/**
+                    * Every part of this line is conditional, because the
+                    * recommendations payload carries none of these fields.
+                    *
+                    * It used to render `{event.applicantCount} applied · up to
+                    * {formatHours(event.hoursAwarded)}` unguarded, which on this
+                    * card meant a leading blank and a false zero: "applied · up
+                    * to 0 hrs". The spots half was already guarded for exactly
+                    * this reason — an event with no shifts printed " of  spots
+                    * open" — and the other half was left behind.
+                    *
+                    * Stating nothing is right here. A suggestion card is an
+                    * invitation to open the event, and "0 hrs" is a reason not
+                    * to.
+                    */}
+                  {(Number.isFinite(event.spotsRemaining) || Number.isFinite(event.applicantCount)
+                    || Number.isFinite(event.hoursAwarded) || typeof event.distance === 'number') && (
+                    <div className="small muted s-956c6f">
+                      {[
+                        Number.isFinite(event.spotsRemaining) && Number.isFinite(event.maxSpots)
+                          ? `${event.spotsRemaining} of ${event.maxSpots} spots open` : null,
+                        Number.isFinite(event.applicantCount)
+                          ? `${event.applicantCount} applied` : null,
+                        Number.isFinite(event.hoursAwarded)
+                          ? `up to ${formatHours(event.hoursAwarded)}` : null,
+                        typeof event.distance === 'number'
+                          ? `${event.distance.toFixed(1)} mi away` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+
+                  {/* Why this one. Rendered only when the server actually
+                      reported a reason, so a fallback suggestion — which has
+                      none — makes no claim about why it is there. */}
+                  {(() => {
+                    /**
+                     * Distance is stated once, in the line above, and left out of
+                     * the chips.
+                     *
+                     * It genuinely is one of the ranking terms, so the server
+                     * returns it as a reason — but rendering it here as well put
+                     * "0.1 mi away" on the card twice, a few pixels apart. The
+                     * chips answer "why does this match me", which is about
+                     * interests and history; how far away it is is a fact about
+                     * the event and belongs with the other facts.
+                     */
+                    const chips = (event.reasons || [])
+                      .filter(r => r.kind !== 'distance')
+                      .map(reasonLabel)
+                      .filter(Boolean);
+                    if (!chips.length) return null;
+                    return (
+                      <ul className="chips rec-reasons" aria-label="Why this is suggested">
+                        {chips.map((label, i) => <li key={i} className="tag">{label}</li>)}
+                      </ul>
+                    );
+                  })()}
+                </button>)}
+            </div>
+          </section>}
 
         {/* ── People and organizations ─────────────────────────────────────
             Above the grid, because they are the short list and the grid is the
