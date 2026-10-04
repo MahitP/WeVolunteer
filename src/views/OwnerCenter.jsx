@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom';
 import {
   Activity, AlertTriangle, BarChart3, Bug, CheckCircle2, Clock, Database, ExternalLink,
-  Gauge, HeartPulse, Mail, MinusCircle, RefreshCw, Server, Sparkles, Zap,
+  Gauge, HeartPulse, Mail, MinusCircle, RefreshCw, Server, Sparkles, Zap, KeyRound, Cloud,
 } from 'lucide-react';
 import { api } from '../utils/api';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
@@ -687,6 +687,34 @@ function serviceStatuses({ health, monitoring, infrastructure }) {
           : vector.reachable
             ? { tone: 'ok', state: 'Connected', detail: `${formatNumber(vector.records)} records` }
             : { tone: 'warn', state: 'Unreachable', detail: reasonText(vector.reason) }),
+    });
+
+    /* Sign-in providers (SC-09). "Reachable" is what the server can learn
+       without signing anybody in; a registered redirect is only proven by a
+       real sign-in, and the detail says so. */
+    for (const [id, label] of [['google', 'Google sign-in'], ['microsoft', 'Microsoft sign-in']]) {
+      const p = infrastructure.signIn?.[id];
+      if (!p) continue;
+      services.push({
+        id,
+        icon: KeyRound,
+        label,
+        ...(p.state === 'not_configured'
+          ? { tone: 'muted', state: 'Not configured' }
+          : p.state === 'ok'
+            ? { tone: 'ok', state: 'Reachable', detail: 'A real sign-in proves the redirect' }
+            : { tone: 'warn', state: p.state === 'timeout' ? 'Not answering' : 'Unreachable' }),
+      });
+    }
+
+    const cf = infrastructure.cloudflare;
+    if (cf) services.push({
+      id: 'cloudflare',
+      icon: Cloud,
+      label: 'Cloudflare',
+      ...(cf.proxied
+        ? { tone: 'ok', state: 'Proxied', detail: cf.colo ? `via ${cf.colo}` : undefined }
+        : { tone: 'muted', state: 'Not proxied', detail: 'Requests reach this server directly' }),
     });
   }
 

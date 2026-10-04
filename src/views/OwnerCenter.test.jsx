@@ -748,3 +748,33 @@ describe('refreshing', () => {
     }
   });
 });
+
+/**
+ * Sign-in providers and Cloudflare (SC-09). Google sign-in once broke in
+ * production with nobody told; these say whether each is set up and reachable,
+ * and whether traffic comes through Cloudflare.
+ */
+describe('sign-in providers and Cloudflare', () => {
+  it('shows each sign-in provider and whether traffic is proxied', async () => {
+    stubApi({
+      i: infrastructure({
+        signIn: { google: { state: 'ok', reachable: true }, microsoft: { state: 'not_configured', configureWith: 'X' } },
+        cloudflare: { state: 'ok', proxied: true, colo: 'IAD' },
+      }),
+    });
+    renderOwner();
+    await screen.findByText('Google sign-in');
+    expect(within(systemRow('Google sign-in')).getByText('Reachable')).toBeInTheDocument();
+    expect(within(systemRow('Microsoft sign-in')).getByText('Not configured')).toBeInTheDocument();
+    expect(within(systemRow('Cloudflare')).getByText('Proxied')).toBeInTheDocument();
+    expect(within(systemRow('Cloudflare')).getByText('via IAD')).toBeInTheDocument();
+  });
+
+  it('flags a provider this server cannot reach', async () => {
+    stubApi({ i: infrastructure({ signIn: { google: { state: 'timeout' }, microsoft: { state: 'unavailable' } } }) });
+    renderOwner();
+    await screen.findByText('Google sign-in');
+    expect(within(systemRow('Google sign-in')).getByText('Not answering')).toBeInTheDocument();
+    expect(within(systemRow('Microsoft sign-in')).getByText('Unreachable')).toBeInTheDocument();
+  });
+});

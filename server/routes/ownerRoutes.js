@@ -58,6 +58,7 @@ import {
 } from '../integrations/amplitude.js';
 import { UPSTASH_CONSOLE_URL, fetchRedis } from '../integrations/upstash.js';
 import { PINECONE_CONSOLE_URL, fetchVectorSearch } from '../integrations/pinecone.js';
+import { fetchSignInProviders, cloudflareStatus } from '../integrations/signIn.js';
 
 const router = express.Router();
 
@@ -191,18 +192,23 @@ router.get('/api/owner/analytics', authenticateToken, requireCap('owner.console'
 router.get('/api/owner/infrastructure', authenticateToken, requireCap('owner.console'), async (req, res) => {
   try {
     const fresh = wantsFresh(req);
-    const [redis, vector] = await Promise.all([
+    const [redis, vector, signIn] = await Promise.all([
       cached('upstash:redis', TTL.infrastructure, () => fetchRedis({
         weather: weatherCacheStats(),
         geocode: geocodeCacheStats(),
       }), { fresh }),
       cached('pinecone:index', TTL.infrastructure, () => fetchVectorSearch(), { fresh }),
+      /* Google and Microsoft sign-in, and Cloudflare (SC-09). See
+         integrations/signIn.js for what is asked and what is never sent. */
+      cached('signin:providers', TTL.infrastructure, () => fetchSignInProviders(), { fresh }),
     ]);
 
     res.json({
       generatedAt: new Date().toISOString(),
       redis,
       vector,
+      signIn,
+      cloudflare: cloudflareStatus(req),
       links: {
         upstash: UPSTASH_CONSOLE_URL,
         pinecone: PINECONE_CONSOLE_URL,
