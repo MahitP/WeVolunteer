@@ -342,7 +342,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
                 <label htmlFor="pf-highlights">Highlights</label>
                 <textarea
                   id="pf-highlights" className="textarea" rows={4} value={form.highlightsInput}
-                  placeholder={'One per line\ne.g. Running the district volunteering programme'}
+                  placeholder={'One per line\ne.g. Running our club’s volunteering program'}
                   aria-describedby="pf-highlights-hint"
                   onChange={e => set('highlightsInput', e.target.value)}
                 />

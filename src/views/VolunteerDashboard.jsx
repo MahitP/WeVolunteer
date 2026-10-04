@@ -205,7 +205,7 @@ export default function VolunteerDashboard({
       {/* The greeting row is also the page-action row. It was a heading with
           the whole width to itself; the action sits in the space that was
           already there rather than adding a band above it. */}
-      <div className="dashboard-greeting" style={{ marginBottom: '-var(--s4)' }}>
+      <div className="dashboard-greeting">
         <h2 style={{ fontSize: '1.75rem', fontWeight: 700 }}>
           {greetingMessage}
         </h2>

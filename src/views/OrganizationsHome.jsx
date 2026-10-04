@@ -56,7 +56,7 @@ export default function OrganizationsHome({ currentUser }) {
       <div className="page-head row-between row-wrap" style={{ gap: 'var(--s3)' }}>
         <div>
           <h2 className="page-title">Organizations</h2>
-          <p className="muted">Clubs and programmes you run or belong to.</p>
+          <p className="muted">Clubs and programs you run or belong to.</p>
         </div>
         {canCreate && (
           <Link to="/organizations/new" className="btn btn-primary">
@@ -77,7 +77,7 @@ export default function OrganizationsHome({ currentUser }) {
           headingLevel={2}
           title="You are not in any organizations yet"
           message={canCreate
-            ? 'Create one for your club or programme, or join one from Discover.'
+            ? 'Create one for your club or program, or join one from Discover.'
             : 'Join one from Discover and it will appear here.'}
           action={canCreate
             ? <Link className="btn btn-primary" to="/organizations/new"><Plus size={15} aria-hidden="true" /> Create organization</Link>

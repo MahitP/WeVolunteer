@@ -210,7 +210,7 @@ export default function OrganizationForm({ addToast }) {
         <p className="muted">
           {editing
             ? 'Change how this organization appears to students.'
-            : 'A club, chapter, or programme that runs volunteering. You become its first manager.'}
+            : 'A club, chapter, or program that runs volunteering. You become its first manager.'}
         </p>
       </div>
 

@@ -102,7 +102,7 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
               {/* Precise, because "may be preserved" was not.
                   What the endpoint actually does (accountRoutes.js, step 1):
                   before anonymising the account it writes the volunteer's NAME,
-                  the event, the organisation, the hours and the completion date
+                  the event, the organization, the hours and the completion date
                   into snapshot columns on every certificate, and keeps those
                   rows. The certificate stays verifiable by a school office
                   precisely because the name on it survives.
@@ -137,7 +137,7 @@ export default function DeleteAccountModal({ onClose, onSuccess, hasPassword, us
                   <div className="stack-sm delete-summary-col">
                     <p className="strong small delete-summary-kept">Kept, with your name on it</p>
                     <ul className="small dim delete-summary-list">
-                      <li>Certificates you earned — your name, the event, the organisation, the hours and the date</li>
+                      <li>Certificates you earned — your name, the event, the organization, the hours and the date</li>
                       <li>The verified hours behind them</li>
                     </ul>
                     {/* "Historical records" was removed rather than reworded: it

@@ -844,7 +844,7 @@ export const PAGE_META = {
        so no other persona can reach the page and an entry under one would be a
        title nobody will ever see. */
     legalEditor: { title: 'Legal Center editor', sub: 'Publish new versions of the documents people agree to' },
-    dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the programme is doing' },
+    dashboard: { title: 'Dashboard', sub: 'Reports waiting, organizers to approve, and how the program is doing' },
     /* "All events" was the pre-consolidation title, and it survived the rename
        into two personas. It disagreed with the rail item that opens the page
        ("Discover") and it named a third of what the page holds — the same
@@ -865,7 +865,7 @@ export const PAGE_META = {
        all while every role could reach it, so the topbar fell back to the
        application name and the one page of figures was the one page with no
        title. */
-    impact: { title: 'Community Impact', sub: 'What the programme has done, counted from confirmed attendance' },
+    impact: { title: 'Community Impact', sub: 'What the program has done, counted from confirmed attendance' },
     adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
     organizations: { title: 'Organization', sub: 'A club or group posting opportunities' },

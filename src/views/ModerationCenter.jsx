@@ -134,7 +134,7 @@ export const AREAS = [
     cap: 'analytics.impact',
     icon: Sprout,
     title: 'Community Impact',
-    blurb: 'What the programme has added up to — hours served, causes supported and who took part. '
+    blurb: 'What the program has added up to — hours served, causes supported and who took part. '
       + 'Held by every administrator.',
   },
   /**

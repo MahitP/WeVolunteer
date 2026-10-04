@@ -548,7 +548,7 @@ export default function AdminDashboard({ addToast, user }) {
           whether volunteering is actually working, not just happening. */}
       {totals && (
         <section>
-          <div className="section-head"><h2>Programme health</h2></div>
+          <div className="section-head"><h2>Program health</h2></div>
           <div className="grid grid-3">
             <RateCard
               label="Show-up rate"

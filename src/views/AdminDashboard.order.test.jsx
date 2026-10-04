@@ -41,7 +41,7 @@ const positionOf = (heading) => {
 describe('the Moderation Center leads with moderation', () => {
   it('puts Reports above every analytics section', () => {
     const reports = positionOf('Reports');
-    for (const analytics of ['Programme health', 'Participation', 'Most active organizers']) {
+    for (const analytics of ['Program health', 'Participation', 'Most active organizers']) {
       expect(
         reports,
         `"${analytics}" is above the safety queue — a moderator should not scroll `
@@ -61,6 +61,6 @@ describe('the Moderation Center leads with moderation', () => {
   });
 
   it('keeps the approval queue above the analytics too', () => {
-    expect(positionOf('Organizer requests')).toBeLessThan(positionOf('Programme health'));
+    expect(positionOf('Organizer requests')).toBeLessThan(positionOf('Program health'));
   });
 });
