@@ -34,6 +34,7 @@ function Spans({ spans }) {
          is present only for that case, so plain bold stays a single text node. */
       return <strong key={i}>{span.spans ? <Spans spans={span.spans} /> : span.text}</strong>;
     }
+    if (span.type === 'italic') return <em key={i}>{span.spans ? <Spans spans={span.spans} /> : span.text}</em>;
     if (span.type === 'code') return <code key={i} className="policy-code">{span.text}</code>;
     if (span.type === 'link') {
       /**

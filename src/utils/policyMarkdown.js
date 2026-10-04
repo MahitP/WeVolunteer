@@ -135,8 +135,10 @@ export function parseInline(line) {
   const spans = [];
   let rest = String(line);
 
-  // Code first, then link, then bold. Each alternative captures its own payload.
-  const pattern = /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(\*\*[^*]+\*\*)/;
+  // Code first, then link, then bold, then italic. Each alternative captures its
+  // own payload. Italic is a single asterisk with no space just inside it and no
+  // word character just outside it, so `5*3 and 2*4` and `a * b` stay literal.
+  const pattern = /(`[^`]+`)|(\[[^\]]+\]\([^)\s]+\))|(\*\*[^*]+\*\*)|((?<![\w*])\*(?![\s*])[^*]+?(?<![\s*])\*(?![\w*]))/;
 
   while (rest.length > 0) {
     const match = pattern.exec(rest);
@@ -157,6 +159,13 @@ export function parseInline(line) {
         text: token.slice(1, split),
         href: token.slice(split + 2, -1),
       });
+    } else if (!token.startsWith('**')) {
+      /* Italic, re-parsed for a nested link or code span exactly as bold is
+         below; `text` is kept so every caller reading `s.text` still works. */
+      const inner = token.slice(1, -1);
+      const nested = parseInline(inner);
+      const flat = nested.length <= 1 && nested.every(sp => sp.type === 'text');
+      spans.push(flat ? { type: 'italic', text: inner } : { type: 'italic', text: inner, spans: nested });
     } else {
       /**
        * Bold can contain a link or a code span, so its payload is re-parsed.
@@ -283,7 +292,10 @@ export function parsePolicyMarkdown(source) {
     if (bullet || numbered) {
       flushParagraph(); flushQuote(); flushTable();
       const ordered = Boolean(numbered);
-      const text = (bullet ? bullet[1] : numbered[2]).trim();
+      /* `- [ ] …` is a printed confirm list in the three agreements. On screen
+         the real checkboxes follow it, so the box is dropped and the sentence
+         kept; a literal "[ ]" above them read as a broken control. */
+      const text = (bullet ? bullet[1] : numbered[2]).trim().replace(/^\[[ xX]\]\s+/, '');
       if (!list || list.ordered !== ordered) {
         flushList();
         list = { type: 'list', ordered, items: [] };

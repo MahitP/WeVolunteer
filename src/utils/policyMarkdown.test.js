@@ -50,6 +50,42 @@ describe('parseInline', () => {
   });
 });
 
+/**
+ * Italics and the confirm lists (final audit, Phase 5, 2026-10-04).
+ *
+ * The parser knew bold and nothing lighter, so every `*italic*` in a published
+ * document rendered with its asterisks: the Organizer Agreement's acceptance
+ * block read "*your name, from your account*". And the three agreements'
+ * printed confirm lists (`- [ ] I will record volunteer hours accurately.`)
+ * rendered their "[ ]" literally, directly above the real checkboxes.
+ */
+describe('emphasis and confirm lists', () => {
+  it('renders single-asterisk italics, beside bold', () => {
+    expect(parseInline('**Accepted by:** *your name, from your account*')).toEqual([
+      { type: 'bold', text: 'Accepted by:' },
+      { type: 'text', text: ' ' },
+      { type: 'italic', text: 'your name, from your account' },
+    ]);
+  });
+
+  it('keeps a lone or arithmetic asterisk literal', () => {
+    expect(parseInline('5*3 and 2*4')).toEqual([{ type: 'text', text: '5*3 and 2*4' }]);
+    expect(parseInline('a * b * c')).toEqual([{ type: 'text', text: 'a * b * c' }]);
+  });
+
+  it('lets an italic run carry a link, like bold', () => {
+    const [span] = parseInline('*see the [Terms](/legal/terms-of-service)*');
+    expect(span.type).toBe('italic');
+    expect(span.spans.find(s => s.type === 'link').href).toBe('/legal/terms-of-service');
+  });
+
+  it('drops the "[ ]" of a printed confirm list, keeping the sentence', () => {
+    const [list] = parsePolicyMarkdown('- [ ] I will record volunteer hours accurately.');
+    expect(list.type).toBe('list');
+    expect(list.items[0]).toEqual([{ type: 'text', text: 'I will record volunteer hours accurately.' }]);
+  });
+});
+
 describe('slugifyHeading', () => {
   it('produces a stable anchor id', () => {
     expect(slugifyHeading('What we collect')).toBe('what-we-collect');
