@@ -112,3 +112,27 @@ describe('the audience control', () => {
     expect(label.textContent).not.toMatch(/optional/i);
   });
 });
+
+/**
+ * Arriving from a club page's "Post an opportunity" (final audit, Phase 5).
+ * The club is chosen already, if this account may publish under it; a club it
+ * may not is ignored, exactly as if it had been chosen in the select.
+ */
+describe('arriving from a club page', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('chooses the club the link named', async () => {
+    window.history.pushState({}, '', '/events/new?organization=org-2');
+    await show(ORGANIZER);
+    await waitFor(() => expect(document.getElementById('ce-org')).toHaveValue('org-2'));
+    window.history.pushState({}, '', '/');
+  });
+
+  it('ignores a club this account may not publish under', async () => {
+    window.history.pushState({}, '', '/events/new?organization=org-3');
+    await show(ORGANIZER);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Chess Club' })).toBeInTheDocument());
+    expect(document.getElementById('ce-org')).toHaveValue('');
+    window.history.pushState({}, '', '/');
+  });
+});

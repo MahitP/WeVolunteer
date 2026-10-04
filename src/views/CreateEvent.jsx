@@ -55,10 +55,22 @@ export default function CreateEvent({
       .then(res => {
         if (cancelled) return;
         const mine = res.organizations || [];
-        setManageableOrgs(mine.filter((o) => {
+        const manageable = mine.filter((o) => {
           const rank = o.viewerRole ?? o.memberRole;
           return rank === 'manager' || rank === 'student_organizer';
-        }));
+        });
+        setManageableOrgs(manageable);
+        /**
+         * Arriving from a club page's "Post an opportunity": that club is
+         * chosen already. Only one this account may publish under, so a link
+         * naming any other is ignored rather than offered. Read from the
+         * address bar, not a router hook, because the form is also rendered
+         * outside a router.
+         */
+        const fromLink = new URLSearchParams(window.location.search).get('organization');
+        if (fromLink && manageable.some(o => o.id === fromLink)) {
+          setForm(f => (f.organizationId ? f : { ...f, organizationId: fromLink }));
+        }
       })
       /* A missing list is not an error worth showing: the field is optional, so
          it simply does not appear. */

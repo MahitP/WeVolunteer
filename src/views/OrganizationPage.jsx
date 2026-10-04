@@ -440,6 +440,8 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
   const { organization: org, members, events, viewer, totals } = data;
   const upcoming = events.filter(e => e.startsAt && new Date(e.startsAt) >= new Date());
   const past = events.filter(e => !e.startsAt || new Date(e.startsAt) < new Date());
+  /* The event form, with this club already chosen (CreateEvent reads it). */
+  const postHref = `/events/new?organization=${encodeURIComponent(org.id)}`;
   /**
    * The affordance the reader actually has, which is the server's answer plus
    * the one thing the server cannot know.
@@ -761,7 +763,15 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
       <div className="org-columns">
         <div className="org-column-main stack-lg">
           <section className="card" aria-labelledby="org-opportunities-heading">
-            <div className="card-head"><h2 id="org-opportunities-heading">Opportunities</h2></div>
+            <div className="card-head">
+              <h2 id="org-opportunities-heading">Opportunities</h2>
+              {/* The way in for whoever may post, with this club chosen on the
+                  form. The card told them to post and offered nothing (final
+                  audit, Phase 5); the server re-checks the right to post. */}
+              {viewer.canPost && (upcoming.length > 0 || past.length > 0) && (
+                <Link className="btn btn-secondary btn-sm" to={postHref}>Post an opportunity</Link>
+              )}
+            </div>
             <div className="card-body">
               {upcoming.length === 0 && past.length === 0 ? (
                 <EmptyState
@@ -772,6 +782,9 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
                       ? 'Post an opportunity and it will appear here for everybody who can see this organization.'
                       : 'When this organization posts an opportunity, it will appear here.'
                   }
+                  action={viewer.canPost
+                    ? <Link className="btn btn-primary btn-sm" to={postHref}>Post an opportunity</Link>
+                    : null}
                 />
               ) : (
                 <>
