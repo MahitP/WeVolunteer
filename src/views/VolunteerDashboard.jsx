@@ -286,7 +286,7 @@ export default function VolunteerDashboard({
             <div>
               <div className="eyebrow">Service hours this year</div>
               <div className="row" style={{ gap: 'var(--s2)', marginTop: 2 }}>
-                <span className={`stat-value ${progressTone}`}>{formatHours(totalHours)}</span>
+                <span className="stat-value accent">{formatHours(totalHours)}</span>
                 <span className="muted small">of {HOUR_GOAL} hr goal</span>
               </div>
             </div>

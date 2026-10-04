@@ -158,7 +158,7 @@ export default function VolunteerProfile({
       <section className="stats">
         <div className="stat">
           <div className="stat-label">Hours served</div>
-          <div className={`stat-value ${progressTone}`}>{formatHours(stats.hours)}</div>
+          <div className="stat-value accent">{formatHours(stats.hours)}</div>
         </div>
         <div className="stat">
           <div className="stat-label">Events completed</div>

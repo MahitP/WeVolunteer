@@ -874,6 +874,14 @@ until ruled on.
      and push the "Create account" button down under the pointer;
    - an admin's report card shows the reported person's name twice.
 
+**Rulings on the Phase 5 questions (2026-10-04):**
+
+| # | Item | Ruling |
+|---|---|---|
+| 23 | Naming | **"Event" in every organizer tool and button; "opportunity" only where a student browses Discover; "sign-up sheet" retired** |
+| 24 | Hours colour | **The hours figure is always the hours colour**; progress to 25 hours is the meter's job |
+| 25 | Small fixes | **All of them**: location banner off organizer dashboards; a manager sees "You manage this organization" and no volunteer-only card on their own club; a pending organizer's subtitle fits; the badge email waits for a confirmed address; the signup button stays put; a report card names the person once |
+
 Deliberately left as found, with the recorded reason: "Microsoft — not set up
 on this site" on the signup screen (`ProviderButtons.jsx`, the AADSTS900144
 incident), and "Verify a certificate" on every dashboard (requested by the
