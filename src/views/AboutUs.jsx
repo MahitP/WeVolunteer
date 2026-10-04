@@ -1,9 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Link } from 'react-router-dom';
 import { Compass, ClipboardList, Users, HeartHandshake, Crown } from 'lucide-react';
-import { APP_NAME, SUPPORT_EMAIL, DOCUMENT_SIGNATORY_TITLE } from '../config';
-import { api } from '../utils/api';
-import { avatarColorValue } from '../utils/avatarColors';
+import { APP_NAME, SUPPORT_EMAIL, DOCUMENT_SIGNATORY, DOCUMENT_SIGNATORY_TITLE } from '../config';
 import useDocumentTitle from '../hooks/useDocumentTitle';
 import CopyableEmail from '../components/common/CopyableEmail';
 import { usePageMeta } from '../hooks/usePageMeta';
@@ -60,10 +58,13 @@ import { usePageMeta } from '../hooks/usePageMeta';
 const BELIEFS = [
   {
     name: 'Showing up once still counts.',
-    body: 'Three hours at one event is a real contribution. When more people want a '
-      + 'place than there are places, the draw that picks them actually favours the '
-      + 'volunteers with fewer recorded hours, so turning up for the first time does '
-      + 'not put you at the back of the queue behind somebody with two hundred.',
+    /* "When an organizer uses Auto Select", because there is not always a draw:
+       an organizer can accept, waitlist or reject by hand. The earlier sentence
+       implied every full event was drawn. */
+    body: 'Three hours at one event is a real contribution. When more people apply '
+      + 'than there are places and the organizer uses Auto Select, the draw favours '
+      + 'the volunteers with fewer credited hours, so turning up for the first time '
+      + 'does not put you at the back of the queue behind somebody with two hundred.',
   },
   {
     name: 'Finding the opportunity is the hard part.',
@@ -84,13 +85,22 @@ const BELIEFS = [
   },
   {
     name: 'These records affect real decisions.',
-    body: 'Service hours go into graduation requirements, scholarships and '
+    /* "May count": whether hours count is the school's or the program's
+       decision, which is how the Volunteer Record Policy puts it. */
+    body: 'Service hours may count toward graduation requirements, scholarships and '
       + 'applications. People rely on them being right, which makes accuracy an '
       + 'obligation rather than a feature we could trade away for convenience.',
   },
 ];
 
-/** The two sides of the same problem. */
+/**
+ * The two sides of the same problem.
+ *
+ * In the app's words: volunteers APPLY, and organizers accept, waitlist or
+ * reject. "Sign up" for applying promised a place the moment you asked for one.
+ * And an event's hours are final only when the organizer closes them out, a
+ * button they press (Volunteer Record Policy), never when the event ends.
+ */
 const AUDIENCES = [
   {
     key: 'volunteers',
@@ -99,7 +109,7 @@ const AUDIENCES = [
     lead: 'If you are here to volunteer, this should do a few specific things for you.',
     points: [
       ['See what is actually available', 'Real events with real dates and a spot count you can trust, without emailing somebody to ask.'],
-      ['Know what you are signing up for', 'What the work involves, how long it runs, where it is, and what to bring. Nobody should show up to a surprise.'],
+      ['Know what you are applying for', 'What the work involves, how long it runs, where it is, and what to bring. Nobody should show up to a surprise.'],
       ['Find things that fit', 'Your schedule, your area, and the kind of work you want to do.'],
       ['Keep a record you can hand over', 'Every hour you are credited stays attached to the event and the date it came from. If a school or a program asks, you can show the work rather than just the number.'],
     ],
@@ -110,10 +120,10 @@ const AUDIENCES = [
     title: 'For organizers',
     lead: 'If you run events, this is meant to take work off your plate, not add a system to learn.',
     points: [
-      ['One place your events live', 'People find them and sign up without going through you first.'],
-      ['A roster that stays current', 'Who signed up, how many places are left, who confirmed, and who actually arrived.'],
-      ['Less to send by hand', 'Reminders go out on their own, and the attendance record is finished when the event is.'],
-      ['A record you do not have to reconstruct', 'What happened on the day, written down while it was happening.'],
+      ['One place your events live', 'People find them and apply without going through you first.'],
+      ['A roster that stays current', 'Who applied, who you accepted, how many places are left, and who actually arrived.'],
+      ['Less to send by hand', 'Accepted volunteers get a reminder before their shift without you sending one, and applicants find out in the app whether you accepted, waitlisted or rejected them.'],
+      ['A record you do not have to reconstruct', 'Check-ins are recorded as people arrive. Afterwards you confirm who was there, which is what credits the hours, and once everyone is accounted for you close the hours out. From then on, no credited record on that event can be changed.'],
     ],
   },
 ];
@@ -138,10 +148,21 @@ const COMMITMENTS = [
   /* Deliberately NOT the derived-total point, which the passage above the motto
      makes at length. Two statements of the same fact in one page is how the
      earlier draft came to say five things four times each. This is the other half
-     of the same guarantee: corrections are appended, so the history survives. */
-  ['Accuracy', 'When an hour is corrected, the correction is added to the record rather than written over it. There is a trail of what changed and when, which means a mistake can be found and fixed instead of quietly becoming the new truth.'],
-  ['Plain language', 'The Terms and the Privacy Policy are written to be understood by the fourteen-year-olds who have to agree to them. Where we do not have an answer yet, they say so instead of leaving a gap that reads like an answer.'],
-  ['Restraint', 'We ask for the information a volunteer record needs and not more. Student profiles are private by default.'],
+     of the same guarantee: the history survives in `hours_ledger`.
+
+     It used to say a correction "is added to the record rather than written
+     over it". The attendance row IS written over — one row per shift, updated in
+     place (`attendance.js`). What is append-only is the ledger beside it, which
+     records every change and who made it (`hoursLedger.js`). */
+  ['Accuracy', 'Every change to an attendance record is written to a permanent ledger, with who made it and when. That trail is what lets a mistake be found and fixed instead of quietly becoming the new truth.'],
+  /* Thirteen is MINIMUM_AGE (server/accountValidation.js). A new account agrees
+     to the Terms and acknowledges the Privacy Policy (`consentType` in
+     server/legalDocuments.js); nobody "agrees" to a privacy notice. */
+  ['Plain language', 'The Terms of Service and the Privacy Policy are written to be understood by students as young as thirteen, the youngest who can make an account. A student agrees to the Terms and acknowledges the Privacy Policy when they join. Where we do not have an answer yet, the documents say so instead of leaving a gap that reads like an answer.'],
+  /* No profile-visibility default is stated here or anywhere on this page. The
+     code and the Privacy Policy currently disagree about it, and until they are
+     reconciled a stated default is a promise one of them breaks. */
+  ['Restraint', 'We ask for the information a volunteer record needs and not more.'],
   ['Accessibility', 'This should not require a particular device, a particular ability, or a particular kind of attention. We build for keyboards, screen readers, small screens and slow connections, and we treat failures there as defects rather than polish.'],
   ['Care with the sensitive parts', 'We would rather be slow about something involving a minor than quick about something we would have to apologize for.'],
 ];
@@ -153,7 +174,7 @@ export default function AboutUs() {
      live: h1 "About WeVolunteer", tab "Dashboard". Same defect as `/verify`;
      see the note in CertificateVerification.jsx. */
   useDocumentTitle('About');
-  usePageMeta({ description: 'About WeVolunteer: volunteer sign-ups and verified service hours for students, organizers and schools.' });
+  usePageMeta({ description: 'About WeVolunteer: finding volunteer work and keeping an honest record of service hours, for students, organizers and schools.' });
 
   return (
     /* `main`, not a bare div, and `aria-labelledby` pointing at the h1 —
@@ -192,7 +213,7 @@ export default function AboutUs() {
             written down.
           </li>
           <li>
-            It is new, and it is built and run by one person. That is not a slogan
+            It is new, and it is run by one person. That is not a slogan
             about being small — it is who answers when you write in.
           </li>
         </ul>
@@ -256,7 +277,7 @@ export default function AboutUs() {
         <section className="about-section" aria-labelledby="about-vision">
           <h2 id="about-vision">Our vision</h2>
           <p>
-            Convenient sign-ups are worth building. They are not the ambition.
+            A convenient sign-up sheet is worth building. It is not the ambition.
           </p>
           <p>
             What we want is for volunteering to feel like a normal, available part of
@@ -314,10 +335,26 @@ export default function AboutUs() {
           *
           * Most adults who reach this page arrive because a student sent them the
           * link, and the question they came with is not "what is your mission".
-          * Every answer below is a fact about the software rather than a promise:
-          * profiles are private by default, hours are confirmed by the organizer
-          * rather than self-reported, and the Privacy Policy enumerates the fields
-          * that are visible to anyone else.
+          * Every answer below is a fact about the software rather than a promise.
+          *
+          * The first answer used to say profiles are private by default and that
+          * the Privacy Policy lists every field anyone else can see. The policy
+          * names no such list, and some of a profile is shown to every signed-in
+          * member whatever the setting (`PUBLIC_BASELINE_FIELDS` in
+          * server/profileSerializer.js). So it now says what is always shown,
+          * what the student controls (`PUBLIC_ONLY_FIELDS`, and the service and
+          * certificate settings in serviceVisibility.js), and that organizers and
+          * administrators see past the setting.
+          *
+          * Written to stay true while the baseline is narrowed
+          * (docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md, Option A): it names
+          * only fields that stay on the baseline either way, and gives the
+          * controlled fields as examples, because location, hobbies and skills
+          * are moving from one list to the other. It does not itemize which
+          * staff see which field, because what a Student Organizer sees of an
+          * applicant is being brought in line with the Student Organizer
+          * Agreement §3. And it states no default, which code and policy
+          * currently disagree about.
           */}
         <section className="about-audience about-audience-wide" aria-labelledby="about-families">
           <div className="about-audience-head">
@@ -330,20 +367,25 @@ export default function AboutUs() {
           </p>
           <dl className="about-point-list">
             <div className="about-point">
-              <dt>A student profile is private unless they change it</dt>
+              <dt>Some of a profile is always visible to members, and some is the student&rsquo;s choice</dt>
               <dd>
-                Private is the default, not something to go and switch on. The{' '}
+                Anyone signed in can see a student&rsquo;s name, picture and the
+                clubs they belong to, whatever their settings. In Settings, under
+                Privacy, the student chooses who else sees details such as their
+                school, grade and bio, and can keep their service history and
+                certificates to themselves. Organizers and administrators see more,
+                as the{' '}
                 <Link className="policy-link" to="/legal/privacy-policy">Privacy Policy</Link>{' '}
-                lists every field anyone else can see, by name.
+                describes.
               </dd>
             </div>
             <div className="about-point">
               <dt>Hours are confirmed by the organizer, not claimed by the student</dt>
               <dd>
                 An hour is credited when the person running the event marks the
-                volunteer as present. Students can also log outside service
-                themselves, and that is recorded separately and labelled as
-                self-reported so nobody mistakes one for the other.
+                volunteer as present. Students can also keep a private log of
+                service they did elsewhere; it is never added to their credited
+                hours, and it is not on their profile or their transcript.
               </dd>
             </div>
             <div className="about-point">
@@ -412,6 +454,11 @@ export default function AboutUs() {
         * This is the fix: one decision, with a price, that a reader can go and
         * verify. Hours really are derived on every read rather than stored — see
         * `hoursLedger.js` — and a running total really would be simpler to build.
+        *
+        * The unit is the SHIFT: `attendance` holds one row per shift and person,
+        * with the hours awarded for it. It used to say "every hour is its own
+        * record", naming the confirming organizer as part of it; the row records
+        * no organizer, and the history of changes is the ledger's job.
         */}
       <section className="about-earned" aria-labelledby="about-earned-heading">
         <h2 id="about-earned-heading" className="about-heading">What “because we care” has cost</h2>
@@ -420,9 +467,9 @@ export default function AboutUs() {
           shows up in the work.
         </p>
         <p>
-          Your hours are never stored as a total. Every hour is its own record — the
-          event, the date, and the organizer who confirmed you were there — and the
-          total is added up fresh every time anybody looks at it. Keeping a running
+          Your hours are never stored as a total. Every shift you are credited for is
+          its own record — the event, the date and the hours — and the total is added
+          up from those records every time anybody looks at it. Keeping a running
           number would have been faster to build and quicker to load. We do not,
           because a student's record of what they did should never be one bad edit
           away from being wrong.
@@ -439,10 +486,10 @@ export default function AboutUs() {
         * account — which is backwards, so this page (public, and reached by
         * exactly those people) is where it belongs.
         *
-        * The name comes from the server by ROLE, never by matching a username,
-        * so an account that changes hands needs no edit here. The title comes
-        * from configuration, the same value the transcript footer signs with, so
-        * the document and the page cannot disagree about who issued what.
+        * The name and the title both come from configuration, the values the
+        * transcript footer prints, so the page and the document cannot disagree
+        * about who issued what. A change of operator is a configuration change,
+        * not an edit here.
         */}
       <OwnerSection />
 
@@ -452,7 +499,8 @@ export default function AboutUs() {
       </p>
 
       {/* A footer line rather than a section, so the motto is the last thing said
-          and the practical links are still one glance away. */}
+          and the practical links are still one glance away. It says who reads the
+          inbox and promises no reply: one person reads it, not around the clock. */}
       <p className="about-footer-links small">
         <Link className="policy-link" to="/legal">Legal Center</Link>
         {' · '}
@@ -460,7 +508,7 @@ export default function AboutUs() {
           <>
             Something here unclear or wrong? Write to us at{' '}
             <CopyableEmail address={SUPPORT_EMAIL} />
-            {' — it goes to one person, and that is who will answer.'}
+            {' — one person reads it.'}
           </>
         ) : (
           'Contact details for privacy requests and safety reports are at the end of each legal document.'
@@ -471,77 +519,34 @@ export default function AboutUs() {
 }
 
 /**
- * The platform owner, named.
+ * The platform's operator, named.
  *
- * ── Why it renders nothing rather than an error ──
+ * ── Why the name is configuration and not an account ──
  *
- * A deployment with no owner account yet is a legitimate state — a fresh
- * install, or a district mid-handover — and so is a failed request on a page
- * somebody opened to read prose. Neither is worth a red box on an About page,
- * and the surrounding nineteen hundred words are still true without this. So a
- * miss is silence.
+ * This used to show whichever account `/api/platform/owner` resolved, by role.
+ * Two accounts hold that role (`server/ownerAllowlist.js`): the founder's, and
+ * the official platform account, whose display name is the "Platform Owner"
+ * placeholder `bin/bootstrap-owners.mjs` gives every account it creates. The
+ * live page resolved the platform account, so it named "Platform Owner",
+ * described an account as a person, and claimed the transcript footer printed
+ * the same name — while the transcript and every legal document name Mahit
+ * Pulavarthi.
  *
- * ── Why the profile link is not always there ──
- *
- * `/users/@handle` is an APP route, deliberately: "public profile" on this
- * platform means visible to the school community, not to the open internet,
- * because the members are children. A signed-out reader gets the name and the
- * role — which is what they came for — and no link into a members-only surface
- * that would only bounce them to a sign-in screen.
+ * The question this section answers is who is responsible, and that is the
+ * operator the Terms and the Privacy Policy name, which is the value the
+ * transcript prints (`DOCUMENT_SIGNATORY`, src/config.js). So the name comes
+ * from there, and it renders whether or not any account exists. Nothing from
+ * an account is shown: an avatar, handle or profile link from whichever owner
+ * account the server picked could belong to the platform account and sit under
+ * a person's name.
  */
 function OwnerSection() {
-  const [owner, setOwner] = useState(null);
-
-  /**
-   * Whether to offer the profile link, decided WITHOUT a request.
-   *
-   * This used to call `api.getMe()`. That is authoritative, and on this page it
-   * is the wrong trade: `/about` is public and is read mostly by people who have
-   * no account — a parent, somebody sent a link — so the call was a guaranteed
-   * 401 on almost every view, from anonymous visitors, purely to decide whether
-   * to render one anchor.
-   *
-   * The cached user is enough for that decision and costs nothing. Being wrong
-   * is cheap in both directions: a stale cache offers a link to somebody signed
-   * out, who meets the sign-in screen the link was always gated by, or withholds
-   * it from somebody signed in, who still has the whole navigation. Neither is
-   * worth an auth probe on a public page.
-   */
-  const signedIn = Boolean(api.getCurrentCachedUser?.());
-
-  useEffect(() => {
-    let cancelled = false;
-    api.fetchPlatformOwner()
-      .then(res => { if (!cancelled) setOwner(res?.owner ?? null); })
-      .catch(() => { if (!cancelled) setOwner(null); });
-    return () => { cancelled = true; };
-  }, []);
-
-  if (!owner) return null;
-
   return (
     <section className="about-section about-owner" aria-labelledby="about-owner-heading">
       <h2 id="about-owner-heading">Who runs {APP_NAME}</h2>
       <div className="about-owner-card">
-        {/* The same three lines PublicProfile uses. There is no shared user
-            avatar component to reuse — only OrgAvatar, for organizations — and
-            inventing one for a single caller would be the wrong moment. */}
-        <span
-          className="avatar avatar-lg"
-          style={avatarColorValue(owner.avatarColor)
-            ? { '--avatar-bg': avatarColorValue(owner.avatarColor) }
-            : undefined}
-          aria-hidden="true"
-        >
-          {owner.profilePictureUrl
-            ? <img src={owner.profilePictureUrl} alt="" className="avatar-img" />
-            : (owner.avatar || '🙂')}
-        </span>
         <div className="stack-xs">
-          <p className="about-owner-name">
-            {owner.name}
-            {owner.username && <span className="about-owner-handle"> @{owner.username}</span>}
-          </p>
+          <p className="about-owner-name">{DOCUMENT_SIGNATORY}</p>
           <p className="about-owner-title">
             <Crown size={14} aria-hidden="true" /> {DOCUMENT_SIGNATORY_TITLE}
           </p>
@@ -551,22 +556,8 @@ function OwnerSection() {
         {APP_NAME} is run by one person, not a company. They are responsible for how
         the platform works, what it does with your information, and every policy in
         the Legal Center. When a document here says &ldquo;we&rdquo;, this is who it
-        means, and the signature at the foot of a service transcript is the same
-        name.
-      </p>
-      <p>
-        They are also a student who volunteers, so their own service record sits on
-        their profile exactly as anybody else&rsquo;s does — the hours there were
-        earned the same way and confirmed by the same organizers.
-        {signedIn && owner.username && (
-          <>
-            {' '}
-            <Link className="policy-link" to={`/users/@${owner.username}`}>
-              See their profile
-            </Link>
-            .
-          </>
-        )}
+        means, and it is the name printed at the foot of every service transcript.
+        They are also a student volunteer.
       </p>
     </section>
   );

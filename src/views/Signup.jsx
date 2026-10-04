@@ -653,7 +653,11 @@ export default function Signup({ onSignupSuccess, addToast }) {
                   <input type="radio" name="role" value="organizer" checked={!isStudent} onChange={() => set('role', 'organizer')} />
                   <span>
                     <span className="check-title">An organizer</span>
-                    <span className="check-desc">Post events and manage volunteers. A school administrator approves this before you can post.</span>
+                    {/* A WeVolunteer administrator, not a school's: WeVolunteer is
+                        independent of schools, and the approval is a platform
+                        admin's (`verified`, checked in POST /api/events). It gates
+                        posting EVENTS, so it does not say "post anything". */}
+                    <span className="check-desc">Post events and manage volunteers. A WeVolunteer administrator approves your account before you can post events.</span>
                   </span>
                 </label>
               </div>

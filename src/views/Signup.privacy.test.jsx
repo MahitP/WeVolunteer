@@ -148,6 +148,19 @@ describe('the consent controls', () => {
     await renderSignup();
     expect(screen.getByText(/parent or guardian/i)).toBeInTheDocument();
   });
+
+  /**
+   * The organizer option is a disclosure too: it says what stands between the
+   * account and posting. It used to name "a school administrator". WeVolunteer
+   * is independent of schools, and the approval is a WeVolunteer
+   * administrator's (`verified`, checked by POST /api/events).
+   */
+  it('says who approves an organizer account, and what the approval gates', async () => {
+    await renderSignup();
+    expect(screen.getByText(/A WeVolunteer administrator approves your account before you can post events\./))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/school administrator/i)).not.toBeInTheDocument();
+  });
 });
 
 describe('the consent controls actually gate', () => {

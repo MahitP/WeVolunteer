@@ -11143,27 +11143,14 @@ input:disabled + .premium-slider {
 /* Same reading measure as the prose around it. */
 .about-owner { max-width: 68ch; }
 
-.about-owner-card {
-  display: flex;
-  align-items: center;
-  gap: var(--s4);
-  margin: var(--s5) 0;
-  /* The row wraps rather than squeezing the name against the avatar at 320px —
-     the avatar is fixed, so it is the text block that has to be allowed to
-     move. */
-  flex-wrap: wrap;
-}
+/* The name and the title only. No avatar or handle: the name is the operator
+   the legal documents name, not an account (see OwnerSection in AboutUs.jsx). */
+.about-owner-card { margin: var(--s5) 0; }
 
 .about-owner-name {
   margin: 0;
   font-weight: 650;
   font-size: 1.125rem;
-}
-
-/* The handle sits with the name but does not compete with it. */
-.about-owner-handle {
-  font-weight: 450;
-  color: var(--ink-3);
 }
 
 .about-owner-title {
