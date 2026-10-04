@@ -1,4 +1,3 @@
-import { MAIL_DOMAIN } from '../config';
 /**
  * Formats a decimal hour value into a user-friendly string (e.g., 1.5 -> "1 hr 30 min", 0.75 -> "45 min")
  * @param {number|string} hours - The decimal hour value (e.g., 1.5, 2.25)
@@ -188,48 +187,6 @@ export function timeAgo(iso) {
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
   return new Date(iso).toLocaleDateString();
-}
-
-/**
- * Generates and triggers a download of an .ics calendar file for a given event and slot.
- * @param {object} event 
- * @param {object} slot 
- */
-export function downloadIcs(event, slot) {
-  if (!event || !slot) return;
-  const formatDates = (dateIso) => dateIso.replace(/[-:]|\.\d+/g, '');
-  
-  const start = new Date(slot.startDatetime).toISOString();
-  const end = new Date(slot.endDatetime).toISOString();
-  const now = new Date().toISOString();
-
-  const icsString = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//WeVolunteer//EN',
-    'BEGIN:VEVENT',
-    /* The UID domain must be one the platform actually controls: it is the
-       identity a calendar client uses to match an update to the entry it already
-       has, and it is visible in the exported file. */
-    `UID:${slot.id}@${MAIL_DOMAIN}`,
-    `DTSTAMP:${formatDates(now)}`,
-    `DTSTART:${formatDates(start)}`,
-    `DTEND:${formatDates(end)}`,
-    `SUMMARY:${event.title || 'Volunteer Shift'}`,
-    `LOCATION:${[event.location, event.address].filter(Boolean).join(', ') || ''}`,
-    `DESCRIPTION:Shift: ${slot.name}\\n\\n${event.description ? event.description.replace(/\\n/g, '\\\\n') : ''}`,
-    'END:VEVENT',
-    'END:VCALENDAR'
-  ].join('\r\n');
-
-  const blob = new Blob([icsString], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', `${(event.title || 'shift').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.ics`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 }
 
 /**

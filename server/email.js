@@ -454,12 +454,13 @@ export function escapeHtml(value) {
  * sends. There is no second template, which is why branding is changed here and
  * only here.
  *
- * ── Why the header is the name, and not the logo image ──
+ * ── Why the header is a tile and the name, and not the logo image ──
  *
- * The header is the product name set in bold, in the brand's Forest green, with
- * no tile and no image. It used to sit beside a coloured table cell reading
- * "WV" — a monogram the WeVolunteer identity has retired — and the checkmark-W
- * that replaced it is a drawing, which an email cannot carry reliably:
+ * The header is the app's lockup built from table cells: a Forest-green tile
+ * carrying a bold white "W", then the product name in bold. The tile is a
+ * coloured cell with a letter in it, not the drawn checkmark-W, and the owner
+ * kept it that way (ruling 12, 2026-09-30). The drawing cannot travel by
+ * email:
  *
  *   • Gmail, Outlook and Apple Mail block remote images by default for a sender
  *     the recipient has not corresponded with before — which is precisely the
@@ -473,10 +474,8 @@ export function escapeHtml(value) {
  *   • Base64-embedding it instead is worse: Gmail strips `data:` URIs in
  *     `<img src>` outright, and inline SVG is stripped by most clients.
  *
- * Text renders identically in every one of those clients, with images off, and
- * costs nothing to download. The identity's own guidance for email is the mark
- * with the wordmark and no tile; the name alone is the part of that which
- * survives an email client. `wordmarkColor` is Forest, the same hex as the
+ * Text and a coloured cell render identically in every one of those clients,
+ * with images off, and cost nothing to download. `wordmarkColor` is Forest, the same hex as the
  * favicon and the in-app wordmark, which `src/logoAssets.test.jsx` checks.
  *
  * ── What this canNOT do: the sender avatar ──

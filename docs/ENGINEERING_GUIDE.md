@@ -2476,8 +2476,12 @@ See [`docs/operations/upstash.md`](operations/upstash.md).
 
 - **Why it may become necessary.** Volunteers use phones, frequently at event
   sites with poor connectivity. 1.1.0 did the responsive and accessibility work
-  — safe areas, touch targets, dialog semantics — but there is no service worker
-  and no manifest, so there is no installability and no offline capability.
+  — safe areas, touch targets, dialog semantics. There is a web app manifest
+  with PNG icons and an apple-touch-icon, and Settings offers "Install
+  WeVolunteer" where the browser allows it, with steps for iPhone (P2-05,
+  ruling 9, 2026-10). There is deliberately **no service worker**, so
+  installing changes the icon and the window, not how pages load: there is no
+  offline capability.
 - **Triggers.** Volunteers need event details or check-in where connectivity is
   unreliable. Organizers ask for a home-screen app. QR attendance (§10.6) is
   built and needs to work offline at the door.
