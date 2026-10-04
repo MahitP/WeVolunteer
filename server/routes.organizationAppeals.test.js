@@ -482,6 +482,36 @@ describe('the organization appeal inbox', () => {
       expect(row.description).toMatch(/cancelled by the organizer/);
     });
 
+    /**
+     * A full note about a long appeal still files (final audit, Phase 6
+     * review). The note (up to 1,000), a fixed sentence and up to 1,500
+     * characters of the appeal could pass the report limit of 2,000, and the
+     * manager was told "Please keep it under 2000 characters" about a note the
+     * form had accepted. The appeal is quoted to whatever room is left.
+     */
+    it('files a full note about a long appeal, quoting what fits', async () => {
+      /* An open report about the same student would absorb this one as a
+         duplicate; the case above leaves one. */
+      await db.prepare("UPDATE reports SET status = 'resolved' WHERE target_type = 'user' AND target_id = ?").run(studentId);
+      await join(orgId, studentId);
+      await srv.call('DELETE', `/api/organizations/${orgKey}/members/${studentId}`,
+        { mode: 'ban', reason: 'Missed three shifts without telling anyone.' }, manager);
+      /* A statement is evidence and cannot be edited after filing, so the long
+         one is filed as such. */
+      const filed = await srv.call('POST', '/api/appeals', {
+        subject: 'organization_ban', organizationId: orgId, statement: 'I was never told. '.repeat(250),
+      }, student);
+      expect(filed.status, JSON.stringify(filed.body)).toBe(201);
+      const res = await report(orgKey, filed.body.appealId, { description: 'N'.repeat(1000) }, manager);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const row = await db.prepare(
+        "SELECT description FROM reports WHERE target_type = 'user' AND target_id = ? ORDER BY created_at DESC"
+      ).get(studentId);
+      expect(row.description.length).toBeLessThanOrEqual(2000);
+      expect(row.description).toMatch(/^N{1000}/);
+      expect(row.description).toMatch(/I was never told\./);
+    });
+
     it('is a manager\'s act, about their own club\'s appeals', async () => {
       const id = await banAndAppeal();
       expect((await report(orgKey, id, { description: 'Not my club to judge.' }, outsider)).status).toBe(403);

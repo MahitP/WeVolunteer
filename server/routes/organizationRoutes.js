@@ -63,6 +63,7 @@ import {
 import { notificationService } from '../services/notificationService.js';
 import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning, organizationBanAppeal } from '../appeals.js';
 import { createReport } from '../reportService.js';
+import { MAX_DESCRIPTION_LENGTH } from '../moderation.js';
 
 const router = express.Router();
 
@@ -1630,10 +1631,17 @@ router.post('/api/organizations/:key/appeals/:appealId/report', authenticateToke
   if (!appeal) return res.status(404).json({ error: 'No appeal matches that id.' });
 
   const note = String(req.body?.description ?? '').trim().slice(0, 1000);
-  const description = [
+  const lead = [
     note || 'Keeps appealing their ban after the organization has said no.',
-    `Reported from ${row.name}'s appeals inbox. Their appeal: "${String(appeal.statement || '').slice(0, 1500)}"`,
+    `Reported from ${row.name}'s appeals inbox. Their appeal: "`,
   ].join('\n\n');
+  /* The appeal is quoted to whatever room the report limit leaves. A full
+     1,000-character note, this sentence and 1,500 characters of appeal could
+     pass MAX_DESCRIPTION_LENGTH, and createReport refused the whole report
+     with "keep it under 2000 characters" about a note the form had accepted
+     (final audit, Phase 6 review). */
+  const room = Math.max(0, MAX_DESCRIPTION_LENGTH - lead.length - 1);
+  const description = `${lead}${String(appeal.statement || '').slice(0, Math.min(1500, room))}"`;
 
   const result = await createReport({
     reporter: req.user,
