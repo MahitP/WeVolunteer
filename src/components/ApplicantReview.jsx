@@ -49,7 +49,7 @@ const privateLast = compare => (a, b) => {
 const SORTS = {
   fewestHours: {
     label: 'Fewest hours first',
-    hint: 'Prioritises volunteers who have had the least opportunity so far',
+    hint: 'Prioritizes volunteers who have had the least opportunity so far',
     compare: privateLast((a, b) => (a.volunteer?.volunteeredHours || 0) - (b.volunteer?.volunteeredHours || 0) || new Date(a.appliedAt) - new Date(b.appliedAt))
   },
   newest: {

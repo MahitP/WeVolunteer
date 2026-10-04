@@ -247,7 +247,7 @@ export default function AdminBadges() {
         <div>
           <h2 className="page-title">Badges</h2>
           <p className="muted">
-            What the platform recognises, and who holds what. Defining a badge changes
+            What the platform recognizes, and who holds what. Defining a badge changes
             every student&apos;s record at once; awarding one is about a single person.
           </p>
         </div>

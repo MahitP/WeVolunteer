@@ -866,7 +866,7 @@ export const PAGE_META = {
     welly: { title: 'Welly', sub: 'Ask about reports, appeals, and the records you administer' },
     audit: { title: 'Audit Explorer', sub: 'Every administrative action, and who took it' },
     roster: { title: 'Admin Roster', sub: 'Who holds administrative access' },
-    badges: { title: 'Badges', sub: 'What the platform recognises, and who holds what' },
+    badges: { title: 'Badges', sub: 'What the platform recognizes, and who holds what' },
     /* `staff` only, like `audit` and `roster` above: `legal.edit` is SUPER_ONLY,
        so no other persona can reach the page and an entry under one would be a
        title nobody will ever see. */
@@ -893,7 +893,7 @@ export const PAGE_META = {
        application name and the one page of figures was the one page with no
        title. */
     impact: { title: 'Community Impact', sub: 'What the program has done, counted from confirmed attendance' },
-    adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
+    adminImpact: { title: 'Platform Impact', sub: 'Program-wide figures for the whole platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
     organizations: { title: 'Organization', sub: 'A club or group posting events' },
     profile: { title: 'Profile', sub: 'Your account on this platform' },

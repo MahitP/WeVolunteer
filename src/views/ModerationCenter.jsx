@@ -154,7 +154,7 @@ export const AREAS = [
     cap: 'analytics.platform',
     icon: TrendingUp,
     title: 'Platform Impact',
-    blurb: 'Programme-wide figures: hours, volunteers, events and how participation has moved over time.',
+    blurb: 'Program-wide figures: hours, volunteers, events and how participation has moved over time.',
   },
   /**
    * The Legal Center editor — the one administrative area that was missing.
@@ -209,7 +209,7 @@ export const AREAS = [
     cap: 'event.moderate',
     icon: Award,
     title: 'Badges',
-    blurb: 'What the platform recognises, who holds what, and how to award or take one back. '
+    blurb: 'What the platform recognizes, who holds what, and how to award or take one back. '
       + 'Every change is recorded against your name.',
   },
   {

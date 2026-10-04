@@ -448,7 +448,7 @@ export default function AdminImpact({ addToast }) {
         <div>
           <h2 className="page-title">Platform Impact</h2>
           <p className="lead">
-            Programme-wide figures for {SCHOOL_NAME}, counted from confirmed attendance.
+            Program-wide figures for {SCHOOL_NAME}, counted from confirmed attendance.
           </p>
         </div>
         {status === 'ready' && (
