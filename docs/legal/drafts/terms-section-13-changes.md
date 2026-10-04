@@ -33,9 +33,9 @@ read it with you.
   part in new volunteering until you accept.
 
 **If you do not agree,** you can close your account at any time, before or after
-a change takes effect, and download your information first. Your verified record
-stays verifiable for anybody you gave a certificate code to, as the Privacy
-Policy explains.
+a change takes effect, and download your information first. What happens to your
+certificates if you do is explained in the
+[Certificate Verification Policy](/legal/certificate-verification-policy).
 
 **Earlier versions.** Every version is kept with a content fingerprint, so a copy
 you were given can be checked against the one your account accepted. Email
