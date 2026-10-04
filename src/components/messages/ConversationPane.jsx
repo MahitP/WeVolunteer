@@ -41,11 +41,22 @@ function getGroupClass(messages, idx) {
   return 'group-start'; // single message treated as start (gets top padding)
 }
 
-export default function ConversationPane({ conversation, onBack, onUpdateConversation, emptyCopy }) {
+/**
+ * `initialDraft` starts the reply box — a certificate shared by message
+ * (SC-04). It is never sent for the student: they read it, can change it, and
+ * press Send. `onDraftTaken` tells the parent it was used, so it is used once.
+ */
+export default function ConversationPane({ conversation, onBack, onUpdateConversation, emptyCopy, initialDraft = '', onDraftTaken }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
   const [inputText, setInputText] = useState('');
+  useEffect(() => {
+    if (!initialDraft) return;
+    setInputText(initialDraft);
+    onDraftTaken?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraft]);
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [showMenu, setShowMenu] = useState(false);
   const [showReport, setShowReport] = useState(false);

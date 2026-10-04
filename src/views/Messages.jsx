@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { MessageSquare, Plus } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from "../utils/api";
 import { subscribeSocket, unsubscribeSocket } from '../services/socket';
 import ConversationList from '../components/messages/ConversationList';
@@ -48,6 +49,27 @@ export default function Messages() {
   }, [isMobilePaneVisible]);
   const [isOffline, setIsOffline] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+
+  /**
+   * A certificate shared "with direct message" (SC-04).
+   *
+   * The share dialog arrives with the link as router state, never in the
+   * address bar. The recipient picker opens, and the conversation chosen starts
+   * with the draft in its reply box — unsent. The state is cleared at once so a
+   * reload or Back does not open the picker again.
+   */
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [shareDraft, setShareDraft] = useState('');
+  const [draftConversationId, setDraftConversationId] = useState(null);
+  useEffect(() => {
+    const draft = location.state?.shareDraft;
+    if (!draft) return;
+    setShareDraft(String(draft));
+    setShowPicker(true);
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   useEffect(() => {
     const loadConversations = async () => {
@@ -151,6 +173,7 @@ export default function Messages() {
         return prev;
       });
       setActiveConversationId(res.conversation.id);
+      if (shareDraft) setDraftConversationId(res.conversation.id);
       setIsMobilePaneVisible(true);
     } catch (err) {
       console.error(err);
@@ -229,6 +252,8 @@ export default function Messages() {
               onUpdateConversation={(updates) => {
                 setConversations(prev => prev.map(c => c.id === activeConversation.id ? { ...c, ...updates } : c));
               }}
+              initialDraft={activeConversation.id === draftConversationId ? shareDraft : ''}
+              onDraftTaken={() => { setShareDraft(''); setDraftConversationId(null); }}
             />
           ) : (
             /* Expression position, not children — a block comment here is a real

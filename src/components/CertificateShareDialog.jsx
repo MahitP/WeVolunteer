@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Check, Copy, ExternalLink, Share2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Check, Copy, ExternalLink, MessageSquare, Share2, X } from 'lucide-react';
 import { useModal } from '../utils/useModal';
 
 /**
@@ -56,6 +57,16 @@ export default function CertificateShareDialog({ certificate, onClose, onShared,
     : 'I completed verified community service with WeVolunteer.';
 
   const share = (channel) => { onShared?.(channel); };
+
+  /* By message (SC-04): Messages opens its recipient picker and the chosen
+     conversation starts with this as an unsent draft. Router state, so the
+     text never sits in the address bar or the history's URLs. */
+  const navigate = useNavigate();
+  const sendByMessage = () => {
+    share('message');
+    onClose?.();
+    navigate('/messages', { state: { shareDraft: `${message} ${url}` } });
+  };
 
   /**
    * Copy, with a real fallback.
@@ -213,6 +224,10 @@ export default function CertificateShareDialog({ certificate, onClose, onShared,
               <Share2 size={15} aria-hidden="true" /> Share…
             </button>
           )}
+
+          <button type="button" className="btn btn-secondary btn-block" onClick={sendByMessage}>
+            <MessageSquare size={15} aria-hidden="true" /> Send in a message
+          </button>
 
           <div>
             <p className="small dim">{canShareNatively() ? 'Or share directly to' : 'Share to'}</p>

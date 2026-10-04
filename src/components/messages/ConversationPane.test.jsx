@@ -200,3 +200,23 @@ describe('where the view sits', () => {
     await waitFor(() => expect(window.HTMLElement.prototype.scrollIntoView).toHaveBeenCalled());
   });
 });
+
+/**
+ * A certificate shared "with direct message" (SC-04) arrives as a draft. It
+ * fills the reply box and is not sent: the student reads it, can change it, and
+ * sends it themselves.
+ */
+describe('a draft handed in', () => {
+  it('fills the reply box once, unsent, and says it took it', async () => {
+    const onDraftTaken = vi.fn();
+    render(
+      <ConversationPane conversation={CONVERSATION} onBack={vi.fn()} onUpdateConversation={vi.fn()}
+        initialDraft="I completed 2 hrs of verified service: https://app.wevolunteers.org/verify/WEV-AAAA-BBBB"
+        onDraftTaken={onDraftTaken} />
+    );
+    const box = await screen.findByRole('textbox');
+    await waitFor(() => expect(box.value).toMatch(/verify\/WEV-AAAA-BBBB/));
+    expect(onDraftTaken).toHaveBeenCalledTimes(1);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+});
