@@ -886,3 +886,13 @@ Deliberately left as found, with the recorded reason: "Microsoft — not set up
 on this site" on the signup screen (`ProviderButtons.jsx`, the AADSTS900144
 incident), and "Verify a certificate" on every dashboard (requested by the
 owner, `VerifyCertificateAction.jsx`).
+
+**Applied (2026-10-04):** ruling 23 `5dbd8c0` (also: Discover's subtitle said
+"across the district"); ruling 24 `6c90e5c`; ruling 25 `93d2967` — six fixes,
+including one wider than asked and worth knowing: *no email but the
+confirmation link now goes to an address nobody has confirmed* (the badge
+email was one case of it), only while `REQUIRE_EMAIL_VERIFICATION` is on, and
+mandatory notices excepted.
+
+**For the security review of this phase:** `b8a3e92` (the session probe
+writes the cached user) and `93d2967` (who is emailed).
