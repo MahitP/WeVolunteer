@@ -426,12 +426,12 @@ describe('await is written where the value is, not where the call is', () => {
    * starts its catch-up sweep. Both chain `.then`/`.catch`, which is what marks
    * the intent, and what this checks for.
    */
-  it('never calls an async function for effect without awaiting it', () => {
+  const abandonedCalls = (files, names) => {
     const re = new RegExp(
-      `^[^\\S\\n]*(?!await\\b|return\\b|void\\b|yield\\b)((?:\\w+\\.)?(?:${unambiguousAsyncNames.join('|')})\\s*\\()`,
+      `^[^\\S\\n]*(?!await\\b|return\\b|void\\b|yield\\b)((?:\\w+\\.)?(?:${names.join('|')})\\s*\\()`,
       'gm');
     const bad = [];
-    for (const { rel, src } of FILES) {
+    for (const { rel, src } of files) {
       if (rel === 'asyncShapes.test.js') continue;
       for (const m of src.matchAll(re)) {
         /* `.then`/`.catch` chained onto the call marks deliberate
@@ -443,17 +443,66 @@ describe('await is written where the value is, not where the call is', () => {
         /* Not a statement after all: an arrow body (`() =>` on the line above)
            or an argument (`expect(` / `Promise.all(`) returns the promise to
            somebody who does await it. Both begin a line the same way, so what
-           distinguishes them is what precedes. */
-        const before = src.slice(Math.max(0, m.index - 120), m.index).trimEnd();
+           distinguishes them is what precedes — all of it, not a fixed window,
+           because a blanked comment can be longer than any window. */
+        const before = src.slice(0, m.index).trimEnd();
         if (/(?:=>|\(|,|\[|&&|\|\||\?|:)$/.test(before)) continue;
         bad.push(`${rel}:${lineOf(src, m.index)} — ${m[1].trim()}…)`);
       }
     }
+    return bad;
+  };
+
+  it('never calls an async function for effect without awaiting it', () => {
     expect(
-      bad,
+      abandonedCalls(FILES, unambiguousAsyncNames),
       'this call is started and abandoned. If it owns a transaction, the BEGIN '
       + 'outlives it. Write `await`, or chain `.catch()` to say it is deliberate.',
     ).toEqual([]);
+  });
+
+  /**
+   * What precedes the call is the code before it, however much comment sits
+   * between.
+   *
+   * `strip()` blanks a comment rather than deleting it, so that line numbers
+   * survive — and a blanked comment is whitespace. The scan above used to look
+   * back a fixed 120 characters, so a comment longer than that left it looking
+   * at nothing, and nothing is not an argument position. 4684d90 put a two-line
+   * comment above the third element of the Owner Center's `Promise.all` in
+   * `routes/ownerRoutes.js`, and the guard reported that awaited call as
+   * abandoned.
+   *
+   * The second fixture is the other half, and it matters as much: the same
+   * comment above a call that really is abandoned must still be reported.
+   * Seeing past a comment is not the same as letting one hide a call.
+   */
+  it('judges a call by the code before it, however long the comment between', () => {
+    const comment = [
+      '    /* Long enough on its own to fill any short lookback window: this is',
+      '       roughly what the Owner Center route put above its third element. */',
+    ];
+    const awaited = strip([
+      'async function route() {',
+      '  const [a, b] = await Promise.all([',
+      "    cached('a', () => fetchA()),",
+      ...comment,
+      "    cached('b', () => fetchB()),",
+      '  ]);',
+      '}',
+    ].join('\n'));
+    const abandoned = strip([
+      'async function route() {',
+      "  await cached('a', () => fetchA());",
+      ...comment,
+      "  cached('b', () => fetchB());",
+      '}',
+    ].join('\n'));
+
+    expect(abandonedCalls([{ rel: 'awaited.js', src: awaited }], ['cached']),
+      'an element of an awaited array was reported because a comment preceded it').toEqual([]);
+    expect(abandonedCalls([{ rel: 'abandoned.js', src: abandoned }], ['cached']),
+      'a comment hid a call that really is abandoned').toEqual(['abandoned.js:5 — cached(…)']);
   });
 
   /**
