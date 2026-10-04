@@ -333,7 +333,10 @@ export default function CalendarView({
           <h2 className="s-badf1b">{viewMode === 'week' ? weekLabel : monthLabel}</h2>
         </div>
 
-        <div className="row">
+        {/* Wraps: with "Go to date" beside Today and the week/month switch the
+            row is 386px, and at 320px it scrolled the page sideways (the a11y
+            geometry sweep, WCAG 1.4.10; final audit Phase 6). */}
+        <div className="row row-wrap">
           <label className="sr-only" htmlFor="cal-goto">Go to date</label>
           <DatePicker id="cal-goto" className="cal-goto" value={jumpDate} onChange={jumpTo} placeholder="Go to date" openOnClick />
           <button className="btn btn-ghost btn-sm" onClick={goToday} aria-current={dayKey(cursor) === dayKey(today) ? 'date' : undefined}>Today</button>

@@ -141,6 +141,14 @@ export const SWEEP_CANNOT_MEASURE = Object.freeze({
     + 'it is a genuine 404. Delete this entry the day the seed gains a club — '
     + 'FIXTURES says an organization key belongs in fixtures.mjs from that day.',
 
+  /* The roster page added by the final audit (N11). The same missing club as
+     the page above, and so the same 404 signed in; its states are covered by
+     src/views/OrganizationPage.membersCap.test.jsx. */
+  '/organizations/:key/members':
+    'the demo seed has no organizations, so no key can be filled in; signed in it is a '
+    + 'genuine 404, as /organizations/:key is. Covered by '
+    + 'src/views/OrganizationPage.membersCap.test.jsx. Delete with the entry above.',
+
   '/organizations/invite/:token':
     'the demo seed has no organizations and therefore no share links. Resolving a '
     + 'real one is deliberately refused rather than merely hard: it would put a '
