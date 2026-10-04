@@ -787,6 +787,30 @@ The commits another session landed afterwards (`d3f9cb6`…`516bba3`, privacy
 defaults and Welly) are outside this review; Phase 6 reviews the whole
 engagement's diff again.
 
+**Second *security-review* — passed 2026-10-04, no findings.** Every code
+change after `d4cd8fb`: this round's `6a4c6c2` (founder profile) and `d989b2b`
+(photo reading), and the other session's `6bad3f9`, `aed176c`, `21f70ad`,
+`3c9de47` and `9784067`. What the two from this round rest on:
+
+- *Founder profile:* `/api/users/:id/profile` still answers 404, with the same
+  body, for every account that answered 404 before; the one addition is
+  `studentProfile`, a server constant chosen by stored role *and* address
+  (`super_admin` with `FOUNDER_EMAIL`). A student who registers that address
+  gets nothing. The response is built field by field, so `is_volunteer` and
+  `users.*` never leave the server. The showcase is badge definitions and
+  milestone tiers, with no user data.
+- *Photo reading:* the dev-server middleware serves one file fixed at config
+  time; the request path never reaches the file system. Worker, engine and
+  data are same-origin, so the production CSP needs nothing relaxed
+  (`worker-src 'self'`, `script-src 'self' 'wasm-unsafe-eval'`,
+  `connect-src 'self'`), and a CDN fallback would be blocked by `connect-src`.
+  OCR text reaches form fields only.
+
+Full suite at `d989b2b`: 11,481 passed, 1 failed: `thirdPartyNotices.test.js`,
+because `tesseract.js` was missing from `THIRD-PARTY-NOTICES.md`. Fixed in the
+next commit, with Tesseract's engine, its bundled libraries and the English
+data, which a dependency scan would not have listed.
+
 Full suite at `ac5ee35`: 11,227 passed, 0 failed.
 
 **For the revamp hand-over (Phase 7):** on a phone, the organizer's volunteer

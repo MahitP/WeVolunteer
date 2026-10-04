@@ -77,7 +77,7 @@ those parts.
 | The Welly AI models (SmolLM2 135M Instruct; Qwen2.5 0.5B and 1.5B Instruct) | Hugging Face; the Qwen team at Alibaba Cloud | Apache 2.0 |
 | The engine that runs them in your browser (wllama) | its open-source contributors | MIT |
 | The photo reader (Tesseract.js, its engine, and the English data) | the Tesseract and Tesseract.js projects | Apache 2.0 (the English data's npm packaging is MIT) |
-| Other open-source libraries in the app's code | their authors | Their own licences, listed in [OWNER: decide where; see note below] |
+| Other open-source libraries in the app's code | their authors | Their own licences, listed in `THIRD-PARTY-NOTICES.md` [OWNER: link it once it is a served page; see note below] |
 
 The models are downloaded directly from Hugging Face, the site that hosts them,
 the first time you choose one. *(`MODEL_BASE_URL`, `src/ai/models.js`.)* The
@@ -86,10 +86,12 @@ photo reader is downloaded from WeVolunteer, never from a third party.
 
 > **[OWNER] A notice page.** Apache 2.0 and MIT both ask for the licence text
 > to accompany a copy. A website is not usually treated as distributing copies
-> of its libraries, but a downloaded model file is closer to it. The simplest
-> way to comply is a "Third-party notices" page in the Legal Center that lists
-> each component and its licence text, generated from `package.json` at build
-> time. Building it is a code change; ask for it if you want it.
+> of its libraries, but a downloaded model file is closer to it. The list
+> already exists: `THIRD-PARTY-NOTICES.md` names every component a browser
+> receives, and a test fails the build when one is missing. What it records as
+> an open item is that no user can see it, because the build strips the
+> licence banners. Serving it as a Legal Center page is a code change, and the
+> notices file leaves that decision to you.
 
 ## 5. Removing it
 

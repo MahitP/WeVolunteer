@@ -115,6 +115,9 @@ lines are copied from each package's own `LICENSE` file, not from its
 | **llama.cpp / ggml** | via wllama's `.wasm` | MIT | Copyright (c) 2023-2026 The ggml authors |
 | `socket.io-client` | 4.8.3 | MIT | Copyright (c) 2014-present Guillermo Rauch and Socket contributors |
 | `@amplitude/unified` | 1.1.x | MIT | See the project's `LICENSE`. Loaded only when a user opts in to analytics |
+| `tesseract.js` | 7.0.0 | Apache-2.0 | See the project's `LICENSE.md`. Its worker bundles zlib.js (MIT, imaya), regenerator-runtime (MIT, Facebook, Inc.), buffer (MIT, Feross Aboukhadijeh) and ieee754 (BSD-3-Clause, Feross Aboukhadijeh), per its own `worker.min.js.LICENSE.txt` |
+| `tesseract.js-core` | 7.0.0 | Apache-2.0 | See the project's `LICENSE`. **The Tesseract OCR engine and Leptonica** are compiled into its `.wasm.js`, like llama.cpp into wllama's |
+| `@tesseract.js-data/eng` | 1.0.0 (`4.0.0_best_int`) | MIT (packaging); the trained data is Google's `tessdata_best`, Apache-2.0 | A devDependency, but the file is copied into the build at `/ocr/` and downloaded by the browser |
 
 Two notes on that table:
 
@@ -123,7 +126,9 @@ Two notes on that table:
   repository when this becomes a served page.
 - `pdfjs-dist` is dynamically imported and is absent from builds with the AI
   flag off (`src/ai/bundleCost.test.js` pins that). It is still listed, because
-  the default build includes it.
+  the default build includes it. The same is true of the three Tesseract rows
+  (the photo reader, ruling 20), which a browser downloads only when somebody
+  chooses a photo of a certificate.
 
 ---
 
