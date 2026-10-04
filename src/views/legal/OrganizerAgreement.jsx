@@ -186,12 +186,12 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
           deserves to know exactly why rather than assuming the app is broken. */}
       <div className="alert alert-warn stack-sm" role="status">
         <div className="alert-title">
-          <AlertTriangle size={16} aria-hidden="true" /> Your organizer tools are paused until you accept
+          <AlertTriangle size={16} aria-hidden="true" /> Your organizer tools open when you accept
         </div>
         <p>
           Until then you cannot create events, see who applied, mark attendance, or message
           students. Nothing about your account is at risk, and nothing is deleted — accepting
-          restores all of it immediately.
+          opens all of it immediately.
         </p>
       </div>
 

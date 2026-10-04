@@ -8425,6 +8425,14 @@ input:disabled + .premium-slider {
   color: inherit;
 }
 .oa-banner:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* The visible cue that the block is a link (final audit, Phase 5). */
+.oa-banner-cta {
+  display: block;
+  margin-top: var(--s1);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 
 /* ==========================================================================
    Signup — grouped sections, a real checkbox, and a compact grade picker

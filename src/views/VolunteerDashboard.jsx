@@ -198,6 +198,7 @@ export default function VolunteerDashboard({
               Before you can post as it, create its events or take attendance, there is a
               short agreement to read. It takes a minute.
             </span>
+            <span className="oa-banner-cta small">Read the agreement</span>
           </span>
         </a>
       )}

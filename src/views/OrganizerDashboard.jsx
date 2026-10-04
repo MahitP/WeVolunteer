@@ -366,12 +366,18 @@ export default function OrganizerDashboard({
         <a className="alert alert-warn oa-banner" href="/organizer-agreement">
           <AlertTriangle size={18} aria-hidden="true" />
           <span className="stack-xs">
-            <strong>Your organizer tools are paused</strong>
+            {/* Worded for the organizer who has never had the tools as well as
+                for one asked to accept a new version: "paused … restores
+                everything" read as a suspension to somebody approved that day
+                (final audit, Phase 5). */}
+            <strong>One step before you can post: the Organizer Agreement</strong>
             <span className="small">
-              You have not yet accepted the Organizer Agreement. Until you do, you cannot
-              create events, see who applied, mark attendance, or message students.
-              Accepting it takes a minute and restores everything.
+              Until you accept it, you cannot create events, see who applied, mark attendance,
+              or message students. It takes a minute, and everything opens as soon as you do.
             </span>
+            {/* The block is the link; this says so, because a warning card
+                does not otherwise look like something to press. */}
+            <span className="oa-banner-cta small">Read and accept the agreement</span>
           </span>
         </a>
       )}
