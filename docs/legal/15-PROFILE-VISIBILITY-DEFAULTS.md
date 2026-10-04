@@ -1,7 +1,8 @@
 # Profile visibility defaults vs. "private by default" — owner decision
 
-**Status: OPEN — waiting on the owner. Nothing user-visible has been changed.**
-Written 2026-10-04 against `main` at `d4cd8fb`.
+**Status: DECIDED 2026-10-04 — Option A, implemented. See §9 for what shipped and what is
+still open.** Written 2026-10-04 against `main` at `d4cd8fb`; §1–§8 are the analysis as it was put
+to the owner, kept unchanged so the reasoning behind the decision stays readable.
 
 Three published documents, the About page and the signup form promise that a student's profile
 is private until the student turns sharing on. The application does not work that way. Under
@@ -254,3 +255,66 @@ accounts should be flipped and counsel asked about retroactivity before 2.0 is p
 3. **Youth Safety Guidelines:** repair 1.0 in place by migration (permitted, zero acceptances), or
    bump it?
 4. Should the founder's account be exempted from the migration, or re-enabled by hand afterwards?
+
+## 9. Decision and what shipped (2026-10-04)
+
+**The owner's answers:**
+
+| Question | Answer |
+|---|---|
+| A or B | **A**: make the code private |
+| Extra defaults under A | **Narrow the baseline** only. Friend activity stays on by default; an unknown value still reads as public |
+| Youth Safety Guidelines | **Repair 1.0 in place** |
+| Founder's account | **Exempt in the migration** |
+
+**What changed:**
+
+- **New accounts start private.** `DEFAULT_SERVICE_VISIBILITY = 'private'`
+  (`server/serviceVisibility.js`) is written explicitly by every account-creation path: password
+  signup, OAuth signup, `bin/bootstrap-owners.mjs`, `bin/seed-pilot.js` and the demo seed.
+  - The column DEFAULT stays `'public'`. SQLite cannot change it without rebuilding `users`.
+  - `privateServiceDefaults.test.js` fails the build on any `INSERT INTO users` that does not name
+    both columns.
+- **Existing accounts.** Migration 074 sets both settings to `'private'` for every account except
+  the founder (`FOUNDER_EMAIL`, case- and whitespace-insensitive). It was verified on SQLite and,
+  by hand, on PostgreSQL.
+- **Narrowed baseline.**
+  - `location`, `hobbies` and `skills` moved from `PUBLIC_BASELINE_FIELDS` to
+    `PUBLIC_ONLY_FIELDS`. Partner and owner accounts are exempt, the same way `headline` already
+    was.
+  - `profileSummary` no longer carries `location`. That closes search, rosters, join requests,
+    invitations and ban lists in one place.
+  - `GET /api/users/:id/profile` gates `skills` the way it already gated bio.
+  - `GET /api/applications` emits `skills` only with the applicant's other particulars.
+- **Youth Safety Guidelines.** Repaired in place at 1.0 by migration 075, which is allowed only
+  where nobody has accepted the document. The parents' section now says:
+  - who can see a student;
+  - what stays hidden until the student shows it;
+  - that the organizer of an event they apply to, and administrators, see more.
+
+  The organizer bullet now scopes *contact details*, not the name. It is re-pinned, and
+  `legalContent.profileVisibility.test.js` holds the words against the serializer constants.
+- **Settings → Privacy.**
+  - "Anyone at your school" becomes "Other members".
+  - The profile hint says what is always visible and what the setting now controls.
+  - The leaderboard switch explains that it shows nothing while hours are private. The board has
+    always required public hours.
+- **About page and signup form** were corrected separately in `9784067`. They state no default.
+- The security-review gate (ENGINEERING_GUIDE §3.2) found nothing.
+
+**Still open, and why:**
+
+1. **Privacy Policy, MINOR clarifications.** These are queued with the three corrections the
+   Privacy Policy already has waiting, and are not applied, because the document has an
+   acceptance.
+   - "Other signed-in students see only what your profile visibility setting allows" is still
+     imprecise: name, username, picture, clubs and join date are visible whatever the setting.
+   - *Who can see your information* still does not say that organizers who have signed the
+     Organizer Agreement can open any student's profile.
+   - "There is no column in WeVolunteer that holds a person's location" reads as absolute.
+2. **"We will never turn it on for you"** is still arguable for friend activity. It notifies
+   accepted friends of an event signup, and it is on by default by the owner's choice. Worth one
+   sentence in the same pass.
+3. **No notice was sent** to the existing students whose settings 074 changed (two student
+   accounts in production on 2026-09-28). Their Settings screen shows the new state. If any of
+   them had deliberately chosen "public", they will need to choose it again.
