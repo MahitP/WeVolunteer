@@ -817,3 +817,64 @@ Full suite at `ac5ee35`: 11,227 passed, 0 failed.
 row gives the name about a third of the width. It wraps now rather than
 truncating, but the row would read better with the pill and Profile on a
 line of their own.
+
+---
+
+## Phase 5 — Coherence: "is this the app I imagined?" (2026-10-04)
+
+The app walked as four people arriving for the first time, on the lived-in
+scratch database: **a new student** (signed up through the form, confirmed the
+email, applied to a shift, opened every tab), **a new organizer** (signed up,
+pending, approved, Organizer Agreement, first event), **a club lead** (a
+manager of a 38-member club) and **an administrator**. Then compared with the
+SignUpGenius dashboard in `SignUp Genius/` (Create · Dashboard · Groups ·
+Messages · Reports · Tools · Admins): reminders (24 h and 2 h), duplicating
+an event, a waitlist, a roster export, check-in and calendar links all have an
+equivalent, so the gaps found were in flow and wording, not features.
+
+### Fixed in the walk (defects: wrong whatever was intended)
+
+| # | What the walk met | Fix |
+|---|---|---|
+| C1 | **A signed-in student opening Messages read "Messaging is not available for this account".** The page chose its copy from a cached user that only the password, two-factor and signup calls wrote; a session that began any other way (Google or Microsoft sign-in, an email link, a returning visit) left it empty. It also went stale after an approval or an accepted agreement. *Live in production for every Google sign-in.* | `b8a3e92`: the session probe writes the cache too. *security-review* (session state) |
+| C2 | An approved organizer pressing "New event" before accepting the Organizer Agreement was told "your organizer account has not been approved yet … nothing else is needed from you" — three false statements, and no mention of the agreement | `7273e05`: the shell says *why* a route was refused; a paused capability names its agreement, with a button |
+| C3 | Eight strings said **school staff** run WeVolunteer (organizer "verified by school staff", a pending organizer waiting on "a school administrator", the private profile option "Only me and school staff", Welly's description of administrators, two dead ends saying "contact your school administrator"). The Privacy Policy says administrators are the operator's appointees; Posture B | `8ef96e3`, with a guard (`schoolStaffClaims.test.js`). The approval notice said "You can now post events" while posting still waited on the agreement; it now opens the agreement |
+| C4 | A newly approved organizer's dashboard opened on "Your organizer tools are **paused** … restores everything" — the wording of a suspension, for tools never held. The banner was a link that did not look like one | `7b0fd86` |
+| C5 | A club page told its manager "Post an opportunity and it will appear here" and offered no way to; the form then made them pick the club again | `1a23792`: the button, and the form opens with the club chosen |
+| C6 | The Legal Center rendered `*italics*` with their asterisks (the Organizer Agreement's acceptance block) and "[ ]" before each agreement's confirm list, above the real checkboxes | `6fefbe2`: presentation only; no document text or hash changes |
+| C7 | "Programme"/"organisation" beside "Organization" in nine places; a profile placeholder suggesting "the district volunteering programme"; an invalid CSS value on the student dashboard | `4b56910` |
+
+### For the owner — changes that alter a choice somebody made
+
+Ranked by how much a first-time user trips on it. Nothing here is changed
+until ruled on.
+
+1. **One noun for the thing an organizer posts.** On two adjacent screens it is
+   "New event", "Create your first event", the page title "New opportunity" and
+   the button "Publish sign-up sheet"; Discover says "opportunities", cards say
+   "View shifts" or "View sign-up". Recommendation: "event" in every organizer
+   tool and button, "opportunity" only where a student browses, and "sign-up
+   sheet" retired.
+2. **A new student's first sight of their own record is a red "0 hrs".** The
+   hours figure is coloured by progress to the 25-hour target: red under a
+   third, amber under the target, green after. Red reads as failing to a
+   student who has not started, and the design notes reserve amber for hours.
+   Recommendation: hours always in the hours colour; progress shown by the
+   meter alone.
+3. **Small placement and wording**, each a few lines:
+   - the "See how far away opportunities are" location banner also shows on an
+     *organizer's* dashboard, whose job is posting;
+   - a club's manager sees "You are a member" on their own club, and a "Your
+     service here" card meant for volunteers;
+   - a pending organizer's page subtitle reads "Track your volunteers, hours,
+     and pending reviews", none of which they have yet;
+   - signup emails the "Early Supporter" badge in the same minute as the
+     address-confirmation link, to an address not yet confirmed;
+   - on the signup form, validation hints appear under each field while typing
+     and push the "Create account" button down under the pointer;
+   - an admin's report card shows the reported person's name twice.
+
+Deliberately left as found, with the recorded reason: "Microsoft — not set up
+on this site" on the signup screen (`ProviderButtons.jsx`, the AADSTS900144
+incident), and "Verify a certificate" on every dashboard (requested by the
+owner, `VerifyCertificateAction.jsx`).
