@@ -57,6 +57,11 @@ export default function DateTimeField({
           value={shownTime}
           aria-invalid={error ? 'true' : undefined}
           onChange={(e) => {
+            /* A cleared time sends nothing: `${day}T` is half a value, which
+               the edit form could neither draw nor save (it threw on submit).
+               The field keeps its last whole time; a date is always sent with
+               one (final audit, Phase 6 review). */
+            if (!e.target.value) return;
             if (day) onChange(`${day}T${e.target.value}`);
             else setPendingTime(e.target.value);
           }}

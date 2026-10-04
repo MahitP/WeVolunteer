@@ -89,3 +89,30 @@ describe('the calendar jumps to a date', () => {
     expect(document.querySelector('.cal-day.is-selected .cal-date')?.textContent).toBe('9');
   });
 });
+
+/**
+ * Clearing the time never sends half a value (final audit, Phase 6 review).
+ *
+ * The time box's clear button sent `${day}T` — "2026-10-11T". The edit form
+ * then drew the date blank as well (it could not parse it), its "missing"
+ * check passed on the truthy string, and Save threw `RangeError: Invalid time
+ * value` with nothing shown to the organizer.
+ */
+describe('clearing the time', () => {
+  it('keeps the last whole value rather than sending "YYYY-MM-DDT"', () => {
+    const onChange = vi.fn();
+    render(<DateTimeField id="t" label="Applications close" timeLabel="Closing time"
+      value="2026-10-11T17:00" onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Closing time'), { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Closing time')).toHaveValue('17:00');
+  });
+
+  it('still sends a new time when one is typed', () => {
+    const onChange = vi.fn();
+    render(<DateTimeField id="t" label="Applications close" timeLabel="Closing time"
+      value="2026-10-11T17:00" onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Closing time'), { target: { value: '18:30' } });
+    expect(onChange).toHaveBeenCalledWith('2026-10-11T18:30');
+  });
+});

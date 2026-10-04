@@ -51,11 +51,16 @@ export default function EventEditForm({
     if (!editForm.description.trim()) errs.description = 'Describe what volunteers will do';
     const locText = typeof editForm.location === 'string' ? editForm.location : editForm.location?.location;
     if (!locText?.trim()) errs.location = 'Add a location';
-    if (!editForm.applicationDeadline) errs.applicationDeadline = 'Set an application deadline';
+    /* Unparseable counts as missing: Save converts with `toISOString()`, which
+       throws on an invalid date rather than reporting it. */
+    if (!editForm.applicationDeadline || Number.isNaN(Date.parse(editForm.applicationDeadline))) {
+      errs.applicationDeadline = 'Set an application deadline';
+    }
     if (editSlots.length === 0) errs.slots = 'An event needs at least one shift';
     editSlots.forEach((slot, i) => {
       if (!slot.name?.trim()) errs[`slot-${i}-name`] = 'Name this shift';
-      if (!slot.startDatetime || !slot.endDatetime) errs[`slot-${i}-time`] = 'Set a start and end time';else if (new Date(slot.startDatetime) >= new Date(slot.endDatetime)) {
+      if (!slot.startDatetime || !slot.endDatetime
+        || Number.isNaN(Date.parse(slot.startDatetime)) || Number.isNaN(Date.parse(slot.endDatetime))) errs[`slot-${i}-time`] = 'Set a start and end time';else if (new Date(slot.startDatetime) >= new Date(slot.endDatetime)) {
         errs[`slot-${i}-time`] = 'End time must be after the start time';
       }
       if (Number(slot.maxSpots) <= 0) errs[`slot-${i}-maxSpots`] = 'At least one spot';
