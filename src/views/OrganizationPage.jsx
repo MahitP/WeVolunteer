@@ -38,6 +38,7 @@ import {
   FileText, Award, UserPlus2, UserMinus2, Ban, Share2, DoorOpen, Undo2, MailOpen, Check, ArrowLeft, ArrowRight,
 } from 'lucide-react';
 import { api } from '../utils/api';
+import { can } from '../authz';
 import LoadingSkeleton from '../components/common/LoadingSkeleton';
 import EmptyState from '../components/common/EmptyState';
 import OrganizationAnnouncements from '../components/OrganizationAnnouncements';
@@ -696,6 +697,7 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
                 busy={busy}
                 onJoin={join}
                 onRequest={() => setRequesting(true)}
+                manages={viewer.canManage === true}
               />
             )}
 
@@ -818,7 +820,12 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
         </div>
 
         <aside className="org-column-rail stack-lg">
-          <OrganizationService org={org} viewer={viewer} totals={totals} />
+          {/* A volunteer's record of hours at this club's events. Shown to
+              whoever can volunteer, or already has service here; not to an
+              adult who runs the club and can earn none (owner ruling 25). */}
+          {(can(currentUser, 'portfolio.write') || (viewer?.history?.length ?? 0) > 0 || Number(viewer?.hours) > 0) && (
+            <OrganizationService org={org} viewer={viewer} totals={totals} />
+          )}
           <AboutOrganization org={org} policy={viewer.joinPolicy ?? org.joinPolicy} />
         </aside>
       </div>

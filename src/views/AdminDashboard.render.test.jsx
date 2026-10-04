@@ -153,3 +153,36 @@ describe('the admin Dashboard renders', () => {
     expect(screen.getByRole('button', { name: /deny/i })).toBeInTheDocument();
   });
 });
+
+/**
+ * A report on a person names them once (owner ruling 25, final audit Phase 5).
+ *
+ * For a reported user the label and the snapshot title are the same string,
+ * so the card read "Leah Okafor" and then "\"Leah Okafor\"" beneath it.
+ */
+describe('a report on a person', () => {
+  it('names them once', async () => {
+    apiMock.apiFetch.mockImplementation((path) => {
+      if (path.includes('/organizers/pending')) return Promise.resolve([]);
+      if (path.includes('/reports')) {
+        return Promise.resolve([{ ...REPORT, targetType: 'user', target_label: 'Leah Okafor', target_title: 'Leah Okafor' }]);
+      }
+      return Promise.resolve({});
+    });
+    renderDash();
+    await screen.findByRole('heading', { name: /^Reports$/i });
+    expect(screen.getAllByText(/Leah Okafor/)).toHaveLength(1);
+  });
+
+  it('still quotes a title that says something the label does not', async () => {
+    apiMock.apiFetch.mockImplementation((path) => {
+      if (path.includes('/organizers/pending')) return Promise.resolve([]);
+      if (path.includes('/reports')) {
+        return Promise.resolve([{ ...REPORT, targetType: 'event', target_label: 'Event', target_title: 'Beach sweep' }]);
+      }
+      return Promise.resolve({});
+    });
+    renderDash();
+    expect(await screen.findByText('"Beach sweep"')).toBeInTheDocument();
+  });
+});

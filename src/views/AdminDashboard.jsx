@@ -355,7 +355,9 @@ export default function AdminDashboard({ addToast, user }) {
                           report, so the queue told the moderator "no copy was
                           kept" about reports holding hundreds of preserved
                           messages. */}
-                      {report.target_title && (
+                      {/* Not when it only repeats the label: for a reported
+                          person both are their name (owner ruling 25). */}
+                      {report.target_title && report.target_title !== report.target_label && (
                         <p className="small muted">&quot;{report.target_title}&quot;</p>
                       )}
                       {report.target_is_snapshot && (

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../db.js';
 import { EVENT_CATEGORIES, getInAppContent, isMandatoryNotice } from './notificationContent.js';
 import { emitToUser } from '../realtime/events.js';
+import { REQUIRE_EMAIL_VERIFICATION } from '../config.js';
 
 /**
  * How long a `dedupe_key` suppresses a repeat.
@@ -39,7 +40,7 @@ const dedupeCutoff = () => new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString()
  * engines, including the NULL case.
  */
 const RECIPIENT_FACTS_SQL = `
-  SELECT u.email_opt_out AS email_opt_out,
+  SELECT u.email_opt_out AS email_opt_out, u.email_verified AS email_verified,
          (SELECT p.enabled FROM notification_preferences p
            WHERE p.user_id = u.id AND p.category = ? AND p.channel = 'inapp') AS inapp_pref,
          (SELECT p.enabled FROM notification_preferences p
@@ -89,10 +90,26 @@ function decideDelivery(event, facts) {
    * suspension is live, and it is exactly what the person finds waiting the
    * moment they are reinstated.
    */
+  /**
+   * Nothing but the confirmation link goes to an address nobody has confirmed
+   * (owner ruling 25). It is unconfirmed precisely because it may be somebody
+   * else's — a typo, a sibling's — and "You earned a badge" in the minute
+   * after signup told that stranger the person had joined. The in-app row is
+   * still written. Mandatory notices go regardless, as above. `0`, not falsy:
+   * a fact a caller did not fetch reads as confirmed, which is how every
+   * account behaved before this rule.
+   *
+   * Only while confirmation is required. A deployment that sets
+   * REQUIRE_EMAIL_VERIFICATION=false has accounts that never confirm, and for
+   * them this rule would silence every email for good.
+   */
+  const unconfirmed = REQUIRE_EMAIL_VERIFICATION
+    && facts.email_verified !== null && facts.email_verified !== undefined
+    && Number(facts.email_verified) === 0;
   return {
     inApp: mandatory || pref(facts.inapp_pref),
     // If global email_opt_out is 1, force email to false.
-    email: mandatory || (facts.email_opt_out === 1 ? false : pref(facts.email_pref)),
+    email: mandatory || (facts.email_opt_out === 1 || unconfirmed ? false : pref(facts.email_pref)),
   };
 }
 
@@ -294,7 +311,7 @@ class NotificationService {
          recipient. The same two scalar subqueries as the single path. */
       const factsById = new Map();
       for (const row of await db.prepare(`
-        SELECT u.id AS id, u.email_opt_out AS email_opt_out,
+        SELECT u.id AS id, u.email_opt_out AS email_opt_out, u.email_verified AS email_verified,
                (SELECT p.enabled FROM notification_preferences p
                  WHERE p.user_id = u.id AND p.category = ? AND p.channel = 'inapp') AS inapp_pref,
                (SELECT p.enabled FROM notification_preferences p

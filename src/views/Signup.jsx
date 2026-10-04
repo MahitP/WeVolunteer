@@ -574,7 +574,9 @@ export default function Signup({ onSignupSuccess, addToast }) {
                 />
                 <span id="su-confirm-status" className="auth-status" aria-live="polite"
                   data-state={!form.confirmPassword ? 'pending' : form.password === form.confirmPassword ? 'ok' : 'error'}>
-                  {!form.confirmPassword ? ''
+                  {/* Never empty: a line that appeared on the first keystroke
+                      pushed "Create account" out from under the pointer. */}
+                  {!form.confirmPassword ? 'Type the same password again.'
                     : form.password === form.confirmPassword
                       ? <><Check size={13} aria-hidden="true" /> Passwords match</>
                       : <><X size={13} aria-hidden="true" /> Passwords do not match yet</>}

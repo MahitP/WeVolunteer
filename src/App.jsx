@@ -279,6 +279,14 @@ export function pageMetaFor(user, activeTab) {
     return { ...meta, sub: 'Paused until the Admin Responsibilities Policy is accepted' };
   }
 
+  /* The same reasoning for an organizer awaiting approval: the page under
+     this subtitle says the account is waiting, and "Track your volunteers,
+     hours, and pending reviews" described tools they did not have yet
+     (owner ruling 25). */
+  if (activeTab === 'dashboard' && persona === 'host' && user && !user.verified) {
+    return { ...meta, sub: 'Your organizer account is awaiting approval' };
+  }
+
   return meta;
 }
 
@@ -545,6 +553,20 @@ for (const entry of NAV) {
  * asks for location itself, in the conversation, at the moment it needs it.
  */
 export const LOCATION_AWARE_TABS = new Set(['dashboard', 'browse', 'calendar']);
+
+/**
+ * Whether the location offer belongs on this page, for this reader.
+ *
+ * `dashboard` qualifies for the VOLUNTEER's dashboard only. The note above
+ * says every persona's dashboard shows a next shift with travel time and
+ * weather; only VolunteerDashboard does, so an organizer was offered "See how
+ * far away opportunities are" on a page it changes nothing on (owner ruling
+ * 25, final audit Phase 5).
+ */
+export function locationRelevantFor(activeTab, persona) {
+  if (activeTab === 'dashboard') return persona === 'volunteer';
+  return LOCATION_AWARE_TABS.has(activeTab);
+}
 
 export function tabForPath(pathname) {
   if (pathname.startsWith('/events/new')) return 'create';
@@ -2122,7 +2144,7 @@ function AppShell({ toasts, addToast, removeToast }) {
                LOCATION_AWARE_TABS. The legal tiers above it are unconditional
                and must stay that way — a document somebody is held to is news
                wherever they are standing. */
-            locationRelevant={LOCATION_AWARE_TABS.has(activeTab)}
+            locationRelevant={locationRelevantFor(activeTab, persona)}
           />
           {/* Inside the shell boundary above, so a chunk that fails to load is
               caught alongside a view that throws while rendering — and covering

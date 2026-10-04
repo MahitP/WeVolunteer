@@ -37,6 +37,9 @@ export default function JoinAction({
   busy = false,
   onJoin,
   onRequest,
+  /* The member state reads "You manage this organization" for whoever runs it
+     (owner ruling 25): "You are a member" undersold it on their own club. */
+  manages = false,
 }) {
   const name = organization?.name ?? 'this organization';
 
@@ -90,7 +93,7 @@ export default function JoinAction({
       return (
         <p className="org-member-state">
           <Check size={17} aria-hidden="true" />
-          <span>You are a member</span>
+          <span>{manages ? 'You manage this organization' : 'You are a member'}</span>
         </p>
       );
 
