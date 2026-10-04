@@ -16,6 +16,7 @@ import '../milestones.js';
 import { volunteerInsights } from '../volunteerInsights.js';
 import { commentHasLiveReport, COMMENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import { nullSafeNotEquals } from '../db/dialectSql.js';
+import { applicantDisclosure } from '../applicantDisclosure.js';
 
 const router = express.Router();
 
@@ -267,7 +268,7 @@ router.get('/api/events/:id/attendees', authenticateToken, async (req, res) => {
     }
 
     const rows = await db.prepare(`
-      SELECT DISTINCT u.id, u.name, u.avatar, u.grade, u.school
+      SELECT DISTINCT u.id, u.name, u.avatar, u.grade, u.school, u.profile_visibility, u.hours_visibility
       FROM applications a
       JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ? AND a.status = 'accepted'
@@ -289,12 +290,19 @@ router.get('/api/events/:id/attendees', authenticateToken, async (req, res) => {
      * policy and the directory's refusal cosmetic.
      *
      * Staff keep both, because reviewing applicants is what those fields are
-     * for and that path is gated on hosting the event.
+     * for and that path is gated on hosting the event — EXCEPT staff who are
+     * themselves students. A Student Organizer or a student club manager is
+     * staff here, and the agreement they accepted gives them grade and school
+     * only where the volunteer shares them (applicantDisclosure.js).
      */
+    const disclosure = isStaff ? await applicantDisclosure(db, req.principal, rows) : null;
     res.json({
       visible: true,
       attendees: rows.map(r => (isStaff
-        ? { id: r.id, name: r.name, avatar: r.avatar, grade: r.grade, school: r.school }
+        ? {
+            id: r.id, name: r.name, avatar: r.avatar,
+            ...(disclosure.get(r.id).particulars ? { grade: r.grade, school: r.school } : {}),
+          }
         : { id: r.id, name: r.name, avatar: r.avatar }))
     });
   } catch (err) {

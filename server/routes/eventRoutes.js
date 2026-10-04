@@ -26,6 +26,7 @@ import { eventHasLiveReport, EVENT_HELD_MESSAGE } from '../evidenceHolds.js';
 import { canHelpRun, canRunEvent, EVENT_STAFF_CAPABILITIES, memberIds } from '../organizations.js';
 import { MAIL_DOMAIN } from '../emailIdentity.js';
 import { badgeService } from '../services/badgeService.js';
+import { applicantDisclosure } from '../applicantDisclosure.js';
 
 const router = express.Router();
 
@@ -773,20 +774,30 @@ router.get('/api/events/:id', authenticateToken, async (req, res) => {
 
     const formattedSlots = slots.map(s => formatSlot(s, acceptedBySlot.get(s.id) || 0));
 
-    const applications = (await db.prepare(`
+    const applicationRows = await db.prepare(`
       SELECT a.id, a.user_id, a.event_id, a.slot_id, a.status, a.applied_at,
-             u.name, u.avatar, u.grade, u.school
+             u.name, u.avatar, u.grade, u.school, u.profile_visibility, u.hours_visibility
       FROM applications a JOIN users u ON a.user_id = u.id
       WHERE a.event_id = ?
       ORDER BY u.name
-    `).all(event.id)).map(a => ({
+    `).all(event.id);
+    /* Being staff decides whether the roster is served; it does not decide
+       what is on it. A student running the event sees grade and school only
+       where the applicant shares them — see applicantDisclosure.js. */
+    const disclosure = await applicantDisclosure(db, req.principal, applicationRows.map(a => ({
+      id: a.user_id, profile_visibility: a.profile_visibility, hours_visibility: a.hours_visibility,
+    })));
+    const applications = applicationRows.map(a => ({
       id: a.id,
       userId: a.user_id,
       eventId: a.event_id,
       slotId: a.slot_id,
       status: a.status,
       appliedAt: a.applied_at,
-      volunteer: { id: a.user_id, name: a.name, avatar: a.avatar, grade: a.grade, school: a.school }
+      volunteer: {
+        id: a.user_id, name: a.name, avatar: a.avatar,
+        ...(disclosure.get(a.user_id).particulars ? { grade: a.grade, school: a.school } : {}),
+      }
     }));
 
     res.json({

@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { Check, Clock4, Ban, ArrowUpDown, Sparkles, AlertCircle } from 'lucide-react';
-import { formatHours, formatDay, gradeLabel } from '../utils/helpers';
+import { formatDay, gradeLabel } from '../utils/helpers';
 import { organizerBadges } from '../utils/badgeOrder';
 import { MIN_EVIDENCE } from '../reliabilityEvidence';
 import { rowTransitionStyle, withViewTransition } from '../utils/motion';
+import { recordKeptPrivate } from '../utils/applicantRecord';
+import ServiceHoursPill from './organizer/ServiceHoursPill';
 
 /**
  * What a badge means, on hover (ruling 4).
@@ -27,21 +29,38 @@ const badgeHover = (b) => (b?.criteria_type === 'attendance_rate' ? RELIABLE_HOV
  * school programmes are actually trying to answer — but it is a default, not
  * a rule, and the organizer can re-sort freely.
  */
+/**
+ * A private record is unknown, not zero — so it goes last, in application order.
+ *
+ * Read as zero (`|| 0`), a volunteer who keeps their record private would top
+ * "Fewest hours first" and "New volunteers first", the two orders that exist to
+ * give a place to somebody who has had fewer chances: a ranking decided by a
+ * figure nobody on this screen can see. See `recordKeptPrivate`.
+ */
+const privateLast = compare => (a, b) => {
+  const aKept = recordKeptPrivate(a.volunteer);
+  const bKept = recordKeptPrivate(b.volunteer);
+  if (aKept || bKept) {
+    return aKept === bKept ? new Date(a.appliedAt) - new Date(b.appliedAt) : (aKept ? 1 : -1);
+  }
+  return compare(a, b);
+};
+
 const SORTS = {
   fewestHours: {
     label: 'Fewest hours first',
     hint: 'Prioritises volunteers who have had the least opportunity so far',
-    compare: (a, b) => (a.volunteer?.volunteeredHours || 0) - (b.volunteer?.volunteeredHours || 0) || new Date(a.appliedAt) - new Date(b.appliedAt)
+    compare: privateLast((a, b) => (a.volunteer?.volunteeredHours || 0) - (b.volunteer?.volunteeredHours || 0) || new Date(a.appliedAt) - new Date(b.appliedAt))
   },
   newest: {
     label: 'New volunteers first',
     hint: 'Students who have not completed an event yet',
-    compare: (a, b) => (a.volunteer?.completedEvents || 0) - (b.volunteer?.completedEvents || 0) || new Date(a.appliedAt) - new Date(b.appliedAt)
+    compare: privateLast((a, b) => (a.volunteer?.completedEvents || 0) - (b.volunteer?.completedEvents || 0) || new Date(a.appliedAt) - new Date(b.appliedAt))
   },
   experienced: {
     label: 'Most experienced first',
     hint: 'Useful when a shift needs someone who has done it before',
-    compare: (a, b) => (b.volunteer?.completedEvents || 0) - (a.volunteer?.completedEvents || 0) || (b.volunteer?.volunteeredHours || 0) - (a.volunteer?.volunteeredHours || 0)
+    compare: privateLast((a, b) => (b.volunteer?.completedEvents || 0) - (a.volunteer?.completedEvents || 0) || (b.volunteer?.volunteeredHours || 0) - (a.volunteer?.volunteeredHours || 0))
   },
   applied: {
     label: 'Applied earliest first',
@@ -154,10 +173,14 @@ export default function ApplicantReview({
          */
         const confirmedCommitments = (v.eventsAttended ?? 0) + (v.eventsAbsent ?? 0);
         const completedCommitments = v.eventsSignedUp ?? v.completedEvents ?? 0;
-        const isNew = confirmedCommitments < MIN_EVIDENCE;
+        /* Withheld, not empty: the reader is a student running the event and
+           this volunteer keeps their record private. None of the counts below
+           exists, so neither status may be inferred from their absence. */
+        const keptPrivate = recordKeptPrivate(v);
+        const isNew = !keptPrivate && confirmedCommitments < MIN_EVIDENCE;
         /* No past commitment at all: nothing to count, so the first-time
            volunteer badge stands in for "0 of 0 attended" (ruling 4). */
-        const isFirstTimer = completedCommitments === 0;
+        const isFirstTimer = !keptPrivate && completedCommitments === 0;
         /* A new volunteer's row is a status line, so it carries no other
            badges — an Early Supporter chip beside the first-timer badge would
            read as experience they do not have. */
@@ -216,9 +239,7 @@ export default function ApplicantReview({
               <div className="small truncate s-40e91a">{app.slot?.name}</div>
               
               <div className="s-821378">
-                <span className={`hourspill ${!v.volunteeredHours ? 'zero' : ''}`}>
-                  {formatHours(v.volunteeredHours)}
-                </span>
+                <ServiceHoursPill volunteer={v} />
               </div>
               
               <div className="s-0c206e">
@@ -234,7 +255,8 @@ export default function ApplicantReview({
                   * paperwork from reading as absence. A first-timer has nothing
                   * to count and carries the first-time badge instead.
                   */}
-                {isFirstTimer ? <div className="small dim">No past shifts</div> : <>
+                {keptPrivate ? <div className="small dim">Keeps their service history private</div>
+                  : isFirstTimer ? <div className="small dim">No past shifts</div> : <>
                     {/**
                       * Signed up versus attended — the follow-through question.
                       *

@@ -19,6 +19,7 @@ import { canRunEvent } from '../organizations.js';
 import { slotHasStarted } from '../attendance.js';
 import { PENDING_APPLICATION_LIMIT } from '../config.js';
 import { applicationLimiter } from '../applicationLimiter.js';
+import { applicantDisclosure } from '../applicantDisclosure.js';
 
 const router = express.Router();
 
@@ -94,6 +95,7 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
     let rows;
     const BASE_QUERY = `
       SELECT a.*, u.name, u.avatar, u.school, u.grade, u.bio, u.skills,
+             u.profile_visibility, u.hours_visibility,
              e.title as event_title,
              s.name as slot_name, s.description as slot_description, s.start_datetime as slot_start_datetime, s.end_datetime as slot_end_datetime, s.max_spots as slot_max_spots,
              /* Evaluated across the whole filtered set, before LIMIT, so one
@@ -331,7 +333,22 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
       }
     }
 
+    /**
+     * What each applicant discloses to THIS reader.
+     *
+     * The capability cascade above decides which rows come back; it says
+     * nothing about what is on them. A Student Organizer and an adult organizer
+     * reach this list through the same organization scope and accepted
+     * different agreements about it — see applicantDisclosure.js.
+     */
+    const disclosure = await applicantDisclosure(db, req.principal, rows.map(r => ({
+      id: r.user_id,
+      profile_visibility: r.profile_visibility,
+      hours_visibility: r.hours_visibility,
+    })));
+
     const formattedApps = rows.map(r => {
+      const shown = disclosure.get(r.user_id);
       const history = historyByUser.get(r.user_id);
       const totalHours = history ? Number(history.total_hours) : 0.0;
       const completedEvents = history ? history.completed_events : 0;
@@ -374,35 +391,45 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
           id: r.user_id,
           name: r.name,
           avatar: r.avatar,
-          school: r.school,
-          grade: r.grade,
-          volunteeredHours: totalHours,
-          completedEvents,
-          lastVolunteeredDate,
-          /* Counts, never a rate — see `participationCountsFor`. `signedUp`
-             counts commitments whose shift has ENDED, so an upcoming shift is
-             not held against somebody who has not had the chance to attend it
-             yet.
+          /* Bio, school and grade follow the applicant's profile setting for a
+             reader who is not an adult organizer — OMITTED, as the profile
+             omits them, rather than nulled into "not on file". */
+          ...(shown.particulars ? { school: r.school, grade: r.grade, bio: r.bio } : {}),
+          /* The service record follows `hours_visibility` the same way. Omitted
+             rather than zeroed: a zero is a claim, and here a false one. */
+          ...(shown.hours === 'visible' ? {
+            volunteeredHours: totalHours,
+            completedEvents,
+            lastVolunteeredDate,
+            /* Counts, never a rate — see `participationCountsFor`. `signedUp`
+               counts commitments whose shift has ENDED, so an upcoming shift is
+               not held against somebody who has not had the chance to attend it
+               yet.
 
-             `eventsAbsent` was computed and then dropped here, which left the
-             organizer unable to tell "8 of 9, one missed" from "8 of 9, one the
-             organizer never got round to confirming". Those are a fact about
-             the volunteer and a fact about the paperwork, and reading the
-             second as the first is the specific unfairness this whole set of
-             definitions exists to prevent. `eventsAwaitingRecord` is the
-             remainder, published alongside so the gap is legible rather than
-             assumed. */
-          eventsSignedUp: participation.get(r.user_id)?.signedUp ?? 0,
-          eventsAttended: participation.get(r.user_id)?.attended ?? 0,
-          eventsAbsent: participation.get(r.user_id)?.absent ?? 0,
-          eventsAwaitingRecord: Math.max(
-            0,
-            (participation.get(r.user_id)?.signedUp ?? 0)
-            - (participation.get(r.user_id)?.attended ?? 0)
-            - (participation.get(r.user_id)?.absent ?? 0),
-          ),
+               `eventsAbsent` was computed and then dropped here, which left the
+               organizer unable to tell "8 of 9, one missed" from "8 of 9, one the
+               organizer never got round to confirming". Those are a fact about
+               the volunteer and a fact about the paperwork, and reading the
+               second as the first is the specific unfairness this whole set of
+               definitions exists to prevent. `eventsAwaitingRecord` is the
+               remainder, published alongside so the gap is legible rather than
+               assumed. */
+            eventsSignedUp: participation.get(r.user_id)?.signedUp ?? 0,
+            eventsAttended: participation.get(r.user_id)?.attended ?? 0,
+            eventsAbsent: participation.get(r.user_id)?.absent ?? 0,
+            eventsAwaitingRecord: Math.max(
+              0,
+              (participation.get(r.user_id)?.signedUp ?? 0)
+              - (participation.get(r.user_id)?.attended ?? 0)
+              - (participation.get(r.user_id)?.absent ?? 0),
+            ),
+          } : {}),
+          /* The setting is disclosed; the figures behind it are not. Without it
+             the row cannot tell a volunteer who keeps their record private from
+             a first-timer, and would call them one. Same shape as the
+             profile's `serviceVisibility`, which the client already reads. */
+          serviceVisibility: { hours: shown.hours },
           badges: badgesByUser.get(r.user_id) ?? [],
-          bio: r.bio,
           skills: r.skills ? JSON.parse(r.skills) : []
         },
         attendance,

@@ -1,5 +1,6 @@
 import React from 'react';
-import { formatHours, gradeLabel } from '../../utils/helpers';
+import { gradeLabel } from '../../utils/helpers';
+import ServiceHoursPill from './ServiceHoursPill';
 
 /** One volunteer in an organizer's roster — the dashboard's row, shared. */
 export default function VolunteerRosterRow({ person, onViewProfile }) {
@@ -12,9 +13,7 @@ export default function VolunteerRosterRow({ person, onViewProfile }) {
           {[gradeLabel(person.grade), `${person.shifts} shift${person.shifts !== 1 ? 's' : ''} with you`].filter(Boolean).join(' · ')}
         </div>
       </div>
-      <span className={`hourspill ${!person.hours ? 'zero' : ''}`}>
-        {formatHours(person.hours)} <span>total</span>
-      </span>
+      <ServiceHoursPill volunteer={person.volunteer}> <span>total</span></ServiceHoursPill>
       <button className="btn btn-ghost btn-sm" onClick={() => onViewProfile(person.volunteer)}>
         Profile
       </button>

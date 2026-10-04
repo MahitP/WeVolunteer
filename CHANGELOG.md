@@ -32,6 +32,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > audited under its own action. See "A legal change now reaches the people it
 > binds" below.
 
+### Fixed — a student running an event saw what applicants keep private
+
+The Student Organizer Agreement (§3) tells applicants that a Student Organizer
+sees their grade and school "where they chose to share it". The applicant list
+did not ask: a Student Organizer, or a student a club made its manager, was
+served the school, grade and bio of every applicant, and their whole service
+record, at any privacy setting — while the same reader opening that applicant's
+profile was refused all of it. The event roster, the attendee list and the
+roster CSV did the same with grade and school.
+
+Those four now give a reader who is a student exactly what the directory would:
+bio, school and grade follow the applicant's profile setting (`friends` opening
+to an accepted friend), and hours, counts and last shift follow the service
+setting. The row says "Keeps their service history private" rather than reading
+as a first-time volunteer with no hours, and sorts such applicants last instead
+of as zero. Adult organizers (`applicant.review`) and staff who may read contact
+detail are unchanged, as the Organizer Agreement describes. The rule is one
+function, `server/applicantDisclosure.js`, built on the profile's own.
+
 ### Added — screenshots on a problem report, and somewhere staff can read reports
 
 Report an Issue takes up to three PNG, JPEG or WebP screenshots, attached by the

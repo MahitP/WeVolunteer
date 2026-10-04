@@ -1,8 +1,10 @@
 import React from 'react';
 import { Check, Clock4 } from 'lucide-react';
 import EmptyState from './common/EmptyState';
-import { formatHours, gradeLabel } from '../utils/helpers';
+import { gradeLabel } from '../utils/helpers';
+import { averageKnownHours } from '../utils/applicantRecord';
 import ApplicantReview from './ApplicantReview';
+import ServiceHoursPill from './organizer/ServiceHoursPill';
 import BusyButton from './common/BusyButton';
 
 export default function EventApplicantsTab({
@@ -75,9 +77,7 @@ export default function EventApplicantsTab({
                         </span>
                       </span>
                     </button>
-                    <span className={`hourspill ${!app.volunteer?.volunteeredHours ? 'zero' : ''}`}>
-                      {formatHours(app.volunteer?.volunteeredHours)}
-                    </span>
+                    <ServiceHoursPill volunteer={app.volunteer} />
                   </div>
                 ))}
               </div>
@@ -109,9 +109,7 @@ export default function EventApplicantsTab({
                           </span>
                         </span>
                       </button>
-                      <span className={`hourspill ${!app.volunteer?.volunteeredHours ? 'zero' : ''}`}>
-                        {formatHours(app.volunteer?.volunteeredHours)}
-                      </span>
+                      <ServiceHoursPill volunteer={app.volunteer} />
                     </div>
                   ))}
               </div>
@@ -163,11 +161,13 @@ export default function EventApplicantsTab({
                     const previewSelectedApps = eventApps.filter(a => latestDraft.selectedIds.includes(a.id));
                     const previewWaitlistApps = eventApps.filter(a => latestDraft.waitlistIds.includes(a.id));
 
-                    const totalSelectedHours = previewSelectedApps.reduce((sum, a) => sum + (a.volunteer?.volunteeredHours || 0), 0);
-                    const totalWaitlistHours = previewWaitlistApps.reduce((sum, a) => sum + (a.volunteer?.volunteeredHours || 0), 0);
-
-                    const avgSelectedHrs = previewSelectedApps.length > 0 ? (totalSelectedHours / previewSelectedApps.length).toFixed(1) : '0';
-                    const avgWaitlistHrs = previewWaitlistApps.length > 0 ? (totalWaitlistHours / previewWaitlistApps.length).toFixed(1) : '0';
+                    /* Over the hours this reader can see. A student running the
+                       event does not see a private record's hours, and counting
+                       it as zero would pull the average down by an amount
+                       nobody on this screen can see; the note under each
+                       figure says how many were left out. */
+                    const selectedAvg = averageKnownHours(previewSelectedApps);
+                    const waitlistAvg = averageKnownHours(previewWaitlistApps);
 
                     return (
                       <>
@@ -196,11 +196,17 @@ export default function EventApplicantsTab({
                             </div>
                             <div className="stack-xs" style={{ flex: 1.5, minWidth: 150 }}>
                               <span className="small dim">Avg. Hours (Accepted)</span>
-                              <strong className="large">{avgSelectedHrs} hrs</strong>
+                              <strong className="large">{selectedAvg.average} hrs</strong>
+                              {selectedAvg.keptPrivate > 0 && (
+                                <span className="small dim">Not counting {selectedAvg.keptPrivate} who keep their hours private</span>
+                              )}
                             </div>
                             <div className="stack-xs" style={{ flex: 1.5, minWidth: 150 }}>
                               <span className="small dim">Avg. Hours (Waitlisted)</span>
-                              <strong className="large">{avgWaitlistHrs} hrs</strong>
+                              <strong className="large">{waitlistAvg.average} hrs</strong>
+                              {waitlistAvg.keptPrivate > 0 && (
+                                <span className="small dim">Not counting {waitlistAvg.keptPrivate} who keep their hours private</span>
+                              )}
                             </div>
                           </div>
 
@@ -234,9 +240,7 @@ export default function EventApplicantsTab({
                                       </span>
                                     </span>
                                   </button>
-                                  <span className={`hourspill ${!app.volunteer?.volunteeredHours ? 'zero' : ''}`}>
-                                    {formatHours(app.volunteer?.volunteeredHours)}
-                                  </span>
+                                  <ServiceHoursPill volunteer={app.volunteer} />
                                 </div>
                               ))}
                             </div>
@@ -269,9 +273,7 @@ export default function EventApplicantsTab({
                                         </span>
                                       </span>
                                     </button>
-                                    <span className={`hourspill ${!app.volunteer?.volunteeredHours ? 'zero' : ''}`}>
-                                      {formatHours(app.volunteer?.volunteeredHours)}
-                                    </span>
+                                    <ServiceHoursPill volunteer={app.volunteer} />
                                   </div>
                                 );
                               })}
@@ -351,9 +353,7 @@ export default function EventApplicantsTab({
                     </span>
                   </span>
                 </button>
-                <span className={`hourspill ${!app.volunteer?.volunteeredHours ? 'zero' : ''}`}>
-                  {formatHours(app.volunteer?.volunteeredHours)}
-                </span>
+                <ServiceHoursPill volunteer={app.volunteer} />
                 <div className="row" style={{ gap: 4, marginLeft: 'auto' }}>
                   <button className="btn btn-primary btn-sm" disabled={submitting}
                     onClick={() => decide(app.id, app.volunteer?.name, 'accepted')}>

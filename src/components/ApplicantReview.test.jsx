@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ApplicantReview from './ApplicantReview';
 
 /**
@@ -248,5 +248,80 @@ describe('naming the unconfirmed shifts', () => {
        fails if a future edit adds "78%". */
     const { container } = draw([applicant({}, { eventsSignedUp: 9, eventsAttended: 7, eventsAbsent: 2, eventsAwaitingRecord: 0 })]);
     expect(container.textContent).not.toMatch(/\d%/);
+  });
+});
+
+/**
+ * An applicant read by a student who helps run the club.
+ *
+ * The Student Organizer Agreement gives that reader grade and school only
+ * "where they chose to share it", so the server now OMITS bio, school and grade
+ * for a private profile, and every service figure for a private record — and
+ * says which it did, in `serviceVisibility` (server/applicantDisclosure.js).
+ *
+ * Read naively, a row with no figures is a first-timer with no hours: "0 hrs",
+ * "First-time volunteer", "No past shifts". Each of those is a claim about a
+ * person, and for somebody who simply keeps their record to themselves every
+ * one of them is false.
+ */
+function privateApplicant(name, overrides = {}) {
+  const app = applicant(overrides, { name, serviceVisibility: { hours: 'private' } });
+  for (const field of ['school', 'grade', 'bio', 'volunteeredHours', 'completedEvents', 'lastVolunteeredDate',
+    'eventsSignedUp', 'eventsAttended', 'eventsAbsent', 'eventsAwaitingRecord']) {
+    delete app.volunteer[field];
+  }
+  return app;
+}
+
+const namesInOrder = (container) =>
+  [...container.querySelectorAll('.person-name')].map(n => n.textContent);
+
+describe('an applicant who keeps their record private', () => {
+  it('says so, rather than describing a first-timer with no hours', () => {
+    const { container } = draw([privateApplicant('Kept Private')]);
+
+    expect(screen.getByText('Keeps their service history private')).toBeInTheDocument();
+    expect(screen.queryByText(/First-time volunteer/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No past shifts')).not.toBeInTheDocument();
+    expect(screen.queryByText(/attended/)).not.toBeInTheDocument();
+    expect(screen.queryByText('no confirmed shifts yet')).not.toBeInTheDocument();
+    expect(container.querySelector('.tag-brand')).toBeNull();
+    expect(container.querySelector('.hourspill').textContent).not.toMatch(/0 hrs/);
+  });
+
+  it('shows no grade or school, and no trace of them, when the server withheld both', () => {
+    const { container } = draw([privateApplicant('Kept Private')]);
+    const meta = container.querySelector('.person-meta');
+    expect(meta.textContent).toBe('');
+    expect(container.textContent).not.toMatch(/undefined|Grade/);
+  });
+
+  it('still shows their badges, which their profile shows to everybody', () => {
+    draw([privateApplicant('Kept Private', {})].map(a => ({ ...a, volunteer: { ...a.volunteer, badges: [RELIABLE] } })));
+    expect(screen.getByText('Reliable Volunteer')).toBeInTheDocument();
+  });
+
+  it('sorts after every applicant whose record is known, in every order that reads it', () => {
+    /* Read as zero, a private record would top "Fewest hours first" and
+       "New volunteers first" — the two orders that exist to give a place to
+       somebody who has had fewer chances. Nothing is known about them either
+       way, so they go last, in the order they applied. */
+    const apps = [
+      privateApplicant('Private Pat', { appliedAt: '2026-08-01T09:00:00.000Z' }),
+      applicant({ appliedAt: '2026-08-01T10:00:00.000Z' }, { name: 'Veteran Val', volunteeredHours: 40, completedEvents: 9 }),
+      applicant({ appliedAt: '2026-08-01T11:00:00.000Z' }, { name: 'Newer Nia', volunteeredHours: 2, completedEvents: 1 }),
+    ];
+    const { container } = draw(apps);
+    expect(namesInOrder(container)).toEqual(['Newer Nia', 'Veteran Val', 'Private Pat']);
+
+    const order = screen.getByLabelText('Order applicants by');
+    fireEvent.change(order, { target: { value: 'newest' } });
+    expect(namesInOrder(container)).toEqual(['Newer Nia', 'Veteran Val', 'Private Pat']);
+
+    fireEvent.change(order, { target: { value: 'experienced' } });
+    expect(namesInOrder(container)).toEqual(['Veteran Val', 'Newer Nia', 'Private Pat']);
+
+    fireEvent.change(order, { target: { value: 'applied' } });
+    expect(namesInOrder(container)).toEqual(['Private Pat', 'Veteran Val', 'Newer Nia']);
   });
 });

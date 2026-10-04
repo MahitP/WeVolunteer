@@ -238,6 +238,41 @@ export const PUBLIC_BASELINE_FIELDS = Object.freeze([
 /** Fields added only when the profile is public. */
 export const PUBLIC_ONLY_FIELDS = Object.freeze(['bio', 'school', 'grade', 'graduationYear']);
 
+/**
+ * `profile_visibility` read as one of its three values.
+ *
+ * 'friends' behaves as 'public' to an accepted friend and as 'private' to
+ * everybody else. Deciding it here, once, is what stops each consumer
+ * inventing its own reading of a three-valued column — and anything that is
+ * not exactly 'public' or 'friends' is 'private', the column's own default.
+ */
+export function statedProfileVisibility(row) {
+  return row?.profile_visibility === 'public' ? 'public'
+    : row?.profile_visibility === 'friends' ? 'friends'
+      : 'private';
+}
+
+/**
+ * May this reader see the subject's `PUBLIC_ONLY_FIELDS`?
+ *
+ * Exported because the profile is not the only surface that carries them. The
+ * applicant lists an event's staff read hand out school, grade and bio too
+ * (`applicantDisclosure.js`), and a privacy rule restated there would be a rule
+ * the two surfaces could disagree about.
+ *
+ * @param {object} row  the subject's `users` row
+ * @param {object} opts
+ * @param {string|null} opts.viewerId
+ * @param {boolean} opts.canSeeContact  the reader may see this subject's particulars anyway
+ * @param {boolean} opts.isFriend       an ACCEPTED friendship (`areFriends`)
+ */
+export function sensitiveFieldsVisible(row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
+  if (viewerId && viewerId === row?.id) return true;
+  if (canSeeContact) return true;
+  const stated = statedProfileVisibility(row);
+  return stated === 'public' || (stated === 'friends' && isFriend);
+}
+
 /** Fields added only for the account itself, or for staff who may see PII. */
 export const PRIVILEGED_FIELDS = Object.freeze(['email', 'emailVerified', 'friendActivityVisible']);
 
@@ -351,17 +386,8 @@ async function organizationsFor(db, userId, { withHours = false } = {}) {
 export async function publicProfile(db, row, { viewerId = null, canSeeContact = false, isFriend = false } = {}) {
   const isSelf = Boolean(viewerId) && viewerId === row.id;
 
-  /**
-   * 'friends' behaves as 'public' to an accepted friend and as 'private' to
-   * everybody else. Deciding it here, once, is what stops each consumer
-   * inventing its own reading of a three-valued column.
-   */
-  const stated = row.profile_visibility === 'public' ? 'public'
-    : row.profile_visibility === 'friends' ? 'friends'
-      : 'private';
-  const sensitiveVisible = isSelf || canSeeContact
-    || stated === 'public'
-    || (stated === 'friends' && isFriend);
+  const stated = statedProfileVisibility(row);
+  const sensitiveVisible = sensitiveFieldsVisible(row, { viewerId, canSeeContact, isFriend });
 
   const stats = await volunteerStats(db, row.id);
 

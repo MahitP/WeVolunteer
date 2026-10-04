@@ -84,7 +84,11 @@ export default function AttendeeList({
         <p>You'll be among the first. Confirmed volunteers show up here.</p>
       </div>;
   }
-  const students = state.attendees.filter(a => /^\d+$/.test(String(a.grade)));
+  /* Counted only when every grade is known. A student running the event is not
+     sent the grade of a volunteer who keeps it private — the key is absent —
+     and a count over the rest would be a wrong number stated as a fact. */
+  const gradesKnown = state.attendees.every(a => Object.hasOwn(a, 'grade'));
+  const students = gradesKnown ? state.attendees.filter(a => /^\d+$/.test(String(a.grade))) : [];
   return <div>
       <p className="small muted s-450599">
         <span className="strong">{state.attendees.length} volunteer{state.attendees.length !== 1 ? 's' : ''}</span> confirmed

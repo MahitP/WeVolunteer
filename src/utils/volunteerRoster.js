@@ -1,5 +1,6 @@
 import { gradeLabel } from './helpers';
 import { csvCell } from '../../server/csv.js';
+import { recordKeptPrivate } from './applicantRecord';
 
 /**
  * The people who have volunteered for an organizer, one row each.
@@ -28,22 +29,35 @@ export function rosterOf(acceptedApps) {
         name: app.volunteer?.name,
         avatar: app.volunteer?.avatar,
         grade: app.volunteer?.grade,
-        hours: app.volunteer?.volunteeredHours || 0,
+        /* `null`, not 0, for a volunteer who keeps their record private from
+           this reader (a student running the event; see `recordKeptPrivate`).
+           Their hours are unknown here, and a zero would say they have none. */
+        hours: recordKeptPrivate(app.volunteer) ? null : (app.volunteer?.volunteeredHours || 0),
         shifts: 1,
         volunteer: app.volunteer
       });
     }
   }
-  return [...byUser.values()].sort((a, b) => b.hours - a.hours);
+  /* Most hours first; an unknown figure is not a small one, so those go last. */
+  return [...byUser.values()].sort((a, b) =>
+    (a.hours === null) - (b.hours === null) || (b.hours ?? 0) - (a.hours ?? 0));
 }
 
-/** Download the roster as the ledger CSV the dashboard has always produced. */
-export function downloadRosterCsv(acceptedApps) {
+/** The roster as the ledger CSV the dashboard has always produced. */
+export function rosterCsv(acceptedApps) {
   const roster = rosterOf(acceptedApps);
-  const rows = [
+  return [
     ['Volunteer Name', 'Grade', 'Email', 'Shifts With You', 'Total Volunteered Hours'].map(csvCell).join(','),
-    ...roster.map(r => [r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts, Number(r.hours).toFixed(2)].map(csvCell).join(',')),
+    ...roster.map(r => [
+      r.name, gradeLabel(r.grade), r.volunteer?.email || '', r.shifts,
+      r.hours === null ? 'Private' : Number(r.hours).toFixed(2),
+    ].map(csvCell).join(',')),
   ].join('\n');
+}
+
+/** Download `rosterCsv` as a file. */
+export function downloadRosterCsv(acceptedApps) {
+  const rows = rosterCsv(acceptedApps);
   const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');

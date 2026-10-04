@@ -18,6 +18,7 @@ import { db } from '../db.js';
 import { recordAudit } from '../auditLog.js';
 import { canRunEvent } from '../organizations.js';
 import { canSeeCertificates } from '../serviceVisibility.js';
+import { applicantDisclosure } from '../applicantDisclosure.js';
 import { markEventDirty } from '../search/eventIndexer.js';
 
 const router = express.Router();
@@ -367,14 +368,24 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
     }
 
     const rows = await db.prepare(`
-      SELECT u.name, u.email, u.school, u.grade, s.name as slot_name,
-             s.start_datetime, s.end_datetime, a.status, a.applied_at
+      SELECT u.id AS user_id, u.name, u.email, u.school, u.grade, s.name as slot_name,
+             s.start_datetime, s.end_datetime, a.status, a.applied_at,
+             u.profile_visibility, u.hours_visibility
       FROM applications a
       JOIN users u ON a.user_id = u.id
       JOIN slots s ON a.slot_id = s.id
       WHERE a.event_id = ? AND a.status = 'accepted'
       ORDER BY s.start_datetime, u.name
     `).all(eventId);
+
+    /* The columns stay, so every export has the same shape; a cell is blank
+       where a student running the event may not read it. Email is not gated:
+       the Student Organizer Agreement gives them contact details for people on
+       their events, which is what this export is for. See
+       applicantDisclosure.js for grade and school. */
+    const disclosure = await applicantDisclosure(db, req.principal, rows.map(r => ({
+      id: r.user_id, profile_visibility: r.profile_visibility, hours_visibility: r.hours_visibility,
+    })));
 
     const calcHours = (start, end) => Math.max(0.1, Number(((new Date(end) - new Date(start)) / 3600000).toFixed(2)));
 
@@ -383,8 +394,8 @@ router.get('/api/events/:id/roster.csv', authenticateToken, requireCapAny(['atte
       ...rows.map(r => [
         csvCell(r.name),
         csvCell(r.email),
-        csvCell(r.school),
-        csvCell(r.grade),
+        csvCell(disclosure.get(r.user_id).particulars ? r.school : ''),
+        csvCell(disclosure.get(r.user_id).particulars ? r.grade : ''),
         csvCell(r.slot_name),
         csvCell(new Date(r.start_datetime).toLocaleString()),
         csvCell(new Date(r.end_datetime).toLocaleString()),
