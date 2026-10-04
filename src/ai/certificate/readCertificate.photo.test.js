@@ -125,7 +125,9 @@ describe('the recogniser is self-hosted and loaded only for a photo', () => {
 
   it('bounds starting the worker as well as the read, since a failed start never settles', () => {
     expect(src).toMatch(/errorHandler:/);
-    expect(src).toMatch(/Promise\.race\(\[read\(\), abandon\]\)/);
+    expect(src).toMatch(/Promise\.race\(\[reading, abandon\]\)/);
+    /* And a worker that finishes starting after that is stopped (ocr.test.js). */
+    expect(src).toMatch(/if \(abandoned\)/);
   });
 
   it('is imported on demand, so a PDF never downloads it', () => {

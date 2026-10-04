@@ -110,6 +110,11 @@ async function scaled(file) {
 export async function recognizeText(file, { signal } = {}) {
   let timer;
   let worker = null;
+  /* Set when the race below is over, whichever side won. A worker that
+     finishes starting after that is stopped on arrival and reads nothing: the
+     timeout or an abort can land while Tesseract is still starting, when there
+     is no worker yet for the cleanup to stop (final audit, Phase 6 review). */
+  let abandoned = false;
   const abandon = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('timeout')), OCR_TIMEOUT_MS);
     signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
@@ -132,15 +137,29 @@ export async function recognizeText(file, { signal } = {}) {
       gzip: true,
       errorHandler: err => failStart(new Error(String(err?.message || err || 'worker failed'))),
     });
-    worker = await Promise.race([starting, startFailed]);
+    /* A start that fails after `startFailed` has already won must not be an
+       unhandled rejection either. */
+    starting.catch(() => {});
+    const started = await Promise.race([starting, startFailed]);
+    if (abandoned) {
+      await started.terminate().catch(() => {});
+      throw new Error('abandoned');
+    }
+    worker = started;
     const image = await scaled(file);
+    if (abandoned) throw new Error('abandoned');
     const { data } = await Promise.race([worker.recognize(image), startFailed]);
     return String(data?.text ?? '');
   };
 
+  const reading = read();
+  /* The branch that loses the race still settles; its rejection is expected. */
+  reading.catch(() => {});
+
   try {
-    return await Promise.race([read(), abandon]);
+    return await Promise.race([reading, abandon]);
   } finally {
+    abandoned = true;
     clearTimeout(timer);
     await worker?.terminate().catch(() => {});
   }
