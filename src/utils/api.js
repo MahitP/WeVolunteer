@@ -494,7 +494,28 @@ export const api = {
 
   getMe: async () => {
     try {
-      return await apiFetch('/api/auth/me');
+      const user = await apiFetch('/api/auth/me');
+      /**
+       * The session probe writes the cache too, not only the sign-in calls.
+       *
+       * Messages and Service Insights read the user from it. Written only by
+       * login, two-factor and signup, it was empty for every session that began
+       * another way (Google or Microsoft sign-in, an email-confirmation link),
+       * and Messages told a signed-in student "Messaging is not available for
+       * this account". It also went stale: capabilities released by an
+       * approval or an accepted agreement stayed withheld in it until the next
+       * sign-in. This is the same object those calls store, from the same
+       * server, refreshed whenever the session is.
+       */
+      if (user && typeof user === 'object' && !Array.isArray(user) && user.id) {
+        try {
+          localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+        } catch {
+          /* Storage full or blocked: the cache is a convenience, and every
+             reader already treats an absent one as unknown. */
+        }
+      }
+      return user;
     } catch (e) {
       /**
        * 403 as well as 401.

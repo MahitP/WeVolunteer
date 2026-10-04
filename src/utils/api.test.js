@@ -164,3 +164,37 @@ describe('request correlation', () => {
     expect(Object.keys(headers).map(k => k.toLowerCase())).not.toContain('x-request-id');
   });
 });
+
+/**
+ * The session probe keeps the cached user current (final audit, Phase 5).
+ *
+ * Messages and Service Insights read the user from the cache that only the
+ * password, two-factor and signup calls wrote. A session that began any other
+ * way, Google or Microsoft sign-in and an email-confirmation link among them,
+ * left it empty, and a signed-in student opening Messages was told
+ * "Messaging is not available for this account". A cache written at login also
+ * went stale: an organizer approved, or one who had just accepted the
+ * Organizer Agreement, kept the capabilities they signed in with.
+ */
+describe('getMe and the cached user', () => {
+  const ME = { id: 'u1', name: 'Nia Okafor', role: 'student', withheld: [], grants: [] };
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true, status: 200, json: () => Promise.resolve(ME), headers: new Headers({ 'content-type': 'application/json' }),
+    })));
+  });
+  afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
+
+  it('writes the user the server returned', async () => {
+    await api.getMe();
+    expect(api.getCurrentCachedUser()).toEqual(ME);
+  });
+
+  it('replaces a stale one', async () => {
+    localStorage.setItem('wev_auth_user', JSON.stringify({ ...ME, withheld: ['message.send'] }));
+    await api.getMe();
+    expect(api.getCurrentCachedUser().withheld).toEqual([]);
+  });
+});
