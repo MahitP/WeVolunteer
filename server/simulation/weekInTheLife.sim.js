@@ -127,10 +127,13 @@ describe('a week in the life', () => {
     const jordan = { email: 'jordan.whitfield@example.org', password: 'password123', role: 'organizer' };
     people.set(admin.email, admin); people.set(jordan.email, jordan);
 
-    // Owners: Mahit (who is also a student) and the platform account.
+    // Owners: Mahit (who is also a student) and the platform account. Their
+    // real handles, @mahit and @wevolunteer, are reserved for the real owner
+    // addresses (server/ownerAllowlist.js), and a rehearsal must not use those,
+    // so the stand-ins carry handles of their own.
     for (const [name, username, email] of [
-      ['Mahit Pulavarthi', 'mahit', 'mahit.owner@sim.test'],
-      ['WeVolunteer', 'wevolunteer', 'platform.owner@sim.test'],
+      ['Mahit Pulavarthi', 'mahit_sim', 'mahit.owner@sim.test'],
+      ['WeVolunteer', 'wevolunteer_sim', 'platform.owner@sim.test'],
     ]) {
       const signed = await srv.signupConfirmed({ name, username, email, password: PASSWORD, role: 'student', grade: '12', dateOfBirth: '2008-03-01' });
       await srv.makeOwner(email);

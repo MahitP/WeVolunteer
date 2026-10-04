@@ -820,7 +820,7 @@ export async function formatUserResponse(row) {
      */
     headline: row.profile_headline || null,
     highlights: parseHighlightsList(row.profile_highlights),
-    distinction: distinctionFor(row.role),
+    distinction: distinctionFor(row.role, row.email),
     /**
      * The two privacy switches, so Settings can render their current state
      * without a second request.

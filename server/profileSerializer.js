@@ -57,6 +57,7 @@
 
 import { volunteerStats, externalHoursSummary } from './volunteerStats.js';
 import { visibilityState } from './serviceVisibility.js';
+import { ownerIdentity } from './ownerAllowlist.js';
 
 /**
  * The distinguished presentation an account carries, or null for a member.
@@ -142,11 +143,55 @@ const DISTINCTIONS = {
   },
 };
 
-export function distinctionFor(role) {
+/**
+ * The two owner accounts, told apart (FX-09, FX-10).
+ *
+ * The owner asked that his own account and the platform's "get different
+ * profile pages". Both keep the "Platform owner" badge, which he asked to keep,
+ * and differ in what they say:
+ *
+ *   • the FOUNDER's says founder, and that it is also a student volunteer's
+ *     record.
+ *   • the PLATFORM account describes an account, not a person. It used to share
+ *     the founder's words, "the person responsible for how the platform works",
+ *     which is untrue of an account and is published to every member.
+ *
+ * Which LAYOUT a profile gets is deliberately not decided here: it follows the
+ * account's volunteering history (`selfProfileFor`, App.ownerProfile.test.jsx),
+ * so the founder's page is a student's as soon as it has service on it.
+ *
+ * Identity is the address (`ownerIdentity`), the same thing the ownership
+ * allowlist names. Where a payload has no address — a search result — the
+ * role's default stands.
+ */
+const OWNER_IDENTITIES = {
+  founder: {
+    ...DISTINCTIONS.super_admin,
+    blurb: 'Founded and runs WeVolunteer.',
+    description:
+      'The founder of WeVolunteer, and the person responsible for how it works, '
+      + 'what it does with your information, and the policies in the Legal Center. '
+      + 'Also a student volunteer, with a service record on this page like anyone else.',
+  },
+  platform: {
+    ...DISTINCTIONS.super_admin,
+    blurb: 'The official WeVolunteer account.',
+    description:
+      'The official WeVolunteer account: the platform speaking for itself. '
+      + 'Announcements and messages from the team come from here, and it is one of '
+      + 'the two accounts that can change how WeVolunteer works.',
+    contributionLabel: 'On WeVolunteer',
+    interestsLabel: 'Focus',
+  },
+};
+
+export function distinctionFor(role, email) {
   /* `hasOwn`, not a bare lookup: `DISTINCTIONS['constructor']` is truthy on a
      plain object literal. Unreachable today — `users.role` is CHECK-constrained
      — but the cost of not depending on that is one call. */
-  return Object.hasOwn(DISTINCTIONS, role) ? DISTINCTIONS[role] : null;
+  if (!Object.hasOwn(DISTINCTIONS, role)) return null;
+  const identity = role === 'super_admin' ? ownerIdentity(email) : null;
+  return identity ? OWNER_IDENTITIES[identity] : DISTINCTIONS[role];
 }
 
 /**
@@ -331,7 +376,7 @@ export async function publicProfile(db, row, { viewerId = null, canSeeContact = 
   const hoursVisible = serviceVisibility.hours === 'visible';
   /* Derived once: it decides both what is emitted and whether the two
      free-text fields below are exempt from the privacy setting. */
-  const distinction = distinctionFor(row.role);
+  const distinction = distinctionFor(row.role, row.email);
 
   const profile = {
     id: row.id,
@@ -514,6 +559,6 @@ export function profileSummary(row) {
     /* Derived from `role`, which is already on this shape — so it discloses
        nothing new, and it lets a search result show a partner organization as
        one rather than as an unexplained account among schoolchildren. */
-    distinction: distinctionFor(row.role),
+    distinction: distinctionFor(row.role, row.email),
   };
 }

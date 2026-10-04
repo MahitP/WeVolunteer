@@ -20,6 +20,7 @@ import { verifyTotpOnce } from '../totpReplay.js';
 import { runInTransaction } from '../db/connectionContext.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 import { badgeService } from '../services/badgeService.js';
+import { handleReservedAgainst } from '../ownerAllowlist.js';
 
 const router = express.Router();
 
@@ -414,6 +415,9 @@ router.get('/api/auth/check-username', async (req, res) => {
   if (!check.ok) {
     return res.json({ available: false, valid: false, error: check.error });
   }
+  /* A reserved owner handle (FX-09) is unavailable to whoever is asking: this
+     route has no account to compare it with. */
+  if (handleReservedAgainst(check.value, null)) return res.json({ available: false, valid: true });
   const taken = await db.prepare('SELECT 1 FROM users WHERE username = ? COLLATE nocase').get(check.value);
   res.json({ available: !taken, valid: true });
 });

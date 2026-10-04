@@ -23,6 +23,7 @@
 import bcrypt from 'bcryptjs';
 import { VALID_GRADES } from './config.js';
 import { isAvatarColor } from './avatarColors.js';
+import { handleReservedAgainst } from './ownerAllowlist.js';
 
 /** Roles a person may give themselves. Admin is seeded or promoted, never self-assigned. */
 export const SELF_ASSIGNABLE_ROLES = ['student', 'organizer'];
@@ -571,6 +572,11 @@ export function validateAccountFields({ name, username, email, role, grade, bio,
 
   const usernameResult = validateUsername(username);
   if (!usernameResult.ok) return usernameResult;
+  /* The owner handles (FX-09): only their own addresses may take them. Here,
+     so password and OAuth signup share the rule. */
+  if (handleReservedAgainst(usernameResult.value, emailResult.value)) {
+    return { ok: false, field: 'username', error: 'That username is reserved.' };
+  }
 
   if (!SELF_ASSIGNABLE_ROLES.includes(role)) {
     return { ok: false, field: 'role', error: 'Role must be student or organizer.' };

@@ -34,6 +34,7 @@ import { OAUTH_ONLY, issueSession, clearLoginFailuresForUser } from './authRoute
 // header before calling it, and never hand-roll a second unlink beside it.
 import { deleteUploadedFile } from './profilePictureRoutes.js';
 import { hashToken, issueToken } from '../tokenDigest.js';
+import { handleReservedAgainst } from '../ownerAllowlist.js';
 
 const router = express.Router();
 
@@ -731,8 +732,12 @@ router.post('/api/auth/change-username', authenticateToken, async (req, res) => 
   const target = check.value;
 
   try {
-    const userRow = await db.prepare('SELECT username, username_changed_at FROM users WHERE id = ?').get(req.user.id);
+    const userRow = await db.prepare('SELECT username, username_changed_at, email FROM users WHERE id = ?').get(req.user.id);
     if (!userRow) return res.status(404).json({ error: 'User not found' });
+    /* The owner handles (FX-09): only their own addresses may take them. */
+    if (handleReservedAgainst(target, userRow.email)) {
+      return res.status(400).json({ error: 'That username is reserved.', field: 'username' });
+    }
 
     const current = String(userRow.username || '');
     if (target === current) {

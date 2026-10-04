@@ -56,3 +56,42 @@ export function mayHoldOwnership(email, env = process.env) {
   const address = String(email ?? '').trim().toLowerCase();
   return address !== '' && platformOwnerEmails(env).includes(address);
 }
+
+/**
+ * Which of the two owner accounts this is, by its address (FX-09, FX-10).
+ *
+ * The owner asked for the two to "get different profile pages": his own, which
+ * should look like a student's because he is one, and the platform's account.
+ * Role cannot tell them apart — both are owners — so identity is the address,
+ * the same thing the allowlist above names.
+ */
+export const FOUNDER_EMAIL = 'mahitp.16@gmail.com';
+export const PLATFORM_ACCOUNT_EMAIL = 'wevolunteer.platform@gmail.com';
+
+/** `'founder'`, `'platform'`, or null for any other address. */
+export function ownerIdentity(email) {
+  const address = String(email ?? '').trim().toLowerCase();
+  if (address === FOUNDER_EMAIL) return 'founder';
+  if (address === PLATFORM_ACCOUNT_EMAIL) return 'platform';
+  return null;
+}
+
+/**
+ * Handles kept for the owner accounts: "username is @mahit" (FX-09).
+ *
+ * Nothing guaranteed it — any account could register the handle or rename
+ * itself to it. Reserved here, checked at signup (password and OAuth alike),
+ * at the availability check and at rename. An account that already holds one
+ * is the owner's to resolve; nothing renames or deletes anybody.
+ */
+export const RESERVED_HANDLES = Object.freeze({
+  mahit: FOUNDER_EMAIL,
+  wevolunteer: PLATFORM_ACCOUNT_EMAIL,
+});
+
+/** True when `username` is reserved for an address other than `email`. */
+export function handleReservedAgainst(username, email) {
+  const owner = RESERVED_HANDLES[String(username ?? '').trim().toLowerCase()];
+  if (!owner) return false;
+  return String(email ?? '').trim().toLowerCase() !== owner;
+}
