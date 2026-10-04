@@ -20,6 +20,10 @@
  * Read tools (`readOnly: true`, `mode: 'read'`) execute immediately to retrieve
  * facts for the user.
  *
+ * That is enforced, not described: `runTool` refuses anything that is not a
+ * read, and the one path that runs a write is `runConfirmedDraft` in
+ * `confirm.js`.
+ *
  * ── No new server endpoints ──
  *
  * Every tool maps to a call the application already makes, through the same
@@ -1151,14 +1155,42 @@ function serverDetail(err) {
 export const TOOL_NAMES = Object.keys(TOOLS);
 
 /**
- * Run a tool by name.
+ * Whether a tool may run the moment it is asked for.
+ *
+ * Only when it says so in all three fields. Anything else — a write, or a tool
+ * added with one of them forgotten — is treated as a write, because the cost of
+ * being wrong is not symmetrical: a read wrongly held for confirmation is a
+ * failing test, and a write wrongly run immediately is a change nobody agreed
+ * to.
+ */
+export function isReadTool(tool) {
+  return tool?.mode === 'read' && tool.readOnly === true && tool.confirmation === false;
+}
+
+/**
+ * Run a read tool by name.
  *
  * Refuses an unknown name rather than throwing, because the caller is a router
  * whose job is to keep going.
+ *
+ * ── Writes are refused here, not merely not sent here ──
+ *
+ * `update_preferences` was routed, given no drafting branch in `ask()`, and
+ * fell through to the read path, which called this with whatever the router
+ * had — and this checked the capability and ran it. It wrote nothing only
+ * because the router supplied no arguments; a slot parser would have made it
+ * an immediate preference change. Keeping writes out of the read path was a
+ * convention every caller had to remember, so it is a rule here instead.
+ *
+ * A write runs through `runConfirmedDraft` in `confirm.js`, which takes the
+ * draft `confirmDraft` handed out — not a tool name — so the only way to run
+ * one is to have been told "confirm".
  */
 export async function runTool(name, args = {}, { user = null } = {}) {
   const tool = TOOLS[name];
   if (!tool) return failed('unknown_tool');
+
+  if (!isReadTool(tool)) return failed('confirmation_required');
 
   if (tool.capability && !can(user, tool.capability)) return failed('not_allowed');
 

@@ -11,13 +11,27 @@
  * 5. Stale confirmations or "yes" said in ordinary conversation without an active
  *    matching draft will never trigger any action.
  * 6. After confirmation, the draft is immediately consumed (single execution).
+ * 7. A write tool runs through `runConfirmedDraft` and nothing else — `runTool`
+ *    refuses one — and only with a draft object this module confirmed.
  */
 
 import { clearEventDraft } from './eventDraft.js';
+import { TOOLS } from './tools.js';
+import { can } from '../authz.js';
 
 const DRAFT_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 let activeDraft = null;
+
+/**
+ * Drafts `confirmDraft` has handed out that have not run yet.
+ *
+ * By identity, so the proof of a confirmation is the object itself: a draft
+ * still pending, or one described by hand with the right tool and arguments, is
+ * not in here and does not run. Weak, so a confirmation nobody executes holds
+ * nothing alive.
+ */
+const confirmedDrafts = new WeakSet();
 
 /**
  * Deeply freezes an object and all nested properties.
@@ -145,7 +159,38 @@ export function confirmDraft(draftId = null, { user = null } = {}) {
 
   const draft = activeDraft;
   activeDraft = null; // Atomically consume the draft
+  confirmedDrafts.add(draft);
   return { ok: true, draft };
+}
+
+/**
+ * Run the write a person has just confirmed.
+ *
+ * Takes the draft `confirmDraft` returned rather than a tool name and
+ * arguments, because a name and arguments are something any caller can supply
+ * and a confirmed draft is not. Runs it once: the second call with the same
+ * draft is a second change nobody agreed to.
+ *
+ * The capability is checked again with the person confirming. A draft is a
+ * record of what was asked for, not a permission, and the server checks a
+ * third time. The two lines of that check repeat `runTool`'s on purpose —
+ * sharing them would mean exporting a runner that skips the confirmation, which
+ * is the thing this exists to remove.
+ */
+export async function runConfirmedDraft(draft, { user = null } = {}) {
+  if (!draft || !confirmedDrafts.has(draft)) return { ok: false, reason: 'confirmation_required' };
+  confirmedDrafts.delete(draft);
+
+  /* Invariant 4, at the moment of execution as well as of confirmation. */
+  if (user?.id && draft.userId && String(user.id) !== draft.userId) {
+    return { ok: false, reason: 'confirmation_required' };
+  }
+
+  const tool = TOOLS[draft.tool];
+  if (!tool) return { ok: false, reason: 'unknown_tool' };
+  if (tool.capability && !can(user, tool.capability)) return { ok: false, reason: 'not_allowed' };
+
+  return tool.run(draft.args, { user });
 }
 
 /**

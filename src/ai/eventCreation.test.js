@@ -811,13 +811,19 @@ describe('who may do this', () => {
   });
 
   /**
-   * The tool re-checks the capability itself, so a draft that somehow reached
-   * confirmation under the wrong account still executes nothing. The server
-   * checks a third time.
+   * The confirmed draft is run with the capability checked again, so a draft
+   * that somehow reached confirmation under the wrong account still executes
+   * nothing. The server checks a third time.
+   *
+   * This used to call `runTool('create_event', …)` directly. `runTool` no
+   * longer runs a write at all — see writeConfirmation.test.js — so the
+   * capability check that matters is the one on the confirmed path.
    */
   it('is refused by the tool as well as by the router', async () => {
-    const { runTool } = await import('./tools.js');
-    const res = await runTool('create_event', { title: 'X' }, { user: student });
+    const { createDraft, confirmDraft, runConfirmedDraft } = await import('./confirm.js');
+    createDraft({ tool: 'create_event', args: { title: 'X' }, user: student });
+    const { draft } = confirmDraft(null, { user: student });
+    const res = await runConfirmedDraft(draft, { user: student });
 
     expect(res.ok).toBe(false);
     expect(res.reason).toBe('not_allowed');

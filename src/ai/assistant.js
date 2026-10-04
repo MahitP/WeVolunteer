@@ -31,6 +31,7 @@ import {
   getPendingDraft,
   confirmDraft,
   cancelDraft,
+  runConfirmedDraft,
 } from './confirm.js';
 import {
   beginEventDraft,
@@ -364,6 +365,8 @@ function failureMessage(reason, detail = null) {
       return FIXED.verify_certificate_missing_code;
     case 'missing_application_id':
       return "Please specify which application you would like to withdraw.";
+    case 'confirmation_required':
+      return "I can't make that change from here, so nothing was changed.";
     default:
       return "I couldn't look that up just now. Please try again.";
   }
@@ -1036,7 +1039,7 @@ export async function ask(
         };
       }
 
-      const result = await runTool(draft.tool, draft.args, { user });
+      const result = await runConfirmedDraft(draft, { user });
       if (!result.ok) {
         /**
          * The collection is kept when the refusal is one the organizer can
@@ -1277,6 +1280,43 @@ export async function ask(
       applyEventMessage(message, { user, initial: true });
       return eventCollectionTurn(started, user);
     }
+
+    if (tool === 'update_preferences') {
+      /**
+       * ── Answered, not drafted ──
+       *
+       * There was no branch here, so this fell through to section 8 and was
+       * run as a lookup. The router supplies no category, channel or setting,
+       * so the tool refused, and the reader was told "I couldn't look that up
+       * just now. Please try again." — a transient failure, for a request
+       * trying again can never satisfy.
+       *
+       * Welly cannot read which notification and which channel out of a
+       * sentence, so it says where the setting is. A link rather than a jump:
+       * they asked for a change, not to be moved. When the router learns those
+       * three slots, this becomes a draft like `update_profile` above.
+       */
+      return {
+        intent,
+        answer: "I can't change your notification settings myself. You can choose which "
+          + 'notifications you get, and how, in Settings under Notifications.',
+        card: { kind: 'navigate', data: { path: '/settings?section=notifications', label: 'Notification Settings' } },
+        phrasedByModel: false,
+      };
+    }
+
+    /**
+     * A write tool with no branch above is answered here and goes no further.
+     *
+     * Section 8 is the read path; `runTool` would refuse a write there anyway,
+     * and say so as a failure. This says it as an answer.
+     */
+    return {
+      intent,
+      answer: "I can't make that change from here, so nothing was changed.",
+      card: null,
+      phrasedByModel: false,
+    };
   }
 
   /* ── 7. Tool-less Responses & Conversational Fallback ────────────────────── */
@@ -1395,6 +1435,8 @@ export async function ask(
   }
 
   /* ── 8. Read Tool Execution ──────────────────────────────────────────────── */
+  /* Reads only. Every write returned in section 6, and `runTool` refuses one
+     regardless — see the note on it in tools.js. */
   const args = { ...slots };
   if (slots.wantsNearby && position) {
     /**
