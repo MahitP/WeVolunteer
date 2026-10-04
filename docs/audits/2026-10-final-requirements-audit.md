@@ -716,8 +716,8 @@ marked 🔒.
 | # | Status | Commit(s) | Notes |
 |---|---|---|---|
 | 1 | Done | `5e231cd` | *security-review* run before commit |
-| 2 | Done | `0e74e2a` | R1. Joins the combined *security-review* below: the fix adds `username` to the session's user |
-| 3 | Done | `5784b79` | R2. Combined *security-review* pending |
+| 2 | Done | `0e74e2a` | R1. Passed the combined *security-review* below: the fix adds `username` to the session's user |
+| 3 | Done | `5784b79` | R2. Passed the combined *security-review* |
 | 4 | Partial | `bb32bdb` | The QA seed refuses real data by content. The demonstration-record tool waits on an owner question: the marker has to be excluded in 26 files that read attendance, and the alternative is weighed in the question |
 | 5 | Done | `cc886fb`, `eeb5e56` | `eeb5e56` builds the reference in memory: the first version deleted a temp directory and failed the script-safety guard |
 | 6 | Done | `7c9cad1` | |
@@ -725,7 +725,7 @@ marked 🔒.
 | 8 | Done | `4b8c746` | |
 | 9 | Done | `44de711` | |
 | 10 | Done | `8f656b2` (A2), `290552e` (A3, A4), `f20f4ab` (A5), `381f374` (A9), `b7375bc` (W2), `11f5803` (W4) | |
-| 11 | Done | `a1ec7c9` | Also fixed: the members page redirected to the club page; the count included suspended accounts (39 over a list of 38); the roster was capped at 100 with no way past it. The `?membersFrom=` paging sits behind the existing roster gate. Combined *security-review* pending |
+| 11 | Done | `a1ec7c9` | Also fixed: the members page redirected to the club page; the count included suspended accounts (39 over a list of 38); the roster was capped at 100 with no way past it. The `?membersFrom=` paging sits behind the existing roster gate. Passed the combined *security-review* |
 | 12 | Done | `e01e550` | `ownerNames.test.jsx` pins one name per page across hub tile, page title and Welly |
 | 13 | Done | `a339315`, `fa5cb5e` | Administrators get Calendar, showing every platform event (it showed only deadlines before); six entries fit from 360px. `fa5cb5e`: the phone bar's overflow fade had never been set on a real network |
 | 14 | Done | `8f656b2` | Account menu of four; "Log external hours" button on the student dashboard |
@@ -761,11 +761,37 @@ marked 🔒.
 4. **EULA (ruling 13).** Recommendation: none. WeVolunteer is a website, and the
    Terms already do an EULA's job.
 
-**Combined *security-review* before release-ready:** `0e74e2a`, `5784b79`
-(session middleware), `a1ec7c9` (roster paging on a privacy-gated route),
-`3373f79` (the public verify endpoint gains a field), `11cd2c5` (uploads and
-a staff-only image route), `152aab1` (signup and rename), `125d645` (organizer
-revocation), `d41eecd` (report from an appeal), `4684d90` (outbound checks).
+**Combined *security-review* — passed 2026-10-04, no findings.** Run over the
+whole diff ahead of `origin/main` at `d4cd8fb`, with these nine commits read
+first: `0e74e2a`, `5784b79` (session middleware), `a1ec7c9` (roster paging on a
+privacy-gated route), `3373f79` (the public verify endpoint gains a field),
+`11cd2c5` (uploads and a staff-only image route), `152aab1` (signup and
+rename), `125d645` (organizer revocation), `d41eecd` (report from an appeal),
+`4684d90` (outbound checks). Nothing reached the reporting bar (medium or high,
+confidence 0.8 or more). What each rests on, so a later change knows what not
+to break:
+
+- *Roster paging:* `membersFrom` is an integer clamped to 0–999,999 and bound
+  as `OFFSET ?`; `mayReadRoster` still decides whether any row is returned.
+- *Appeal report:* `organization.manage.own` plus `loadManagedOrganization`;
+  the appeal lookup is scoped to `subject_ref` = this club, the reported user
+  is resolved on the server, and `createReport` refuses self-reports.
+- *Screenshots:* anybody but the reporter gets the same 404 as a missing
+  report; fifteen minutes, three images (the primary key enforces it too),
+  re-encoded to WebP; reading needs `report.resolve` and is `no-store`.
+- *Reserved handles:* checked at both signups, `check-username` and
+  `change-username`, against the stored email, never the request's.
+- *Revocation:* all three routes need `organizer.approve`; Deny skips revoked
+  accounts and refuses any with events; event creation still reads `verified`.
+- *Verify endpoint:* gains one boolean from the event's `credits_hours`.
+- *Owner Center checks:* two fixed discovery URLs, no credentials sent, results
+  reduced to a status word for `owner.console` holders.
+- *Session:* only the status of a failed verify changed (403 → 401); the
+  preauth and `token_version` checks are untouched.
+
+The commits another session landed afterwards (`d3f9cb6`…`516bba3`, privacy
+defaults and Welly) are outside this review; Phase 6 reviews the whole
+engagement's diff again.
 
 Full suite at `ac5ee35`: 11,227 passed, 0 failed.
 
