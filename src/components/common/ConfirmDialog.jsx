@@ -40,6 +40,9 @@ export default function ConfirmDialog({
   busyLabel = 'Working…',
   onConfirm,
   onCancel,
+  /** Holds the confirm button until the dialog's own fields are filled — a
+   *  required reason, for one (P2-12). */
+  confirmDisabled = false,
   /**
    * Extra class for the OVERLAY, passed straight through to `Modal`.
    *
@@ -79,6 +82,7 @@ export default function ConfirmDialog({
             onClick={onConfirm}
             busy={busy}
             busyLabel={busyLabel}
+            disabled={confirmDisabled}
           >
             {confirmLabel}
           </BusyButton>

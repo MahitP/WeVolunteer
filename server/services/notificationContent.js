@@ -264,6 +264,7 @@ export const EVENT_CATEGORIES = {
 
   // ACCOUNT
   ORGANIZER_APPROVED: 'ACCOUNT',
+  ORGANIZER_APPROVAL_REVOKED: 'ACCOUNT',
   PASSWORD_CHANGED: 'ACCOUNT',
   PASSWORD_RESET: 'ACCOUNT',
   EMAIL_VERIFIED: 'ACCOUNT',
@@ -531,6 +532,16 @@ export function getInAppContent(event, payload) {
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
         title: 'Account Approved!',
         body: 'Your organizer account has been verified. You can now post events.',
+        link: '/profile'
+      };
+    /* P2-12. Says what changed and what did not: their events and the hours
+       volunteers earned at them are untouched. */
+    case 'ORGANIZER_APPROVAL_REVOKED':
+      return {
+        kind,
+        priority: NOTIFICATION_PRIORITY.IMPORTANT,
+        title: 'Organizer approval removed',
+        body: 'An administrator has removed your approval to post new events. Your past events and the hours volunteers earned at them are unchanged.',
         link: '/profile'
       };
     /**

@@ -108,6 +108,9 @@ export const CLIENT_ROUTE_PATTERNS = Object.freeze([
   /* Reported problems. A literal path; the reports are chosen on the page,
      so a report from here names the screen and nobody in it. */
   '/admin/issues',
+  /* Approved organizers (P2-12). A literal path; the organizer is chosen on
+     the page. */
+  '/admin/organizers',
   '/admin/audit-logs',
   '/admin/roster',
   /* Badge administration. A literal path with no parameter, and the person

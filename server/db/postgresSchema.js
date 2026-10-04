@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS "users" (
           deleted_at TEXT,
           email_verified INTEGER DEFAULT 0,
           username_changed_at TEXT
-        , suspended_at TEXT, suspension_reason TEXT, suspended_by TEXT, date_of_birth TEXT, graduation_year INTEGER, suspended_until TEXT, suspension_lifted_at TEXT, last_sign_in_at TEXT, promoted_at TEXT, promoted_by TEXT, promotion_reason TEXT, profile_picture_url TEXT, profile_picture_uploaded_at TEXT, tfa_enabled INTEGER DEFAULT 0, tfa_secret TEXT, two_factor_enabled_at TEXT, tfa_email_enabled INTEGER DEFAULT 0, tfa_last_counter INTEGER, preview_persona TEXT, preview_expires_at TEXT, location TEXT, hobbies TEXT, friend_activity_visible INTEGER NOT NULL DEFAULT 1, profile_headline TEXT, profile_highlights TEXT, avatar_color TEXT, hours_visibility TEXT NOT NULL DEFAULT 'public', certificates_visibility TEXT NOT NULL DEFAULT 'public', analytics_consent INTEGER);
+        , suspended_at TEXT, suspension_reason TEXT, suspended_by TEXT, date_of_birth TEXT, graduation_year INTEGER, suspended_until TEXT, suspension_lifted_at TEXT, last_sign_in_at TEXT, promoted_at TEXT, promoted_by TEXT, promotion_reason TEXT, profile_picture_url TEXT, profile_picture_uploaded_at TEXT, tfa_enabled INTEGER DEFAULT 0, tfa_secret TEXT, two_factor_enabled_at TEXT, tfa_email_enabled INTEGER DEFAULT 0, tfa_last_counter INTEGER, preview_persona TEXT, preview_expires_at TEXT, location TEXT, hobbies TEXT, friend_activity_visible INTEGER NOT NULL DEFAULT 1, profile_headline TEXT, profile_highlights TEXT, avatar_color TEXT, hours_visibility TEXT NOT NULL DEFAULT 'public', certificates_visibility TEXT NOT NULL DEFAULT 'public', analytics_consent INTEGER, approval_revoked_at TEXT);
 
 CREATE TABLE IF NOT EXISTS admin_audit_logs (
       id TEXT PRIMARY KEY,
@@ -1555,7 +1555,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 72;
+export const LATEST_MIGRATION_VERSION = 73;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

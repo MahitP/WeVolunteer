@@ -37,7 +37,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge, LifeBuoy
+  Flag, Scale, UserCheck, UserCog, Activity, Bug, TrendingUp, Sprout, Eye, FileSignature, Award, Gauge, LifeBuoy, UserMinus
 } from 'lucide-react';
 import { can } from '../authz';
 import { api } from '../utils/api';
@@ -95,6 +95,14 @@ export const AREAS = [
     icon: UserCheck,
     title: 'Organizer requests',
     blurb: 'People asking to post events. Approving one lets them see the contact details of the students who apply.',
+  },
+  {
+    id: 'approvedOrganizers',
+    to: '/admin/organizers',
+    cap: 'organizer.approve',
+    icon: UserMinus,
+    title: 'Approved organizers',
+    blurb: 'Who may post events, and taking that back. Their events and every volunteer\'s hours stay.',
   },
   {
     id: 'roster',

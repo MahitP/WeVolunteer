@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 /**
  * Every icon rendered below must be imported here.
  *
@@ -461,9 +461,15 @@ export default function AdminDashboard({ addToast, user }) {
       <section id="organizer-requests">
         <div className="section-head">
           <h2>Organizer requests</h2>
-          {pendingOrganizers.length > 0 && (
-            <span className="section-action tag tag-warn">{pendingOrganizers.length} waiting</span>
-          )}
+          <div className="section-actions">
+            {pendingOrganizers.length > 0 && (
+              <span className="section-action tag tag-warn">{pendingOrganizers.length} waiting</span>
+            )}
+            {/* Taking approval back (P2-12) lives on its own page. */}
+            <Link to="/admin/organizers" className="btn btn-ghost btn-sm section-action">
+              Approved organizers
+            </Link>
+          </div>
         </div>
 
         {pendingOrganizers.length === 0 ? (

@@ -30,6 +30,7 @@ import { recordAudit } from '../auditLog.js';
 import { deleteUploadedFile } from './profilePictureRoutes.js';
 import { deliveryHealth } from '../resendWebhook.js';
 import { insertionTiebreak, caseInsensitiveLike } from '../db/dialectSql.js';
+import { hasEventsOnRecord, approvedOrganizer, organizersWithApproval } from '../organizerApproval.js';
 import {
   REPORT_PRIORITIES, REPORT_RESOLUTIONS, REPORT_STATUSES, REPORT_TARGET_TYPES,
   LIVE_REPORT_STATUSES, CATEGORY_VALUES, isValidCategory, normalizeTargetType,
@@ -39,7 +40,11 @@ const router = express.Router();
 
 router.get('/api/admin/organizers/pending', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
   try {
-    const rows = await db.prepare("SELECT * FROM users WHERE role = 'organizer' AND verified = 0").all();
+    /* Not a revoked organizer (P2-12): those are a different state, listed on
+       their own, and the "Deny" this queue offers would delete one. */
+    const rows = await db.prepare(
+      "SELECT * FROM users WHERE role = 'organizer' AND verified = 0 AND approval_revoked_at IS NULL"
+    ).all();
     const formatted = await Promise.all(rows.map(r => formatUserResponse(r)));
     res.json(formatted);
   } catch (error) {
@@ -75,7 +80,7 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
      * "there is no pending request here" is the true answer to both.
      */
     const target = await db.prepare(
-      "SELECT id FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
+      "SELECT id, approval_revoked_at FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
     ).get(orgId);
 
     if (!target) {
@@ -84,14 +89,16 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
       });
     }
 
+    /* Approving a revoked organizer restores them (P2-12), and says so. */
+    const restoring = Boolean(target.approval_revoked_at);
     await runInTransaction(db, async (tx) => {
-      await tx.prepare('UPDATE users SET verified = 1 WHERE id = ?').run(target.id);
+      await tx.prepare('UPDATE users SET verified = 1, approval_revoked_at = NULL WHERE id = ?').run(target.id);
 
       await recordAudit(tx, {
         adminId: req.user.id,
         action: 'APPROVE_ORGANIZER',
         targetUserId: target.id,
-        details: 'Approved pending organizer account'
+        details: restoring ? 'Restored a revoked organizer approval' : 'Approved pending organizer account'
       });
     });
 
@@ -102,6 +109,60 @@ router.post('/api/admin/organizers/:id/approve', authenticateToken, requireCap('
   } catch (error) {
     console.error('Verify organizer error:', error);
     res.status(500).json({ error: 'Internal server error verifying account' });
+  }
+});
+
+/**
+ * Organizers who hold, or held, approval — so an administrator can take it back
+ * or give it again (P2-12).
+ */
+router.get('/api/admin/organizers/approved', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
+  try {
+    res.json({ organizers: await organizersWithApproval(db) });
+  } catch (error) {
+    console.error('Approved organizers error:', error);
+    res.status(500).json({ error: 'Could not load organizers.' });
+  }
+});
+
+/**
+ * Take an organizer's approval back (P2-12).
+ *
+ * The owner asked for a way to "make an approved organizer unapproved", with
+ * records kept and only administrators able to do it. The organizer loses the
+ * ability to post new events — that is what approval granted. Their events
+ * stay, every volunteer's attendance and hours at them stay, and they can still
+ * record attendance for events already run, so no student's hours are stranded
+ * by a decision about somebody else. A reason is required and goes in the
+ * audit trail; approving again restores them.
+ */
+router.post('/api/admin/organizers/:id/revoke', authenticateToken, requireCap('organizer.approve'), async (req, res) => {
+  const reason = String(req.body?.reason ?? '').trim();
+  if (reason.length < 10 || reason.length > 500) {
+    return res.status(400).json({ error: 'Say why, in 10 to 500 characters. It is kept in the audit trail.', field: 'reason' });
+  }
+  try {
+    const target = await approvedOrganizer(db, req.params.id);
+    if (!target) return res.status(404).json({ error: 'No approved organizer matches that id.' });
+
+    await runInTransaction(db, async (tx) => {
+      await tx.prepare('UPDATE users SET verified = 0, approval_revoked_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), target.id);
+      await recordAudit(tx, {
+        adminId: req.user.id,
+        action: 'REVOKE_ORGANIZER_APPROVAL',
+        targetUserId: target.id,
+        details: reason,
+      });
+    });
+
+    /* After the commit, like approval: a notice for a change that rolled back
+       would be untrue. */
+    await notificationService.dispatch('ORGANIZER_APPROVAL_REVOKED', {}, target.id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Revoke organizer error:', error);
+    res.status(500).json({ error: 'Could not revoke that approval.' });
   }
 });
 
@@ -119,12 +180,26 @@ router.post('/api/admin/organizers/:id/deny', authenticateToken, requireCap('org
     // deleted, and the file it names lives on disk outside the database. Once
     // the row is gone there is no pointer left to ever find that file again.
     const target = await db.prepare(
-      "SELECT id, profile_picture_url FROM users WHERE id = ? AND role = 'organizer' AND verified = 0"
+      "SELECT id, profile_picture_url FROM users WHERE id = ? AND role = 'organizer' AND verified = 0 AND approval_revoked_at IS NULL"
     ).get(orgId);
 
     if (!target) {
       return res.status(404).json({
         error: 'No pending organizer request matches that id. Approved organizers cannot be deleted here.'
+      });
+    }
+
+    /**
+     * The assumption above, checked rather than trusted (P2-12).
+     *
+     * "A pending organizer has no events and no volunteers attached" is what
+     * makes this hard delete safe — and it was only ever true by construction.
+     * A row with events, however it came to be unapproved, would take every
+     * student's attendance at those events with it. Refused instead.
+     */
+    if (await hasEventsOnRecord(db, target.id)) {
+      return res.status(409).json({
+        error: 'This organizer has events on record, so the account cannot be deleted. Revoke approval instead.',
       });
     }
 

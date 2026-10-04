@@ -81,6 +81,7 @@ import resyncCookieNoticeMapSection from './069_resync_cookie_notice_map_section
 import resyncCookieNoticeConsentPrompt from './070_resync_cookie_notice_consent_prompt.js';
 import resyncCookieNoticeCloudflare from './071_resync_cookie_notice_cloudflare.js';
 import issueReportScreenshots from './072_issue_report_screenshots.js';
+import organizerApprovalRevoked from './073_organizer_approval_revoked.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -500,6 +501,7 @@ export const MIGRATIONS = [
   resyncCookieNoticeConsentPrompt,
   resyncCookieNoticeCloudflare,
   issueReportScreenshots,
+  organizerApprovalRevoked,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

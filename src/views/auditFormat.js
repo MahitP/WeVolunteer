@@ -127,6 +127,8 @@ const ACTIONS = {
 
   APPROVE_ORGANIZER:        ['Organizer approved', TONES.ROUTINE],
   DENY_ORGANIZER:           ['Organizer declined', TONES.ROUTINE],
+  /* NOTABLE: it takes standing away from a working organizer (P2-12). */
+  REVOKE_ORGANIZER_APPROVAL: ['Organizer approval revoked', TONES.NOTABLE],
   ACCEPT_ORGANIZER_AGREEMENT: ['Organizer agreement accepted', TONES.ROUTINE],
   ACCEPT_ADMIN_RESPONSIBILITIES: ['Admin Responsibilities Policy accepted', TONES.ROUTINE],
   ACCEPT_STUDENT_ORGANIZER_AGREEMENT: ['Student organizer agreement accepted', TONES.ROUTINE],

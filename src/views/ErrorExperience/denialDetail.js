@@ -63,6 +63,7 @@ export const FEATURE_NAMES = Object.freeze({
   'organization.manage.own': 'managing an organization',
   'error.read': 'the error dashboard',
   'appeal.review': 'the appeals queue',
+  'organizer.approve': 'approving organizers',
   /* "the Admin area", matching the rail entry, the page title and the page's own
      heading. A refusal that names a destination by a name the product no longer
      shows anywhere sends the reader looking for something they cannot find. */
