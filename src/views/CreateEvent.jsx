@@ -806,7 +806,7 @@ export default function CreateEvent({
           {slots.length === 0 ? <div className="empty">
               <span className="empty-icon"><Calendar size={18} /></span>
               <h3>Nothing to preview yet</h3>
-              <p>Add dates and shifts above and your sign-up sheet builds itself here.</p>
+              <p>Add dates and shifts above and your event builds itself here, as volunteers will see it.</p>
             </div> : <div className="card-body">
               <div className="sheet">
                 {Object.entries(byDate).sort(([a], [b]) => a.localeCompare(b)).map(([date, daySlots]) => <div key={date} className="sheet-daygroup">
@@ -839,7 +839,7 @@ export default function CreateEvent({
             Cancel
           </button>
           <button type="submit" className="btn btn-primary btn-lg" disabled={submitting}>
-            {submitting ? 'Publishing…' : 'Publish sign-up sheet'}
+            {submitting ? 'Publishing…' : 'Publish event'}
           </button>
         </div>
       </div>

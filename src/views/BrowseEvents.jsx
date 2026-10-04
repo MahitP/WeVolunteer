@@ -1148,7 +1148,7 @@ export default function BrowseEvents({
             reappear — so the placeholder is for the first load only, and the
             count line below says the list is updating. */}
         {loading && results.length === 0 ? <p className="small dim" role="status" aria-live="polite">Loading opportunities…</p>
-          : filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts a sign-up sheet, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
+          : filtered.length === 0 ? <EmptyState icon={CalendarX2} title={hasFilters ? 'No events match those filters' : 'No opportunities posted yet'} message={hasFilters ? 'Try a broader search, or clear the filters to see everything that\'s been posted.' : 'When an organizer posts one, it will appear here.'} action={hasFilters && <button className="btn btn-secondary btn-sm" onClick={clearFilters}>Clear filters</button>} /> : <>
             <p className="small dim s-450599" role="status" aria-live="polite">
               {loading ? 'Updating results…' : `Showing ${filtered.length} of ${total} event${total !== 1 ? 's' : ''}`}
             </p>

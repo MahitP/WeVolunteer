@@ -112,7 +112,7 @@ export default function OrganizationMasthead({
             {events > 0 && (
               <>
                 <span className="org-charter-sep" aria-hidden="true">·</span>
-                <span>{events} {events === 1 ? 'opportunity' : 'opportunities'}</span>
+                <span>{events} {events === 1 ? 'event' : 'events'}</span>
               </>
             )}
           </p>

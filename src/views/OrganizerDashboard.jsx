@@ -601,7 +601,7 @@ export default function OrganizerDashboard({
 
         <div key={tab} id="org-events-panel" className="tabpanel" role="tabpanel" aria-labelledby={`org-tab-${tab}`} tabIndex={0}>
 
-        {filtered.length === 0 ? <EmptyState icon={Calendar} title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'} message={query ? 'Try a different name or location.' : tab === 'completed' ? 'Events move here once you take attendance.' : 'Create a sign-up sheet and volunteers can start claiming shifts.'} action={!query && tab === 'active' && <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
+        {filtered.length === 0 ? <EmptyState icon={Calendar} title={query ? 'No events match that search' : tab === 'completed' ? 'No completed events yet' : 'No active events'} message={query ? 'Try a different name or location.' : tab === 'completed' ? 'Events move here once you take attendance.' : 'Create an event and volunteers can start claiming shifts.'} action={!query && tab === 'active' && <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('create')}>
                   <CalendarPlus size={14} /> Create your first event
                 </button>} /> : <div className="tablewrap">
             <div className="tablescroll">
@@ -711,7 +711,7 @@ export default function OrganizerDashboard({
 
       {/* ── Quick edit ── */}
       {editingEvent && <Modal onClose={() => setEditingEvent(null)} label="Edit event">
-          <ModalHead title="Edit event" description="Shifts and times are edited on the event's sign-up sheet." onClose={() => setEditingEvent(null)} />
+          <ModalHead title="Edit event" description="Shifts and times are edited on the event's Shifts tab." onClose={() => setEditingEvent(null)} />
 
             <form id="quick-edit" className="modal-body" onSubmit={saveEdit}>
               <div className="field">

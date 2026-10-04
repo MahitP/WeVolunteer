@@ -818,7 +818,7 @@ export const PAGE_META = {
     /* Reached from the search on Discover, and titled for what is on the
        page rather than for where the reader came from. */
     directory: { title: 'Member profile', sub: 'Someone you volunteer alongside' },
-    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
+    organizations: { title: 'Organization', sub: 'A club or group posting events' }
   },
   host: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
@@ -829,7 +829,7 @@ export const PAGE_META = {
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
-    create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
+    create: { title: 'New event', sub: 'Post shifts for volunteers to apply to' },
     volunteers: { title: 'Your volunteers', sub: 'Everyone who has volunteered at your events' },
     dashboard: { title: 'Dashboard', sub: 'Track your volunteers, hours, and pending reviews' },
     browse: { title: 'Discover', sub: 'Events on the network, and the members and clubs behind them' },
@@ -842,7 +842,7 @@ export const PAGE_META = {
     notifications: { title: 'Notifications', sub: 'Application updates and community alerts' },
     profile: { title: 'Profile', sub: 'Your public track record and organizer status' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
-    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
+    organizations: { title: 'Organization', sub: 'A club or group posting events' }
   },
   staff: {
     appealForm: { title: 'Make an appeal', sub: 'Ask somebody who was not involved to look at a decision again' },
@@ -854,7 +854,7 @@ export const PAGE_META = {
     organizerAgreement: { title: 'Organizer Agreement', sub: 'The terms for running events with students' },
     studentOrganizerAgreement: { title: 'Student Organizer Agreement', sub: 'What you take on when you help run an organization' },
     checkin: { title: 'Check-in', sub: 'Mark volunteers as they arrive' },
-    create: { title: 'New opportunity', sub: 'Post a shift for volunteers to apply to' },
+    create: { title: 'New event', sub: 'Post shifts for volunteers to apply to' },
     volunteers: { title: 'Your volunteers', sub: 'Everyone who has volunteered at your events' },
     calendar: { title: 'Calendar', sub: 'Events across the district and when they close' },
     messages: { title: 'Messages', sub: 'Conversations with students and organizers' },
@@ -873,7 +873,7 @@ export const PAGE_META = {
        two faults the volunteer entry above was already corrected for. The
        organizer's page was "Recruit" until the owner ruled (2026-09-30) that
        it is "Discover" for every persona, like the rail item that opens it. */
-    browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
+    browse: { title: 'Discover', sub: 'Every opportunity, member, and club on WeVolunteer' },
     notifications: { title: 'Notifications', sub: 'Platform activity' },
     errors: { title: 'Errors', sub: 'Crashes and faults reported by browsers, the server, and background jobs' },
     appeals: { title: 'Appeals', sub: 'Review and decide user suspension appeals' },
@@ -890,7 +890,7 @@ export const PAGE_META = {
     impact: { title: 'Community Impact', sub: 'What the program has done, counted from confirmed attendance' },
     adminImpact: { title: 'Platform Impact', sub: 'Programme-wide figures for the whole platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
-    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' },
+    organizations: { title: 'Organization', sub: 'A club or group posting events' },
     profile: { title: 'Profile', sub: 'Your account on this platform' },
     /* An owner holds '*', so both hour pages are reachable from this persona. */
     loggedHours: { title: 'Logged hours', sub: 'Confirmed service and self-reported entries' },
@@ -925,7 +925,7 @@ export const PAGE_META = {
        two faults the volunteer entry above was already corrected for. The
        organizer's page was "Recruit" until the owner ruled (2026-09-30) that
        it is "Discover" for every persona, like the rail item that opens it. */
-    browse: { title: 'Discover', sub: 'Every opportunity, member, and club across the district' },
+    browse: { title: 'Discover', sub: 'Every opportunity, member, and club on WeVolunteer' },
     /**
      * `profile` was missing, and partner is the role the distinguished profile
      * was BUILT for — so the one page it exists to serve fell through to the
@@ -959,14 +959,14 @@ export const PAGE_META = {
      * deadlines for events they favourited — promising anything more would be
      * the fallback wearing a title.
      */
-    calendar: { title: 'Calendar', sub: 'Application deadlines for opportunities you have favorited' },
+    calendar: { title: 'Calendar', sub: 'Application deadlines for events you have favorited' },
     /* Reachable by everybody signed in, and described for volunteers and staff
        only — so an organizer and a partner reporting something broken read the
        bare product name. Same copy as the other two blocks. */
     reportIssue: { title: 'Report an Issue', sub: 'Tell us what is broken, confusing, or unsafe' },
     profile: { title: 'Profile', sub: 'How your organization appears on this platform' },
     directory: { title: 'Member profile', sub: 'Someone who volunteers on this platform' },
-    organizations: { title: 'Organization', sub: 'A club or group posting opportunities' }
+    organizations: { title: 'Organization', sub: 'A club or group posting events' }
   }
 };
 

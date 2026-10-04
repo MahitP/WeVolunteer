@@ -55,14 +55,14 @@ describe('posting an opportunity from the club page', () => {
 
   it('gives somebody who may post the button the empty card promises, for this club', async () => {
     draw(payload({ canPost: true }));
-    const card = await screen.findByRole('region', { name: /^Opportunities$/ });
-    expect(within(card).getByRole('link', { name: /Post an opportunity/i }))
+    const card = await screen.findByRole('region', { name: /^Events$/ });
+    expect(within(card).getByRole('link', { name: /Post an event/i }))
       .toHaveAttribute('href', '/events/new?organization=org-1');
   });
 
   it('offers nothing to a member who may not post', async () => {
     draw(payload({ canPost: false }));
-    const card = await screen.findByRole('region', { name: /^Opportunities$/ });
-    expect(within(card).queryByRole('link', { name: /Post an opportunity/i })).toBeNull();
+    const card = await screen.findByRole('region', { name: /^Events$/ });
+    expect(within(card).queryByRole('link', { name: /Post an event/i })).toBeNull();
   });
 });

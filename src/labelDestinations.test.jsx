@@ -26,11 +26,12 @@ import path from 'node:path';
  * and what they want is to find a club, not a list of the ones they are already
  * in.
  *
- * The REST of the terminology finding is not decidable this way — four labels
+ * The REST of the terminology finding was not decidable this way — four labels
  * for `/events/new` against a page titled "New opportunity", application vs
  * sign-up split along the role line, five names for the service-hours record —
- * because each needs somebody to pick which word wins. Those stay recorded as
- * an owner decision and are deliberately not asserted here.
+ * because each needed somebody to pick which word wins. The first is now
+ * decided (owner ruling 23, 2026-10-04) and asserted at the bottom of this
+ * file; the other two stay an owner decision.
  *
  * ── A source check, deliberately ──
  *
@@ -81,5 +82,46 @@ describe('"Browse organizations"', () => {
       .filter(l => /^organizations$/i.test(l.label));
     expect(yours.length).toBeGreaterThan(0);
     for (const l of yours) expect(l.to).toBe('/organizations');
+  });
+});
+
+/**
+ * What an organizer posts is an "event" (owner ruling 23, 2026-10-04).
+ *
+ * It had four names on two adjacent screens: "New event", "Create your first
+ * event", a page titled "New opportunity" and a button "Publish sign-up
+ * sheet". "Opportunity" stays where a student browses Discover; every
+ * organizer tool says "event", and "sign-up sheet" is retired as a label.
+ */
+describe('the name of what an organizer posts', () => {
+  const ORGANIZER_FILES = [
+    'src/views/CreateEvent.jsx',
+    'src/views/OrganizerDashboard.jsx',
+    'src/views/OrganizationPage.jsx',
+    'src/components/organizations/OrganizationMasthead.jsx',
+  ];
+
+  it('is "event" on every link to the event form', () => {
+    /* `to="/events/new…"` or the club page's `to={postHref}`, which is
+       `/events/new?organization=<id>`. */
+    const toForm = ORGANIZER_FILES.flatMap((f) => {
+      const flat = read(f).replace(/\s+/g, ' ');
+      return [...flat.matchAll(/<Link[^>]*to=(?:"\/events\/new[^"]*"|\{postHref\})[^>]*>(.*?)<\/Link>/g)]
+        .map(m => ({ label: m[1].replace(/<[^>]*>/g, '').trim() }));
+    });
+    expect(toForm.length).toBeGreaterThan(0);
+    for (const { label } of toForm) expect(label).toMatch(/event/i);
+  });
+
+  it('titles the form "New event" and publishes an event', () => {
+    expect(read('src/App.jsx')).not.toMatch(/title: 'New opportunity'/);
+    expect(read('src/views/CreateEvent.jsx')).toMatch(/'Publish event'/);
+  });
+
+  it('no longer calls it a sign-up sheet in any organizer tool', () => {
+    for (const file of ORGANIZER_FILES) {
+      const code = read(file).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+      expect(code, file).not.toMatch(/sign-?up sheet/i);
+    }
   });
 });

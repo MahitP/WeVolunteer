@@ -72,7 +72,7 @@ export default function PublicOrganizationView({ organization, action, note, hea
             <EmptyState
               icon={CalendarDays}
               title="Nothing scheduled yet"
-              message={`${organization.name} has not posted an opportunity yet. `
+              message={`${organization.name} has not posted an event yet. `
                 + 'Join and you will be told when it does.'}
             />
           )}

@@ -488,20 +488,20 @@ describe('the masthead', () => {
     await show({ organization: { memberCount: 42, eventCount: 11 } });
     expect(screen.getByText('Since 2024')).toBeInTheDocument();
     expect(screen.getByText('42 members')).toBeInTheDocument();
-    expect(screen.getByText('11 opportunities')).toBeInTheDocument();
+    expect(screen.getByText('11 events')).toBeInTheDocument();
   });
 
-  it('says "member" and "opportunity" in the singular', async () => {
+  it('says "member" and "event" in the singular', async () => {
     await show({ organization: { memberCount: 1, eventCount: 1 } });
     expect(screen.getByText('1 member')).toBeInTheDocument();
-    expect(screen.getByText('1 opportunity')).toBeInTheDocument();
+    expect(screen.getByText('1 event')).toBeInTheDocument();
   });
 
-  it('leaves the count out of the charter line when there are no opportunities', async () => {
+  it('leaves the count out of the charter line when there are no events', async () => {
     await show({ organization: { eventCount: 0 } });
     /* "Opportunities" is also a section heading, so this asserts the absence of
        the charter line's counted form rather than of the word. */
-    expect(screen.queryByText(/^\d+ opportunit/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\d+ events?$/)).not.toBeInTheDocument();
   });
 
   /**

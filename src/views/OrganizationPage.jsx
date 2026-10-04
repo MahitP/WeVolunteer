@@ -766,12 +766,12 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
         <div className="org-column-main stack-lg">
           <section className="card" aria-labelledby="org-opportunities-heading">
             <div className="card-head">
-              <h2 id="org-opportunities-heading">Opportunities</h2>
+              <h2 id="org-opportunities-heading">Events</h2>
               {/* The way in for whoever may post, with this club chosen on the
                   form. The card told them to post and offered nothing (final
                   audit, Phase 5); the server re-checks the right to post. */}
               {viewer.canPost && (upcoming.length > 0 || past.length > 0) && (
-                <Link className="btn btn-secondary btn-sm" to={postHref}>Post an opportunity</Link>
+                <Link className="btn btn-secondary btn-sm" to={postHref}>Post an event</Link>
               )}
             </div>
             <div className="card-body">
@@ -781,11 +781,11 @@ export default function OrganizationPage({ addToast, currentUser, view }) {
                   title="No events yet"
                   message={
                     viewer.canPost
-                      ? 'Post an opportunity and it will appear here for everybody who can see this organization.'
-                      : 'When this organization posts an opportunity, it will appear here.'
+                      ? 'Post an event and it will appear here for everybody who can see this organization.'
+                      : 'When this organization posts an event, it will appear here.'
                   }
                   action={viewer.canPost
-                    ? <Link className="btn btn-primary btn-sm" to={postHref}>Post an opportunity</Link>
+                    ? <Link className="btn btn-primary btn-sm" to={postHref}>Post an event</Link>
                     : null}
                 />
               ) : (

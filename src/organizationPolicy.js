@@ -109,7 +109,7 @@ export const VISIBILITY_COPY = Object.freeze({
      * been told something untrue about what they published.
      */
     note: 'It shows your name, description, logo, tags, how many members you have, how many '
-      + 'opportunities you have run, and what is coming up — never who is in it, and never '
+      + 'events you have run, and what is coming up — never who is in it, and never '
       + 'where an event is.',
   },
   unlisted: {
@@ -159,7 +159,7 @@ export function joinPolicySentence(affordance, { policy, organizationName } = {}
     case 'invite_required':
       return `${club} admits members by invitation. Ask somebody in it for the link.`;
     case 'member':
-      return 'You are told when this organization posts a new opportunity.';
+      return 'You are told when this organization posts a new event.';
     case 'unavailable':
       return 'This organization is not taking new members.';
     default:
