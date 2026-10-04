@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { recordCliAudit, assertSystemActor, CLI_EVENTS } from './cliAudit.mjs';
 import { openPrivilegedDb } from './resolveDb.mjs';
 import { mayHoldOwnership, platformOwnerEmails } from '../server/ownerAllowlist.js';
+import { DEFAULT_SERVICE_VISIBILITY } from '../server/serviceVisibility.js';
 
 /**
  * Creates the platform's owner accounts, directly in the database.
@@ -186,13 +187,18 @@ async function main() {
           INSERT INTO users (
             id, name, email, username, password_hash, grade, role, verified,
             avatar, bio, school, skills, email_verified, account_status,
-            leaderboard_opt_in, email_opt_out, profile_visibility, created_at, token_version
-          ) VALUES (?, ?, ?, ?, ?, ?, 'super_admin', 1, ?, ?, ?, ?, 1, 'active', 0, 0, 'private', ?, 0)
+            leaderboard_opt_in, email_opt_out, profile_visibility, created_at, token_version,
+            hours_visibility, certificates_visibility
+          ) VALUES (?, ?, ?, ?, ?, ?, 'super_admin', 1, ?, ?, ?, ?, 1, 'active', 0, 0, 'private', ?, 0, ?, ?)
         `).run(
           userId, 'Platform Owner', email, await usernameFor(db, email),
           unknowablePasswordHash(), 'N/A',
           '👑', 'Platform owner.', 'WeVolunteer', JSON.stringify([]),
-          now
+          now,
+          /* Private like every other new account. The founder's exemption is
+             migration 074's, for the record he already had; an account created
+             here has none yet, and its owner can show it in Settings. */
+          DEFAULT_SERVICE_VISIBILITY, DEFAULT_SERVICE_VISIBILITY
         );
       }
 

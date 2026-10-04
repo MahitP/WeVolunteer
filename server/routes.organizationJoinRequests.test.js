@@ -239,7 +239,7 @@ describe('requests to join an organization', () => {
       await ask(student);
       const [row] = (await queue()).body.requests;
       expect(Object.keys(row).sort()).toEqual([
-        'avatar', 'avatarColor', 'distinction', 'id', 'kind', 'location',
+        'avatar', 'avatarColor', 'distinction', 'id', 'kind',
         'message', 'name', 'profilePictureUrl', 'requestId', 'role', 'submittedAt', 'username',
       ]);
       /* Everything a profile withholds stays withheld. `message` is the one

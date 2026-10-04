@@ -127,7 +127,10 @@ describe('volunteer insights endpoint', () => {
       role: 'student',
     });
 
-    await db.prepare('UPDATE users SET leaderboard_opt_in = 1 WHERE email = ?').run('ranked.then.gone@example.com');
+    /* Hours shown as well: the board drops a private service record, and every
+       record starts private since 2026-10-04. */
+    await db.prepare("UPDATE users SET leaderboard_opt_in = 1, hours_visibility = 'public' WHERE email = ?")
+      .run('ranked.then.gone@example.com');
 
     const before = (await srv.call('GET', '/api/leaderboard', undefined, student)).body;
     expect(before.some(r => r.name === 'Ranked Then Gone')).toBe(true);

@@ -391,10 +391,14 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
           id: r.user_id,
           name: r.name,
           avatar: r.avatar,
-          /* Bio, school and grade follow the applicant's profile setting for a
-             reader who is not an adult organizer — OMITTED, as the profile
-             omits them, rather than nulled into "not on file". */
-          ...(shown.particulars ? { school: r.school, grade: r.grade, bio: r.bio } : {}),
+          /* Bio, school, grade and skills follow the applicant's profile
+             setting for a reader who is not an adult organizer — OMITTED, as the
+             profile omits them, rather than nulled into "not on file". Skills
+             joined on 2026-10-04, when they left the directory baseline. */
+          ...(shown.particulars ? {
+            school: r.school, grade: r.grade, bio: r.bio,
+            skills: r.skills ? JSON.parse(r.skills) : [],
+          } : {}),
           /* The service record follows `hours_visibility` the same way. Omitted
              rather than zeroed: a zero is a claim, and here a false one. */
           ...(shown.hours === 'visible' ? {
@@ -430,7 +434,6 @@ router.get('/api/applications', authenticateToken, async (req, res) => {
              profile's `serviceVisibility`, which the client already reads. */
           serviceVisibility: { hours: shown.hours },
           badges: badgesByUser.get(r.user_id) ?? [],
-          skills: r.skills ? JSON.parse(r.skills) : []
         },
         attendance,
         hasConflict: conflictsByAppId.has(r.id)

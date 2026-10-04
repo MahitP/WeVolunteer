@@ -46,8 +46,9 @@
  * ── What it does NOT change ──
  *
  * Which applications a reader may list at all is the route's question, asked in
- * SQL before this runs. Name, avatar, skills and badges are the directory's
- * public baseline and stay on every row. The attendance a reader records on
+ * SQL before this runs. Name, avatar and badges are the directory's public
+ * baseline and stay on every row. (Skills were too, until they moved behind the
+ * profile setting on 2026-10-04; the route now emits them with `particulars`.) The attendance a reader records on
  * their own event is theirs to see whatever the volunteer's setting: that is
  * the event being run, not the volunteer's record. And Auto Select is
  * untouched — it weighs hours on the server, from the ledger, not from what a

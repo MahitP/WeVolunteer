@@ -29,17 +29,28 @@
  * their school and grade to everybody. Now the profile is always discoverable
  * and the SENSITIVE fields are what privacy withholds:
  *
- *   Always visible   name, username, avatar, role, location, hobbies, skills,
- *                    joined, last volunteered, participation counts, credited
- *                    hours, organizations
- *   Public only      bio, school, grade, graduation year
+ *   Always visible   name, username, avatar, role, joined, organizations
+ *   Public only      bio, school, grade, graduation year, location, hobbies,
+ *                    skills
+ *   Service setting  last volunteered, participation counts, credited hours,
+ *                    per-club hours — `hours_visibility`, private by default
  *   Never here       email, date of birth, phone, address, coordinates,
  *                    password hash, TFA secret, suspension state, token
  *                    version, the detailed service history
  *
- * The always-visible set is the smallest thing that makes a volunteer profile
- * worth opening, and every field in it is either chosen by the student
- * (hobbies, skills, a general location) or a count.
+ * The always-visible set is the smallest thing that lets members find each
+ * other: a name to search for, a picture to recognise, and the clubs whose
+ * rosters already list the same fact.
+ *
+ * ── Why location, hobbies and skills left it (2026-10-04) ──
+ *
+ * They used to be on it, on the reasoning that each is chosen by the student.
+ * But the Privacy Policy, Community Guidelines and Youth Safety Guidelines all
+ * promise a profile is private until the student turns sharing on, and a
+ * general location published to every adult organizer at the default setting
+ * is not what a reader of "private" expects for a minor. The owner moved them
+ * behind the setting rather than rewrite the documents
+ * (docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md).
  *
  * ── The service history is not in the public baseline, at all ──
  *
@@ -222,8 +233,12 @@ export function parseHighlights(raw) {
  */
 export const PUBLIC_BASELINE_FIELDS = Object.freeze([
   'id', 'username', 'name', 'avatar', 'avatarColor', 'profilePictureUrl', 'role',
-  'location', 'hobbies', 'skills', 'joinedAt', 'lastVolunteeredAt',
-  'stats', 'organizations', 'visibility', 'isSelf',
+  'joinedAt',
+  /* These two follow `hours_visibility` rather than the profile setting, and
+     are here because a public service record carries them at any profile
+     setting. They are omitted, not zeroed, when it is private. */
+  'lastVolunteeredAt', 'stats',
+  'organizations', 'visibility', 'isSelf',
   /* Says WHY a figure is absent, never the figure. A page that rendered an
      empty list instead would be telling the reader this student has never
      volunteered, which is a lie about a person. */
@@ -235,8 +250,16 @@ export const PUBLIC_BASELINE_FIELDS = Object.freeze([
   'distinction',
 ]);
 
-/** Fields added only when the profile is public. */
-export const PUBLIC_ONLY_FIELDS = Object.freeze(['bio', 'school', 'grade', 'graduationYear']);
+/**
+ * Fields added only when the profile is public (or 'friends', to a friend).
+ *
+ * `location`, `hobbies` and `skills` joined on 2026-10-04; see the header. They
+ * stay unconditional on a distinguished account, the same exemption `headline`
+ * has, because there they are an institution describing itself.
+ */
+export const PUBLIC_ONLY_FIELDS = Object.freeze([
+  'bio', 'school', 'grade', 'graduationYear', 'location', 'hobbies', 'skills',
+]);
 
 /**
  * `profile_visibility` read as one of its three values.
@@ -412,9 +435,8 @@ export async function publicProfile(db, row, { viewerId = null, canSeeContact = 
     avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
-    location: row.location || null,
-    hobbies: parseList(row.hobbies),
-    skills: parseList(row.skills),
+    /* `location`, `hobbies` and `skills` are added below, behind the same
+       test as `headline`; they left this always-visible block on 2026-10-04. */
     joinedAt: row.created_at,
     /* Both of these are service data. When the subject keeps their history
        private they are OMITTED rather than zeroed: a zero is a claim, and it is
@@ -490,6 +512,20 @@ export async function publicProfile(db, row, { viewerId = null, canSeeContact = 
   if (distinction || sensitiveVisible) {
     profile.headline = row.profile_headline || null;
     profile.highlights = parseHighlights(row.profile_highlights);
+    /**
+     * And the student's own descriptors, on exactly the same terms.
+     *
+     * A general location, a list of hobbies and a list of skills were on the
+     * always-visible baseline, so a student at the default PRIVATE setting
+     * published where they live, roughly, to every member — adult organizers
+     * included — while three published documents said the profile was private
+     * until they turned sharing on. They follow the setting now. On a partner or
+     * owner account they stay unconditional for the reason given above: there
+     * they are an institution's areas of involvement, not a child's.
+     */
+    profile.location = row.location || null;
+    profile.hobbies = parseList(row.hobbies);
+    profile.skills = parseList(row.skills);
   }
 
   /**
@@ -581,7 +617,10 @@ export function profileSummary(row) {
     avatarColor: row.avatar_color || null,
     profilePictureUrl: row.profile_picture_url || null,
     role: row.role,
-    location: row.location || null,
+    /* No `location`. This shape has no viewer, so it cannot ask the profile
+       setting, and it must stay a subset of the strictest profile — a PRIVATE
+       one — which no longer carries it. It used to, and every search result,
+       roster and member list published it. */
     /* Derived from `role`, which is already on this shape — so it discloses
        nothing new, and it lets a search result show a partner organization as
        one rather than as an unexplained account among schoolchildren. */

@@ -239,7 +239,11 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
         grade: canSeeContact ? row.grade : null,
         bio: canSeeContact ? row.bio : null,
         school: canSeeContact ? row.school : null,
-        skills: row.skills ? JSON.parse(row.skills) : [],
+        /* Gated with bio, school and grade above. It was unconditional, so this
+           route published a private student's skills to every member while the
+           public profile — after 2026-10-04 — withheld them. Null rather than
+           an empty list: an empty list is a claim that they listed none. */
+        skills: canSeeContact ? (row.skills ? JSON.parse(row.skills) : []) : null,
         joinedAt: row.created_at,
         // Contact details stay with the person and the adults coordinating them
         email: canSeeContact ? row.email : null

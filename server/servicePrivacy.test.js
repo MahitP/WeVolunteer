@@ -6,11 +6,13 @@ import { startTestServer } from './testServer.js';
  *
  * ── What this is guarding ──
  *
- * Certificates and hours default to PUBLIC, which is a product decision: being
- * able to see what somebody actually did is the point of a profile. The control
- * is that the subject can turn either of them off, and that turning it off
- * actually withholds the data at the SERVER — not in React, where a reader with
- * the network tab open sees everything the endpoint sent.
+ * Certificates and hours default to PRIVATE, because the published documents
+ * promise a profile is private until the student turns sharing on. They used to
+ * default to public, which made that promise false for every account; see
+ * docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md. The control is that the subject
+ * can turn either of them on or off, and that "off" actually withholds the data
+ * at the SERVER — not in React, where a reader with the network tab open sees
+ * everything the endpoint sent.
  *
  * So every case below drives the API directly. A test that rendered a component
  * and asserted a section was absent would pass against a server that had
@@ -106,19 +108,32 @@ const certificatesOf = (id, session) =>
 
 /* ─────────────────────────── defaults ─────────────────────────── */
 
-describe('the default is public', () => {
-  it('a brand new account publishes hours and certificates', async () => {
+describe('the default is private', () => {
+  /**
+   * Inverted on 2026-10-04. Migration 049 defaulted both settings to public, and
+   * the published Privacy Policy, Community Guidelines and Youth Safety
+   * Guidelines all said a profile is private until the student turns sharing on.
+   * The owner chose to make the code true rather than the documents; see
+   * docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md.
+   */
+  it('a brand new account keeps hours and certificates to itself', async () => {
     const res = await publicProfileOf(aliceId, bob);
     expect(res.status).toBe(200);
     const p = res.body.profile ?? res.body;
-    expect(p.serviceVisibility).toEqual({ hours: 'visible', certificates: 'visible' });
-    expect(p.stats, 'hours were withheld by default').toBeTruthy();
+    expect(p.serviceVisibility).toEqual({ hours: 'private', certificates: 'private' });
+    expect(p.stats, 'hours were published by default').toBeUndefined();
   });
 
-  it('and the certificate collection answers', async () => {
+  it('and the certificate collection refuses rather than answering', async () => {
     const res = await certificatesOf(aliceId, bob);
-    expect(res.status).toBe(200);
-    expect(res.body.certificates.length).toBeGreaterThan(0);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('certificates_private');
+  });
+
+  it('reports the new account\'s own settings as private', async () => {
+    const me = await srv.call('GET', '/api/auth/me', undefined, alice);
+    expect(me.body.hoursVisibility).toBe('private');
+    expect(me.body.certificatesVisibility).toBe('private');
   });
 });
 
@@ -185,7 +200,7 @@ describe('certificates', () => {
 /* ─────────────────────────── service hours ─────────────────────────── */
 
 describe('service history', () => {
-  it('is published by default and withheld when set to private', async () => {
+  it('is published when public and withheld when set to private', async () => {
     await setVisibility({ hoursVisibility: 'public' }, alice);
     let res = await publicProfileOf(aliceId, bob);
     let p = res.body.profile ?? res.body;

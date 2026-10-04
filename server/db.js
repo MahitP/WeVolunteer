@@ -1728,9 +1728,14 @@ async function seedDatabase() {
    * demo or test database that could exercise it. `migrate_usernames.js`
    * backfills real deployments, but it is a manual one-off and never runs here.
    */
+  /* Service records start private here as everywhere: the column DEFAULT is
+     still 'public' and cannot change in place. This runs from
+     `completeDatabaseInit`, after `runMigrations`, so the columns exist and
+     migration 074 has already run — it will not reach these rows for us. See
+     DEFAULT_SERVICE_VISIBILITY. */
   const insertUser = db.prepare(`
-    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, avatar, bio, school, skills, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, avatar, bio, school, skills, created_at, hours_visibility, certificates_visibility)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', 'private')
   `);
 
   // Admins & Organizers

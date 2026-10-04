@@ -103,6 +103,9 @@ describe('a volunteer profile for whoever has volunteered', () => {
      */
     const ownerId = await makeAccount('super_admin');
     await giveAttendance(ownerId, 'owner');
+    /* Service records start private (2026-10-04). This owner shows theirs,
+       which is the case the test is about: a record that EXISTS and is shown. */
+    await db.prepare(`UPDATE users SET hours_visibility = 'public' WHERE id = ?`).run(ownerId);
 
     const res = await profileOf(ownerId);
     expect(res.status, 'the owner’s own service record answered 404').toBe(200);

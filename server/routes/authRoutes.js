@@ -21,6 +21,7 @@ import { runInTransaction } from '../db/connectionContext.js';
 import { recordSecurityEvent } from '../securityAudit.js';
 import { badgeService } from '../services/badgeService.js';
 import { handleReservedAgainst } from '../ownerAllowlist.js';
+import { DEFAULT_SERVICE_VISIBILITY } from '../serviceVisibility.js';
 
 const router = express.Router();
 
@@ -553,13 +554,16 @@ router.post('/api/auth/signup', async (req, res) => {
        * hand-written request register a ninth grader as a senior.
        */
       await tx.prepare(`
-        INSERT INTO users (id, name, email, username, password_hash, grade, graduation_year, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (id, name, email, username, password_hash, grade, graduation_year, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at, hours_visibility, certificates_visibility)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         userId, fields.name, fields.email, fields.username, passwordHash,
         fields.grade, fields.graduationYear, fields.role, verifiedVal, emailVerifiedVal,
         fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills),
-        fields.dateOfBirth, now
+        fields.dateOfBirth, now,
+        /* Named rather than left to the column, whose DEFAULT is 'public' and
+           cannot be changed in place; see DEFAULT_SERVICE_VISIBILITY. */
+        DEFAULT_SERVICE_VISIBILITY, DEFAULT_SERVICE_VISIBILITY
       );
 
       if (oauthData) {

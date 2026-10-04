@@ -38,6 +38,33 @@
 /** The values a visibility column may hold. */
 export const VISIBILITY_VALUES = Object.freeze(['public', 'private']);
 
+/**
+ * What a new account starts with, for both settings.
+ *
+ * ── Private, because that is what the documents promise ──
+ *
+ * The Privacy Policy, the Community Guidelines and the Youth Safety Guidelines
+ * all say a profile is private until the student turns sharing on. Migration
+ * 049 defaulted both columns to 'public', so that promise was false for every
+ * account; the owner chose to make the code true rather than rewrite the
+ * documents (docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md). Migration 074
+ * brought existing accounts into line.
+ *
+ * ── Why this is written at every INSERT, not in the schema ──
+ *
+ * The column DEFAULT is still 'public'. SQLite cannot change a default without
+ * rebuilding `users`, the most foreign-keyed table in the schema, and the
+ * PostgreSQL schema is generated from the SQLite one. So every account-creation
+ * path names both columns with this value, and `privateServiceDefaults.test.js`
+ * fails the build on any `INSERT INTO users` that does not.
+ *
+ * This is NOT the reading of an unknown value — `normaliseVisibility` below
+ * still fails towards public, for the reason its header gives. The two answer
+ * different questions: what a new person starts with, and what a corrupted row
+ * should mean.
+ */
+export const DEFAULT_SERVICE_VISIBILITY = 'private';
+
 /** Normalises anything to one of the two values. See the header on direction. */
 export function normaliseVisibility(value) {
   return value === 'private' ? 'private' : 'public';

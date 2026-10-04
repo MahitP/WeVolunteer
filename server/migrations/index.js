@@ -82,6 +82,8 @@ import resyncCookieNoticeConsentPrompt from './070_resync_cookie_notice_consent_
 import resyncCookieNoticeCloudflare from './071_resync_cookie_notice_cloudflare.js';
 import issueReportScreenshots from './072_issue_report_screenshots.js';
 import organizerApprovalRevoked from './073_organizer_approval_revoked.js';
+import privateServiceDefaults from './074_private_service_defaults.js';
+import resyncYouthSafetyProfileVisibility from './075_resync_youth_safety_profile_visibility.js';
 
 export const MIGRATIONS = [
   authzRoles, userCapabilities, reauthChallenges, errorEvents, errorAlerts, accountSuspension,
@@ -502,6 +504,19 @@ export const MIGRATIONS = [
   resyncCookieNoticeCloudflare,
   issueReportScreenshots,
   organizerApprovalRevoked,
+  /**
+   * 074 — existing service records become private, as the published documents
+   * said they were. Data only: no schema change, and it must run after 049,
+   * which created the two columns. The founder is exempt by the owner's
+   * decision; see the file.
+   */
+  privateServiceDefaults,
+  /**
+   * 075 — the Youth Safety Guidelines' parents' section, repaired in place.
+   * Clears the 1.0 row only where nobody has accepted it, so the boot's
+   * `syncLegalDocuments` republishes it at the new hash. Same shape as 071.
+   */
+  resyncYouthSafetyProfileVisibility,
 ];
 
 const label = (m) => `${m.version}_${m.name}`;

@@ -167,9 +167,14 @@ Accepting an organizer account means accepting these rules. They are also in the
 
 Your student's account is theirs, but you have a right to understand it.
 
-- Their profile is **private by default**. Nobody sees it unless the student changed that.
+- Other members — students, and organizers who have signed our Organizer Agreement — can find
+  your student by name and see their username, picture, the clubs they belong to, and when they
+  joined. Their school, grade, bio, location, interests, skills, volunteer hours and certificates
+  stay **hidden until the student chooses to show them**. The organizer of an event your student
+  applies to sees more, to run that event, and so do our administrators; the
+  [Privacy Policy](/legal/privacy-policy) explains what.
 - The leaderboard is **off by default**.
-- Organizers see their name and contact details only for events they applied to.
+- Organizers see their contact details only for events they applied to.
 - Students can message organizers and other students through the app.
 - Every conversation has a Report button.
 

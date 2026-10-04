@@ -21,6 +21,7 @@ import { isSuspended, liftIfExpired } from '../suspension.js';
 import googleProvider from '../oauth/providers/google.js';
 import microsoftProvider from '../oauth/providers/microsoft.js';
 import appleProvider from '../oauth/providers/apple.js';
+import { DEFAULT_SERVICE_VISIBILITY } from '../serviceVisibility.js';
 
 const router = express.Router();
 const OAUTH_STATE_COOKIE = 'wev_oauth_state';
@@ -637,8 +638,8 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
 
       await runInTransaction(db, async (tx) => {
         await tx.prepare(`
-          INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (id, name, email, username, password_hash, grade, role, verified, email_verified, avatar, bio, school, skills, date_of_birth, created_at, hours_visibility, certificates_visibility)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           newUserId, fields.name, providerEmail, fields.username, '!OAUTH_ONLY!',
           fields.grade, fields.role,
@@ -647,7 +648,10 @@ router.post('/api/oauth/:provider/callback', async (req, res) => {
           fields.role === 'organizer' ? 0 : 1,
           emailVerified,
           fields.avatar, fields.bio, fields.school, JSON.stringify(fields.skills),
-          fields.dateOfBirth, now
+          fields.dateOfBirth, now,
+          /* The same door as password signup, so the same start: see
+             DEFAULT_SERVICE_VISIBILITY. */
+          DEFAULT_SERVICE_VISIBILITY, DEFAULT_SERVICE_VISIBILITY
         );
 
         await tx.prepare(`

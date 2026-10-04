@@ -117,7 +117,7 @@ describe('organization moderation', () => {
       await ban();
       const [row] = (await bans(orgKey, manager)).body.bans;
       expect(Object.keys(row.user).sort()).toEqual(
-        ['avatar', 'avatarColor', 'distinction', 'id', 'kind', 'location', 'name', 'profilePictureUrl', 'role', 'username'].sort(),
+        ['avatar', 'avatarColor', 'distinction', 'id', 'kind', 'name', 'profilePictureUrl', 'role', 'username'].sort(),
       );
       expect(row.user).not.toHaveProperty('email');
     });

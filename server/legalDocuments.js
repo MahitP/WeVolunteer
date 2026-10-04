@@ -360,8 +360,16 @@ export const LEGAL_DOCUMENTS = [
        the Organizer Agreement §5 — the document that actually binds an organizer
        — says within 30 days. This file already defers to §4 for the sharing
        rule, so it now defers to §5 here for the same reason rather than
-       restating a deadline it does not own. Pre-launch correction, 1.0 stands. */
-    contentHash: '9e624189f900a3b700f13777f43c676cdef341ba1b756415a5973bcc74a58f54',
+       restating a deadline it does not own. Pre-launch correction, 1.0 stands.
+
+       Re-pinned again on 2026-10-04 for the parents' section. It said a
+       student's profile was seen by nobody unless the student changed that,
+       which a profile findable by name never was; it now says who sees what,
+       and what stays hidden. Repaired in place by migration 075 with the
+       owner's approval, which is permissible because this is a `notice` and
+       has never collected an acceptance. `legalContent.profileVisibility.
+       test.js` holds the new words against the serializer. */
+    contentHash: 'f162e5a80d12bc67ab0d9d64aa82662556041e3386a911da3d6812bc7f6dd36b',
     bundledWith: null,
   },
   {

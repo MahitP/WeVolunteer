@@ -118,7 +118,7 @@ describe('inviting somebody to an organization', () => {
          a rendering bug. */
       expect(Object.keys(res.body.invitation).sort()).toEqual([
         'avatar', 'avatarColor', 'createdAt', 'distinction', 'expiresAt', 'id',
-        'invitationId', 'kind', 'location', 'message', 'name', 'profilePictureUrl', 'role', 'username',
+        'invitationId', 'kind', 'message', 'name', 'profilePictureUrl', 'role', 'username',
       ]);
     });
 
@@ -357,7 +357,7 @@ describe('inviting somebody to an organization', () => {
       const [row] = (await listInvitations()).body.invitations;
       expect(Object.keys(row).sort()).toEqual([
         'avatar', 'avatarColor', 'createdAt', 'distinction', 'expiresAt', 'id',
-        'invitationId', 'kind', 'location', 'message', 'name', 'profilePictureUrl', 'role', 'username',
+        'invitationId', 'kind', 'message', 'name', 'profilePictureUrl', 'role', 'username',
       ]);
       const body = JSON.stringify((await listInvitations()).body);
       expect(body).not.toMatch(/"grade"|"school"|"dateOfBirth"|"email"/);

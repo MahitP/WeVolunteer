@@ -66,7 +66,7 @@ describe('applicant particulars, read by students who help run a club', () => {
       role: 'student', grade: '9', school: `${label} High School`,
     });
     const set = await srv.call('PATCH', '/api/auth/profile',
-      { bio: `The ${label} applicant's bio.`, ...settings }, cookie);
+      { bio: `The ${label} applicant's bio.`, skills: [`${label} skill`], ...settings }, cookie);
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     applicant[label] = { id: user.id, cookie };
   };
@@ -166,6 +166,12 @@ describe('applicant particulars, read by students who help run a club', () => {
         expect(v.name).toBe('Applicant private');
       });
 
+      /* Skills follow the profile setting since 2026-10-04 (PUBLIC_ONLY_FIELDS);
+         an applicant list that kept emitting them would be the alternate route. */
+      it(`withholds a private applicant's skills from ${who}`, async () => {
+        expect(rowFor(await listAs(session()), 'private')).not.toHaveProperty('skills');
+      });
+
       it(`withholds a private service record from ${who}, and says so`, async () => {
         const v = rowFor(await listAs(session()), 'private');
         for (const field of SERVICE_FIELDS) expect(v, field).not.toHaveProperty(field);
@@ -179,6 +185,7 @@ describe('applicant particulars, read by students who help run a club', () => {
         expect(v.bio).toBe("The public applicant's bio.");
         expect(v.school).toBe('public High School');
         expect(v.grade).toBe('9');
+        expect(v.skills).toEqual(['public skill']);
         for (const field of SERVICE_FIELDS) expect(v, field).toHaveProperty(field);
         expect(v.serviceVisibility?.hours).toBe('visible');
       });
@@ -200,6 +207,7 @@ describe('applicant particulars, read by students who help run a club', () => {
       expect(v.bio).toBe("The private applicant's bio.");
       expect(v.school).toBe('private High School');
       expect(v.grade).toBe('9');
+      expect(v.skills).toEqual(['private skill']);
       for (const field of SERVICE_FIELDS) expect(v, field).toHaveProperty(field);
       expect(v.serviceVisibility?.hours).toBe('visible');
     });

@@ -160,6 +160,11 @@ describe('privacy: student profile PII scoping (grade/school/bio/email)', () => 
   });
 
   it('keeps aggregate stats and service history visible to an unrelated student viewer (not PII)', async () => {
+    /* Visible once the student shows them: service records start private
+       (2026-10-04), and servicePrivacy.test.js owns that default. What this case
+       guards is that the figures are not treated as PII once shown. */
+    const { db: rawDb } = await import('./db.js');
+    await rawDb.prepare("UPDATE users SET hours_visibility = 'public' WHERE id = 'user-student-2'").run();
     const res = await srv.call('GET', '/api/users/user-student-2/profile', undefined, leoToken);
     expect(res.status).toBe(200);
     expect(res.body.volunteer.name).toBe('Priya Patel');
@@ -188,7 +193,7 @@ describe('leaderboard privacy', () => {
   it('shows a student once leaderboard_opt_in is set to 1 directly in the DB', async () => {
     const { db: rawDb } = await import('./db.js');
     try {
-      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1, hours_visibility = 'public' WHERE id = 'user-student-3'").run();
     } finally {
     }
 
@@ -200,7 +205,7 @@ describe('leaderboard privacy', () => {
     // Reset so this test doesn't leak state into the others below.
     const { db: rawDb2 } = await import('./db.js');
     try {
-      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0, hours_visibility = 'private' WHERE id = 'user-student-3'").run();
     } finally {
     }
   });
@@ -208,7 +213,7 @@ describe('leaderboard privacy', () => {
   it('never returns school or grade on leaderboard rows', async () => {
     const { db: rawDb } = await import('./db.js');
     try {
-      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1 WHERE id = 'user-student-3'").run();
+      await rawDb.prepare("UPDATE users SET leaderboard_opt_in = 1, hours_visibility = 'public' WHERE id = 'user-student-3'").run();
     } finally {
     }
 
@@ -222,7 +227,7 @@ describe('leaderboard privacy', () => {
 
     const { db: rawDb2 } = await import('./db.js');
     try {
-      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0 WHERE id = 'user-student-3'").run();
+      await rawDb2.prepare("UPDATE users SET leaderboard_opt_in = 0, hours_visibility = 'private' WHERE id = 'user-student-3'").run();
     } finally {
     }
   });
@@ -230,8 +235,11 @@ describe('leaderboard privacy', () => {
   it('round-trips the opt-in through PATCH /api/auth/profile (the write-path guard)', async () => {
     const priyaToken = await srv.login('priya.patel@example.com');
 
-    // Opt in.
-    const optInRes = await srv.call('PATCH', '/api/auth/profile', { leaderboardOptIn: true }, priyaToken);
+    /* Opt in — and show the service record, which the board also requires
+       (contentRoutes.js) and which starts private since 2026-10-04. Settings
+       tells a student this when they opt in with their hours hidden. */
+    const optInRes = await srv.call('PATCH', '/api/auth/profile',
+      { leaderboardOptIn: true, hoursVisibility: 'public' }, priyaToken);
     expect(optInRes.status).toBe(200);
     expect(optInRes.body.user.leaderboardOptIn).toBe(true);
 

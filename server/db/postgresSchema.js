@@ -1555,7 +1555,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
  * answered by `POSTGRES_BASELINE_VERSION` in the migration registry, which is
  * frozen; see the note there.
  */
-export const LATEST_MIGRATION_VERSION = 73;
+export const LATEST_MIGRATION_VERSION = 75;
 
 /**
  * Creates the schema on a PostgreSQL database, and brings an existing one up to

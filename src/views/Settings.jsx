@@ -267,6 +267,15 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                     Adds your name and total hours to the school leaderboard. Off by default —
                     turning it off again removes you immediately.
                   </span>
+                  {/* The board drops anybody whose hours are private, and since
+                      2026-10-04 private is where every service record starts —
+                      so without this the switch would read as on and do nothing. */}
+                  {leaderboardOptIn && hoursVisibility === 'private' && (
+                    <span className="field-hint">
+                      The leaderboard only lists you while your service history is visible to
+                      other members. You can change that under Your service record, below.
+                    </span>
+                  )}
                 </div>
               </label>
             </div>
@@ -335,7 +344,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                 * either way.
                 */}
               <div className="field">
-                <label htmlFor="pv-select">Who can see my school and year?</label>
+                <label htmlFor="pv-select">Who can see my school, year and interests?</label>
                 <select
                   id="pv-select"
                   className="select"
@@ -348,9 +357,10 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   <option value="public">Any WeVolunteer member</option>
                 </select>
                 <span className="field-hint">
-                  Your name, general area, hobbies, skills and volunteering totals are always
-                  visible to signed-in members so they can find you. This setting controls your
-                  school, year group and bio. Your email address is never shown to other students.
+                  Your name, picture and clubs are always visible to signed-in members so they can
+                  find you. This setting controls your school, year group, bio, general area,
+                  hobbies and skills. Your volunteering totals have their own setting below. Your
+                  email address is never shown to other students.
                 </span>
               </div>
             </div>
@@ -366,13 +376,20 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                 * A student may reasonably want the school to see one and not
                 * the other, in either direction.
                 *
-                * Both default to "Anyone at your school" — that is what the
-                * column defaults to and what the server treats an unset value
-                * as, so the control cannot show a state the server disagrees
-                * with. The wording says who, rather than "allow others to…",
-                * because the existing visibility control on this same screen
-                * asks "Who can see my school and year?" and a screen that asks
-                * the same question two ways is a screen that gets misread.
+                * Both start at "Only me" for every account since 2026-10-04:
+                * the published documents promise a profile is private until the
+                * student turns sharing on, and the server now writes 'private'
+                * at signup (DEFAULT_SERVICE_VISIBILITY). The `|| 'public'`
+                * fallback above is NOT that default — it mirrors how the server
+                * reads a missing value (`normaliseVisibility`), so the control
+                * cannot show a state the server disagrees with.
+                *
+                * "Other members", not "Anyone at your school": the audience
+                * includes adult organizers, who need not be at the school, on a
+                * platform no school operates. The wording says who, rather than
+                * "allow others to…", because the profile control on this same
+                * screen asks "Who can see my school, year and interests?" and a
+                * screen that asks the same question two ways gets misread.
                 */}
               <div className="field">
                 <label htmlFor="hours-visibility">Who can see my service history?</label>
@@ -383,7 +400,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   disabled={savingPrivacy}
                   onChange={e => handleHoursVisibility(e.target.value)}
                 >
-                  <option value="public">Anyone at your school</option>
+                  <option value="public">Other members</option>
                   <option value="private">Only me</option>
                 </select>
                 <span className="field-hint">
@@ -402,7 +419,7 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   disabled={savingPrivacy}
                   onChange={e => handleCertificatesVisibility(e.target.value)}
                 >
-                  <option value="public">Anyone at your school</option>
+                  <option value="public">Other members</option>
                   <option value="private">Only me</option>
                 </select>
                 <span className="field-hint">

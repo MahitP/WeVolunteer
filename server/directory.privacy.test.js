@@ -30,7 +30,9 @@ const NEVER = [
 ];
 
 /** Fields a PRIVATE profile must withhold from an ordinary member. */
-const PRIVATE_FIELDS = ['bio', 'school', 'grade', 'graduationYear'];
+/* location, hobbies and skills joined on 2026-10-04, when they left the
+   always-visible baseline (PUBLIC_ONLY_FIELDS in profileSerializer.js). */
+const PRIVATE_FIELDS = ['bio', 'school', 'grade', 'graduationYear', 'location', 'hobbies', 'skills'];
 
 /** Recursively collects every key present anywhere in a payload. */
 function allKeys(value, into = new Set()) {
@@ -66,7 +68,10 @@ describe('the member directory: what one member may learn about another', () => 
 
     await db.prepare(`
       UPDATE users SET bio = ?, school = ?, location = ?,
-                       hobbies = ?, skills = ?, profile_visibility = 'public'
+                       hobbies = ?, skills = ?, profile_visibility = 'public',
+                       /* Service records start private; this student has
+                          chosen to show hers, so the stats cases have figures. */
+                       hours_visibility = 'public'
       WHERE id = ?
     `).run('I like helping out.', 'Example Valley High', 'Example Valley, NJ',
       JSON.stringify(['baking']), JSON.stringify(['first aid']), otherId);
@@ -137,9 +142,8 @@ describe('the member directory: what one member may learn about another', () => 
       const res = await srv.call('GET', '/api/users/by-username/priya', undefined, student);
       expect(res.status).toBe(200);
       expect(res.body.profile.name).toBe('Priya Raman');
-      expect(res.body.profile.location).toBe('Example Valley, NJ');
-      expect(res.body.profile.hobbies).toEqual(['baking']);
-      expect(res.body.profile.skills).toEqual(['first aid']);
+      /* Location, hobbies and skills used to be asserted here, as part of the
+         baseline. They follow the profile setting now; see PRIVATE_FIELDS. */
       expect(res.body.profile.stats.eventsSignedUp).toBeTypeOf('number');
       expect(res.body.profile.stats.eventsAttended).toBeTypeOf('number');
       expect(res.body.profile.joinedAt).toBeTruthy();

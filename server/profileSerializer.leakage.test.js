@@ -313,6 +313,53 @@ describe('the search summary is a strict subset of the profile', () => {
     const serialized = JSON.stringify(profileSummary(db.prepare('SELECT * FROM users').get()));
     for (const value of FORBIDDEN_VALUES) expect(serialized).not.toContain(value);
   });
+
+  /**
+   * Measured against a PRIVATE student, because that is the profile the
+   * summary must never exceed. Checked only against a public one, a field that
+   * privacy withholds (location, once it left the baseline) can sit in every
+   * search result and member list while this suite stays green.
+   */
+  it('emits nothing a private student\'s profile withholds', async () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student'`).run();
+    const row = db.prepare('SELECT * FROM users').get();
+    const summary = profileSummary(row);
+    const full = await publicProfile(db, row, { viewerId: 'other' });
+    for (const k of Object.keys(summary)) {
+      if (k === 'kind') continue;
+      expect(full, `search emits ${k}, which a private profile withholds`).toHaveProperty(k);
+    }
+  });
+});
+
+describe('location, interests and skills', () => {
+  it('are withheld from another member when a student\'s profile is private', async () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student'`).run();
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    for (const k of ['location', 'hobbies', 'skills']) expect(p).not.toHaveProperty(k);
+  });
+
+  it('are shown to the student themselves at a private setting', async () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'student'`).run();
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'u1' });
+    expect(p.location).toBe('Example Valley, NJ');
+    expect(p.hobbies).toEqual(['Baking']);
+    expect(p.skills).toEqual(['First aid']);
+  });
+
+  /**
+   * The headline exemption, carried across. A partner organization's "areas of
+   * involvement" are its hobbies column, and an institution's description of
+   * itself disappearing behind a setting written for a fourteen-year-old is a
+   * page that fails to say what it is for. `distinctionFor` decides, from role.
+   */
+  it('stay on a partner organization\'s profile at a private setting', async () => {
+    db.prepare(`UPDATE users SET profile_visibility = 'private', role = 'partner'`).run();
+    const p = await publicProfile(db, db.prepare('SELECT * FROM users').get(), { viewerId: 'other' });
+    expect(p.location).toBe('Example Valley, NJ');
+    expect(p.hobbies).toEqual(['Baking']);
+    expect(p.skills).toEqual(['First aid']);
+  });
 });
 
 describe('the distinguished presentation is derived from role and nothing else', () => {

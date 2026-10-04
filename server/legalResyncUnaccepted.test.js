@@ -296,3 +296,63 @@ describe('migration 068', () => {
     expect(() => resync068(early)).not.toThrow();
   });
 });
+
+/**
+ * Migration 075 — the Youth Safety Guidelines' parents' section.
+ *
+ * It told a guardian a student's profile was seen by nobody unless the student
+ * changed that. A profile is findable by name, so that was never true at any
+ * setting; see docs/legal/15-PROFILE-VISIBILITY-DEFAULTS.md. The document is a
+ * `notice` and collects no acceptance, which is what makes repairing 1.0 in
+ * place permissible. The acceptance check is asserted anyway: the scope of a
+ * repair is two conditions, never one.
+ */
+describe('migration 075', () => {
+  let resync075;
+
+  beforeEach(async () => {
+    ({ up: resync075 } = await import('./migrations/075_resync_youth_safety_profile_visibility.js'));
+  });
+
+  it('clears the Youth Safety Guidelines when nobody has accepted them', () => {
+    doc('youth-safety-guidelines', '1.0', 'old-ysg-hash');
+
+    resync075(db);
+
+    expect(remaining()).toEqual([]);
+  });
+
+  it('leaves them alone the moment somebody has accepted them', () => {
+    doc('youth-safety-guidelines', '1.0', 'old-ysg-hash');
+    accept('youth-safety-guidelines', '1.0', 'old-ysg-hash');
+
+    resync075(db);
+
+    expect(remaining()).toEqual([{ slug: 'youth-safety-guidelines', version: '1.0' }]);
+  });
+
+  it('touches no other document, the Privacy Policy above all', () => {
+    /* The Privacy Policy and the Community Guidelines make the same promise and
+       each hold an acceptance. Their correction is a version, not a repair. */
+    doc('privacy-policy', '1.0', 'privacy-hash');
+    doc('community-guidelines', '1.0', 'cg-hash');
+    doc('youth-safety-guidelines', '1.0', 'old-ysg-hash');
+
+    resync075(db);
+
+    expect(remaining()).toEqual([
+      { slug: 'community-guidelines', version: '1.0' },
+      { slug: 'privacy-policy', version: '1.0' },
+    ]);
+  });
+
+  it('does nothing on an empty catalogue', () => {
+    expect(() => resync075(db)).not.toThrow();
+    expect(remaining()).toEqual([]);
+  });
+
+  it('skips a database too early to have the tables', () => {
+    const early = new DatabaseSync(':memory:');
+    expect(() => resync075(early)).not.toThrow();
+  });
+});

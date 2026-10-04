@@ -145,6 +145,9 @@ describe('the profile headline', () => {
       /* Promoted with SQL, then the existing cookie is reused: identity is
          re-derived from the users row on every request. */
       await db.prepare(`UPDATE users SET role = 'super_admin' WHERE id = ?`).run(ownerId);
+      /* Service records start private (2026-10-04). This owner shows theirs, so
+         "still carries the ordinary member fields" has figures to carry. */
+      await db.prepare(`UPDATE users SET hours_visibility = 'public' WHERE id = ?`).run(ownerId);
       const { enrolTwoFactor } = await import('./testServer.js');
       await enrolTwoFactor(db, 'theowner@test.local');
       ownerCookie = owner.cookie;

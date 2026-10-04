@@ -84,9 +84,12 @@ const sharedPassword = 'pilotpassword2026'; // Safe shared password for demo
 const passwordHash = bcrypt.hashSync(sharedPassword, salt);
 const nowStr = new Date().toISOString();
 
+/* Service records start private, as on every other creation path — the column
+   DEFAULT is still 'public' and cannot change in place. See
+   DEFAULT_SERVICE_VISIBILITY in server/serviceVisibility.js. */
 const insertUser = db.prepare(`
-  INSERT INTO users (id, name, email, password_hash, grade, role, verified, avatar, bio, school, skills, created_at, email_verified)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+  INSERT INTO users (id, name, email, password_hash, grade, role, verified, avatar, bio, school, skills, created_at, email_verified, hours_visibility, certificates_visibility)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'private', 'private')
 `);
 
 const insertEvent = db.prepare(`
