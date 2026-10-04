@@ -416,8 +416,8 @@ export default function VerifyIdentityModal({
            * would be worse than an error.
            */
           <div className="alert alert-danger" role="alert">
-            This account has no way to verify your identity. Please contact your
-            school administrator.
+            This account has no way to verify your identity. Tell us through{' '}
+            <a href="/report-issue">Report a problem</a> and we will help you get back in.
           </div>
         )}
 

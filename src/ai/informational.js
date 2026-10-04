@@ -29,7 +29,7 @@ export const INFORMATIONAL_KNOWLEDGE = Object.freeze({
     'WeVolunteer has distinct roles:\n'
     + '• Students / Volunteers: Browse opportunities, apply for shifts, track verified hours, earn badges and certificates, log external service, and join clubs.\n'
     + '• Organizers: Create and manage events, review applicants, run Auto-Select lotteries, take attendance, scan QR check-in codes, and award service hours.\n'
-    + '• Administrators: School staff members who oversee platform safety, approve organizers, moderate events and reports, resolve appeals, and view impact analytics.\n'
+    + '• Administrators: people the operator of WeVolunteer has given an administrator account. They oversee platform safety, approve organizers, moderate events and reports, resolve appeals, and view impact analytics.\n'
     + '• Super Admins: Manage platform configuration, view immutable audit logs, and edit legal policies.',
 
   info_selection:

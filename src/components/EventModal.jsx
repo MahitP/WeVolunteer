@@ -437,7 +437,7 @@ export default function EventModal({
               <p className="lead row" style={{ gap: 6, flexWrap: 'wrap' }}>
                 <span>Hosted by {event.organizerName}</span>
                 {event.organizerVerified && (
-                  <span className="tag tag-ok" title="This organizer has been verified by school staff">
+                  <span className="tag tag-ok" title="A WeVolunteer administrator approved this organizer">
                     <ShieldCheck size={10} /> Verified organizer
                   </span>
                 )}

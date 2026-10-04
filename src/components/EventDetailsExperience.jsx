@@ -232,7 +232,7 @@ export default function EventDetailsExperience({
           <div className="event-detail-org">
             <span>Hosted by <strong>{event.organizerName}</strong></span>
             {event.organizerVerified && (
-              <span className="tag tag-ok" title="This organizer has been verified by school staff">
+              <span className="tag tag-ok" title="A WeVolunteer administrator approved this organizer">
                 <ShieldCheck size={11} /> Verified organizer
               </span>
             )}

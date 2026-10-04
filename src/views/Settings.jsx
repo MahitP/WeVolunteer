@@ -352,7 +352,10 @@ export default function Settings({ currentUser, addToast, onProfileChange }) {
                   disabled={savingPrivacy}
                   onChange={e => handleVisibilityChange(e.target.value)}
                 >
-                  <option value="private">Only me and school staff</option>
+                  {/* Who can see a private profile, in the Privacy Policy's own terms:
+                      the organizers of events you apply to, and WeVolunteer
+                      administrators. It said "school staff", who have no access. */}
+                  <option value="private">Only me, organizers I apply to, and administrators</option>
                   <option value="friends">My friends</option>
                   <option value="public">Any WeVolunteer member</option>
                 </select>

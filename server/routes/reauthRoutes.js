@@ -158,7 +158,9 @@ router.post('/api/auth/reauth/challenge', authenticateToken, async (req, res) =>
    */
   if (opened.methods.length === 0) {
     return res.status(409).json({
-      error: 'This account has no way to verify your identity. Contact your school administrator.',
+      /* Not "your school administrator": WeVolunteer is run independently
+         (Posture B), and nobody at a school can reach this account. */
+      error: 'This account has no way to verify your identity. Tell us through Report a problem and we will help you get back in.',
       code: 'no_verification_method'
     });
   }

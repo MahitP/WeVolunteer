@@ -137,11 +137,11 @@ export default function OrganizerProfile({ userId, onBack, onEditProfile, onView
             : <ShieldAlert size={15} style={{ flexShrink: 0, marginTop: 1 }} />}
           <span>
             <span className="alert-title">
-              {organizer.verified ? 'Approved by school staff' : 'Awaiting staff approval'}
+              {organizer.verified ? 'Approved by WeVolunteer' : 'Awaiting approval'}
             </span>
             <span style={{ display: 'block', marginTop: 2 }}>
               {organizer.verified
-                ? 'A school administrator checked this organizer\'s identity before letting them post events.'
+                ? 'A WeVolunteer administrator approved this organizer before they could post events.'
                 : 'This organizer cannot post events until an administrator approves their account.'}
             </span>
           </span>

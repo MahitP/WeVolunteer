@@ -329,8 +329,10 @@ export default function OrganizerDashboard({
         </span>
         <h3>Your organizer account is awaiting approval</h3>
         <p>
-          A school administrator needs to verify <span className="strong">{currentUser.email}</span> before
-          you can post events. You can look around Discover in the meantime.
+          A WeVolunteer administrator reviews every new organizer account, including{' '}
+          <span className="strong">{currentUser.email}</span>, before it can post events. We will
+          let you know when yours is approved; then you accept the Organizer Agreement, and you
+          can post. You can look around Discover in the meantime.
         </p>
         {/* The sentence above says what to do next and this card used to offer
             nothing to do it with — on the one screen every organizer sees

@@ -526,13 +526,16 @@ export function getInAppContent(event, payload) {
           body: `You earned ${payload.hours} hours for ${payload.eventTitle}.`,
           link: `event:${payload.eventId}`
         };
+    /* "You can now post events" was untrue on the day it arrived: posting also
+       waits on the Organizer Agreement, which a new organizer has not seen yet
+       (final audit, Phase 5). The notice now says so and opens it. */
     case 'ORGANIZER_APPROVED':
       return {
         kind,
         priority: NOTIFICATION_PRIORITY.IMPORTANT,
-        title: 'Account Approved!',
-        body: 'Your organizer account has been verified. You can now post events.',
-        link: '/profile'
+        title: 'Your organizer account is approved',
+        body: 'Read and accept the Organizer Agreement, and you can post events.',
+        link: '/organizer-agreement'
       };
     /* P2-12. Says what changed and what did not: their events and the hours
        volunteers earned at them are untouched. */
