@@ -737,10 +737,35 @@ marked 🔒.
 | 20 | Done | `0c35281` | iOS Balanced under a 512 MiB experimental ceiling, opt-in |
 | 21 | Done | `4c4bb09` | PNG icons and an apple-touch-icon added; the button appears only when the browser offers installation |
 | 22 | Done | `c16a584` | `Wordmark` is now rendered nowhere; kept for the revamp hand-over |
+| 23 | Done | `48cc211` | robots.txt, sitemap.xml, per-page descriptions; `noindex` on every page that carries a person. Search Console verification is an owner action |
+| 24 | Done | `11cd2c5` | Also N13: reports had no staff view at all; `/admin/issues` added. Migration 072 |
+| 25 | Partial | `152aab1` | `@mahit`/`@wevolunteer` reserved; the platform account's wording fixed. Student layout at zero hours left history-driven by recorded design: owner question |
+| 26 | Done | `cd8638b`, `125d645`, `d41eecd` | Revoked organizers are their own state (migration 073), never deniable; appeal spam reported through the appeal, never the appellant's id |
+| 27 | Done | `08b5a8a`, `b75a16b`, `4684d90` | |
+| 28 | Owner question | — | The code records a deliberate decision not to OCR photos (accuracy of the hours field). Recommendation in the question list |
+| 29 | Done (drafts) | `45ff705`, `e10568e` | `docs/legal/drafts/`. Unpublished; the owner publishes |
+| 30 | Done | `c832dd1` | |
+
+**Questions for the owner, from the fix pass:**
+
+1. **Demonstration record (item 4).** Marking the showcase rows means excluding
+   them in every query that reads attendance (26 files). The alternative is a
+   showcase drawn only on the profile page, with nothing written to the record.
+2. **Photo reading (item 28).** On-device OCR (Tesseract, about 10 MB of
+   language data hosted by WeVolunteer, loaded only when a photo is chosen),
+   with every value shown for the student to check before saving. The existing
+   code declined it because OCR misreads hours most often.
+3. **His profile at zero hours (item 25).** The page follows volunteering
+   history by recorded design; with no service yet it shows the account layout.
+   Make the founder's page student-style unconditionally?
+4. **EULA (ruling 13).** Recommendation: none. WeVolunteer is a website, and the
+   Terms already do an EULA's job.
 
 **Combined *security-review* before release-ready:** `0e74e2a`, `5784b79`
 (session middleware), `a1ec7c9` (roster paging on a privacy-gated route),
-`3373f79` (the public verify endpoint gains a field).
+`3373f79` (the public verify endpoint gains a field), `11cd2c5` (uploads and
+a staff-only image route), `152aab1` (signup and rename), `125d645` (organizer
+revocation), `d41eecd` (report from an appeal), `4684d90` (outbound checks).
 
 Full suite at `ac5ee35`: 11,227 passed, 0 failed.
 
