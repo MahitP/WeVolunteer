@@ -61,7 +61,8 @@ import {
   ALLOWED_IMAGE_FORMATS, ALLOWED_IMAGE_FORMAT_LABEL, MAX_IMAGE_INPUT_PIXELS,
 } from './profilePictureRoutes.js';
 import { notificationService } from '../services/notificationService.js';
-import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning } from '../appeals.js';
+import { recordAppealEvent, APPEAL_DECISIONS, validateReasoning, organizationBanAppeal } from '../appeals.js';
+import { createReport } from '../reportService.js';
 
 const router = express.Router();
 
@@ -1605,6 +1606,44 @@ router.get('/api/organizations/:key/appeals', authenticateToken, requireCap('org
       `).get(row.id, a.user_id))?.banned_by === req.principal.userId,
     }))),
   });
+});
+
+/**
+ * Report appeal spam to the moderators, from the appeal (FX-70).
+ *
+ * The owner: "an organizer can also report a student if they're being annoying
+ * and spamming them with appeals even tho they clearly don't want the student".
+ * Appeals are already capped at five in thirty days; this is for the pattern a
+ * cap cannot judge.
+ *
+ * Keyed on the APPEAL, not the person. The inbox deliberately carries no
+ * appellant id — "no id to correlate elsewhere" — so the server resolves who is
+ * reported, and the appeal's own words go to the moderators as the evidence.
+ * It files an ordinary report through `createReport`, so duplicates, limits and
+ * the moderation queue all behave as for any other report.
+ */
+router.post('/api/organizations/:key/appeals/:appealId/report', authenticateToken, requireCap('organization.manage.own'), async (req, res) => {
+  const row = await loadManagedOrganization(req, res);
+  if (!row) return;
+
+  const appeal = await organizationBanAppeal(db, req.params.appealId, row.id);
+  if (!appeal) return res.status(404).json({ error: 'No appeal matches that id.' });
+
+  const note = String(req.body?.description ?? '').trim().slice(0, 1000);
+  const description = [
+    note || 'Keeps appealing their ban after the organization has said no.',
+    `Reported from ${row.name}'s appeals inbox. Their appeal: "${String(appeal.statement || '').slice(0, 1500)}"`,
+  ].join('\n\n');
+
+  const result = await createReport({
+    reporter: req.user,
+    targetType: 'user',
+    targetId: appeal.user_id,
+    category: 'bullying_or_harassment',
+    description,
+  });
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error, code: result.code });
+  return res.status(201).json({ reported: true, duplicate: Boolean(result.duplicate) });
 });
 
 /**

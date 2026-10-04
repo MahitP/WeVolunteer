@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Scale, AlertTriangle } from 'lucide-react';
+import { Scale, AlertTriangle, Flag } from 'lucide-react';
+import ConfirmDialog from '../common/ConfirmDialog';
 import { api } from '../../utils/api';
 import { DECISION_LABELS, isFinal } from '../../appeals';
 
@@ -31,7 +32,25 @@ import { DECISION_LABELS, isFinal } from '../../appeals';
  * list would push the roster off a phone screen for a card that is empty on
  * most days.
  */
+const SPAM_NOTE = 'Keeps sending appeals against their ban from our organization after we have said no.';
+
 export default function AppealInbox({ orgKey, addToast }) {
+  /* Appeal spam (FX-70): the appeal being reported, and the note sent with it. */
+  const [reporting, setReporting] = useState(null);
+  const [reportNote, setReportNote] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const sendReport = async () => {
+    setReportBusy(true);
+    try {
+      const res = await api.reportOrganizationAppeal(orgKey, reporting.id, { description: reportNote.trim() });
+      addToast?.(res?.duplicate ? 'The moderators already have a report about this.' : 'Reported to the moderators.', 'success');
+      setReporting(null);
+    } catch (err) {
+      addToast?.(err.message, 'error');
+    } finally {
+      setReportBusy(false);
+    }
+  };
   const [appeals, setAppeals] = useState(null);
   const [busy, setBusy] = useState(null);
   const [reasoning, setReasoning] = useState({});
@@ -125,6 +144,17 @@ export default function AppealInbox({ orgKey, addToast }) {
 
             <blockquote className="appeal-inbox-statement">{a.statement}</blockquote>
 
+            {/* Appeal spam (FX-70): appeals are capped at five in thirty days,
+                and a manager can still hand a pattern of them to the
+                moderators, from the appeal itself. */}
+            <div>
+              <button type="button" className="btn btn-ghost btn-sm"
+                onClick={() => { setReporting(a); setReportNote(SPAM_NOTE); }}
+                aria-label={`Report ${a.appellant.name}`}>
+                <Flag size={13} aria-hidden="true" /> Report
+              </button>
+            </div>
+
             {isFinal(a.status) ? (
               <p className="small dim">
                 {DECISION_LABELS[a.decision] || 'Decided'}
@@ -168,6 +198,27 @@ export default function AppealInbox({ orgKey, addToast }) {
           </article>
         ))}
       </div>
+      {reporting && (
+        <ConfirmDialog
+          title={`Report ${reporting.appellant.name} to the moderators?`}
+          confirmLabel="Send report"
+          busy={reportBusy}
+          busyLabel="Sending…"
+          confirmDisabled={!reportNote.trim()}
+          onConfirm={sendReport}
+          onCancel={() => setReporting(null)}
+        >
+          <p>
+            The moderators see this appeal and your note, and decide what happens. It does not
+            change the ban or the appeal.
+          </p>
+          <div className="field">
+            <label htmlFor="appeal-report-note">What is happening?</label>
+            <textarea id="appeal-report-note" className="input" rows={3} maxLength={1000}
+              value={reportNote} onChange={e => setReportNote(e.target.value)} />
+          </div>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

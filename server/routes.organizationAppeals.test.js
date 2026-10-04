@@ -456,4 +456,39 @@ describe('the organization appeal inbox', () => {
       await db.prepare("DELETE FROM organization_bans WHERE id = 'newer-ban'").run();
     });
   });
+
+  /**
+   * "Ofc an organizer can also report a student if they're being annoying and
+   * spamming them with appeals" (FX-70). A manager reports from the appeal: the
+   * server finds the appellant, so the manager never holds their account id
+   * (the rule the case above pins), and the appeal's own words go to the
+   * moderators as the evidence.
+   */
+  describe('reporting appeal spam', () => {
+    const report = (key, id, body, session) =>
+      srv.call('POST', `/api/organizations/${key}/appeals/${id}/report`, body, session);
+
+    it('files a moderation report about the appellant, with the appeal attached', async () => {
+      const id = await banAndAppeal();
+      const res = await report(orgKey, id, { description: 'Five appeals this week after we said no.' }, manager);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+
+      const row = await db.prepare(
+        "SELECT target_type, target_id, category, description, reporter_id FROM reports WHERE target_type = 'user' AND target_id = ? ORDER BY created_at DESC"
+      ).get(studentId);
+      expect(row.reporter_id).toBe(managerId);
+      expect(row.category).toBe('bullying_or_harassment');
+      expect(row.description).toMatch(/Five appeals this week/);
+      expect(row.description).toMatch(/cancelled by the organizer/);
+    });
+
+    it('is a manager\'s act, about their own club\'s appeals', async () => {
+      const id = await banAndAppeal();
+      expect((await report(orgKey, id, { description: 'Not my club to judge.' }, outsider)).status).toBe(403);
+      /* A club this manager does not run: refused by the same check every
+         manager route uses. */
+      expect((await report(otherKey, id, { description: 'Wrong club.' }, manager)).status).toBe(403);
+      expect((await report(orgKey, 'appeal-nope', { description: 'Nothing here.' }, manager)).status).toBe(404);
+    });
+  });
 });

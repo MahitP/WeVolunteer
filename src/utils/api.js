@@ -917,6 +917,12 @@ export const api = {
    */
   /* The organization's own appeal inbox. Scoped server-side to the org in the
      path, so a manager of one club cannot read another's. */
+  /* Report appeal spam from the appeal (FX-70). Keyed on the appeal: the inbox
+     never holds the appellant's id, so the server says who is reported. */
+  reportOrganizationAppeal: async (key, appealId, body) =>
+    apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals/${encodeURIComponent(appealId)}/report`, {
+      method: 'POST', body: JSON.stringify(body),
+    }),
   fetchOrganizationAppeals: async (key) =>
     apiFetch(`/api/organizations/${encodeURIComponent(key)}/appeals`),
 

@@ -20,6 +20,7 @@ vi.mock('../../utils/api', () => ({
   api: {
     fetchOrganizationAppeals: vi.fn(),
     decideOrganizationAppeal: vi.fn(),
+    reportOrganizationAppeal: vi.fn(),
   },
 }));
 
@@ -52,5 +53,35 @@ describe('AppealInbox', () => {
     await waitFor(() => expect(api.fetchOrganizationAppeals).toHaveBeenCalled());
     expect(addToast).not.toHaveBeenCalled();
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+/**
+ * "Ofc an organizer can also report a student if they're being annoying and
+ * spamming them with appeals even tho they clearly don't want the student"
+ * (FX-70). Appeals are limited to five in thirty days; past that, or within
+ * it, a manager can hand the matter to the moderators from the appeal itself.
+ */
+describe('reporting appeal spam', () => {
+  it('reports from the appeal, with a note the manager can edit', async () => {
+    const { screen, fireEvent, within } = await import('@testing-library/react');
+    api.fetchOrganizationAppeals.mockResolvedValue({
+      appeals: [{
+        id: 'ap1', status: 'open', decision: null, statement: 'Please let me back in. Please. Please.',
+        createdAt: '2026-09-30T10:00:00.000Z',
+        appellant: { name: 'Maya Chen', username: 'maya' },
+        ban: { reason: 'Repeated disruption', active: true },
+      }],
+    });
+    api.reportOrganizationAppeal.mockResolvedValue({ reported: true });
+    render(<AppealInbox orgKey="beach-cleanup" addToast={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Report Maya Chen' }));
+    const dialog = screen.getByRole('dialog');
+    const note = within(dialog).getByLabelText(/What is happening/);
+    expect(note.value).toMatch(/appeals/i);
+    fireEvent.change(note, { target: { value: 'Five appeals this week.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send report' }));
+    await waitFor(() => expect(api.reportOrganizationAppeal)
+      .toHaveBeenCalledWith('beach-cleanup', 'ap1', { description: 'Five appeals this week.' }));
   });
 });

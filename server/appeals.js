@@ -383,3 +383,15 @@ export async function recordAppealEvent(db, { appealId, actorId = null, actorRol
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(newAppealEventId(), appealId, actorId, actorRole, action, fromStatus, toStatus, note, new Date().toISOString());
 }
+
+/**
+ * One appeal against a ban from this organization, or null (FX-70).
+ *
+ * Scoped to the organization so a manager can reach only their own club's
+ * appeals; takes a handle, like the rest of this module.
+ */
+export async function organizationBanAppeal(db, appealId, organizationId) {
+  return (await db.prepare(
+    "SELECT id, user_id, statement FROM appeals WHERE id = ? AND subject = 'organization_ban' AND subject_ref = ?"
+  ).get(String(appealId), organizationId)) || null;
+}
