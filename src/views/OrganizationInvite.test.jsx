@@ -80,7 +80,7 @@ describe('a visitor with no account', () => {
   it('sees the club, its counts and what is coming up', async () => {
     await show();
     expect(screen.getByText('42 members')).toBeInTheDocument();
-    expect(screen.getByText('11 opportunities')).toBeInTheDocument();
+    expect(screen.getByText('11 events')).toBeInTheDocument();
     expect(screen.getByText('We play chess and we teach it.')).toBeInTheDocument();
     expect(screen.getByText('Beach cleanup')).toBeInTheDocument();
   });

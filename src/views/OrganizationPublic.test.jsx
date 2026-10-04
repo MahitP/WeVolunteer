@@ -79,7 +79,7 @@ describe('the club at its public address', () => {
   it('shows the counts and what is coming up', async () => {
     await show();
     expect(screen.getByText('42 members')).toBeInTheDocument();
-    expect(screen.getByText('11 opportunities')).toBeInTheDocument();
+    expect(screen.getByText('11 events')).toBeInTheDocument();
     expect(screen.getByText('Beach cleanup')).toBeInTheDocument();
   });
 

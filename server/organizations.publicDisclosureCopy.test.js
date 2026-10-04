@@ -72,7 +72,7 @@ const ACCOUNTED_FOR = {
   avatarColor: ['logo'],
   tags: ['tags'],
   memberCount: ['how many members'],
-  eventCount: ['how many opportunities'],
+  eventCount: ['how many events'],
   upcoming: ['what is coming up'],
   joinPolicy: ['can join', 'coming up'],
 
