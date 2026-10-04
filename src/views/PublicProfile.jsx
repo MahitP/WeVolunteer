@@ -34,6 +34,7 @@ import EmptyState from '../components/common/EmptyState';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ReportModal from '../components/ReportModal';
 import { DistinctionBanner, DistinctionTag } from '../components/profile/Distinction';
+import DemonstrationShowcase from '../components/profile/DemonstrationShowcase';
 import OrgAvatar from '../components/common/OrgAvatar';
 /* Extracted so the organization roster can use the same menu rather than a
    second copy that drifts out of step on accessibility. */
@@ -350,9 +351,14 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
         * runs things. The moment such an account HAS volunteered, the section
         * returns, which is exactly what makes the owner/student hybrid work
         * without a rule naming anybody: the condition is the data, not the role.
+        *
+        * One exception, the owner's ruling 21: the founder's page is a
+        * student's at any history, so his zeros are shown. The server sets
+        * `studentProfile` from his address; this page names nobody.
         */}
       {(hoursPrivate
         || !profile.distinction
+        || profile.distinction?.studentProfile
         || stats?.eventsSignedUp > 0 || stats?.eventsAttended > 0
         || stats?.hours > 0 || profile.lastVolunteeredAt) && (
       <section className="card">
@@ -447,6 +453,9 @@ export default function PublicProfile({ currentUser, addToast, onEditProfile }) 
         </div>
       </section>
       )}
+
+      {/* The founder's alone (ruling 19), after his real record. */}
+      <DemonstrationShowcase showcase={profile.showcase} />
 
       {/* ── Interests ── */}
       {(profile.hobbies?.length > 0 || profile.skills?.length > 0) && (

@@ -11,6 +11,7 @@ import { buildMilestones } from '../milestones.js';
 import { milestoneInputs, creditedTotalsFor } from '../volunteerInsights.js';
 import { db } from '../db.js';
 import { distinctionFor } from '../profileSerializer.js';
+import { demonstrationShowcase } from '../demonstrationShowcase.js';
 import { validateProfilePatch } from '../accountValidation.js';
 import '../services/verification.js';
 import { canSeeHours, isValidVisibility } from '../serviceVisibility.js';
@@ -92,15 +93,23 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
      * profile is still theirs.
      */
     const row = await db.prepare(`
-      SELECT * FROM users
+      SELECT users.*,
+             CASE WHEN role = 'student'
+                    OR EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = users.id AND a.present = 1)
+                  THEN 1 ELSE 0 END AS is_volunteer
+        FROM users
        WHERE id = ?
          AND account_status <> 'deleted'
-         AND (
-           role = 'student'
-           OR EXISTS (SELECT 1 FROM attendance a WHERE a.user_id = users.id AND a.present = 1)
-         )
     `).get(req.params.id);
-    if (!row) return res.status(404).json({ error: 'Volunteer not found' });
+    /* A volunteer profile exists for a student, for anybody with confirmed
+       service, and for the founder at any history (ruling 21: his page is a
+       student's, with honest zeros). The last is the server's own flag from
+       the address, never a client's claim. Every other account with no
+       service answers 404 exactly as before, so this route still says nothing
+       about who exists beyond what it said already. */
+    const distinction = row ? distinctionFor(row.role, row.email) : null;
+    const isVolunteer = row && (Number(row.is_volunteer) === 1 || distinction?.studentProfile === true);
+    if (!isVolunteer) return res.status(404).json({ error: 'Volunteer not found' });
 
     const isSelf = req.params.id === req.principal.userId;
 
@@ -320,7 +329,10 @@ router.get('/api/users/:id/profile', authenticateToken, async (req, res) => {
       upcoming: isSelf ? upcoming.map(u => ({
         eventId: u.event_id, title: u.title, category: u.category, location: u.location,
         slotName: u.slot_name, startDatetime: u.start_datetime, endDatetime: u.end_datetime
-      })) : []
+      })) : [],
+      /* Ruling 19: definitions labelled a demonstration, never an award.
+         Same source as the public profile's (demonstrationShowcase.js). */
+      ...(distinction?.showcase ? { showcase: await demonstrationShowcase(db) } : {}),
     });
   } catch (err) {
     console.error('Volunteer profile error:', err);

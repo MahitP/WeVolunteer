@@ -213,7 +213,11 @@ const SELF_PROFILE = [
  * banner, so the page says "Platform owner" and then shows their service.
  */
 export const selfProfileFor = (user) => {
-  if (can(user, 'portfolio.write') && Number(user?.volunteeredHours) > 0) return 'volunteer';
+  /* `studentProfile` is the server's flag for the founder (ruling 21, decided
+     from the address in server/profileSerializer.js): his page is a student's
+     at any history. This file still matches no name or address. */
+  const presentsAsVolunteer = Number(user?.volunteeredHours) > 0 || user?.distinction?.studentProfile === true;
+  if (can(user, 'portfolio.write') && presentsAsVolunteer) return 'volunteer';
   return SELF_PROFILE.find(p => can(user, p.cap))?.view ?? 'denied';
 };
 

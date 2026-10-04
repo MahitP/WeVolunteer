@@ -9,6 +9,7 @@ import { creditedLabel } from '../utils/serviceRecord';
 import { DateChip } from '../components/Seats';
 import PreviewList from '../components/common/PreviewList';
 import BadgesList from '../components/BadgesList';
+import DemonstrationShowcase from '../components/profile/DemonstrationShowcase';
 import { Link } from 'react-router-dom';
 
 /**
@@ -207,6 +208,10 @@ export default function VolunteerProfile({
           moreHref={seeAllHref('badges', { isSelf, username: volunteer?.username })}
         />
       </section>
+
+      {/* The founder's alone (ruling 19); after the real badges, so the record
+          is read first and the demonstration is read as one. */}
+      <DemonstrationShowcase showcase={data.showcase} />
 
       {/* The same two-column body as the dashboard, and the same class — it had
           the same inline `gridTemplateColumns`, so it overflowed a phone for the

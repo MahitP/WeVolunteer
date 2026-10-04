@@ -718,7 +718,7 @@ marked 🔒.
 | 1 | Done | `5e231cd` | *security-review* run before commit |
 | 2 | Done | `0e74e2a` | R1. Passed the combined *security-review* below: the fix adds `username` to the session's user |
 | 3 | Done | `5784b79` | R2. Passed the combined *security-review* |
-| 4 | Partial | `bb32bdb` | The QA seed refuses real data by content. The demonstration-record tool waits on an owner question: the marker has to be excluded in 26 files that read attendance, and the alternative is weighed in the question |
+| 4 | Done | `bb32bdb`, see 25 | The QA seed refuses real data by content. Ruling 19 replaced the demonstration-record tool with a showcase drawn on the profile, so nothing is written and no marker exists to exclude |
 | 5 | Done | `cc886fb`, `eeb5e56` | `eeb5e56` builds the reference in memory: the first version deleted a temp directory and failed the script-safety guard |
 | 6 | Done | `7c9cad1` | |
 | 7 | Done | `ef96802` | |
@@ -739,27 +739,21 @@ marked 🔒.
 | 22 | Done | `c16a584` | `Wordmark` is now rendered nowhere; kept for the revamp hand-over |
 | 23 | Done | `48cc211` | robots.txt, sitemap.xml, per-page descriptions; `noindex` on every page that carries a person. Search Console verification is an owner action |
 | 24 | Done | `11cd2c5` | Also N13: reports had no staff view at all; `/admin/issues` added. Migration 072 |
-| 25 | Partial | `152aab1` | `@mahit`/`@wevolunteer` reserved; the platform account's wording fixed. Student layout at zero hours left history-driven by recorded design: owner question |
+| 25 | Done | `152aab1`, this commit | `@mahit`/`@wevolunteer` reserved; the platform account's wording fixed. Rulings 19 and 21: the founder's page is a student's at any history (`distinction.studentProfile`), and carries every badge and milestone as a labelled demonstration that writes nothing (`server/demonstrationShowcase.js`). `/api/users/:id/profile` admits the founder at zero service; every other account answers as before. *security-review* with the rest of this round |
 | 26 | Done | `cd8638b`, `125d645`, `d41eecd` | Revoked organizers are their own state (migration 073), never deniable; appeal spam reported through the appeal, never the appellant's id |
 | 27 | Done | `08b5a8a`, `b75a16b`, `4684d90` | |
 | 28 | Owner question | — | The code records a deliberate decision not to OCR photos (accuracy of the hours field). Recommendation in the question list |
 | 29 | Done (drafts) | `45ff705`, `e10568e` | `docs/legal/drafts/`. Unpublished; the owner publishes |
 | 30 | Done | `c832dd1` | |
 
-**Questions for the owner, from the fix pass:**
+**Rulings on the fix-pass questions (2026-10-04):**
 
-1. **Demonstration record (item 4).** Marking the showcase rows means excluding
-   them in every query that reads attendance (26 files). The alternative is a
-   showcase drawn only on the profile page, with nothing written to the record.
-2. **Photo reading (item 28).** On-device OCR (Tesseract, about 10 MB of
-   language data hosted by WeVolunteer, loaded only when a photo is chosen),
-   with every value shown for the student to check before saving. The existing
-   code declined it because OCR misreads hours most often.
-3. **His profile at zero hours (item 25).** The page follows volunteering
-   history by recorded design; with no service yet it shows the account layout.
-   Make the founder's page student-style unconditionally?
-4. **EULA (ruling 13).** Recommendation: none. WeVolunteer is a website, and the
-   Terms already do an EULA's job.
+| # | Item | Ruling | Consequence |
+|---|---|---|---|
+| 19 | Item 4 / decision 1, the showcase | **Drawn on the profile only** — supersedes the marked demonstration rows | The founder's profile shows every badge, hour and streak under a "demonstration" tag; nothing is written to attendance, so the transcript, certificates, `/verify` and every platform total stay true without touching the 26 files that read attendance. The QA seed (`bb32bdb`) stays as it is |
+| 20 | Item 28 / P2-31, photo reading | **OCR, but never the hours** | On-device OCR pre-fills organization, event and date from a photo; the student always types the hours, so the misread that lands on a record cannot happen. Language data self-hosted, loaded only when a photo is chosen |
+| 21 | Item 25, the founder's page | **Student-style always** | The founder's profile uses the student layout whatever the history, with honest zeros; every other account keeps the history-driven layout |
+| 22 | Ruling 13, EULA | **Draft one** — the recommendation was none | An EULA draft in `docs/legal/drafts/`, unpublished, for the owner to review against Posture B before publishing |
 
 **Combined *security-review* — passed 2026-10-04, no findings.** Run over the
 whole diff ahead of `origin/main` at `d4cd8fb`, with these nine commits read

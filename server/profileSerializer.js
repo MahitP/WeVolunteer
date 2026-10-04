@@ -69,6 +69,7 @@
 import { volunteerStats, externalHoursSummary } from './volunteerStats.js';
 import { visibilityState } from './serviceVisibility.js';
 import { ownerIdentity } from './ownerAllowlist.js';
+import { demonstrationShowcase } from './demonstrationShowcase.js';
 
 /**
  * The distinguished presentation an account carries, or null for a member.
@@ -167,9 +168,14 @@ const DISTINCTIONS = {
  *     the founder's words, "the person responsible for how the platform works",
  *     which is untrue of an account and is published to every member.
  *
- * Which LAYOUT a profile gets is deliberately not decided here: it follows the
- * account's volunteering history (`selfProfileFor`, App.ownerProfile.test.jsx),
- * so the founder's page is a student's as soon as it has service on it.
+ * Which LAYOUT a profile gets follows the account's volunteering history
+ * (`selfProfileFor`, App.ownerProfile.test.jsx) for every account but one. The
+ * owner ruled on 2026-10-04 (ruling 21) that the founder's page is a student's
+ * whatever the history, with honest zeros until there is service on it:
+ * `studentProfile` says so, and the client follows the flag rather than
+ * matching an address. `showcase` is ruling 19: the demonstration of every
+ * badge and milestone, drawn on his profile and written nowhere
+ * (demonstrationShowcase.js). Both are presentation, like everything here.
  *
  * Identity is the address (`ownerIdentity`), the same thing the ownership
  * allowlist names. Where a payload has no address — a search result — the
@@ -183,6 +189,8 @@ const OWNER_IDENTITIES = {
       'The founder of WeVolunteer, and the person responsible for how it works, '
       + 'what it does with your information, and the policies in the Legal Center. '
       + 'Also a student volunteer, with a service record on this page like anyone else.',
+    studentProfile: true,
+    showcase: true,
   },
   platform: {
     ...DISTINCTIONS.super_admin,
@@ -591,6 +599,13 @@ export async function publicProfile(db, row, { viewerId = null, canSeeContact = 
   }
   if (isSelf) {
     profile.friendActivityVisible = row.friend_activity_visible !== 0;
+  }
+
+  /* Badge and milestone DEFINITIONS, labelled a demonstration where they
+     render; no award and no hours, so no privacy setting has anything to
+     withhold. See demonstrationShowcase.js. */
+  if (distinction?.showcase) {
+    profile.showcase = await demonstrationShowcase(db);
   }
 
   return profile;
