@@ -50,7 +50,9 @@ export default function CertificateImport({ onExtracted }) {
        */
       let result = await readCertificate(file, { runtime: null });
 
-      const stillMissing = ['organizationName', 'activityName', 'occurredOn', 'hours']
+      /* `fillable` leaves out the hours for a photo, which is never read for
+         them (ruling 20), so their absence does not load a model. */
+      const stillMissing = (result.fillable ?? ['organizationName', 'activityName', 'occurredOn', 'hours'])
         .some(key => result.fields[key] === undefined);
       const prefs = readPreferences();
 
@@ -89,8 +91,9 @@ export default function CertificateImport({ onExtracted }) {
       <h3>Import from a certificate</h3>
       <p className="dim small">
         Choose a certificate and WeVolunteer will try to fill in the organization, activity,
-        date and hours below. The file is read on this device and is not uploaded. Check
-        everything before you save it.
+        date and hours below. From a photo it fills in everything but the hours, which you
+        type yourself. The file is read on this device and is not uploaded. Check everything
+        before you save it.
       </p>
 
       <div>

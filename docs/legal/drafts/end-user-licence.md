@@ -42,10 +42,12 @@ and this licence covers all three:
    downloaded to your browser's storage and runs on your device.
    *(`src/ai/models.js`.)*
 
-[OWNER: if photo reading (ruling 20) ships before this is published, add: "4.
-**Text-recognition data, if you read a certificate from a photo.** About 10 MB,
-downloaded from WeVolunteer the first time you choose a photo, and kept in your
-browser's storage."]
+4. **The photo reader, if you import a certificate from a photo.** A
+   text-recognition engine and its English data, about 7 MB, downloaded from
+   WeVolunteer itself the first time you choose a photo and kept in your
+   browser's cache. The photo is read on your device and is not uploaded.
+   *(Ruling 20: `src/ai/certificate/ocr.js`. Built 2026-10-04 and not yet
+   deployed; drop this item if it is not live when you publish.)*
 
 ## 2. What you may do
 
@@ -74,10 +76,13 @@ those parts.
 |---|---|---|
 | The Welly AI models (SmolLM2 135M Instruct; Qwen2.5 0.5B and 1.5B Instruct) | Hugging Face; the Qwen team at Alibaba Cloud | Apache 2.0 |
 | The engine that runs them in your browser (wllama) | its open-source contributors | MIT |
+| The photo reader (Tesseract.js, its engine, and the English data) | the Tesseract and Tesseract.js projects | Apache 2.0 (the English data's npm packaging is MIT) |
 | Other open-source libraries in the app's code | their authors | Their own licences, listed in [OWNER: decide where; see note below] |
 
 The models are downloaded directly from Hugging Face, the site that hosts them,
-the first time you choose one. *(`MODEL_BASE_URL`, `src/ai/models.js`.)*
+the first time you choose one. *(`MODEL_BASE_URL`, `src/ai/models.js`.)* The
+photo reader is downloaded from WeVolunteer, never from a third party.
+*(`ocr.js`; `vite.config.js` serves its data.)*
 
 > **[OWNER] A notice page.** Apache 2.0 and MIT both ask for the licence text
 > to accompany a copy. A website is not usually treated as distributing copies
@@ -90,6 +95,8 @@ the first time you choose one. *(`MODEL_BASE_URL`, `src/ai/models.js`.)*
 
 - **The app's code:** clear WeVolunteer's site data in your browser's settings.
 - **The home-screen version:** remove it like any other app icon.
+- **The photo reader:** clear WeVolunteer's site data, as above. It sits in the
+  browser's ordinary cache and nowhere else.
 - **A Welly AI model:** in Settings, under Welly Assistant, choose **Turn off and
   remove**. Clearing site data removes it too.
   *(`AISettingsCard.jsx`.)* [OWNER: confirm the button's wording at

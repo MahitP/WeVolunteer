@@ -21,7 +21,6 @@ const { MockRuntime } = await import('../runtime/MockRuntime.js');
 
 const TODAY = new Date('2026-08-15T12:00:00Z');
 const PDF_BYTES = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37];
-const JPEG_BYTES = [0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0];
 
 const fileOf = bytes => new File([new Uint8Array(bytes)], 'cert.pdf', { type: 'application/pdf' });
 
@@ -156,14 +155,8 @@ describe('a certificate that needs the model', () => {
 });
 
 describe('files it cannot read', () => {
-  it('says so plainly for a photo, rather than guessing', async () => {
-    /* Optical character recognition is not in yet, and reading an image wrong
-       is worse than not reading it. */
-    const res = await readCertificate(fileOf(JPEG_BYTES), { runtime: null, today: TODAY });
-    expect(res.fields).toEqual({});
-    expect(res.notes.join(' ')).toMatch(/photo/i);
-    expect(res.notes.join(' ')).toMatch(/type the details in/i);
-  });
+  /* Photos are read now, for everything but the hours (ruling 20):
+     readCertificate.photo.test.js. */
 
   it('recognises a scan wrapped in a PDF', async () => {
     extractPdfText.mockResolvedValue('  \n f \n ');

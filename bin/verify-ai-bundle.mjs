@@ -38,9 +38,11 @@ import path from 'node:path';
  * roughly two megabytes and is gated behind the same flag. Leaving it out made
  * the script report a pass while listing only part of what it had actually
  * kept out of the default build — accurate on the verdict, misleading on the
- * evidence.
+ * evidence. The photo reader (ruling 20) is gated the same way, and matched
+ * by every name it ships under: `ocr-*.js`, Tesseract's `worker.min-*.js`,
+ * the two `tesseract-core-*` engines and the English `traineddata`.
  */
-const AI_PATTERN = /wllama|pdf|\.wasm$/i;
+const AI_PATTERN = /wllama|pdf|tesseract|traineddata|worker\.min|(^|\/)ocr[-.]|\.wasm$/i;
 
 function build(outDir, env) {
   execFileSync('npx', ['vite', 'build', '--outDir', outDir, '--emptyOutDir'], {

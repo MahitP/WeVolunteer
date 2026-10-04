@@ -50,7 +50,9 @@ function ExtractedMark({ source }) {
   return (
     <span className="field-hint dim small">
       <Check size={12} aria-hidden="true" />
-      {source === 'ai' ? ' Read by the assistant — please check' : ' Read from the certificate — please check'}
+      {source === 'ai' ? ' Read by the assistant — please check'
+        : source === 'photo' ? ' Read from the photo — please check'
+        : ' Read from the certificate — please check'}
     </span>
   );
 }

@@ -177,6 +177,17 @@ describe('on-device AI bundle cost', () => {
     expect(offenders).toEqual(['ai/runtime/WllamaRuntime.js']);
   });
 
+  it('keeps the photo reader in the one module the certificate reader imports on demand', () => {
+    /* Ruling 20. About 7 MB of engine and data, wanted only when somebody
+       chooses a photo; a second module naming Tesseract would be a second way
+       into the build. readCertificate.photo.test.js checks the import is
+       dynamic. */
+    const mentions = FILES
+      .filter(f => /tesseract/i.test(stripComments(f.text)))
+      .map(f => f.path);
+    expect(mentions).toEqual(['ai/certificate/ocr.js']);
+  });
+
   it('keeps everything the app imports directly free of the runtime', () => {
     /**
      * The modules re-exported from `ai/index.js` are imported by ordinary

@@ -1,5 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { createReadStream, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { OCR_LANGUAGE_PATH, OCR_LANGUAGE_FILE, OCR_LANGUAGE_VERSION } from './src/ai/certificate/ocrAssets.js'
 
 /**
  * Where `/api` and `/socket.io` are forwarded in development.
@@ -69,9 +72,41 @@ function localAiFlag(mode) {
   return process.env.VITE_LOCAL_AI ?? fromFiles.VITE_LOCAL_AI ?? 'true'
 }
 
+/**
+ * The English data the photo reader needs (ruling 20), from this origin.
+ *
+ * Tesseract asks for `<langPath>/eng.traineddata.gz` by that exact name, so the
+ * file cannot be an ordinary hashed asset. It is served in development and
+ * emitted into the build at `OCR_LANGUAGE_PATH` (src/ai/certificate/ocrAssets.js),
+ * read from `@tesseract.js-data/eng`, which the lockfile pins, rather than
+ * committed as a binary.
+ *
+ * Emitted only when the build carries Welly AI, like the rest of the
+ * certificate reader: `bin/verify-ai-bundle.mjs` checks that a build with
+ * the feature off contains none of it.
+ */
+function ocrLanguageData(enabled) {
+  const source = createRequire(import.meta.url)
+    .resolve(`@tesseract.js-data/eng/${OCR_LANGUAGE_VERSION}/${OCR_LANGUAGE_FILE}`)
+  const route = `${OCR_LANGUAGE_PATH}/${OCR_LANGUAGE_FILE}`
+  return {
+    name: 'wevolunteer-ocr-language-data',
+    configureServer(server) {
+      server.middlewares.use(route, (req, res) => {
+        res.setHeader('Content-Type', 'application/gzip')
+        createReadStream(source).pipe(res)
+      })
+    },
+    generateBundle() {
+      if (!enabled) return
+      this.emitFile({ type: 'asset', fileName: route.slice(1), source: readFileSync(source) })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
-  plugins: [react()],
+  plugins: [react(), ocrLanguageData(localAiFlag(mode) === 'true')],
   define: {
     'import.meta.env.VITE_LOCAL_AI': JSON.stringify(localAiFlag(mode)),
   },

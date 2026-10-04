@@ -17,14 +17,16 @@
  * accepts. Showing it would have meant a student read it as correct and learned
  * otherwise on submit.
  *
- * ── Images are not read yet ──
+ * ── A photo is read for everything except the hours ──
  *
- * A photograph of a certificate needs optical character recognition, which is
- * another dependency and, on the research available, the step most likely to
- * return confident nonsense for the one field that matters most — the hours.
- * Rather than ship a guess, an image is accepted, identified, and reported as
- * something to type in manually. That is a worse feature than reading it and a
- * better one than reading it wrong.
+ * A photograph needs optical character recognition, the step most likely to
+ * return confident nonsense for the one field that matters most: the hours.
+ * Photos were therefore not read at all. The owner ruled on 2026-10-04
+ * (ruling 20) to read them and keep the objection: organization, activity and
+ * date come from the photo (`ocr.js`, on the device), and the hours are never
+ * filled from one, by the patterns or by the model. The student types them.
+ * A scan inside a PDF is still not read; rasterising PDF pages is a path this
+ * module deliberately never takes (see `extractPdfText`).
  */
 
 import {
@@ -74,25 +76,41 @@ export async function readCertificate(file, { runtime = null, signal, today = ne
   const kind = await inspectFile(file);
   const notes = [];
 
-  if (kind !== 'pdf') {
+  const isPhoto = kind !== 'pdf';
+  let text;
+
+  if (isPhoto) {
+    try {
+      /* Loaded here and only here, so a PDF never downloads the recogniser. */
+      const { recognizeText } = await import('./ocr.js');
+      text = await recognizeText(file, { signal });
+    } catch (err) {
+      if (isAbort(err)) throw err;
+      return {
+        fields: {},
+        sources: {},
+        text: '',
+        notes: ['That photo could not be read on this device. Please type the details in below.'],
+      };
+    }
+    notes.push(PHOTO_HOURS_NOTE);
+  } else {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    text = await withTimeout(
+      extractPdfText(bytes),
+      LIMITS.timeoutMs,
+      'That PDF took too long to read. Please type the details in below.',
+    );
+  }
+
+  if (isPhoto && !hasUsableText(text)) {
     return {
       fields: {},
       sources: {},
       text: '',
-      notes: [
-        'That looks like a photo. Reading text out of an image is not supported yet, '
-        + 'so please type the details in below.',
-      ],
+      notes: ['No text could be read from that photo. Please type the details in below.'],
     };
   }
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
-
-  const text = await withTimeout(
-    extractPdfText(bytes),
-    LIMITS.timeoutMs,
-    'That PDF took too long to read. Please type the details in below.',
-  );
 
   if (!hasUsableText(text)) {
     /* A scanned page inside a PDF wrapper. The text layer is absent or is a
@@ -112,7 +130,15 @@ export async function readCertificate(file, { runtime = null, signal, today = ne
   let fields = { ...pattern.fields };
   const sources = { ...pattern.sources };
 
-  const missing = ['organizationName', 'activityName', 'occurredOn', 'hours']
+  /* Ruling 20: a photo never supplies the hours, from the patterns or from the
+     model. Every other field it supplies is marked as read from a photo. */
+  if (isPhoto) {
+    delete fields.hours;
+    delete sources.hours;
+    for (const key of Object.keys(sources)) sources[key] = 'photo';
+  }
+
+  const missing = (isPhoto ? PHOTO_FIELDS : ALL_FIELDS)
     .filter(key => fields[key] === undefined);
 
   /* The model runs only for what the patterns did not find, and only when one
@@ -125,6 +151,8 @@ export async function readCertificate(file, { runtime = null, signal, today = ne
       );
 
       const parsed = safeParse(reply);
+      /* `missing` never names the hours for a photo, so a model that returns
+         them anyway contributes nothing there. */
       for (const key of missing) {
         const value = parsed?.[key];
         if (value === undefined || value === '' || value === 0) continue;
@@ -148,12 +176,23 @@ export async function readCertificate(file, { runtime = null, signal, today = ne
     notes.push('The hours could not be read reliably, so they have been left blank.');
   }
 
-  if (Object.keys(valid).length === 0 && notes.length === 0) {
+  if (Object.keys(valid).length === 0 && notes.every(n => n === PHOTO_HOURS_NOTE)) {
     notes.push("We couldn't confidently read this certificate. Please type the details in below.");
   }
 
-  return { fields: valid, sources, notes, text };
+  /* `fillable` is what this read could ever supply, so a caller deciding
+     whether to load a model for the gaps does not count the hours of a photo
+     as a gap. */
+  return { fields: valid, sources, notes, text, fillable: isPhoto ? [...PHOTO_FIELDS] : [...ALL_FIELDS] };
 }
+
+const ALL_FIELDS = Object.freeze(['organizationName', 'activityName', 'occurredOn', 'hours']);
+
+/** What a photo may fill. Never `hours`: see the note at the top. */
+const PHOTO_FIELDS = Object.freeze(['organizationName', 'activityName', 'occurredOn']);
+
+const PHOTO_HOURS_NOTE = 'Hours are never read from a photo. Please type them in yourself: '
+  + 'it is the number a photo is most often misread on, and it goes on your record.';
 
 function safeParse(reply) {
   try {

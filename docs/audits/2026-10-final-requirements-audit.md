@@ -742,7 +742,7 @@ marked 🔒.
 | 25 | Done | `152aab1`, this commit | `@mahit`/`@wevolunteer` reserved; the platform account's wording fixed. Rulings 19 and 21: the founder's page is a student's at any history (`distinction.studentProfile`), and carries every badge and milestone as a labelled demonstration that writes nothing (`server/demonstrationShowcase.js`). `/api/users/:id/profile` admits the founder at zero service; every other account answers as before. *security-review* with the rest of this round |
 | 26 | Done | `cd8638b`, `125d645`, `d41eecd` | Revoked organizers are their own state (migration 073), never deniable; appeal spam reported through the appeal, never the appellant's id |
 | 27 | Done | `08b5a8a`, `b75a16b`, `4684d90` | |
-| 28 | Owner question | — | The code records a deliberate decision not to OCR photos (accuracy of the hours field). Recommendation in the question list |
+| 28 | Done | this commit | Ruling 20. Tesseract.js on the device, loaded only for a photo, every file from this origin (about 7 MB); organization, activity and date filled and marked "Read from the photo", hours never. Verified in the browser against a generated JPEG certificate: text read exactly, no request to any CDN. Both builds verified (`bin/verify-ai-bundle.mjs`, now matching the OCR files). Not covered: a scan inside a PDF, which would need PDF pages rasterised. The AI policy (and its 2.0 draft) does not mention the certificate reader at all, before or after this |
 | 29 | Done (drafts) | `45ff705`, `e10568e`, this commit | `docs/legal/drafts/`. Unpublished; the owner publishes. Ruling 22 added `end-user-licence.md`, limited to what reaches a device |
 | 30 | Done | `c832dd1` | |
 

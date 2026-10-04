@@ -51,6 +51,36 @@ of as zero. Adult organizers (`applicant.review`) and staff who may read contact
 detail are unchanged, as the Organizer Agreement describes. The rule is one
 function, `server/applicantDisclosure.js`, built on the profile's own.
 
+### Added — a certificate photo is read on the device, for everything but the hours
+
+"Import from a certificate" read a PDF's text layer and turned a photo away.
+It now reads a photo too (owner ruling 20): organization, activity and date are
+filled in and marked "Read from the photo — please check", and **the hours are
+never filled from a photo**, by the patterns or by the model. The student
+types them. The objection that kept photos out was that OCR is most often wrong
+about the hours, the one field that lands on a record. It still holds, and now
+the reader is built around it.
+
+Recognition is Tesseract.js (Apache 2.0), run in a worker on the device and
+loaded only when a photo is chosen. Its worker, its engine (the SIMD build
+where the browser has SIMD) and its English data are all served from this
+origin, about 7 MB, so nothing is fetched from a CDN and the photo is never
+uploaded. The data is emitted at `/ocr/4.0.0_best_int/` from the pinned
+`@tesseract.js-data/eng` package, because Tesseract asks for it by a fixed
+name. All of it ships only in a build with Welly AI, and
+`bin/verify-ai-bundle.mjs` now checks for every one of those files. A scan
+inside a PDF is still not read.
+
+### Added — the founder's profile is a student's, with every badge as a demonstration
+
+Owner rulings 19 and 21. The founder's page uses the student layout at any
+history, with honest zeros, and carries a "Demonstration" card of every badge
+and milestone the platform awards. The card is definitions only, with no award
+dates and no hours figure, and nothing is written to the record, so the
+transcript, certificates, `/verify` and platform totals are untouched. This
+replaces the planned demonstration rows, which would have needed excluding in
+26 files.
+
 ### Added — screenshots on a problem report, and somewhere staff can read reports
 
 Report an Issue takes up to three PNG, JPEG or WebP screenshots, attached by the
