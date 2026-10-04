@@ -743,7 +743,7 @@ marked 🔒.
 | 26 | Done | `cd8638b`, `125d645`, `d41eecd` | Revoked organizers are their own state (migration 073), never deniable; appeal spam reported through the appeal, never the appellant's id |
 | 27 | Done | `08b5a8a`, `b75a16b`, `4684d90` | |
 | 28 | Owner question | — | The code records a deliberate decision not to OCR photos (accuracy of the hours field). Recommendation in the question list |
-| 29 | Done (drafts) | `45ff705`, `e10568e` | `docs/legal/drafts/`. Unpublished; the owner publishes |
+| 29 | Done (drafts) | `45ff705`, `e10568e`, this commit | `docs/legal/drafts/`. Unpublished; the owner publishes. Ruling 22 added `end-user-licence.md`, limited to what reaches a device |
 | 30 | Done | `c832dd1` | |
 
 **Rulings on the fix-pass questions (2026-10-04):**
