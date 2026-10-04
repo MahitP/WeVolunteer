@@ -21,7 +21,7 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import AdminImpact from './AdminImpact';
+import AdminImpact, { impactHeadline } from './AdminImpact';
 import { api } from '../utils/api';
 
 vi.mock('../utils/api');
@@ -412,5 +412,30 @@ describe('Platform Impact', () => {
     expect(screen.queryByRole('button', { name: /download snapshot/i })).not.toBeInTheDocument();
     resolve(PAYLOAD());
     expect(await screen.findByRole('button', { name: /download snapshot/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * "Like we helped ___ people volunteer or ___ hours of volunteering. It should
+ * be that type of information" (P2-09) — the line the owner wants to post. The
+ * figures were on the page; the sentence was not, and the downloadable
+ * snapshot is where a post comes from.
+ */
+describe('the headline', () => {
+  it('says it the owner\'s way, from the same figures as the page', () => {
+    expect(impactHeadline({ totalVolunteers: 42, totalHours: 318.5 }))
+      .toBe('We have helped 42 people volunteer 319 hours.');
+    expect(impactHeadline({ totalVolunteers: 1, totalHours: 1 }))
+      .toBe('We have helped 1 person volunteer 1 hour.');
+  });
+
+  it('claims nothing before there is anything to claim', () => {
+    expect(impactHeadline({ totalVolunteers: 0, totalHours: 0 })).toBe('No confirmed volunteering yet.');
+  });
+
+  it('leads the page', async () => {
+    api.fetchAdminImpact.mockResolvedValue(PAYLOAD());
+    renderPage();
+    expect(await screen.findByText('We have helped 42 people volunteer 319 hours.')).toBeInTheDocument();
   });
 });

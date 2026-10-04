@@ -239,6 +239,23 @@ function HoursByCategory({ categories }) {
   );
 }
 
+/**
+ * The line to post (P2-09).
+ *
+ * The owner asked for a master dashboard with "that type of information …
+ * like we helped ___ people volunteer or ___ hours of volunteering" — "something
+ * that would be cool to post". The figures were here; the sentence was not.
+ * Drawn from the same `community` figures the page shows, so the two cannot
+ * disagree, and it claims nothing before there is something to claim.
+ */
+export function impactHeadline(community) {
+  const people = Number(community?.totalVolunteers) || 0;
+  const hours = Math.round(Number(community?.totalHours) || 0);
+  if (people === 0) return 'No confirmed volunteering yet.';
+  return `We have helped ${nf.format(people)} ${people === 1 ? 'person' : 'people'} volunteer `
+    + `${nf.format(hours)} ${hours === 1 ? 'hour' : 'hours'}.`;
+}
+
 /* ── The snapshot ────────────────────────────────────────────────────────── */
 
 /**
@@ -295,12 +312,14 @@ function snapshotSvg(data, title) {
   const cols = Math.min(cells.length, 3);
   const rowsN = Math.ceil(cells.length / cols);
   const CELL_H = 118;
-  const H = 150 + rowsN * CELL_H + 46;
+  /* The headline sits under the title, so the figures start lower. */
+  const TOP = 186;
+  const H = TOP + rowsN * CELL_H + 46;
   const cellW = (W - 96) / cols;
 
   const cellSvg = cells.map(([value, label], i) => {
     const cx = 48 + (i % cols) * cellW;
-    const cy = 150 + Math.floor(i / cols) * CELL_H;
+    const cy = TOP + Math.floor(i / cols) * CELL_H;
     return `
     <text x="${cx}" y="${cy + 44}" fill="${brand}" font-size="40" font-weight="700"
           font-family="Helvetica, Arial, sans-serif">${escapeXml(value)}</text>
@@ -316,7 +335,9 @@ function snapshotSvg(data, title) {
         font-family="Helvetica, Arial, sans-serif">${escapeXml(title)}</text>
   <text x="48" y="104" fill="${ink3}" font-size="16"
         font-family="Helvetica, Arial, sans-serif">${escapeXml(SCHOOL_NAME)}</text>
-  <line x1="48" y1="128" x2="${W - 48}" y2="128" stroke="${rule}" stroke-width="1"/>
+  <text x="48" y="146" fill="${brand}" font-size="22" font-weight="700"
+        font-family="Helvetica, Arial, sans-serif">${escapeXml(impactHeadline(c))}</text>
+  <line x1="48" y1="166" x2="${W - 48}" y2="166" stroke="${rule}" stroke-width="1"/>
   ${cellSvg}
   <text x="48" y="${H - 22}" fill="${ink3}" font-size="13"
         font-family="Helvetica, Arial, sans-serif">Generated ${escapeXml(generated)} · Hours are credited only after an organizer confirms attendance.</text>
@@ -453,6 +474,8 @@ export default function AdminImpact({ addToast }) {
 
         {status === 'ready' && (
           <div className="stack-lg">
+            {/* The line to post (P2-09); the snapshot carries it too. */}
+            <p className="impact-headline">{impactHeadline(data.community)}</p>
             <section aria-labelledby="impact-totals">
               <h2 className="sr-only" id="impact-totals">Totals</h2>
               <div className="impact-figures">

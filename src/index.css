@@ -11810,6 +11810,15 @@ input:disabled + .premium-slider {
 .issue-head { gap: var(--s3); align-items: center; }
 .issue-description { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
 
+/* Platform Impact's headline (P2-09): the sentence to post, above the figures. */
+.impact-headline {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--brand);
+}
+
 /* A day and a time (DateTimeField, ruling 8). When it is the whole content
    of a `.field`, the row's own top margin would push it below its
    neighbours. */
