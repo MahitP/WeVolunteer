@@ -138,9 +138,17 @@ describe('setting up on an iPhone (ruling 7)', () => {
   });
 });
 
-describe('the disclaimer (ruling 14)', () => {
-  it('says exactly what stays on the device and what does not', () => {
+describe('the disclaimer (ruling 14, as amended 2026-10-04)', () => {
+  it('says exactly what runs on the device and what does not', () => {
+    /* The ruling's first wording, "what you type stays on your device", was
+       false: a search sends the words searched for. This is its replacement,
+       and the info site's sentence word for word. */
     const src = fs.readFileSync(path.join(process.cwd(), 'src/views/WellyView.jsx'), 'utf8');
-    expect(src).toContain('With Welly AI on, what you type stays on your device; lookups use WeVolunteer like the rest of the app.');
+    expect(src).toContain(
+      "With Welly AI on, the model that writes Welly's replies runs on your device. "
+      + 'Looking something up, like your hours or events to join, is a request to '
+      + 'WeVolunteer like the rest of the app, and a search sends the words you searched for.',
+    );
+    expect(src).not.toContain('With Welly AI on, what you type stays on your device');
   });
 });

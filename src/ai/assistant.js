@@ -120,13 +120,20 @@ const FIXED = {
    * replaces the absolute half is the other thing the footer already says: a
    * lookup is answered by WeVolunteer's server, exactly as the rest of the app
    * is. That is a smaller promise and a keepable one.
+   *
+   * It also no longer says "your words are not sent to any AI service" (owner,
+   * 2026-10-04). Pinecone runs a hosted embedding model over the words a search
+   * sends, so that was the same overstatement in other words. What is true,
+   * and what the footer and AI policy 2.0 now say, is narrower: no AI service
+   * writes the replies, and a search sends the words searched for.
    */
   identity_self:
     'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
     + 'I am software, not a person. When Welly AI is switched on I run a small open '
-    + 'language model entirely on your own device, so your words are not sent to any '
-    + 'AI service. Looking something up — your hours, your shifts, opportunities to '
-    + "join — is answered by WeVolunteer's server, the same as the rest of the app.",
+    + 'language model entirely on your own device, so no AI service writes my replies. '
+    + 'Looking something up — your hours, your shifts, opportunities to join — is '
+    + "answered by WeVolunteer's server, the same as the rest of the app, and a search "
+    + 'sends the words you searched for.',
 
   identity_platform:
     'This is WeVolunteer — the app schools use to post volunteer events, sign students '
@@ -387,9 +394,10 @@ function identityAnswer(runtime) {
      loaded actually reads. */
   return 'I am Welly, the assistant built into WeVolunteer by the people who make the app. '
     + 'I am software, not a person. Right now I am running a small open language model '
-    + `(${name}) entirely on your own device, so your words are not sent to any AI `
-    + 'service. Looking something up — your hours, your shifts, opportunities to join — '
-    + "is answered by WeVolunteer's server, the same as the rest of the app.";
+    + `(${name}) entirely on your own device, so no AI service writes my replies. `
+    + 'Looking something up — your hours, your shifts, opportunities to join — is '
+    + "answered by WeVolunteer's server, the same as the rest of the app, and a search "
+    + 'sends the words you searched for.';
 }
 
 /** "The deadline must…" → "the deadline must…", for use inside a sentence. */

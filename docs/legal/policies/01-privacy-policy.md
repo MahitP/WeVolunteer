@@ -56,6 +56,45 @@ name, the postal address, the vendor names) arrive as configuration and the page
 incomplete until they do. This draft supplies the text those config values should hold. There are
 no district-specific facts — that branch is gone.
 
+**PENDING CORRECTION 3 — Pinecone is not named anywhere in this document, and it
+should be.** Staged here, deliberately not applied, for the reason given under correction 1.
+Owner decision 2026-10-04: apply it at the launch pass, with corrections 1 and 2.
+
+When `PINECONE_API_KEY` is set, the server sends Pinecone the words a person searched for, from
+the Discover search box or a Welly search, with the search's filters. It also sends the text of
+every event: title, category, tags, organization name, location and description. It sends no
+name, account, email, IP address or location. Pinecone runs a hosted AI model over the text, in
+AWS us-east-1. The table says "Here is all of them" and does not list it. AI and On-Device
+Processing Policy 2.0 names Pinecone for Welly searches, but nothing names it for the Discover
+search box. The evidence and the reasoning are in `docs/legal/drafts/privacy-policy-search-provider.md`.
+
+The row, after OpenRouteService:
+
+> | **Pinecone** | The words you type into a search, and the details of every event (title,
+> description, location, tags, organization). **Not your name, account, email or location** |
+> Finding events that match what a search means, not only its exact words. See the note below
+> this table |
+
+The note, beside "About Upstash":
+
+> **About Pinecone.** When you search for opportunities, on the Discover page or by asking
+> Welly, our server may send the words you searched for to Pinecone, a search service. Pinecone
+> uses its own AI model to compare them with event descriptions by meaning, and sends back a
+> list of matching events. It is also sent the details of every event so that it can do this.
+>
+> The search request comes from our server, not your device, and does not include your name,
+> your account, your email address or your location. It does include whatever you typed, so
+> please don't put personal details in a search. Very short searches, and searches in
+> quotation marks, are not sent to Pinecone. If Pinecone is unavailable, the search runs on our
+> own database instead. Pinecone's servers for this are in the **United States**.
+
+In the same pass: put Pinecone with the services "contacted by our servers", and add **Hugging
+Face** to the table ("only if you set up Welly AI"). The browser fetches the model from Hugging
+Face directly, so "CARTO and Amplitude are the two your browser talks to directly" is not true
+either.
+
+---
+
 **PENDING CORRECTION 2 — Cloudflare is not named anywhere in this document, and it
 should be.** Staged here, deliberately not applied, for the reason given under correction 1.
 

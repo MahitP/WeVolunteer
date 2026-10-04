@@ -135,6 +135,27 @@ describe('what Welly is', () => {
    * only, so restoring the old claim in `FIXED.identity_self` left the suite
    * green: the mutation check caught that, and this is the half it was missing.
    */
+  /**
+   * ── Nor "not sent to any AI service" ──
+   *
+   * The narrowed answer still said "your words are not sent to any AI
+   * service". Pinecone runs a hosted embedding model over the words a search
+   * sends, so that was the same overstatement in other words (owner,
+   * 2026-10-04). What is true: no AI service writes the replies, and a search
+   * sends the words searched for. Both answers are checked, loaded and not.
+   */
+  it('says a search sends the words searched for, and nothing broader', async () => {
+    const rt = await loudRuntime('irrelevant');
+    const answers = [
+      (await ask('who trained you?', { runtime: rt, user: STUDENT })).answer,
+      (await ask('who trained you?', { user: STUDENT })).answer,
+    ];
+    for (const answer of answers) {
+      expect(answer).toMatch(/a search sends the words you searched for/);
+      expect(answer).not.toMatch(/not sent to any AI service/i);
+    }
+  });
+
   it('makes the same narrowed claim with no model loaded', async () => {
     const res = await ask('who trained you?', { user: STUDENT });
 

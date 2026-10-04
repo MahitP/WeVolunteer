@@ -44,7 +44,7 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
     <Modal onClose={onClose} label="Set up Welly AI" size="lg">
       <ModalHead
         title="Set up Welly AI"
-        description="Welly AI runs private, on-device AI directly on your device. Once downloaded, conversations stay in your browser and can work without an internet connection."
+        description="Welly AI runs a language model on this device, so Welly writes its replies here. Looking things up still needs a connection to WeVolunteer."
         onClose={onClose}
       />
 
@@ -62,15 +62,17 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
         <section className="stack-xs">
           <h3>Where your information goes</h3>
           <p className="dim small">
-            Welly runs inside this browser. What you type to it is not sent
-            to an AI company, and there is no account or key behind it.
+            Welly runs inside this browser. No AI company writes its replies,
+            and there is no account or key behind it.
           </p>
           <p className="dim small">
-            Two things do use the network, and it is worth being exact about them. Setting
+            Three things do use the network, and it is worth being exact about them. Setting
             up downloads the model from <strong>Hugging Face</strong>, which means that
-            company receives a request from this device. And questions about your own hours,
+            company receives a request from this device. Questions about your own hours,
             events or certificates are answered from WeVolunteer&rsquo;s server, exactly as
-            the rest of the app is.
+            the rest of the app is. And a search for opportunities sends the words you
+            searched for to WeVolunteer, which may use a search service, Pinecone, to match
+            them by meaning.
           </p>
         </section>
 

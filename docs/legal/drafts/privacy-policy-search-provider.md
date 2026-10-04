@@ -1,10 +1,11 @@
 # Privacy Policy — Pinecone is missing from "Other companies involved"
 
-> **Note and draft text for the owner. Not applied.** The Privacy Policy has a
+> **Owner decision 2026-10-04: apply at the launch pass**, with Pending
+> Corrections 1 (analytics prompt) and 2 (Cloudflare). The Privacy Policy has a
 > student's acceptance row, so its published text cannot be edited in place.
-> This is staged here for the same launch pass as Pending Corrections 1
-> (analytics prompt) and 2 (Cloudflare), unless the owner chooses a new version
-> sooner.
+> The wording is staged above the policy's `## Draft` marker as **Pending
+> Correction 3**, where it is unhashed and unpublished, and
+> `docs/legal/05-LAUNCH-CHECKLIST.md` has a row for it.
 
 Checked against `main` at `d4cd8fb`, 2026-10-04.
 
@@ -75,9 +76,9 @@ Two existing sentences change with it:
 - Once the AI policy 2.0 is live, link "by asking Welly" to
   `/legal/ai-and-on-device-processing`.
 
-## [OWNER] When to apply it
+## When to apply it — option 1 chosen
 
-1. **At the launch pass, with Corrections 1 and 2 (recommended default).**
+1. **At the launch pass, with Corrections 1 and 2. Chosen by the owner.**
    Copy the row and note into the table when the launch reset clears the
    acceptance row. Until then, AI policy 2.0 names Pinecone for Welly searches,
    but **Discover search-box searches are disclosed nowhere**. That is the cost

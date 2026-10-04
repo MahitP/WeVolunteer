@@ -1,9 +1,10 @@
-# Welly's privacy wording — DRAFT corrections
+# Welly's privacy wording — corrections
 
-> **Draft for the owner. Nothing here has been applied.** The footer sentence is
-> ruling 14, the owner's own words, so it changes only with the owner's
-> approval of the replacement. The other strings below are not rulings, but they make the same
-> claim and should change in the same pass, so the feature says one thing.
+> **Approved by the owner on 2026-10-04, and applied.** The footer sentence is
+> ruling 14, the owner's own words, so it changed only once the owner approved
+> the replacement: the info site's sentence (option 1 below). The owner also
+> approved changing the other strings below in the same pass, so the feature
+> says one thing. This file is kept as the record of why.
 
 Verified against `main` at `d4cd8fb`, 2026-10-04.
 
@@ -60,7 +61,7 @@ that checks whether it is true never sees it.
 
 ## Proposed wording
 
-### 1. The footer — ruling 14 [OWNER: approve, amend, or keep]
+### 1. The footer — ruling 14 (approved: the recommended wording)
 
 Only the ruling-14 clause changes. It still appears only in builds that ship
 Welly AI.
@@ -91,7 +92,7 @@ shows (not the site's wording, so the site would need to change to match):
 The **short form** of the footer (`welly-footer-short`) makes no claim about the
 device and needs no change.
 
-### 2. The same claim elsewhere in the app (not rulings)
+### 2. The same claim elsewhere in the app (not rulings; approved)
 
 | Where | Now | Proposed |
 |---|---|---|
@@ -113,7 +114,7 @@ Why "private" and "not sent to any AI service" go:
 "Can work without an internet connection" is true only for small talk. Every
 lookup and every search needs the network.
 
-## What has to ship with the footer change
+## What shipped with the footer change
 
 - `src/components/ai/WellyOfferBanner.test.jsx:141-145`: pin the new sentence.
 - `src/views/WellyView.disclaimer.test.jsx`: render the footer with Welly AI
@@ -123,6 +124,10 @@ lookup and every search needs the network.
   amended on <date>".
 - `docs/audits/2026-10-final-requirements-audit.md` rulings table, row 14:
   record the amendment and why. The ledger is the record of the owner's word.
-- The AI policy's new version (see
-  [ai-and-on-device-processing-2.0.md](ai-and-on-device-processing-2.0.md)),
-  published the same day, so the footer's link leads to a page that agrees with it.
+- Also: `src/ai/identity.test.js` now asserts both identity answers say "a
+  search sends the words you searched for" and never "not sent to any AI
+  service".
+- **Still to do, by the owner:** publish the AI policy's new version (see
+  [ai-and-on-device-processing-2.0.md](ai-and-on-device-processing-2.0.md)) in
+  the Legal Center at the same time as this change is deployed, so the
+  footer's link leads to a page that agrees with it.

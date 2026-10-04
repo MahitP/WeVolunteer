@@ -1,9 +1,12 @@
 # AI and On-Device Processing Policy, version 2.0 — DRAFT
 
-> **Draft for the owner. Not published, not reviewed by a lawyer.** Published
-> versions are immutable, so this is a new version, not an edit to 1.0. Nothing
-> in `docs/legal/policies/12-ai-and-on-device-processing.md` or
-> `server/legalDocuments.js` has been changed.
+> **Approved by the owner on 2026-10-04 as version 2.0. Not yet published, and
+> not reviewed by a lawyer.** Published versions are immutable, so this is a new
+> version, not an edit to 1.0. Nothing in
+> `docs/legal/policies/12-ai-and-on-device-processing.md` or
+> `server/legalDocuments.js` has been changed. The text to paste is in
+> [ai-and-on-device-processing-2.0.body.md](ai-and-on-device-processing-2.0.body.md),
+> exactly as below, and it passes the editor's own `validateBody`.
 
 Checked against `main` at `d4cd8fb`, 2026-10-04.
 
@@ -26,9 +29,9 @@ conversations, accuracy, analytics, and turning it off. Every network call
 Welly makes goes through `src/utils/api` to WeVolunteer, except the model
 download.
 
-## Decisions for the owner
+## Decisions
 
-**[OWNER] Version number. Recommended: 2.0 (MAJOR).**
+**Version number: 2.0 (MAJOR), approved by the owner 2026-10-04.**
 
 - **Why MAJOR.** The test at the top of `server/legalDocuments.js` is
   consequence: "a reasonable reader of the previous version would be surprised
@@ -56,19 +59,25 @@ an orphan row from a drafting state stops a dev boot under enforced hashes. If
 a dev boot then fails with an immutability error on this slug, that row is
 why.
 
-**[OWNER] How to publish.** In the Legal Center editor (`/admin/legal`), paste
-everything under "Proposed text" below, set version 2.0, and set the effective
-date. Before that, check in the editor which version is live: a revision there
-supersedes the file, and the new version must be greater than the live one.
-Publish the footer change (ruling 14) the same day, so the footer's link leads
-to a page that agrees with it.
+**How to publish (owner action).** In the Legal Center editor (`/admin/legal`),
+paste the contents of `ai-and-on-device-processing-2.0.body.md`, set version
+2.0, and set the effective date. Before that, check in the editor which version
+is live: a revision there supersedes the file, and the new version must be
+greater than the live one. Do it when the footer change (ruling 14) is deployed,
+so the footer's link leads to a page that agrees with it.
 
-**[OWNER] Effective date.** A notice needs no 30-day wait. The sooner it takes
+The editor and not the file is the route on purpose. `resolveDocument`
+(`server/legalStore.js:260`) serves the newest editor revision for a slug
+whatever its version, so if production already holds a revision of this
+document, a 2.0 written into the file and the registry would be silently
+ignored. Nothing in this repository can show whether one exists.
+
+**Effective date (owner's choice when publishing).** A notice needs no 30-day wait. The sooner it takes
 effect, the sooner the published page stops overstating what Welly does.
 
 **Not in this version, on purpose:** naming Pinecone in the Privacy Policy's
 list of outside companies. That document has a student's acceptance row and
-cannot be changed in place; see
+cannot be changed in place. The owner chose the launch pass (2026-10-04); see
 [privacy-policy-search-provider.md](privacy-policy-search-provider.md). This
 version names Pinecone itself so that, until then, the one document about
 Welly is complete.

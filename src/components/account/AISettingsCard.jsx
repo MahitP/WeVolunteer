@@ -180,7 +180,7 @@ export default function AISettingsCard({ addToast }) {
           <div className="stack-xs">
             <span className="strong">Welly AI</span>
             <p className="dim small" style={{ margin: 0 }}>
-              Private AI that runs directly on your device. Setting it up downloads a model from Hugging Face, and it can be removed again at any time. Conversations stay on this machine and can work without an internet connection.{' '}
+              AI that runs on your device. Setting it up downloads a model from Hugging Face, and it can be removed again at any time. Welly writes its replies on this machine; looking things up still goes to WeVolunteer.{' '}
               <Link to="/legal/ai-and-on-device-processing">How this works</Link>.
             </p>
           </div>

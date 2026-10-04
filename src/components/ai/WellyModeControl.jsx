@@ -235,7 +235,7 @@ export default function WellyModeControl({
               </span>
               <span className="welly-mode-option-body dim">
                 Adds a language model that runs on your own device, so Welly can hold
-                a conversation. Nothing you type leaves this browser.
+                a conversation. Looking things up and searching still go to WeVolunteer.
               </span>
             </div>
           </button>

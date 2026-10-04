@@ -17,16 +17,35 @@ import { MemoryRouter } from 'react-router-dom';
  *
  * The same message asked for "nothing leaves your device (which it does)". It
  * is the natural reading of the mode pill and it is not true of the whole
- * feature: what a reader TYPES stays in the browser when Welly AI is running,
- * and a lookup about their own hours or events is answered by WeVolunteer's
- * server exactly as the rest of the app is. The AI policy says both halves; a
- * footnote that says only the flattering one would make the assistant's single
- * privacy claim the one place it overstates itself.
+ * feature. The model runs in the browser, but a lookup about the reader's own
+ * hours or events is answered by WeVolunteer's server exactly as the rest of
+ * the app is, and a search sends the words searched for, which the server may
+ * pass on to Pinecone. Even "what you type stays on your device" is false for
+ * that reason. It was ruling 14's first wording, amended on 2026-10-04 once
+ * this file was run with Welly AI on and failed on it. The AI policy says every
+ * half; a footnote that says only the flattering one would make the assistant's
+ * single privacy claim the one place it overstates itself.
  *
  * So the on-device claim stays in the mode panel, which knows whether the model
  * is actually running, and this row links to the policy. That is a deliberate
  * departure from what was asked for, and this test is where it is written down.
  */
+
+/**
+ * Whether this build ships Welly AI, switchable per test.
+ *
+ * The ruling-14 clause renders only when `isLocalAIEnabled()` is true, and
+ * vitest leaves `VITE_LOCAL_AI` unset, so with the real flag this file never
+ * saw the one sentence it exists to check. It passed from 2026-10-01 to
+ * 2026-10-04 while the footer said "what you type stays on your device",
+ * and failed on it when run with the flag on. Production builds
+ * default the flag to on (`vite.config.js`), so both states are tested.
+ */
+const flags = vi.hoisted(() => ({ localAI: false }));
+vi.mock('../ai', async (importOriginal) => ({
+  ...(await importOriginal()),
+  isLocalAIEnabled: () => flags.localAI,
+}));
 
 vi.mock('../utils/api', () => ({
   api: {
@@ -52,7 +71,7 @@ const footer = () => document.querySelector('.welly-composer-footer');
 const longForm = () => document.querySelector('.welly-footer-long').textContent;
 const shortForm = () => document.querySelector('.welly-footer-short').textContent;
 
-beforeEach(() => { vi.clearAllMocks(); window.localStorage.clear(); });
+beforeEach(() => { vi.clearAllMocks(); window.localStorage.clear(); flags.localAI = false; });
 
 describe('the disclaimer under the composer', () => {
   it('says Welly makes mistakes, in those words', () => {
@@ -110,18 +129,34 @@ describe('the disclaimer under the composer', () => {
     expect(shortForm().trim().length).toBeLessThan(longForm().trim().length);
   });
 
-  it('never claims that nothing leaves the device', () => {
-    /**
-     * The assertion this file exists for. A lookup about the reader's own
-     * record IS sent to WeVolunteer's server, so an unconditional "nothing
-     * leaves your device" here would be false — and it is the exact sentence a
-     * future edit would reach for, because it is what the mode panel says one
-     * pane away, where it is conditional and true.
-     */
+  for (const localAI of [false, true]) {
+    it(`never claims that nothing leaves the device (Welly AI ${localAI ? 'on' : 'off'})`, () => {
+      /**
+       * The assertion this file exists for. A lookup about the reader's own
+       * record IS sent to WeVolunteer's server, and a search sends the words
+       * searched for, so "nothing leaves your device", or "what you type stays
+       * on your device", would be false here. Both are sentences a future edit
+       * will reach for.
+       */
+      flags.localAI = localAI;
+      show();
+      /* Both wordings, since either could be the one on screen. */
+      const text = footer().textContent;
+      expect(text).not.toMatch(/nothing leaves|never leaves|stays on your device|no data is sent/i);
+      expect(text).not.toMatch(/what you type stays|nothing you type/i);
+      expect(text).not.toMatch(/private|encrypted|anonymous/i);
+    });
+  }
+
+  it('with Welly AI on, says what runs on the device and what a search sends', () => {
+    flags.localAI = true;
     show();
-    /* Both wordings, since either could be the one on screen. */
-    const text = footer().textContent;
-    expect(text).not.toMatch(/nothing leaves|never leaves|stays on your device|no data is sent/i);
-    expect(text).not.toMatch(/private|encrypted|anonymous/i);
+    expect(longForm()).toMatch(/the model that writes Welly's replies runs on your device/);
+    expect(longForm()).toMatch(/a search sends the words you searched for/);
+  });
+
+  it('without Welly AI, does not name the engine at all', () => {
+    show();
+    expect(footer().textContent).not.toMatch(/Welly AI/);
   });
 });
