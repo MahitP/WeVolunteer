@@ -489,7 +489,10 @@ describe('the `/` dashboard, per role', () => {
     /* The refusal names the feature. `/Welly/` alone would match the navigation
        item and the topbar and pass whatever the route did — measured: it passes
        with the gate reverted. The sentence is the assertion. */
-    expect(await screen.findByText(/does not have permission for Welly/i)).toBeInTheDocument();
+    /* Paused by the Organizer Agreement rather than never held, so the refusal
+       says so and names the document (Phase 5, 2026-10-04: the old sentence
+       told an organizer they lacked a permission their role holds). */
+    expect(await screen.findByText(/Your access to Welly is paused until you accept the Organizer Agreement/i)).toBeInTheDocument();
 
     /* And the page itself did not render. The composer is the one element only
        WellyView has. */

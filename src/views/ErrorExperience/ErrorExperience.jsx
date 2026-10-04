@@ -253,7 +253,12 @@ export default function ErrorExperience({
             </Link>
           ) : signedIn ? (
             <>
-              <Link className={`btn ${canRetry ? 'btn-secondary' : 'btn-primary'}`} to="/">
+              {/* The way forward, when the refusal has one the reader can take
+                  themselves: an agreement to accept (denialDetail.js). */}
+              {detail?.action && (
+                <Link className="btn btn-primary" to={detail.action.to}>{detail.action.label}</Link>
+              )}
+              <Link className={`btn ${canRetry || detail?.action ? 'btn-secondary' : 'btn-primary'}`} to="/">
                 <ArrowLeft size={15} /> Back to my dashboard
               </Link>
               {kind === '404' && (

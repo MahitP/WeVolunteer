@@ -141,10 +141,49 @@ const UNREACHABLE_BY_GRANT = new Set(SUPER_ONLY);
  *   reach this route, which is what lets the themed copy above drop its offer of
  *   an administrator's help rather than contradict the remedy below it.
  */
+/**
+ * The document each role accepts to release what it withholds, and where.
+ *
+ * Mirrors the arms of `withheldCapabilitiesFor` (server/organizerAgreement.js)
+ * that a person can resolve from a page. The fourth arm, a re-accepted signup
+ * document, is asked for by a modal over the whole app rather than here.
+ * An administrator's gate is on the Admin page itself (`showWhenWithheld`).
+ */
+const AGREEMENT_FOR_ROLE = {
+  organizer: { name: 'the Organizer Agreement', to: '/organizer-agreement', label: 'Read the Organizer Agreement' },
+  student: { name: 'the Student Organizer Agreement', to: '/student-organizer-agreement', label: 'Read the Student Organizer Agreement' },
+  admin: { name: 'the Admin Responsibilities Policy', to: '/admin', label: 'Open the Admin Responsibilities Policy' },
+  super_admin: { name: 'the Admin Responsibilities Policy', to: '/admin', label: 'Open the Admin Responsibilities Policy' },
+};
+
 export function denialDetail(route) {
   if (!route) return null;
 
   const feature = FEATURE_NAMES[route.requiredCap] ?? null;
+
+  /* `because` comes from `deniedRoute()`, which alone knows which condition
+     failed. A route without it (the gallery, a test) is read from its flags. */
+  const because = route.because ?? (route.requiresVerified ? 'unverified' : 'capability');
+
+  /**
+   * Paused, not missing: the role holds it once an agreement is accepted.
+   *
+   * Reported before the approval check below, because `/events/new` carries
+   * `requiresVerified` and an approved organizer refused there for the
+   * agreement was told they were unapproved and that nothing else was needed.
+   * No administrator can grant this either, so the themed offer is dropped.
+   */
+  if (because === 'withheld') {
+    const agreement = AGREEMENT_FOR_ROLE[route.role];
+    return {
+      feature,
+      reason: `${feature ? `Your access to ${feature}` : 'This'} is paused until you accept `
+        + `${agreement ? agreement.name : 'an agreement'}.`,
+      remedy: 'It takes a minute, and opens this straight away.',
+      grantable: false,
+      ...(agreement ? { action: { to: agreement.to, label: agreement.label } } : {}),
+    };
+  }
 
   /**
    * `requiresVerified` is reported FIRST, and the order is the whole point.
@@ -155,7 +194,7 @@ export function denialDetail(route) {
    * mirror of `deniedRoute()`'s own ordering, which tests `requiresVerified` first
    * for the same reason.
    */
-  if (route.requiresVerified) {
+  if (because === 'unverified') {
     return {
       feature,
       reason: 'Your organizer account has not been approved yet.',

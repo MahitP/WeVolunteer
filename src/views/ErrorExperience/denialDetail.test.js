@@ -49,6 +49,42 @@ describe('denialDetail', () => {
     expect(detail.remedy).toMatch(/reviews new organizer requests/);
   });
 
+  /**
+   * Approved, but the agreement is not accepted yet (Phase 5 walk, 2026-10-04).
+   *
+   * A newly approved organizer pressed "New event" and was told their account
+   * "has not been approved yet" and that "nothing else is needed" — both false.
+   * It was approved; what was missing was the Organizer Agreement, and that page
+   * was the one thing the refusal never mentioned. `deniedRoute()` now says WHY
+   * it refused (`because`), and the role, so the refusal can name the document.
+   */
+  describe('a capability paused until an agreement is accepted', () => {
+    const route = { path: '/events/new', requiredCap: 'event.create', requiresVerified: true };
+
+    it('names the agreement, links to it, and promises no administrator', () => {
+      const detail = denialDetail({ ...route, because: 'withheld', role: 'organizer' });
+      expect(detail.reason).not.toMatch(/approved/);
+      expect(detail.reason).toMatch(/Organizer Agreement/);
+      expect(detail.action).toEqual({ to: '/organizer-agreement', label: 'Read the Organizer Agreement' });
+      expect(detail.grantable).toBe(false);
+    });
+
+    it('sends a student organizer and an administrator to their own documents', () => {
+      expect(denialDetail({ requiredCap: 'attendance.mark', because: 'withheld', role: 'student' }).action.to)
+        .toBe('/student-organizer-agreement');
+      for (const role of ['admin', 'super_admin']) {
+        const detail = denialDetail({ requiredCap: 'report.resolve', because: 'withheld', role });
+        expect(detail.reason).toMatch(/Admin Responsibilities Policy/);
+        expect(detail.action.to).toBe('/admin');
+      }
+    });
+
+    it('still reports pending approval when that is the reason', () => {
+      expect(denialDetail({ ...route, because: 'unverified', role: 'organizer' }).reason)
+        .toMatch(/has not been approved yet/);
+    });
+  });
+
   it('does not promise a grant for a capability no grant can reach', () => {
     const detail = denialDetail({ path: '/errors', requiredCap: 'error.read' });
     expect(detail.remedy).toMatch(/cannot be granted/);

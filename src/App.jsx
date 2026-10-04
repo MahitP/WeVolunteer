@@ -1075,13 +1075,35 @@ function routeCapSatisfied(route, user) {
   return true;
 }
 
-function deniedRoute(pathname, user) {
+/**
+ * The refused route, with WHY it was refused.
+ *
+ * `because` is the condition that failed, because the refusal page cannot
+ * work it out from the route: `/events/new` carries `requiresVerified`, and
+ * reading that flag told an approved organizer whose Organizer Agreement was
+ * still pending that they were awaiting approval and that "nothing else is
+ * needed" (Phase 5 walk, 2026-10-04).
+ *
+ *   'unverified'  an organizer awaiting approval
+ *   'withheld'    a capability the role holds, paused until an agreement is
+ *                 accepted (`user.withheld`); `role` lets the page name it
+ *   'capability'  a capability this account does not hold at all
+ *
+ * Exported for its test.
+ */
+export function deniedRoute(pathname, user) {
   const matched = matchRoutes(APP_ROUTES.map(r => ({ path: r.path, route: r })), pathname);
   const route = matched?.[matched.length - 1]?.route?.route;
   if (!route) return null;
 
-  if (route.requiresVerified && !user.verified) return route;
-  if (!routeCapSatisfied(route, user)) return route;
+  if (route.requiresVerified && !user.verified) return { ...route, because: 'unverified', role: user.role };
+  if (!routeCapSatisfied(route, user)) {
+    const withheld = user?.withheld ?? [];
+    const caps = route.requiredCap ? [route.requiredCap] : (route.requiredCapAny ?? []);
+    /* Paused rather than absent: withheld now, and held once nothing is. */
+    const paused = caps.some(cap => withheld.includes(cap) && can({ ...user, withheld: [] }, cap));
+    return { ...route, because: paused ? 'withheld' : 'capability', role: user?.role };
+  }
   return null;
 }
 
