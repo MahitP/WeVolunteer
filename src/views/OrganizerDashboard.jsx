@@ -322,6 +322,24 @@ export default function OrganizerDashboard({
   }, [currentUser.name]);
 
   /* ── Unverified organizers can't do anything yet ─────────── */
+  /* An organizer an administrator UN-approved is not a new organizer
+     awaiting review (that queue excludes them on purpose), so they are told
+     what happened and that nothing they ran was lost (Phase 6 review). */
+  if (!currentUser.verified && currentUser.approvalRevoked) {
+    return <div className="card empty s-fd1ec5">
+        <span className="empty-icon s-dce988">
+          <ShieldAlert size={20} />
+        </span>
+        <h3>Your approval to post events was withdrawn</h3>
+        <p>
+          A WeVolunteer administrator withdrew this account&apos;s approval to post events. Your
+          past events and the hours volunteers earned at them are unchanged. If you think this is
+          a mistake, tell us through Report a problem.
+        </p>
+        <Link to="/report-issue" className="btn btn-secondary btn-sm">Report a problem</Link>
+      </div>;
+  }
+
   if (!currentUser.verified) {
     return <div className="card empty s-fd1ec5">
         <span className="empty-icon s-dce988">

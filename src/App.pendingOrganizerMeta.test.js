@@ -14,6 +14,10 @@ describe('the organizer dashboard subtitle', () => {
     expect(pageMetaFor(organizer({ verified: false }), 'dashboard').sub).toMatch(/awaiting approval/i);
   });
 
+  it('says the approval was withdrawn when it was', () => {
+    expect(pageMetaFor(organizer({ verified: false, approvalRevoked: true }), 'dashboard').sub).toMatch(/withdrawn/i);
+  });
+
   it('is unchanged once approved', () => {
     expect(pageMetaFor(organizer(), 'dashboard').sub).toBe(PAGE_META.host.dashboard.sub);
   });

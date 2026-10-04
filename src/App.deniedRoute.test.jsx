@@ -37,3 +37,12 @@ describe('deniedRoute', () => {
       .toBe('capability');
   });
 });
+
+/* An organizer whose approval an administrator withdrew is not awaiting
+   review: revoked accounts are kept out of the pending queue on purpose
+   (final audit, Phase 6 review). */
+describe('a revoked organizer', () => {
+  it('is refused as "revoked", not "unverified"', () => {
+    expect(deniedRoute('/events/new', organizer({ verified: false, approvalRevoked: true })).because).toBe('revoked');
+  });
+});

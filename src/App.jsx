@@ -284,7 +284,12 @@ export function pageMetaFor(user, activeTab) {
      hours, and pending reviews" described tools they did not have yet
      (owner ruling 25). */
   if (activeTab === 'dashboard' && persona === 'host' && user && !user.verified) {
-    return { ...meta, sub: 'Your organizer account is awaiting approval' };
+    return {
+      ...meta,
+      sub: user.approvalRevoked
+        ? 'Your approval to post events was withdrawn'
+        : 'Your organizer account is awaiting approval',
+    };
   }
 
   return meta;
@@ -1118,7 +1123,11 @@ export function deniedRoute(pathname, user) {
   const route = matched?.[matched.length - 1]?.route?.route;
   if (!route) return null;
 
-  if (route.requiresVerified && !user.verified) return { ...route, because: 'unverified', role: user.role };
+  if (route.requiresVerified && !user.verified) {
+    /* Revoked is not pending: an administrator withdrew the approval, and
+       revoked accounts are kept out of the review queue on purpose. */
+    return { ...route, because: user.approvalRevoked ? 'revoked' : 'unverified', role: user.role };
+  }
   if (!routeCapSatisfied(route, user)) {
     const withheld = user?.withheld ?? [];
     const caps = route.requiredCap ? [route.requiredCap] : (route.requiredCapAny ?? []);

@@ -194,6 +194,24 @@ export function denialDetail(route) {
    * mirror of `deniedRoute()`'s own ordering, which tests `requiresVerified` first
    * for the same reason.
    */
+  /**
+   * Approved once, then withdrawn by an administrator (P2-12).
+   *
+   * Not the approval message below: that promises a review "usually within a
+   * day", and revoked accounts are kept out of the review queue on purpose, so
+   * the promise was false (final audit, Phase 6 review). No grant restores it
+   * either, so the themed offer of an administrator's help is dropped.
+   */
+  if (because === 'revoked') {
+    return {
+      feature,
+      reason: 'An administrator withdrew this account\'s approval to post events.',
+      remedy: 'Your past events and the hours volunteers earned at them are unchanged. '
+        + 'If you think this is a mistake, tell us through Report a problem.',
+      grantable: false,
+    };
+  }
+
   if (because === 'unverified') {
     return {
       feature,

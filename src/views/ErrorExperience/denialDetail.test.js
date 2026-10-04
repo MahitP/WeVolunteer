@@ -85,6 +85,13 @@ describe('denialDetail', () => {
     });
   });
 
+  it('tells a revoked organizer what happened, and promises no review', () => {
+    const detail = denialDetail({ path: '/events/new', requiredCap: 'event.create', requiresVerified: true, because: 'revoked', role: 'organizer' });
+    expect(detail.reason).toMatch(/withdrew/);
+    expect(detail.reason + detail.remedy).not.toMatch(/usually within a day|Nothing else is needed/);
+    expect(detail.grantable).toBe(false);
+  });
+
   it('does not promise a grant for a capability no grant can reach', () => {
     const detail = denialDetail({ path: '/errors', requiredCap: 'error.read' });
     expect(detail.remedy).toMatch(/cannot be granted/);

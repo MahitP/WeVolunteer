@@ -69,6 +69,16 @@ describe('revoking an organizer\'s approval', () => {
     expect(audit?.details).toMatch(/not volunteering/);
   });
 
+  /* Their own session says so, so the app can tell them what happened rather
+     than call them a new organizer awaiting review (Phase 6 review). */
+  it('tells the organizer their approval was withdrawn, not that it is pending', async () => {
+    const organizer = await srv.login(ORGANIZER);
+    const me = (await srv.call('GET', '/api/auth/me', undefined, organizer)).body;
+    const user = me.user ?? me;
+    expect(user.verified).toBe(false);
+    expect(user.approvalRevoked).toBe(true);
+  });
+
   it('keeps a revoked organizer out of the pending queue, so Deny cannot reach it', async () => {
     expect(await pending()).not.toContain(organizerId);
     const denied = await srv.call('POST', `/api/admin/organizers/${organizerId}/deny`, undefined, admin);

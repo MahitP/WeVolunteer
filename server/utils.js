@@ -769,6 +769,10 @@ export async function formatUserResponse(row) {
     grade: row.grade,
     role: row.role,
     verified: row.verified === 1,
+    /* An organizer an administrator UN-approved (P2-12). Without it the app
+       could only call them a new organizer awaiting review, a queue revoked
+       accounts are deliberately kept out of (final audit, Phase 6 review). */
+    approvalRevoked: Boolean(row.approval_revoked_at),
     emailVerified: row.email_verified === 1,
     leaderboardOptIn: row.leaderboard_opt_in === 1,
     emailOptOut: row.email_opt_out === 1,
