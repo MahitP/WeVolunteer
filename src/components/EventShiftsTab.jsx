@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Info, CalendarClock, CalendarPlus, QrCode } from 'lucide-react';
+import { Info, CalendarClock, CalendarPlus, QrCode, CalendarCheck } from 'lucide-react';
 import { formatDay, formatTime, formatHours, usesAutoSelect } from '../utils/helpers';
 import { Seats } from './Seats';
 import EmptyState from './common/EmptyState';
 import InlineConfirmation from './common/InlineConfirmation';
 import BusyButton from './common/BusyButton';
 import CheckInCodeModal from './CheckInCodeModal';
+import { googleCalendarUrl } from '../utils/googleCalendar';
 
 /**
  * How long before a shift the downloaded calendar entry should sound an alarm.
@@ -272,6 +273,22 @@ export default function EventShiftsTab({
                                 aria-label={`Add ${slot.name} to your calendar`}
                               >
                                 <CalendarPlus size={16} aria-hidden="true" />
+                              </a>
+                            )}
+                            {/* Google Calendar, one tap (P2-04) — for a
+                                Chromebook, where the .ics above just lands in
+                                Downloads. Opens Google's own form; nothing is
+                                saved until the student saves it there. */}
+                            {mine.status === 'accepted' && (
+                              <a
+                                href={googleCalendarUrl(event, slot)}
+                                className="btn btn-secondary btn-sm btn-icon shift-util"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Add to Google Calendar"
+                                aria-label={`Add ${slot.name} to Google Calendar`}
+                              >
+                                <CalendarCheck size={16} aria-hidden="true" />
                               </a>
                             )}
                             {/* Per slot, because check-in is per slot: on a
