@@ -39,7 +39,6 @@ const NOT_TEXT = /::?(placeholder|before|after|-webkit)|\[type=.?(checkbox|radio
 const EXEMPT = {
   '.share-link-input': 'read-only: it opens no keyboard, so Safari does not zoom',
   '.demobar select': 'demo builds only, and widening it worsens the 320px overflow the revamp hand-over records',
-  '.form-input': 'no element uses it',
 };
 
 /** Every rule, with where it starts and whether it sits in a coarse-pointer block. */

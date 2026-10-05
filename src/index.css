@@ -5406,22 +5406,6 @@ a.list-row:hover { text-decoration: none; }
   color: var(--ink);
 }
 
-.form-input {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  font-size: 0.9375rem;
-  width: 100%;
-  color: var(--ink);
-}
-
-.form-input:focus {
-  border-color: var(--brand);
-  outline: none;
-  box-shadow: 0 0 0 2px var(--brand-tint);
-}
-
 .mt-3 { margin-top: var(--s4); }
 .mb-4 { margin-bottom: var(--s5); }
 .text-center { text-align: center; }
@@ -13428,7 +13412,6 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   .dp-nav-btn:focus-visible,
   .dp-quick:focus-visible,
   .dp-cell:focus-visible,
-  .form-input:focus,
   .message-composer:focus-within,
   .skip-link:focus {
     outline: 3px solid Highlight;
@@ -13442,7 +13425,6 @@ ol.welly-md-list li::marker { font-variant-numeric: tabular-nums; }
   .card,
   .modal,
   .popover,
-  .form-input,
   .btn {
     border: 1px solid CanvasText;
   }
@@ -13668,7 +13650,6 @@ a.btn {
 :root[data-controls='large'] .modal-close,
 :root[data-controls='large'] .icon-btn,
 :root[data-controls='large'] button.rail-item,
-:root[data-controls='large'] .form-input,
 :root[data-controls='large'] select,
 :root[data-controls='large'] .dp-toggle,
 :root[data-controls='large'] .dp-nav-btn {
