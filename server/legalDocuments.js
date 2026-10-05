@@ -558,6 +558,46 @@ export const LEGAL_DOCUMENTS = [
     contentHash: '8a2e2f8f9dda72b997e15270529320e63334bd020284672ef20e5ef728de8726',
     bundledWith: null,
   },
+  {
+    slug: 'acceptable-use-policy',
+    /**
+     * `notice` / `notice`: part of the Terms of Service, which every account
+     * accepts, so it asks for no acceptance of its own.
+     *
+     * The rules were Terms §4, §4.1 and §4.2 (ruling 13). Terms 2.0 replaces §4
+     * with a pointer here and takes effect on the same date, so for the thirty
+     * days of notice Terms 1.0 still carries the rules and this document says it
+     * takes effect later — the two never state different rules as current.
+     */
+    version: '1.0',
+    title: 'Acceptable Use Policy',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'The rules for using WeVolunteer: toward other people, with information, with the service, automation, limits, disruption, and reporting a security problem.',
+    effectiveAt: '2026-11-06',
+    file: '14-acceptable-use-policy.md',
+    contentHash: 'f7aa39d385fddb803143a0cc4025316741884c32c298da1e48fa522c8173ed8a',
+    bundledWith: null,
+  },
+  {
+    slug: 'end-user-license',
+    /**
+     * `notice` / `notice`: part of the Terms of Service and adds no obligation,
+     * so nobody is asked to accept it again (ruling 22). It covers only the
+     * software that ends up on a device — the app's code, the home-screen
+     * version, a Welly AI model, the photo reader — and points to the Terms
+     * for everything else, so the two cannot disagree.
+     */
+    version: '1.0',
+    title: 'End-User License',
+    consentType: 'notice',
+    scope: 'notice',
+    summary: 'What software WeVolunteer puts on your device, what you may do with it, which parts come from other people, and how to remove it.',
+    effectiveAt: '2026-11-06',
+    file: '15-end-user-license.md',
+    contentHash: '16ec8b9f87a0c7ed1fb15edc3d69fdb9f994ce13e1c752dc86a015b87efb4dd8',
+    bundledWith: null,
+  },
 ];
 
 /**

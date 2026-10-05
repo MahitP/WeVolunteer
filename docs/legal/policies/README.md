@@ -63,7 +63,7 @@ the behaviour and flags the gap — it does not describe the aspiration.
 
 ## The set
 
-All thirteen are revised for the **independent-platform** model, operated by a **sole proprietor**.
+All fifteen are written for the **independent-platform** model, operated by a **sole proprietor**.
 Every Posture A / district branch is resolved; the operator, jurisdiction, minimum age, privacy
 contact and retention periods are filled in.
 
@@ -82,6 +82,8 @@ contact and retention periods are filled in.
 | 11 | [Student Organizer Agreement](/legal/student-organizer-agreement) | Student organizers | **Ready** — acceptance is recorded and gated by `server/studentOrganizerAgreement.js`. Deliberately stricter and shorter than 09: a student helping run a club is handling their peers' details, and the two-adult rule in 09 does not transfer to them |
 | 12 | [AI and On-Device Processing Policy](/legal/ai-and-on-device-processing) | All | **Ready** — `notice`, not `acknowledge`: the assistant is opt-in and off by default, and the enable screen is where the decision is actually made. Briefly 2.0 for a dictation section; the control was withdrawn before release and the section went with it, so it says what 1.0 said |
 | 13 | [Accessibility Statement](/legal/accessibility-statement) | All | **Ready** — states a WCAG 2.2 AA target, what was tested, what is known broken, and how to report a barrier. Deliberately does **not** claim ADA compliance |
+| 14 | [Acceptable Use Policy](/legal/acceptable-use-policy) | All | **Ready, takes effect 2026-11-06** — the rules from Terms §4, §4.1 and §4.2 in one place (ruling 13), plus appeal spam, limits, disruption and enforcement. `notice`: part of the Terms. Terms 2.0, published through the editor with the same effective date, replaces §4 with a pointer here |
+| 15 | [End-User License](/legal/end-user-license) | All | **Ready, takes effect 2026-11-06** — only the software that ends up on a device (ruling 22); everything else points to the Terms. `notice`: adds no obligation, so nobody re-accepts |
 
 ## What changed on 2026-08-05
 
@@ -118,7 +120,7 @@ them are wording:
 
 ## Versioning — read before publishing
 
-`server/legalDocuments.js` pins a **sha256 of the published body** of all thirteen documents — the
+`server/legalDocuments.js` pins a **sha256 of the published body** of all fifteen documents — the
 half below the `## Draft` marker, so editing the specification block above it does not invalidate
 anybody's acceptance record.
 
