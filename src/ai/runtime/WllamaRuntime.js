@@ -37,6 +37,7 @@
  * origin as the rest of the application.
  */
 import wasmUrl from '@wllama/wllama/esm/wasm/wllama.wasm?url';
+import compatWasmUrl from '@wllama/wllama-compat/wasm/wllama.wasm?url';
 
 import { AIStatus, AIRuntimeError, AIAbortError, isAbort, throwIfAborted } from './types.js';
 import { IntegrityError, verifyModel } from '../integrity.js';
@@ -70,6 +71,33 @@ const CONTEXT_TOKENS = 4096;
  * 2026-10-05).
  */
 export const LOAD_TIMEOUT_MS = 120_000;
+
+/**
+ * Run the compatibility engine, for a browser that cannot compile 64-bit
+ * WebAssembly.
+ *
+ * The default engine is Memory64. Safari cannot compile it, yet passes the
+ * check wllama makes before choosing (it only constructs a 64-bit memory from
+ * JavaScript), so left alone wllama starts the engine Safari cannot run, the
+ * worker aborts, and the load never settles (iPhone Simulator, 2026-10-05).
+ *
+ * `@wllama/wllama-compat` is wllama's own build for exactly these browsers: no
+ * Memory64, Asyncify instead of JSPI, and slower. It is served from this
+ * origin like the default engine, never from the CDN wllama would otherwise
+ * fetch it from. The worker code is imported on demand, so nobody whose
+ * browser runs the default engine downloads it.
+ *
+ * `getWorkerResources` is replaced rather than trusting wllama's `needCompat`,
+ * which is the check Safari passes. It is public, and it is the one place
+ * wllama decides which engine a worker starts.
+ */
+async function useCompatibilityEngine(wllama) {
+  const { default: code } = await import('@wllama/wllama-compat/wasm/wllama.js?raw');
+  const wasmPath = typeof location === 'undefined' ? compatWasmUrl : new URL(compatWasmUrl, location.href).href;
+  wllama.setCompat?.({ wasm: compatWasmUrl, worker: { code } });
+  const resources = wllama.getWorkerResources.bind(wllama);
+  wllama.getWorkerResources = () => ({ ...resources(), wasmPath, jsPath: { code }, compat: true });
+}
 
 /** How long a worker that is being let go may take to answer its exit. */
 const EXIT_TIMEOUT_MS = 2_000;
@@ -168,17 +196,6 @@ export class WllamaRuntime {
 
       this.status = AIStatus.LOADING;
 
-      /* The engine build is 64-bit WebAssembly. A browser that cannot compile
-         it would abort inside the worker and, through wllama's error path,
-         never say so (see LOAD_TIMEOUT_MS). The capability check keeps such a
-         browser from being offered a model at all; this is for one that got
-         here anyway, such as a model downloaded before that check existed. */
-      if (!supportsMemory64()) {
-        throw new AIRuntimeError('This browser cannot compile 64-bit WebAssembly (Memory64).', {
-          userMessage: 'Welly AI cannot run in this browser. Welly Chat still works.',
-        });
-      }
-
       /* Same cache manager as the download used, so the engine reads the file
          that was actually written rather than looking in cross-origin storage
          and finding nothing. */
@@ -186,6 +203,7 @@ export class WllamaRuntime {
         { default: wasmUrl },
         { allowOffline: true, suppressNativeLog: true, cacheManager },
       );
+      if (!supportsMemory64()) await useCompatibilityEngine(this._wllama);
 
       /**
        * Two paths, chosen by whether we can afford to hash the file.

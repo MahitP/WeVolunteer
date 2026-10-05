@@ -159,35 +159,34 @@ describe('unsupported environments', () => {
 });
 
 /**
- * A browser that cannot compile the engine is offered nothing.
+ * A browser that cannot compile the default engine runs the compatibility one.
  *
  * Found in the iPhone Simulator on 2026-10-05: Safari accepted the 469 MB
- * download, then hung on "Thinking" for good. The engine build wllama ships is
- * 64-bit WebAssembly (Memory64), and this Safari cannot compile it —
- * "WebAssembly.Module doesn't parse at byte 4294: Memory64 is not enabled" —
- * while passing the check wllama itself uses, which only constructs a 64-bit
- * memory from JavaScript. So the student downloaded half a gigabyte for an
- * assistant that could never start. Every browser on an iPhone or iPad is
- * WebKit, and so is Safari on a Mac.
+ * download, then hung on "Thinking" for good. The default engine is 64-bit
+ * WebAssembly (Memory64), and Safari cannot compile it while passing the check
+ * wllama itself makes. `WllamaRuntime` now runs wllama's compatibility engine
+ * there, self-hosted; it answered in the Simulator, more slowly. So such a
+ * browser is still offered the models, and told what to expect.
  */
-describe('a browser that cannot run the engine', () => {
-  it('is offered nothing, and is told why', () => {
+describe('a browser without Memory64', () => {
+  it('is offered the models, marked as using the slower engine, and told so', () => {
     const cap = detectCapability(nav({ ua: MAC, memory: 16 }), { memory64: false });
-    expect(cap.supported).toBe(false);
-    expect(offerableModels(cap)).toEqual([]);
-    expect(cap.reason).toMatch(/browser/i);
+    expect(cap.supported).toBe(true);
+    expect(cap.compat).toBe(true);
+    expect(offerableModels(cap).length).toBeGreaterThan(0);
+    expect(cap.reason).toMatch(/slower/i);
   });
 
-  it('on an iPhone, says no browser there can run it yet, rather than offering the experiment', () => {
+  it('on an iPhone, is still ruling 7\'s experiment, warning included', () => {
     const cap = detectCapability(nav({ ua: IPHONE, touch: 5 }), { memory64: false });
-    expect(cap.supported).toBe(false);
-    expect(cap.experimental).toBe(false);
-    expect(cap.reason).toMatch(/iPhone and iPad/);
+    expect(cap.supported).toBe(true);
+    expect(cap.experimental).toBe(true);
+    expect(cap.reason).toMatch(/experimental/i);
   });
 
-  it('is decided by compiling a 64-bit module, which this Node can', () => {
+  it('is decided by compiling a 64-bit module, which this Node can, so it uses the default engine', () => {
     /* Not the JavaScript-API probe wllama uses: that one passes in the Safari
        that then fails to compile. */
-    expect(detectCapability(nav({ ua: MAC, memory: 16 })).supported).toBe(true);
+    expect(detectCapability(nav({ ua: MAC, memory: 16 })).compat).toBe(false);
   });
 });

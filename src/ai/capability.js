@@ -89,11 +89,12 @@ function fitsDevice(model, { maxBytes, deviceMemoryGB }) {
 /**
  * Whether this browser can compile 64-bit WebAssembly (Memory64).
  *
- * The engine build wllama ships needs it, and there is no way round that short
- * of shipping wllama's separate compatibility build. Safari is the case that
- * matters: in the iPhone Simulator on 2026-10-05 it accepted the 469 MB
- * download and then hung on "Thinking" for good, because the engine failed with
- * "Memory64 is not enabled" and wllama's own error path never reported it.
+ * The default engine needs it. Where it is missing, the runtime runs
+ * wllama's compatibility engine instead, which is slower. Safari is the case
+ * that matters: in the iPhone Simulator on 2026-10-05 it accepted the 469 MB
+ * download and then hung on "Thinking" for good, because the default engine
+ * failed with "Memory64 is not enabled" and wllama's own error path never
+ * reported it.
  *
  * Compiled, not asked about. wllama's check constructs a 64-bit
  * `WebAssembly.Memory` from JavaScript, which that Safari accepts while
@@ -145,24 +146,10 @@ export function detectCapability(
   const cores = Number(nav.hardwareConcurrency || 0);
   const deviceMemoryGB = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null;
 
-  /* Before any size is weighed: a browser that cannot compile the engine is
-     offered nothing, however much memory it has (see `supportsMemory64`). */
-  if (!memory64) {
-    return {
-      supported: false,
-      reason: isIOS
-        ? 'Welly AI cannot run in any browser on iPhone and iPad yet: they cannot run the '
-          + 'kind of WebAssembly the on-device model needs.'
-        : 'This browser cannot run the kind of WebAssembly the on-device model needs. '
-          + 'Chrome, Edge or Firefox on a computer can.',
-      recommendedTier: null,
-      maxBytes: 0,
-      webgpu,
-      isIOS,
-      experimental: false,
-      deviceMemoryGB,
-    };
-  }
+  /* No Memory64 means the slower compatibility engine (see
+     `supportsMemory64`). It runs the same models, so nothing is withheld for
+     it; the reader is told replies will be slower. */
+  const compat = !memory64;
 
   let maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
   let fits = MODELS.filter(m => fitsDevice(m, { maxBytes, deviceMemoryGB }));
@@ -212,8 +199,8 @@ export function detectCapability(
     reason =
       'Experimental on iPhone and iPad. Safari gives a web page limited memory, and this '
       + 'model has not been tested on these devices. If it is too big for yours, the page '
-      + 'will reload during setup or while Welly answers. Nothing else is affected, and you '
-      + 'can turn it off again in Settings.';
+      + 'will reload during setup or while Welly answers. Replies are slower than on a '
+      + 'computer. Nothing else is affected, and you can turn it off again in Settings.';
   } else if (isIOS) {
     /**
      * Unreachable today, and kept rather than deleted.
@@ -233,13 +220,17 @@ export function detectCapability(
     reason =
       'On iPhone and iPad, Safari limits how much memory a page may use, so only '
       + 'the smallest model is offered here.';
+  } else if (compat) {
+    reason =
+      'In this browser Welly AI uses a slower engine, so replies take a few seconds. '
+      + 'Chrome, Edge or Firefox answer faster.';
   } else if (!webgpu) {
     reason =
       'This browser has no graphics acceleration available for AI, so responses '
       + 'will be slower.';
   }
 
-  return { supported: true, reason, recommendedTier, maxBytes, webgpu, isIOS, experimental, deviceMemoryGB };
+  return { supported: true, reason, recommendedTier, maxBytes, webgpu, isIOS, experimental, compat, deviceMemoryGB };
 }
 
 /**

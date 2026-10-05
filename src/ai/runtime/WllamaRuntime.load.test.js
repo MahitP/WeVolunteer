@@ -93,6 +93,12 @@ vi.mock('@wllama/wllama/esm/index.js', () => {
     constructor(pathConfig, config) {
       this.pathConfig = pathConfig;
       this.config = config;
+      this.compat = null;
+    }
+    setCompat(compat) { this.compat = compat; }
+    /* wllama's own choice, which Safari fools: it always says "default" here. */
+    getWorkerResources() {
+      return { wasmPath: String(this.pathConfig.default), compat: false };
     }
     async loadModel(source, params) {
       h.loadedWith.push({ source, params });
@@ -344,17 +350,29 @@ describe('switching between the two models', () => {
  * download; these are the two layers behind it.
  */
 describe('an engine that cannot start', () => {
-  it('is refused with a clear message in a browser that cannot compile it, before any engine is made', async () => {
+  it('runs the self-hosted compatibility engine in a browser that cannot compile the default one', async () => {
     h.memory64 = false;
     cache(BALANCED, BALANCED.bytes);
     const runtime = new WllamaRuntime();
 
-    const err = await runtime.load(BALANCED).catch(e => e);
+    await runtime.load(BALANCED);
 
-    expect(err).toBeInstanceOf(AIRuntimeError);
-    expect(err.userMessage).toMatch(/browser/i);
-    expect(runtime.status).toBe(AIStatus.ERROR);
-    expect(h.loadedWith).toHaveLength(0);
+    const resources = runtime._wllama.getWorkerResources();
+    expect(resources.compat).toBe(true);
+    expect(resources.wasmPath).toMatch(/wllama-compat/);
+    expect(resources.wasmPath).not.toMatch(/^https?:\/\/(?!localhost)/);
+    expect(resources.jsPath.code.length).toBeGreaterThan(1000);
+    expect(runtime.status).toBe(AIStatus.READY);
+  });
+
+  it('leaves a browser that can compile it on the default engine', async () => {
+    cache(BALANCED, BALANCED.bytes);
+    const runtime = new WllamaRuntime();
+
+    await runtime.load(BALANCED);
+
+    expect(runtime._wllama.getWorkerResources().compat).toBe(false);
+    expect(runtime._wllama.compat).toBeNull();
   });
 
   it('fails at a time limit instead of loading for ever, and lets the engine go', async () => {

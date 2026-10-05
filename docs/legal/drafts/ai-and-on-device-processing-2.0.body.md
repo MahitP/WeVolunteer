@@ -179,14 +179,16 @@ Not every device can run a model, and WeVolunteer will not offer one that is
 likely to fail or to answer badly. Where a device cannot, Settings says so and
 says why rather than presenting a choice that will not work.
 
-**Welly AI does not run on iPhone or iPad, or in Safari on a Mac.** The model
-needs a kind of WebAssembly (64-bit memory) that Safari cannot run yet, and
-every browser on an iPhone or iPad is built on Safari's engine. So on those
-devices Settings says Welly AI is not available here, rather than offering a
-download that could not start.
+**On iPhone and iPad, Welly AI is an experiment.** Safari limits how much
+memory a web page may use, and ends the page if it uses more. WeVolunteer has
+not yet been able to test which models stay inside that limit. So on these
+devices only the smaller model, Balanced (about 500 MB), is offered, and only
+after you tick a box saying you understand it is experimental on your device.
+If it is too big for your device, the page reloads during setup or while Welly
+is answering. Nothing else is affected, and you can turn Welly AI off again in
+Settings. The larger model is not offered on iPhone or iPad.
 
-On other browsers, the same care applies to computers with little memory
-available. Welly Chat,
+The same care applies to computers with little memory available. Welly Chat,
 and everything else in WeVolunteer, works normally on every device either way.
 
 ## Analytics
@@ -218,11 +220,11 @@ downloaded under any circumstances.
 ## Changes
 
 This is version 2.0. Version 1.0 said that your question is not sent when
-Welly looks something up. That is not true today: a search sends the words you
-searched for. This version also describes Welly Chat and the actions Welly can
-take after you confirm, gives the current reason Welly AI is not available on
-iPhone or iPad, and corrects the model sizes and which models are checked
-against a checksum. Earlier versions
+Welly looks something up, and that Welly is not available on iPhone or iPad.
+Neither is true today: a search sends the words you searched for, and Welly AI
+is offered on iPhone and iPad as an experiment. This version also describes
+Welly Chat and the actions Welly can take after you confirm, and corrects the
+model sizes and which models are checked against a checksum. Earlier versions
 are available on request.
 
 As further parts of the assistant are built, this page is updated to describe

@@ -113,6 +113,7 @@ lines are copied from each package's own `LICENSE` file, not from its
 | `jsqr` | 1.4.0 | Apache-2.0 | See the project's `LICENSE` |
 | `@wllama/wllama` | 3.5.1 | MIT | Declared in `package.json`; the package ships **no `LICENSE` file** |
 | **llama.cpp / ggml** | via wllama's `.wasm` | MIT | Copyright (c) 2023-2026 The ggml authors |
+| `@wllama/wllama-compat` | 3.5.1 | MIT | Declared in `package.json` (author Xuan Son Nguyen); like wllama, the package ships **no `LICENSE` file**. wllama's engine built without Memory64, for Safari; llama.cpp/ggml are compiled into its `.wasm` as into wllama's. Served from this origin, and downloaded only by a browser that cannot run the default engine |
 | `socket.io-client` | 4.8.3 | MIT | Copyright (c) 2014-present Guillermo Rauch and Socket contributors |
 | `@amplitude/unified` | 1.1.x | MIT | See the project's `LICENSE`. Loaded only when a user opts in to analytics |
 | `tesseract.js` | 7.0.0 | Apache-2.0 | See the project's `LICENSE.md`. Its worker bundles zlib.js (MIT, imaya), regenerator-runtime (MIT, Facebook, Inc.), buffer (MIT, Feross Aboukhadijeh) and ieee754 (BSD-3-Clause, Feross Aboukhadijeh), per its own `worker.min.js.LICENSE.txt` |

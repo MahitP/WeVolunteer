@@ -42,6 +42,7 @@
   "dependencies": {
     "@amplitude/unified": "^1.1.29",
     "@wllama/wllama": "^3.5.1",
+    "@wllama/wllama-compat": "3.5.1",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.24.0",
