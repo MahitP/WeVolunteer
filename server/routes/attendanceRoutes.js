@@ -303,7 +303,7 @@ router.post('/api/events/:id/hours/close-out', authenticateToken, requireCapAny(
     if (event.status !== 'completed') {
       return res.status(409).json({
         error: 'Every shift has to have ended and every confirmed volunteer has to be '
-          + 'accounted for before the hours can be closed out. Finalise the roster first.',
+          + 'accounted for before the hours can be closed out. Finalize the roster first.',
         code: 'event_not_complete',
       });
     }

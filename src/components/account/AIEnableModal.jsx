@@ -80,7 +80,7 @@ export default function AIEnableModal({ capability, models, initialModelId, onCo
           <h3>Energy use</h3>
           <p className="dim small">
             Running the model here uses this device&rsquo;s battery rather than a data
-            centre, and once it is downloaded there is no further transfer for each
+            center, and once it is downloaded there is no further transfer for each
             question. Whether that is better overall depends on the device, the model and
             how much it is used, so it is a reasonable trade rather than a green claim.
           </p>

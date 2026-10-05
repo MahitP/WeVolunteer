@@ -407,7 +407,7 @@ export default function EventModal({
             <div className="row" style={{ gap: 'var(--s2)', alignItems: 'center' }}>
               <h2>
                 {mode === 'edit' ? 'Edit event'
-                  : mode === 'attendance' ? (event.hoursClosedOutAt ? 'Hours (final)' : 'Finalise hours')
+                  : mode === 'attendance' ? (event.hoursClosedOutAt ? 'Hours (final)' : 'Finalize hours')
                   : event.title}
               </h2>
               {mode === 'view' && currentUser?.role === 'student' && onToggleFavorite && (
@@ -637,7 +637,7 @@ export default function EventModal({
                     <button className="btn btn-primary btn-sm" onClick={() => setMode('attendance')}
                       disabled={endedApps.length === 0}
                       title={endedApps.length === 0
-                        ? 'Hours can be finalised once a shift has ended'
+                        ? 'Hours can be finalized once a shift has ended'
                         : undefined}>
                       <ClipboardCheck size={13} />
                       {/* Three states, three words. "Correct hours" on an event
@@ -646,7 +646,7 @@ export default function EventModal({
                           for once nothing on it can change. */}
                       {event.hoursClosedOutAt ? 'View hours'
                         : event.status === 'completed' ? 'Correct hours'
-                          : 'Finalise hours'}
+                          : 'Finalize hours'}
                     </button>
                   </div>
                 </div>

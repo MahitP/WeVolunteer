@@ -69,7 +69,7 @@ export const ISSUE_CATEGORIES = Object.freeze([
    * an enforcement address is a better landing place than a support inbox — but
    * the page also says where the proper control is.
    */
-  { value: 'conduct', label: 'Inappropriate content or behaviour' },
+  { value: 'conduct', label: 'Inappropriate content or behavior' },
   { value: 'privacy', label: 'Privacy concern' },
   { value: 'security', label: 'Security concern' },
   { value: 'legal', label: 'Legal or policy question' },

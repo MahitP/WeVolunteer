@@ -81,7 +81,7 @@ export default function PublicOrganizationView({ organization, action, note, hea
 
       <p className="muted small invite-foot">
         <Building2 size={13} aria-hidden="true" />{' '}
-        {APP_NAME} is where schools and community groups organise volunteering and keep a
+        {APP_NAME} is where schools and community groups organize volunteering and keep a
         record of service hours. <Link to="/about">What is this?</Link>
       </p>
     </>

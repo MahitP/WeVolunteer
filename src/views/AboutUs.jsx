@@ -62,7 +62,7 @@ const BELIEFS = [
        an organizer can accept, waitlist or reject by hand. The earlier sentence
        implied every full event was drawn. */
     body: 'Three hours at one event is a real contribution. When more people apply '
-      + 'than there are places and the organizer uses Auto Select, the draw favours '
+      + 'than there are places and the organizer uses Auto Select, the draw favors '
       + 'the volunteers with fewer credited hours, so turning up for the first time '
       + 'does not put you at the back of the queue behind somebody with two hundred.',
   },

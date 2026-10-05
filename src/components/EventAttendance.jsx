@@ -310,7 +310,7 @@ export default function EventAttendance({
           </div>
         )}
 
-        {markableApps.length === 0 ? <EmptyState icon={Users} title={acceptedApps.length === 0 ? 'No confirmed volunteers' : 'No shifts have ended yet'} message={acceptedApps.length === 0 ? 'Accept applicants first, then come back to record who attended.' : 'Hours can only be finalised once a shift is over. Use check-in during the event.'} /> : <>
+        {markableApps.length === 0 ? <EmptyState icon={Users} title={acceptedApps.length === 0 ? 'No confirmed volunteers' : 'No shifts have ended yet'} message={acceptedApps.length === 0 ? 'Accept applicants first, then come back to record who attended.' : 'Hours can only be finalized once a shift is over. Use check-in during the event.'} /> : <>
             <div className="row-between row-wrap s-6cce54">
               <span className="small muted tnum">
                 <span className="strong">{markedCount}</span> of {markableApps.length} marked

@@ -120,7 +120,7 @@ describe('EventModal Characterization', () => {
       />
     );
     
-    const attendanceBtn = screen.getByText('Finalise hours');
+    const attendanceBtn = screen.getByText('Finalize hours');
     fireEvent.click(attendanceBtn);
 
     await waitFor(() => {

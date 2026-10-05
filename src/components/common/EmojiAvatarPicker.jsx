@@ -95,7 +95,7 @@ const KEYWORDS = Object.freeze({
   '🐱': 'cat shelter', '🐢': 'turtle wildlife', '🐬': 'marine wildlife',
   '🍎': 'food fruit school', '🥕': 'garden vegetable food', '🍞': 'bread food bank',
   '🥗': 'food healthy', '☕': 'coffee cafe', '🎂': 'birthday party', '🎉': 'party celebration',
-  '⭐': 'star favourite', '🚀': 'launch new', '🧭': 'guide direction', '🛠️': 'build repair tools',
+  '⭐': 'star favorite', '🚀': 'launch new', '🧭': 'guide direction', '🛠️': 'build repair tools',
   '🧰': 'tools repair', '🚲': 'bike', '🚌': 'transport bus', '📣': 'announce outreach',
   '🗺️': 'map area', '🔑': 'access key', '💼': 'work career', '🧩': 'puzzle inclusion autism',
 });

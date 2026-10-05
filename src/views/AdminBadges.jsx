@@ -592,7 +592,7 @@ function BadgeForm({ badge, meta, error, busy, onChange, onSubmit, onCancel }) {
           <label htmlFor="badge-category">Category</label>
           <input id="badge-category" type="text" required maxLength={40}
             value={badge.category} onChange={(e) => set({ category: e.target.value })} />
-          <p className="muted small">Groups the badge in the catalogue, e.g. Service, Reliability.</p>
+          <p className="muted small">Groups the badge in the catalog, e.g. Service, Reliability.</p>
         </div>
 
         <div className="form-group">

@@ -837,7 +837,7 @@ async function finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, rea
       error: 'slot_unpriceable',
       message: `${unpriceable.length === 1 ? 'A shift has' : `${unpriceable.length} shifts have`} `
         + 'start and end times that do not describe a real span, so hours cannot be worked out '
-        + 'from them. Correct the shift times on the event, then finalise again.',
+        + 'from them. Correct the shift times on the event, then finalize again.',
       unpriceable
     };
   }
@@ -848,7 +848,7 @@ async function finalizeAttendanceInner(db, { event, attendanceMap, hoursMap, rea
     return {
       ok: false,
       error: 'shift_not_ended',
-      message: `Hours can only be finalised after a shift has ended. ${notEnded.length} of the shifts you submitted are still to come — use check-in for those.`,
+      message: `Hours can only be finalized after a shift has ended. ${notEnded.length} of the shifts you submitted are still to come — use check-in for those.`,
       notEnded
     };
   }

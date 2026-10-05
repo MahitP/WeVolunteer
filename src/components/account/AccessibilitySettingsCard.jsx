@@ -49,7 +49,7 @@ const SWITCHES = [
     key: 'contrast',
     on: 'high',
     label: 'Increase contrast',
-    hint: 'Darkens body text and strengthens borders, keeping WeVolunteer’s colours. '
+    hint: 'Darkens body text and strengthens borders, keeping WeVolunteer’s colors. '
       + 'If you use your operating system’s own high-contrast mode, that is applied '
       + 'automatically and you do not need this.'
   },
@@ -58,7 +58,7 @@ const SWITCHES = [
     on: 'reduce',
     label: 'Reduce motion',
     hint: 'Removes animations and transitions. If your device already asks for reduced '
-      + 'motion, WeVolunteer honours that on its own — this is for when it does not, '
+      + 'motion, WeVolunteer honors that on its own — this is for when it does not, '
       + 'or when you want less movement only here.'
   },
   {
@@ -78,7 +78,7 @@ const SWITCHES = [
     key: 'linkUnderlines',
     on: 'always',
     label: 'Always underline links',
-    hint: 'Underlines links in text so they are not identified by colour alone. '
+    hint: 'Underlines links in text so they are not identified by color alone. '
       + 'Navigation and buttons are left alone.'
   }
 ];

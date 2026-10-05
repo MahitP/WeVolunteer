@@ -537,8 +537,8 @@ export default function AdminImpact({ addToast }) {
               <h2 id="impact-categories">Where the effort went</h2>
               {!hasCategoryHours ? (
                 <EmptyState
-                  title="No categorised hours yet"
-                  message="Categories appear once events with confirmed attendance have been categorised."
+                  title="No categorized hours yet"
+                  message="Categories appear once events with confirmed attendance have been categorized."
                 />
               ) : (
                 <>

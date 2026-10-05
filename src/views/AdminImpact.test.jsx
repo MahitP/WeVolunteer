@@ -107,7 +107,7 @@ describe('Platform Impact', () => {
     renderPage();
 
     expect(await screen.findByText(/No confirmed hours yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/No categorised hours yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No categorized hours yet/i)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 

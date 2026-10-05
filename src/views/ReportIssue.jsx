@@ -228,7 +228,7 @@ export default function ReportIssue({ currentUser, addToast }) {
       <div className="alert" role="note">
         <div>
           <span className="alert-title row" style={{ gap: 6 }}>
-            <Flag size={15} aria-hidden="true" /> Reporting someone&rsquo;s behaviour?
+            <Flag size={15} aria-hidden="true" /> Reporting someone&rsquo;s behavior?
           </span>
           <p className="small">
             Use the <strong>Report</strong> control on that person&rsquo;s profile or on the

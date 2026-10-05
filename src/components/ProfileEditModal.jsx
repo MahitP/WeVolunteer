@@ -310,7 +310,7 @@ export default function ProfileEditModal({ user, onClose, onSave, addToast, onSi
               aria-describedby="pf-location-hint"
               onChange={e => set('location', e.target.value)} />
             <span className="field-hint" id="pf-location-hint">
-              A town or neighbourhood is enough — &ldquo;Example Valley, NJ&rdquo;. Never your street
+              A town or neighborhood is enough — &ldquo;Example Valley, NJ&rdquo;. Never your street
               address. This is visible to anyone who finds your profile.
             </span>
           </div>
