@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, AlertTriangle, Check } from 'lucide-react';
 import { api } from '../../utils/api';
 import PolicyBody from '../../components/legal/PolicyBody';
+import { effectiveDateLabel } from './legalDates';
 
 /**
  * The Organizer Agreement acceptance screen.
@@ -199,7 +200,7 @@ export default function OrganizerAgreement({ currentUser, addToast, onAccepted }
         <h2 id="oa-text">The agreement</h2>
         <p className="small dim">
           Version {status.documents[0]?.version}
-          {status.documents[0]?.effectiveAt && ` · in effect since ${status.documents[0].effectiveAt}`}
+          {effectiveDateLabel(status.documents[0]?.effectiveAt) && ` · ${effectiveDateLabel(status.documents[0].effectiveAt)}`}
         </p>
         {markdown && <PolicyBody markdown={markdown} />}
       </section>

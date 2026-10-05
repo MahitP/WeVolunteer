@@ -2,6 +2,7 @@ import React from 'react';
 import { ShieldCheck, AlertTriangle, Check, FileText } from 'lucide-react';
 import { api } from '../../utils/api';
 import PolicyBody from './PolicyBody';
+import { effectiveDateLabel } from '../../views/legal/legalDates';
 
 /**
  * The Admin Responsibilities Policy, and the form that accepts it.
@@ -156,7 +157,7 @@ export default function AdminPolicyGate({ currentUser, addToast, onAccepted }) {
           </h3>
           <p className="small dim">
             Version {status.documents[0]?.version}
-            {status.documents[0]?.effectiveAt && ` · in effect since ${status.documents[0].effectiveAt}`}
+            {effectiveDateLabel(status.documents[0]?.effectiveAt) && ` · ${effectiveDateLabel(status.documents[0].effectiveAt)}`}
           </p>
         </div>
         {/* Bounded and scrollable, so the text and the boxes below stay on screen

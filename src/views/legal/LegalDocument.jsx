@@ -6,7 +6,7 @@ import { parsePolicyMarkdown, tableOfContents } from '../../utils/policyMarkdown
 import PolicyBody from '../../components/legal/PolicyBody';
 /* Shared, so the reason it parses a plain date rather than a timestamp lives in
    one place. See legalDates.js. */
-import { formatLegalDate } from './legalDates';
+import { formatLegalDate, effectiveDateLabel } from './legalDates';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import { usePageMeta } from '../../hooks/usePageMeta';
 
@@ -196,7 +196,7 @@ export default function LegalDocument() {
                 rather than shrinking to `.small dim`. */}
             <p className="legal-meta">
               Version {doc.version}
-              {formatLegalDate(doc.effectiveAt) && ` · in effect since ${formatLegalDate(doc.effectiveAt)}`}
+              {effectiveDateLabel(doc.effectiveAt) && ` · ${effectiveDateLabel(doc.effectiveAt)}`}
               {/**
                 * "Last revised" appears only when it says something the effective
                 * date does not.

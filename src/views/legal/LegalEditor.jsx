@@ -9,7 +9,7 @@ import { STEP_UP } from '../../utils/stepUp';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import PolicyBody from '../../components/legal/PolicyBody';
 import { parsePolicyMarkdown, isSafeHref } from '../../utils/policyMarkdown';
-import { formatLegalDate, todayIso, latestEffectiveIso, isoPlusDays } from './legalDates';
+import { formatLegalDate, effectiveDateLabel, todayIso, latestEffectiveIso, isoPlusDays } from './legalDates';
 import DatePicker from '../../components/common/DatePicker';
 
 /**
@@ -497,7 +497,7 @@ export default function LegalEditor({ addToast }) {
                   </h2>
                   <p className="legal-editor-current dim small">
                     Currently published: version {loaded.version}
-                    {formatLegalDate(loaded.effectiveAt) && ` · in effect since ${formatLegalDate(loaded.effectiveAt)}`}
+                    {effectiveDateLabel(loaded.effectiveAt) && ` · ${effectiveDateLabel(loaded.effectiveAt)}`}
                     {loaded.source === 'file' && ' · as originally published'}
                   </p>
                 </div>

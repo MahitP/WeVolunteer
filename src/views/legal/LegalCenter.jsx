@@ -4,7 +4,7 @@ import { FileText, Search, ShieldCheck, Handshake, BookOpen } from 'lucide-react
 import { api } from '../../utils/api';
 /* Shared, so the reason it parses a plain date rather than a timestamp lives in
    one place. See legalDates.js. */
-import { formatLegalDate } from './legalDates';
+import { effectiveDateLabel } from './legalDates';
 import { usePageMeta } from '../../hooks/usePageMeta';
 
 /**
@@ -241,7 +241,7 @@ export default function LegalCenter() {
                   {doc.summary && <span className="legal-doc-summary">{doc.summary}</span>}
                   <span className="legal-doc-meta small dim">
                     Version {doc.version}
-                    {formatLegalDate(doc.effectiveAt) && ` · in effect since ${formatLegalDate(doc.effectiveAt)}`}
+                    {effectiveDateLabel(doc.effectiveAt) && ` · ${effectiveDateLabel(doc.effectiveAt)}`}
                   </span>
                 </Link>
               </li>

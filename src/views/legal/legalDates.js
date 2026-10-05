@@ -35,6 +35,26 @@ export function todayIso() {
 }
 
 /**
+ * The effective date as a version line states it: "in effect since …" once it
+ * has arrived, "takes effect …" while it is still ahead.
+ *
+ * Every line used to say "in effect since", which stopped being true the first
+ * time a document was published ahead of its date — what a notice period is.
+ * Terms 2.0 is published thirty days early, as Terms §13 promises, and for those
+ * thirty days the page would have told readers they were already bound by it.
+ *
+ * The reader's own calendar day, like the editor's picker: the server compares
+ * in UTC with a day of slack for the same reason (`parseEffectiveAt`).
+ */
+export function effectiveDateLabel(iso, today = todayIso()) {
+  const formatted = formatLegalDate(iso);
+  if (!formatted) return null;
+  return String(iso).slice(0, 10) > today
+    ? `takes effect ${formatted}`
+    : `in effect since ${formatted}`;
+}
+
+/**
  * The latest date the server will accept, as `YYYY-MM-DD`.
  *
  * Mirrors `MAX_EFFECTIVE_DAYS_AHEAD` in server/legalStore.js. The server owns

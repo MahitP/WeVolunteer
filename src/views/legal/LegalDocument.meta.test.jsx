@@ -139,4 +139,12 @@ describe('the version line', () => {
     expect(meta).toHaveTextContent('Version 1.0');
     expect(meta).toHaveTextContent('in effect since August 15, 2026');
   });
+
+  /* Published ahead of its date, as a notice period requires: the reader is not
+     bound yet, so the line must not say they are (legalDates.test.js). */
+  it('says a version published ahead of its date takes effect then', async () => {
+    const meta = await renderDoc(DOC({ version: '2.0', effectiveAt: '2099-01-01' }));
+    expect(meta).toHaveTextContent('takes effect January 1, 2099');
+    expect(meta).not.toHaveTextContent('in effect since');
+  });
 });

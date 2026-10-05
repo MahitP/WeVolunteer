@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, AlertTriangle, Check } from 'lucide-react';
 import { api } from '../../utils/api';
 import PolicyBody from '../../components/legal/PolicyBody';
+import { effectiveDateLabel } from './legalDates';
 
 /**
  * The Student Organizer Agreement acceptance screen.
@@ -196,7 +197,7 @@ export default function StudentOrganizerAgreement({ currentUser, addToast, onAcc
         <h2 id="soa-text">The agreement</h2>
         <p className="small dim">
           Version {status.documents[0]?.version}
-          {status.documents[0]?.effectiveAt && ` · in effect since ${status.documents[0].effectiveAt}`}
+          {effectiveDateLabel(status.documents[0]?.effectiveAt) && ` · ${effectiveDateLabel(status.documents[0].effectiveAt)}`}
         </p>
         {markdown && <PolicyBody markdown={markdown} />}
       </section>
