@@ -370,10 +370,13 @@ export const TOOLS = {
         maxDistance: { type: 'number', minimum: 0, maximum: 500 },
         lat: { type: 'number' },
         lng: { type: 'number' },
+        /* The days the question named ("this weekend"), from `dateWindow`. */
+        from: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        to: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       },
       additionalProperties: false,
     },
-    async run({ query, tags, maxDistance, lat, lng } = {}) {
+    async run({ query, tags, maxDistance, lat, lng, from, to } = {}) {
       try {
         const res = await api.fetchEventsFiltered({
           q: typeof query === 'string' ? query.slice(0, 200) : '',
@@ -398,6 +401,8 @@ export const TOOLS = {
           lat: typeof lat === 'number' ? lat : undefined,
           lng: typeof lng === 'number' ? lng : undefined,
           maxDistance: typeof maxDistance === 'number' ? maxDistance : undefined,
+          from: typeof from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : undefined,
+          to: typeof to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : undefined,
           limit: MAX_ROWS,
         });
         const list = res?.events || [];

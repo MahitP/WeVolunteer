@@ -512,6 +512,25 @@ describe('refusals reach no tool at all', () => {
   });
 });
 
+describe('a date in the question', () => {
+  it('reaches the events API as a from/to window', async () => {
+    await ask('find food bank events this weekend', { runtime: null, position: null });
+
+    const filters = apiMock.fetchEventsFiltered.mock.calls[0][0];
+    expect(filters.q).toBe('food bank');
+    expect(filters.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(filters.to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('sends no window when none was asked for', async () => {
+    await ask('find food bank events', { runtime: null, position: null });
+
+    const filters = apiMock.fetchEventsFiltered.mock.calls[0][0];
+    expect(filters.from).toBeUndefined();
+    expect(filters.to).toBeUndefined();
+  });
+});
+
 describe('location', () => {
   it('uses a shared position when one is available', async () => {
     await ask('opportunities near me', {

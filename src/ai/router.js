@@ -153,6 +153,12 @@ const SEARCH_INTENT = new RegExp([
   /\b(looking for|sign ?up for|what'?s on)\b/,
   /\b(near|nearby|around|close (by|to)|this (week|weekend|month))\b/,
   /\bcan i\b.{0,15}\b(do|join|participate|attend|help|sign ?up|volunteer)\b/,
+  /* Two ways of asking that found nothing before 2026-10-05, each held to the
+     thing being looked for so that a question about the rules ("Can I apply to
+     more than five events at once?") is not turned into a search:
+     "what food pantry events can I apply to", and "events I can join". */
+  /\b(what|which|any)\b[^.?!]{0,40}\bcan i\s+(apply|join|attend|participate|sign ?up|volunteer|help)\b/,
+  /\b(opportunit(y|ies)|events?|shifts?|slots?|openings?)\s+(that\s+)?i (can|could)\s+(apply|join|attend|participate|sign ?up|volunteer|help)\b/,
 ].map(r => r.source).join('|'), 'i');
 
 /**
@@ -326,6 +332,60 @@ function searchTopic(text) {
     .join(' ');
 
   return topic;
+}
+
+/** `YYYY-MM-DD` for a local calendar day, the form the events API filters on. */
+function localIso(d) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The day `n` days after `d`, at the same local time. */
+function plusDays(d, n) {
+  const out = new Date(d);
+  out.setDate(out.getDate() + n);
+  return out;
+}
+
+/**
+ * The days a question means by "this weekend", "tomorrow" and the like, as
+ * `{ from, to }`, or null when it names no time.
+ *
+ * "Find food bank events this weekend" used to search every date: the phrase
+ * was removed from the search words (`searchTopic`) and then dropped. The
+ * events API filters on the first shift's day, so this is passed as its
+ * `from`/`to` (2026-10-05).
+ *
+ * Weeks run Monday to Sunday. "This weekend" on a Saturday or Sunday is the one
+ * already under way; "next week" on a Sunday is the week that starts tomorrow.
+ */
+export function dateWindow(text, today = new Date()) {
+  const t = String(text).toLowerCase();
+  const day = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12);
+  const dow = (day.getDay() + 6) % 7; /* Monday 0 … Sunday 6 */
+  const span = (a, b) => ({ from: localIso(a), to: localIso(b) });
+
+  if (/\bnext weekend\b/.test(t)) {
+    const saturday = plusDays(day, 12 - dow);
+    return span(saturday, plusDays(saturday, 1));
+  }
+  if (/\b(this )?weekend\b/.test(t)) {
+    if (dow === 6) return span(day, day);
+    const saturday = plusDays(day, 5 - dow);
+    return span(dow === 5 ? day : saturday, plusDays(saturday, 1));
+  }
+  if (/\bnext week\b/.test(t)) {
+    const monday = plusDays(day, 7 - dow);
+    return span(monday, plusDays(monday, 6));
+  }
+  if (/\bthis week\b/.test(t)) return span(day, plusDays(day, 6 - dow));
+  if (/\bnext month\b/.test(t)) {
+    return span(new Date(day.getFullYear(), day.getMonth() + 1, 1), new Date(day.getFullYear(), day.getMonth() + 2, 0));
+  }
+  if (/\bthis month\b/.test(t)) return span(day, new Date(day.getFullYear(), day.getMonth() + 1, 0));
+  if (/\btomorrow\b/.test(t)) return span(plusDays(day, 1), plusDays(day, 1));
+  if (/\b(today|tonight)\b/.test(t)) return span(day, day);
+  return null;
 }
 
 /** Affirmations, gratitude and conversational wrap-ups. */
@@ -873,6 +933,12 @@ const MATCHERS = [
 
       const query = searchTopic(text);
       if (query) slots.query = query;
+
+      const window = dateWindow(text);
+      if (window) {
+        slots.from = window.from;
+        slots.to = window.to;
+      }
 
       return slots;
     },
