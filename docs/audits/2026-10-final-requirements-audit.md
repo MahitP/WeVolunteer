@@ -169,206 +169,206 @@ is **Reported** until Phase 1 promotes it.
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
-| FX-01 | 403 screen full-screen like 404/500; all error screens match, mobile + laptop | Done·R | `src/App.jsx:1939-1941`; `ErrorExperience/kinds.js` (`403: 'immersive'`) | Visual check in Phase 2 incl. landscape phone |
-| FX-02 | Admin audit log styled properly | Done·R | `AdminAuditExplorer.jsx:213-243`; `index.css:9171`; `16b9867` | Sentences, severity, cards on mobile |
-| FX-03 | Suspension splash: red border, blurred app behind, unescapable, reason shown, can sign out, no global sign-out | Partial·V | `App.jsx:~1662-1681` ("reverted, for three reasons"); `SuspendedWall.jsx`; `authRoutes.js:1678-1695` | Reason + per-device sign-out done. Blur deliberately reverted; no red border. **Gate** — Ruling 1: red border over static blurred backdrop |
-| FX-04 | "New message" copy wrong for admins/organizers | Done·R | `components/messages/recipientCopy.js:60,87,122` | Copy derived from capabilities |
+| FX-01 | 403 screen full-screen like 404/500; all error screens match, mobile + laptop | Done·V | `src/App.jsx:1939-1941`; `ErrorExperience/kinds.js` (`403: 'immersive'`) | Visual check in Phase 2 incl. landscape phone — **Final:** browser, Phase 2 |
+| FX-02 | Admin audit log styled properly | Done·V | `AdminAuditExplorer.jsx:213-243`; `index.css:9171`; `16b9867` | Sentences, severity, cards on mobile — **Final:** browser, Phase 2 |
+| FX-03 | Suspension splash: red border, blurred app behind, unescapable, reason shown, can sign out, no global sign-out | Done·V | `App.jsx:~1662-1681` ("reverted, for three reasons"); `SuspendedWall.jsx`; `authRoutes.js:1678-1695` | Reason + per-device sign-out done. Blur deliberately reverted; no red border. **Gate** — Ruling 1: red border over static blurred backdrop — **Final:** `17e6b86` (ruling 1) |
+| FX-04 | "New message" copy wrong for admins/organizers | Done·V | `components/messages/recipientCopy.js:60,87,122` | Copy derived from capabilities — **Final:** browser, Phase 5 walk after `b8a3e92` (the copy fell to "not available" without a cached user) |
 | FX-05 | One Admin / SuperAdmin entry instead of many | Done·V | `App.jsx:433` | Single "Admin" → `/admin/moderation` — P1: NAV table read: one Admin entry |
 | FX-06 | "Create event" on the right of Opportunities for everyone who can; remove "New Event" from nav | Done·V | `BrowseEvents.jsx:593,691-694`; `App.jsx:397` | P1: NAV comment + Discover header |
 | FX-07 | Owner pages only via the hub, never deleted: Community Impact, Appeals, Admin Roster, Audit Explorer, Errors, Platform Impact | Done·V | `ModerationCenter.jsx:77-140`; routes intact | Tile names ≠ page titles (see A10) — P1: all six routes registered; hub tiles present |
-| FX-08 | Mahit persona switch: owner / admin / organizer / student | Done·R | `server/routes/personaRoutes.js:79-82`; `PersonaPreviewBanner.jsx:39` | |
-| FX-09 | Mahit's handle is `@mahit`; delete any conflicting account; only two accounts matter | Partial·R | `bin/bootstrap-owners.mjs:77-78`; `server/config.js:414`; `accountValidation.js:119-137` | Nothing guarantees `@mahit`. **Deletion is Owner-action** — production holds real users; this audit deletes no accounts |
-| FX-10 | WeVolunteer platform account gets a special owner profile | Partial·R | `App.jsx:184-189,215-218`; `profileSerializer.js:115,143` | Keyed on role, so both super_admins get the same treatment |
-| FX-11 | "Your next shift" too bright in dark mode; match other greens | Done·R | `index.css:433,466,2208` | Eyeball in Phase 2 |
-| FX-12 | Admin mobile bar: Dashboard, Opportunities, Calendar, Messages, Admin; overflow: Notifications, My profile; short consistent hub name; no detached separator | Partial·V | `App.jsx:392,2251-2345`; 09-21 Pass 15 6A | No Calendar — an audit choice, not the owner's. **Gate** — Ruling 2: add Calendar for admins (6A overturned) |
-| FX-13 | Owner/partner preview selector UI cleaner | Done·R | `ModerationCenter.jsx:388,423-448` | Radio cards replaced `<select>` |
-| FX-14 | External hours: tracking only, never verified; separate log page; not in nav | Partial·R | `LogExternalHours.jsx:285-295`; `LoggedHours.jsx:114,215-226`; `VolunteerDashboard.jsx:499-543` | Tracking-only + warning + back button done. See P2-21 for the button |
-| FX-15 | RULE: no new menu-bar icons; entry points in existing surfaces | Done·R | — | Standing rule; checked across every item |
-| FX-16 | Opportunities + Find merged cleanly | Done·R | `routes/index.jsx:273`; `BrowseEvents.jsx:104-109` | Visual check Phase 2 |
-| FX-17 | Avatar menu exactly Profile / Notifications / Settings / Sign Out; mobile Profile in overflow | Partial·V | `ProfileMenu.jsx:146-185`; `accountMenu.js:70` | Extra "My hours" item. "Notifications" goes to *settings* on desktop, the *inbox* on mobile (A2). **Gate** for My hours — Ruling 3: exactly four items; A2 fixed as a defect |
-| FX-18 | Dashboard zoom-out on mobile — investigate, fix only if real | Done·R | `index.html:38`; `e3c2190` | Zoom not blocked; sideways overflow fixed |
+| FX-08 | Mahit persona switch: owner / admin / organizer / student | Done·V | `server/routes/personaRoutes.js:79-82`; `PersonaPreviewBanner.jsx:39` | — **Final:** browser, Phase 6 owner walk: preview as student lands on the dashboard with its banner; Stop returns |
+| FX-09 | Mahit's handle is `@mahit`; delete any conflicting account; only two accounts matter | Done·V | `bin/bootstrap-owners.mjs:77-78`; `server/config.js:414`; `accountValidation.js:119-137` | Nothing guarantees `@mahit`. **Deletion is Owner-action** — production holds real users; this audit deletes no accounts — **Final:** `152aab1` reserves @mahit; any conflicting production account is an Owner-action |
+| FX-10 | WeVolunteer platform account gets a special owner profile | Done·V | `App.jsx:184-189,215-218`; `profileSerializer.js:115,143` | Keyed on role, so both super_admins get the same treatment — **Final:** `152aab1`, `6a4c6c2` (rulings 19, 21) |
+| FX-11 | "Your next shift" too bright in dark mode; match other greens | Done·V | `index.css:433,466,2208` | Eyeball in Phase 2 — **Final:** browser, Phase 2 |
+| FX-12 | Admin mobile bar: Dashboard, Opportunities, Calendar, Messages, Admin; overflow: Notifications, My profile; short consistent hub name; no detached separator | Done·V | `App.jsx:392,2251-2345`; 09-21 Pass 15 6A | No Calendar — an audit choice, not the owner's. **Gate** — Ruling 2: add Calendar for admins (6A overturned) — **Final:** `a339315`, `fa5cb5e` (ruling 2) |
+| FX-13 | Owner/partner preview selector UI cleaner | Done·V | `ModerationCenter.jsx:388,423-448` | Radio cards replaced `<select>` — **Final:** browser, Phase 6 owner walk: three role cards on the Admin hub |
+| FX-14 | External hours: tracking only, never verified; separate log page; not in nav | Done·V | `LogExternalHours.jsx:285-295`; `LoggedHours.jsx:114,215-226`; `VolunteerDashboard.jsx:499-543` | Tracking-only + warning + back button done. See P2-21 for the button — **Final:** `8f656b2` (ruling 3) |
+| FX-15 | RULE: no new menu-bar icons; entry points in existing surfaces | Done·V | — | Standing rule; checked across every item — **Final:** the only rail change in this engagement is Calendar for administrators (ruling 2); every new surface went into an existing page |
+| FX-16 | Opportunities + Find merged cleanly | Done·V | `routes/index.jsx:273`; `BrowseEvents.jsx:104-109` | Visual check Phase 2 — **Final:** browser, Phase 5 walk: search, tabs, cards, apply from the modal |
+| FX-17 | Avatar menu exactly Profile / Notifications / Settings / Sign Out; mobile Profile in overflow | Done·V | `ProfileMenu.jsx:146-185`; `accountMenu.js:70` | Extra "My hours" item. "Notifications" goes to *settings* on desktop, the *inbox* on mobile (A2). **Gate** for My hours — Ruling 3: exactly four items; A2 fixed as a defect — **Final:** `8f656b2` (ruling 3) |
+| FX-18 | Dashboard zoom-out on mobile — investigate, fix only if real | Done·V | `index.html:38`; `e3c2190` | Zoom not blocked; sideways overflow fixed — **Final:** browser, Phase 2 |
 | FX-19 | People/org search inside Opportunities; no Edit Profile item; edit button on profile; same layout | Done·V (owner-accepted) | `BrowseEvents.jsx:804`; `VolunteerProfile.jsx:135` | Edit opens a modal. **Gate** — Ruling 12: pop-up kept |
 | FX-20 | One logo in both themes; favicon; emails | Done·V (owner-accepted) | `BrandMark.jsx`; `public/favicon.svg`; `server/email.js:675` | Email tile draws a plain "W", not the checkmark-W (clients strip SVG). **Gate** — Ruling 12: letter-W tile kept |
 | FX-21 | Desktop: Profile not in nav, lives in avatar menu | Done·V | `App.jsx:480,2027` | P1: Profile is `secondary`, `accountOnly` |
-| FX-22 | Owners/partners get custom profiles; @mahit shows student info for colleges | Done·R | `App.jsx:215-218`; `VolunteerProfile.jsx:112`; `Distinction.jsx` | |
+| FX-22 | Owners/partners get custom profiles; @mahit shows student info for colleges | Done·V | `App.jsx:215-218`; `VolunteerProfile.jsx:112`; `Distinction.jsx` | — **Final:** browser, Phase 6 owner walk; founder page per rulings 19 and 21 (`6a4c6c2`) |
 | FX-23 | `@` → only users; `#` → only tagged opportunities/orgs | Done·V | `BrowseEvents.jsx:249-300` | P1: sigil overrides type server-side |
-| FX-24 | Applicants show events signed up and attended | Done·R | `ApplicantReview.jsx:208-225` | Counts, never % |
-| FX-25 | Rename Opportunities tab, no longer than "Opportunities" | Done·R | `App.jsx:358` | "Discover". Organizers' page title says "Recruit" (FX-30) |
-| FX-26 | About Us once, own non-heart icon | Done·R | `Settings.jsx:592-637` | `Info` icon |
-| FX-27 | Org creation tags fail with "40 characters" | Done·R | `server/organizationTags.js:88-107`; `a9ded8d` | Root cause: `{tag,label}` objects |
+| FX-24 | Applicants show events signed up and attended | Done·V | `ApplicantReview.jsx:208-225` | Counts, never % — **Final:** rehearsal (real routes), Phases 3 and 6; counts always shown (`c237410`) |
+| FX-25 | Rename Opportunities tab, no longer than "Opportunities" | Done·V | `App.jsx:358` | "Discover". Organizers' page title says "Recruit" (FX-30) — **Final:** browser, Phase 5 walk: "Discover" in the rail and the title |
+| FX-26 | About Us once, own non-heart icon | Done·V | `Settings.jsx:592-637` | `Info` icon — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| FX-27 | Org creation tags fail with "40 characters" | Done·V | `server/organizationTags.js:88-107`; `a9ded8d` | Root cause: `{tag,label}` objects — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) and rehearsal (real routes), Phases 3 and 6 (clubs created with tags) |
 | FX-28 | Check-in and finalize hours — do they work, when? | Done·V | `attendance.js:29-34,477-553`; `attendanceRoutes.js:280-304` | Close-out only after every shift ends and everyone is accounted for — P1: lock re-read `FOR UPDATE`; refused before any other check |
-| FX-29 | Friends can message; copy says organizers **and** friends | Done·R | `messageRoutes.js:60-95`; `recipientCopy.js:123-125` | |
-| FX-30 | `/events` → `/discover`; no naming discrepancies | Partial·V | `VolunteerDashboard.jsx:274,435`; `OrganizerDashboard.jsx:344`; `CalendarView.jsx:371`; `ai/navigation.js:58` | No `/events` links remain; "Browse/Find opportunities" labels and "Recruit" do. **Gate** (N-13 declined these) — Ruling 5: "Discover" everywhere, incl. organizer title |
-| FX-31 | Dashboard service record capped + "show more" → page | Done·R | `VolunteerDashboard.jsx:556-561` | Cap 3 → `/hours` |
-| FX-32 | Profile service record capped + "show more" | Partial·V | `VolunteerProfile.jsx:261-267` | Cap 5, but on someone else's profile the link goes to **your** `/hours` (A3) — P1: A3 confirmed: `moreHref="/hours"` regardless of `isSelf` |
-| FX-33 | Reliable Volunteer as a badge beside applicants, hover text; fair model (history, recent, decay, recovery, volume); first-time and inactive badges; lost below 90%; not an achievement | Partial·V | `server/reliability.js:61-96,222`; `ApplicantReview.jsx:142-205,238-262`; `c2f5fff` | Badge + decay + evidence floor + withdrawal done. No hover text; first-time is a tag; inactive badge declined; smoothing means exactly 90% never earns it. **Gate** — Ruling 4: hover text + first-timer badge |
-| FX-34 | Hour ladder 5…250+, streak badges, descending, interleaved, "show more" to a page; Early Supporter; other good achievements | Done·R | `server/scripts/seed_badges.js:103-218`; `utils/badgeOrder.js`; `BadgesList.jsx:126` | |
-| FX-35 | Transcript and certificate print properly, light and dark | Done·R | `index.css:4397`; `printIsolation.test.js` | Tests parse CSS only — **print preview in Phase 2** |
-| FX-36 | Transcript lists events (total hours each), not shifts | Partial·V | `VolunteerPortfolio.jsx:15-22,89,217` | Transcript done; a third document lists shifts (A7) — P1: A7 confirmed |
-| FX-37 | Shift row cluttered | Done·R | `EventShiftsTab.jsx:239-314` | Icon buttons |
-| FX-38 | Organizer map: normal theme, not high contrast | Done·R | `location/basemap.js`; `dba4001` | |
-| FX-39 | Remove "Confirmed" pseudo-button from confirmed shifts | Done·R | `VolunteerDashboard.jsx:450-474` | |
-| FX-40 | Location banner: permission checked each load; dismissed per session | Done·R | `LocationContext.jsx:49-161` | Safari fallback noted |
-| FX-41 | Newest message at the bottom | Done·R | `ConversationPane.jsx:70,176-195`; `9a2465b` | Simulated conversation in Phase 3 |
-| FX-42 | Organizers can kick before start only; never revoke hours | Done·R (owner-accepted) | `applicationRoutes.js:866-879,1024-1063` | Per shift, not per event (section C) — Ruling 12: per-shift kept |
-| FX-43 | Org managers can remove members | Done·R | `OrganizationPage.jsx:200-239` | See FX-59/71/73 |
-| FX-44 | Legal change → pop-up with changed lines + link; "your responsibility" clause; formatted email | Partial·R | `LegalUpdateNotice.jsx:157`; `LegalAcceptanceModal.jsx:136-237`; `notificationContent.js:62-69` | No responsibility clause — Terms §13 promises 30 days' notice instead. Wording is Owner-action (Posture B) |
-| FX-45 | Clarify certificate vs transcript | Partial·V | `App.jsx:770,798`; `CertificatesPage.jsx:90-105` | Only implied; plus the third document (A7) — P1: A7 confirmed — a third document is the confusion |
-| FX-46 | Certificate prints both names above the lines: Volunteer / Program Coordinator | Done·R | `CertificateDocument.jsx:115-124`; `certificatePdf.js:221-227` | |
-| FX-47 | Transcript prints without a white background | Done·R | `index.css:4397` | Print preview Phase 2 |
-| FX-48 | Transcript signature: Mahit Pulavarthi, Founder of WeVolunteer | Done·R | `src/config.js:72-74`; `VolunteerPortfolio.jsx:270-279` | |
-| FX-49 | Org pictures: upload, or emoji on a chosen colour (iMessage-style); same for users | Done·R | `OrgAvatar.jsx`; `EmojiAvatarPicker.jsx` | ~200 curated emoji, fixed palette |
-| FX-50 | Org announcements; replies; one org-level Allow Replies checkbox | Done·R | `OrganizationForm.jsx:209,460-463`; `OrganizationAnnouncements.jsx` | |
-| FX-51 | Mobile regressions: dashboard scroll strips; "Message new people" size | Reported | `Messages.jsx:170-181` | Runtime only (Phase 2) |
-| FX-52 | Welcome / login / signup load on mobile | Reported | `a11y/workflows/mobile.spec.js` | Runtime only |
-| FX-53 | Printing prints only the document, not the page | Done·R | `index.css:4397`; `printIsolation.test.js:52-100` | Print preview Phase 2 |
-| FX-54 | Org picture in search results and Discover's org tab | Done·R | `BrowseEvents.jsx:893,923` | |
-| FX-55 | @mahit looks like a student profile, keeps owner badge, holds every badge/achievement/hour/streak | Partial·R | `bin/seed-qa-profile.mjs`; `ownerCompleteCollection.test.js` | Student look done. The "every badge" part exists only as a dev script writing unmarked real rows (A8). **Owner decision 1** |
-| FX-56 | Mobile login: Microsoft logo overflow; less scrolling | Done·R | `providerButtonContainment.test.js`; `cf2d81b`; `b9589b2` | Scroll length judged in Phase 2 |
+| FX-29 | Friends can message; copy says organizers **and** friends | Done·V | `messageRoutes.js:60-95`; `recipientCopy.js:123-125` | — **Final:** browser, Phase 2 |
+| FX-30 | `/events` → `/discover`; no naming discrepancies | Done·V | `VolunteerDashboard.jsx:274,435`; `OrganizerDashboard.jsx:344`; `CalendarView.jsx:371`; `ai/navigation.js:58` | No `/events` links remain; "Browse/Find opportunities" labels and "Recruit" do. **Gate** (N-13 declined these) — Ruling 5: "Discover" everywhere, incl. organizer title — **Final:** `e01e550`, `5dbd8c0` (rulings 5, 23) |
+| FX-31 | Dashboard service record capped + "show more" → page | Done·V | `VolunteerDashboard.jsx:556-561` | Cap 3 → `/hours` — **Final:** browser, Phase 2 |
+| FX-32 | Profile service record capped + "show more" | Done·V | `VolunteerProfile.jsx:261-267` | Cap 5, but on someone else's profile the link goes to **your** `/hours` (A3) — P1: A3 confirmed: `moreHref="/hours"` regardless of `isSelf` — **Final:** `290552e` |
+| FX-33 | Reliable Volunteer as a badge beside applicants, hover text; fair model (history, recent, decay, recovery, volume); first-time and inactive badges; lost below 90%; not an achievement | Done·V | `server/reliability.js:61-96,222`; `ApplicantReview.jsx:142-205,238-262`; `c2f5fff` | Badge + decay + evidence floor + withdrawal done. No hover text; first-time is a tag; inactive badge declined; smoothing means exactly 90% never earns it. **Gate** — Ruling 4: hover text + first-timer badge — **Final:** `c237410` (ruling 4) |
+| FX-34 | Hour ladder 5…250+, streak badges, descending, interleaved, "show more" to a page; Early Supporter; other good achievements | Done·V | `server/scripts/seed_badges.js:103-218`; `utils/badgeOrder.js`; `BadgesList.jsx:126` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`badgeOrder`), and the showcase interleaves the ladders in the browser (Phase 6) |
+| FX-35 | Transcript and certificate print properly, light and dark | Done·V | `index.css:4397`; `printIsolation.test.js` | Tests parse CSS only — **print preview in Phase 2** — **Final:** browser, Phase 2; PDFs printed |
+| FX-36 | Transcript lists events (total hours each), not shifts | Done·V | `VolunteerPortfolio.jsx:15-22,89,217` | Transcript done; a third document lists shifts (A7) — P1: A7 confirmed — **Final:** `c32be23` |
+| FX-37 | Shift row cluttered | Done·V | `EventShiftsTab.jsx:239-314` | Icon buttons — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| FX-38 | Organizer map: normal theme, not high contrast | Done·V | `location/basemap.js`; `dba4001` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| FX-39 | Remove "Confirmed" pseudo-button from confirmed shifts | Done·V | `VolunteerDashboard.jsx:450-474` | — **Final:** browser, Phase 2 |
+| FX-40 | Location banner: permission checked each load; dismissed per session | Done·V | `LocationContext.jsx:49-161` | Safari fallback noted — **Final:** browser, Phase 5 walk; dashboard scope narrowed by ruling 25 (`93d2967`) |
+| FX-41 | Newest message at the bottom | Done·V | `ConversationPane.jsx:70,176-195`; `9a2465b` | Simulated conversation in Phase 3 — **Final:** browser, Phase 2 and rehearsal (real routes), Phases 3 and 6 |
+| FX-42 | Organizers can kick before start only; never revoke hours | Done·V | `applicationRoutes.js:866-879,1024-1063` | Per shift, not per event (section C) — Ruling 12: per-shift kept — **Final:** rehearsal (real routes), Phases 3 and 6: 34 late removals refused |
+| FX-43 | Org managers can remove members | Done·V | `OrganizationPage.jsx:200-239` | See FX-59/71/73 — **Final:** rehearsal (real routes), Phases 3 and 6 |
+| FX-44 | Legal change → pop-up with changed lines + link; "your responsibility" clause; formatted email | Owner-action | `LegalUpdateNotice.jsx:157`; `LegalAcceptanceModal.jsx:136-237`; `notificationContent.js:62-69` | No responsibility clause — Terms §13 promises 30 days' notice instead. Wording is Owner-action (Posture B) — **Final:** drafted in `docs/legal/drafts/terms-section-13-changes.md` (`45ff705`); publishing is the owner's (Posture B) |
+| FX-45 | Clarify certificate vs transcript | Done·V | `App.jsx:770,798`; `CertificatesPage.jsx:90-105` | Only implied; plus the third document (A7) — P1: A7 confirmed — a third document is the confusion — **Final:** `c32be23` |
+| FX-46 | Certificate prints both names above the lines: Volunteer / Program Coordinator | Done·V | `CertificateDocument.jsx:115-124`; `certificatePdf.js:221-227` | — **Final:** browser, Phase 2 |
+| FX-47 | Transcript prints without a white background | Done·V | `index.css:4397` | Print preview Phase 2 — **Final:** browser, Phase 2; plain white per ruling 15 (`c32be23`) |
+| FX-48 | Transcript signature: Mahit Pulavarthi, Founder of WeVolunteer | Done·V | `src/config.js:72-74`; `VolunteerPortfolio.jsx:270-279` | — **Final:** browser, Phase 2 |
+| FX-49 | Org pictures: upload, or emoji on a chosen colour (iMessage-style); same for users | Done·V | `OrgAvatar.jsx`; `EmojiAvatarPicker.jsx` | ~200 curated emoji, fixed palette — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) and browser, Phase 5 walk (avatar picker at signup) |
+| FX-50 | Org announcements; replies; one org-level Allow Replies checkbox | Done·V | `OrganizationForm.jsx:209,460-463`; `OrganizationAnnouncements.jsx` | — **Final:** browser, Phase 2 and rehearsal (real routes), Phases 3 and 6 |
+| FX-51 | Mobile regressions: dashboard scroll strips; "Message new people" size | Done·V | `Messages.jsx:170-181` | Runtime only (Phase 2) — **Final:** browser, Phase 2 |
+| FX-52 | Welcome / login / signup load on mobile | Done·V | `a11y/workflows/mobile.spec.js` | Runtime only — **Final:** browser, Phase 2 |
+| FX-53 | Printing prints only the document, not the page | Done·V | `index.css:4397`; `printIsolation.test.js:52-100` | Print preview Phase 2 — **Final:** browser, Phase 2; PDFs printed |
+| FX-54 | Org picture in search results and Discover's org tab | Done·V | `BrowseEvents.jsx:893,923` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| FX-55 | @mahit looks like a student profile, keeps owner badge, holds every badge/achievement/hour/streak | Done·V | `bin/seed-qa-profile.mjs`; `ownerCompleteCollection.test.js` | Student look done. The "every badge" part exists only as a dev script writing unmarked real rows (A8). **Owner decision 1** — **Final:** `6a4c6c2` (ruling 19: drawn on the profile, nothing written) |
+| FX-56 | Mobile login: Microsoft logo overflow; less scrolling | Done·V | `providerButtonContainment.test.js`; `cf2d81b`; `b9589b2` | Scroll length judged in Phase 2 — **Final:** browser, Phase 2 |
 | FX-57 | Transcript signature (repeat) | Dup | — | → FX-48 |
-| FX-58 | "Organizations" button → `/organizations` (list + create), same name everywhere | Partial·V | `BrowseEvents.jsx:661-690`; `OrganizationsHome.jsx:63,83`; `0fe739d` | Named "Your organizations". **Gate** — Ruling 5: label becomes "Organizations" |
-| FX-59 | Kick dialog ("can join back", optional reason) + smaller red Ban (reason mandatory); notify; ban notice with appeal | Done·R | `RemoveMemberDialog.jsx:17-99`; `notificationContent.js:802-850` | |
+| FX-58 | "Organizations" button → `/organizations` (list + create), same name everywhere | Done·V | `BrowseEvents.jsx:661-690`; `OrganizationsHome.jsx:63,83`; `0fe739d` | Named "Your organizations". **Gate** — Ruling 5: label becomes "Organizations" — **Final:** `e01e550` (ruling 5) |
+| FX-59 | Kick dialog ("can join back", optional reason) + smaller red Ban (reason mandatory); notify; ban notice with appeal | Done·V | `RemoveMemberDialog.jsx:17-99`; `notificationContent.js:802-850` | — **Final:** rehearsal (real routes), Phases 3 and 6: ban without a reason refused |
 | FX-60 | @mahit showcase (repeat) + account identity | Dup | — | → FX-55, FX-09 |
-| FX-61 | Transcript name sits on the line; certificates unchanged | Done·R | `transcriptSignature.test.js:62-121` | |
-| FX-62 | Discover date box stretched for some events | Done·R | `dateChipGeometry.test.js` | Cause was height, not width |
-| FX-63 | Org-ban appeals seen by all org organizers, at the bottom | Done·R | `AppealInbox.jsx`; `OrganizationPage.jsx:776-777` | |
-| FX-64 | Achievements "See all" → `/profile/badges` or `/users/@user/badges` | Partial·V | `VolunteerProfile.jsx:194`; `PublicProfile.jsx:441` | `/users/@undefined/badges` when no username (A4) — P1: A4 confirmed |
-| FX-65 | Certificates capped + see all | Done·R | `VolunteerProfile.jsx:370-375` | |
-| FX-66 | Same cap for shifts and certificates | Done·R | `PreviewList.jsx:60` | |
+| FX-61 | Transcript name sits on the line; certificates unchanged | Done·V | `transcriptSignature.test.js:62-121` | — **Final:** browser, Phase 2 |
+| FX-62 | Discover date box stretched for some events | Done·V | `dateChipGeometry.test.js` | Cause was height, not width — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`dateChipGeometry.test.js`) |
+| FX-63 | Org-ban appeals seen by all org organizers, at the bottom | Done·V | `AppealInbox.jsx`; `OrganizationPage.jsx:776-777` | — **Final:** browser, Phase 2 and rehearsal (real routes), Phases 3 and 6 |
+| FX-64 | Achievements "See all" → `/profile/badges` or `/users/@user/badges` | Done·V | `VolunteerProfile.jsx:194`; `PublicProfile.jsx:441` | `/users/@undefined/badges` when no username (A4) — P1: A4 confirmed — **Final:** `290552e` |
+| FX-65 | Certificates capped + see all | Done·V | `VolunteerProfile.jsx:370-375` | — **Final:** browser, Phase 2 |
+| FX-66 | Same cap for shifts and certificates | Done·V | `PreviewList.jsx:60` | — **Final:** browser, Phase 2 |
 | FX-67 | Others' certificates visible, not downloadable; transcript hidden; privacy for hours and certificates; `/users/@user/hours` | Done·V | `PublicCertificates.jsx:118-135`; `certificateRoutes.js:115-117,181-183` | P1: view and PDF via `getCertificateForOwner`; `/portfolio` needs `portfolio.write` |
-| FX-68 | Tag limits: 15 popular filter chips; 4 per event card | Done·R | `eventTags.js:261`; `EventCard.jsx:92` | Stale comment "three" (A14) |
-| FX-69 | Appeal button beside Join when banned | Done·R | `JoinAction.jsx:97-118` | |
-| FX-70 | Join → Appeal when banned; disabled once sent; 5 per 30 days; organizers can report appeal spam | Partial·V | `appealsRoutes.js:42-43,400` | No way to report appeal spam — P1: 5 per 30 days verified (`APPEAL_WINDOW_MAX`) |
-| FX-71 | One settings button per member → promote/demote (label by role), kick, ban | Done·R | `OrganizationPage.jsx:200-239,1000` | |
-| FX-72 | Do event tags exist? | Done·R | `server/eventTags.js` | 8 max, 30 chars |
-| FX-73 | Member Manage button opened nothing | Done·R | `OrganizationPage.jsx:1000` | Click-through in Phase 2 |
-| FX-74 | `mailto:` links don't work | Partial·V | `Settings.jsx:546-566` | Remain in `AboutUs.jsx:459`, `OrganizerProfile.jsx:120` (A9) — P1: A9 confirmed; the certificate share dialog's mailto is a deliberate share-by-email option and stays |
-| FX-75 | Report-a-problem page with category dropdown and screenshots | Partial·R | `ReportIssue.jsx:194-206`; `issueRoutes.js:97` | No screenshot upload |
+| FX-68 | Tag limits: 15 popular filter chips; 4 per event card | Done·V | `eventTags.js:261`; `EventCard.jsx:92` | Stale comment "three" (A14) — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`eventTags` tests) |
+| FX-69 | Appeal button beside Join when banned | Done·V | `JoinAction.jsx:97-118` | — **Final:** rehearsal (real routes), Phases 3 and 6 |
+| FX-70 | Join → Appeal when banned; disabled once sent; 5 per 30 days; organizers can report appeal spam | Done·V | `appealsRoutes.js:42-43,400` | No way to report appeal spam — P1: 5 per 30 days verified (`APPEAL_WINDOW_MAX`) — **Final:** `d41eecd`, `04b7c30` |
+| FX-71 | One settings button per member → promote/demote (label by role), kick, ban | Done·V | `OrganizationPage.jsx:200-239,1000` | — **Final:** browser, Phase 2 |
+| FX-72 | Do event tags exist? | Done·V | `server/eventTags.js` | 8 max, 30 chars — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| FX-73 | Member Manage button opened nothing | Done·V | `OrganizationPage.jsx:1000` | Click-through in Phase 2 — **Final:** browser, Phase 2 |
+| FX-74 | `mailto:` links don't work | Done·V | `Settings.jsx:546-566` | Remain in `AboutUs.jsx:459`, `OrganizerProfile.jsx:120` (A9) — P1: A9 confirmed; the certificate share dialog's mailto is a deliberate share-by-email option and stays — **Final:** `381f374` |
+| FX-75 | Report-a-problem page with category dropdown and screenshots | Done·V | `ReportIssue.jsx:194-206`; `issueRoutes.js:97` | No screenshot upload — **Final:** `11cd2c5` |
 
 ### CK — "Issues to check" (14)
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
-| CK-01 | 2FA "Internal Server Error"; email always offered; recovery codes always a fallback; save codes as .txt or .png | Done·R (owner-accepted) | `fb934d0`; migration 055 (`f26f827`); `twoFactor.noFiveHundred.test.js`; `recoveryCodeExport.js:126,146` | Two root causes fixed. Email offered only for a *confirmed* address (section C). .txt and .png both exist — Ruling 12: email 2FA for confirmed addresses kept |
-| CK-02 | No 500 for email, authenticator or recovery codes | Done·R | `twoFactor.noFiveHundred.test.js:112-300`; `routes.2faEmail.test.js:332` | Browser end-to-end in Phase 2 |
+| CK-01 | 2FA "Internal Server Error"; email always offered; recovery codes always a fallback; save codes as .txt or .png | Done·V (owner-accepted) | `fb934d0`; migration 055 (`f26f827`); `twoFactor.noFiveHundred.test.js`; `recoveryCodeExport.js:126,146` | Two root causes fixed. Email offered only for a *confirmed* address (section C). .txt and .png both exist — Ruling 12: email 2FA for confirmed addresses kept — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`twoFactor.noFiveHundred.test.js`) |
+| CK-02 | No 500 for email, authenticator or recovery codes | Done·V | `twoFactor.noFiveHundred.test.js:112-300`; `routes.2faEmail.test.js:332` | Browser end-to-end in Phase 2 — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`twoFactor.noFiveHundred.test.js`, `routes.2faEmail.test.js`); and browser, Phase 6 owner walk (email code sign-in) |
 | CK-03 | "9 codes remaining" after an authenticator sign-in | Done·V | `authRoutes.js:1400-1430`; `ae4fe03` | Count was right; copy now explains it — P1: count computed only when a recovery code is spent |
-| CK-04 | Removing the authenticator still showed it | Done·R | `fd47c47`; `0d18cd4`; `TwoFactorSetup.jsx:342` | |
-| CK-05 | Change-email dialog can't be closed; check every dialog | Done·R | `VerifyIdentityModal.jsx:385`; `ae4fe03` | 7 overlays use `useModal` without `Modal` — each tested in Phase 2 |
+| CK-04 | Removing the authenticator still showed it | Done·V | `fd47c47`; `0d18cd4`; `TwoFactorSetup.jsx:342` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| CK-05 | Change-email dialog can't be closed; check every dialog | Done·V | `VerifyIdentityModal.jsx:385`; `ae4fe03` | 7 overlays use `useModal` without `Modal` — each tested in Phase 2 — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`dialogSemantics.test.jsx`) |
 | CK-06 | Adding a second factor doesn't reset recovery codes | Done·V | `twoFactorRoutes.js:244-275` | P1: codes issued only when none exist |
-| CK-07 | AI mode available to everyone under `npm run dev` | Partial·V | `vite.config.js:69`; `server/authz.js:131,217,346` | Works on desktop; **iPhone/iPad get none** (A13) — Ruling 7: iPhone opt-in to Balanced |
+| CK-07 | AI mode available to everyone under `npm run dev` | Done·V | `vite.config.js:69`; `server/authz.js:131,217,346` | Works on desktop; **iPhone/iPad get none** (A13) — Ruling 7: iPhone opt-in to Balanced — **Final:** `0c35281` (ruling 7); on-device trial on an iPhone is the owner's |
 | CK-08 | 2FA still 500s (repeat, "serious") | Dup | — | → CK-01/02 |
-| CK-09 | Banned: red "Appeal" with ban text; sent → grey with clock; icons on buttons | Done·R | `JoinAction.jsx:97-118` | |
-| CK-10 | Banned-member list with unban (Discord-style) | Done·R | `BannedMembers.jsx:18-148` | |
-| CK-11 | Student dashboard: hours box above the stat strip | Done·R | `VolunteerDashboard.jsx:322,363,373-395`; `a5bbf6c` | |
-| CK-12 | Organizer dashboard: stat strip above "Ready when you are" | Regressed·V | `OrganizerDashboard.jsx:469-545` | Card renders above; the test asserts nothing about order (A1) — P1: Misread in `a5bbf6c`: "review hours box" taken as the Awaiting-review tile; the owner pasted the close-out card as that box. Card must go below the strip, and the tile swap (not asked for — "keep everything as is") reverted |
-| CK-13 | Welly's advanced model won't start | Done·R | `ai/runtime/modelCache.js`; `083b7d1`; `1295a1e` | Truncated 986 MB download reused forever |
-| CK-14 | Welly creates real events by conversation, explains refusals in plain English | Done·R | `ai/eventDraft.js:358,600-650`; `ai/eventCreation.test.js` | Conversation quality needs a live run |
+| CK-09 | Banned: red "Appeal" with ban text; sent → grey with clock; icons on buttons | Done·V | `JoinAction.jsx:97-118` | — **Final:** rehearsal (real routes), Phases 3 and 6 |
+| CK-10 | Banned-member list with unban (Discord-style) | Done·V | `BannedMembers.jsx:18-148` | — **Final:** browser, Phase 2 |
+| CK-11 | Student dashboard: hours box above the stat strip | Done·V | `VolunteerDashboard.jsx:322,363,373-395`; `a5bbf6c` | — **Final:** `7c9cad1` |
+| CK-12 | Organizer dashboard: stat strip above "Ready when you are" | Done·V | `OrganizerDashboard.jsx:469-545` | Card renders above; the test asserts nothing about order (A1) — P1: Misread in `a5bbf6c`: "review hours box" taken as the Awaiting-review tile; the owner pasted the close-out card as that box. Card must go below the strip, and the tile swap (not asked for — "keep everything as is") reverted — **Final:** `7c9cad1` |
+| CK-13 | Welly's advanced model won't start | Done·V | `ai/runtime/modelCache.js`; `083b7d1`; `1295a1e` | Truncated 986 MB download reused forever — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| CK-14 | Welly creates real events by conversation, explains refusals in plain English | Done·V | `ai/eventDraft.js:358,600-650`; `ai/eventCreation.test.js` | Conversation quality needs a live run — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`ai/eventCreation.test.js`) |
 
 ### EM — Email
 
 | ID | Request | Status | Evidence | Notes |
 |---|---|---|---|---|
-| EM-01 | Sender profile picture on emails (also "Email stuff I have to worry about") | Owner-action·R | `docs/EMAIL_BRANDING.md:20-111` | Needs BIMI + enforcing DMARC + a paid VMC for Gmail; Gravatar on the sending address is the free route. None is code |
+| EM-01 | Sender profile picture on emails (also "Email stuff I have to worry about") | Owner-action | `docs/EMAIL_BRANDING.md:20-111` | Needs BIMI + enforcing DMARC + a paid VMC for Gmail; Gravatar on the sending address is the free route. None is code — **Final:** unchanged: BIMI or Gravatar on the sending address; not code |
 
 ### P2 — The Phase 2 feature list (51)
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
-| P2-01 | Download data and delete account | Done·R | `privacyRoutes.js:51,103,146`; `accountRoutes.js:57` | Both re-verify identity |
-| P2-02 | Improved notifications | Done·R | `NOTIFICATION_KINDS`; 09-21 Pass 5 | |
-| P2-03 | DMs | Done·R | `messageRoutes.js` | |
-| P2-04 | Calendar integration | Partial·R | `server/ics.js:112-154` | .ics with location + alarm; no Google Calendar link; dead `downloadIcs` (A14) |
-| P2-05 | "Add to Home Screen" | Partial·V | `public/site.webmanifest` | No service worker or install prompt — deliberately deferred. **Gate** — Ruling 9: install prompt, no service worker |
-| P2-06 | Better mobile experience and OAuth | Partial·R | `server/config.js:515-517,666-669` | Google + Microsoft done; Apple needs a paid developer account (Owner-action) |
-| P2-07 | Better 400/500 handling | Done·R | `ErrorExperience/*`; `app.errorMapping.test.js` | |
-| P2-08 | Privacy Policy and ToS | Done·R | `docs/legal/policies/` (13 documents) | |
-| P2-09 | Master dashboard: active users, events, hours, top tags, "we helped N people" | Partial·R | `AdminImpact.jsx:285,459-586`; `OwnerCenter.jsx:1044-1054` | No headline "we helped" figure |
-| P2-10 | Personal account switches between all roles; can create and apply | Done·R | → FX-08 | |
-| P2-11 | Email box: promote existing account or store for later; admin log; revoke; no new super admins | Partial·V | `invitationRoutes.js:35,116`; `adminInvitations.js`; `bin/grant-ownership.mjs` | Invitee must accept (consent + Policy 10). **No allowlist**: the CLI can make any email super_admin (A11). **Gate** — Ruling 6: keep accept-to-join; lock ownership to two addresses |
-| P2-12 | Revoke: unapprove organizer, ban student, demote admin; records kept | Partial·R | `adminRoutes.js:109,1518,1609,2359` | An approved organizer cannot be unapproved |
-| P2-13 | Profile pictures | Done·R | → FX-49 | |
-| P2-14 | Real badges | Done·R | → FX-33/34 | |
-| P2-15 | 2FA | Done·R | → CK-01…06 | |
-| P2-16 | One date picker everywhere, themed | Partial·V | `DatePicker.adoption.test.jsx`; `EventEditForm.jsx:157,252,256`; `OrganizerDashboard.jsx:752`; `ShareOrganizationDialog.jsx:712,777` | Native inputs remain; calendar has no jump-to-date; N-16 declined these. **Gate** — Ruling 8: picker everywhere, typing kept |
-| P2-17 | Signed-up vs attended counts, not %; on profile too | Done·R | → FX-24; `PublicProfile.jsx:379-381` | |
-| P2-18 | Public `/users/:handle`; private mode hides grade/school/PII; placeholder text; public stats; show-up rate in Auto Select below hours | Done·R | `profileSerializer.js:178,192,345-364`; `ProfileEditModal.jsx:309`; `server/weighting.js` | |
-| P2-19 | Organizers adjust time stayed; "left early" subtract checkbox | Done·R (owner-accepted) | `EventAttendance.jsx:356-378` | Editable actual hours instead of a checkbox. **Gate** (section C) — Ruling 12: actual-hours box kept |
-| P2-20 | Events without hours | Done·R | `CreateEvent.jsx:101,309,573-575` | |
-| P2-21 | "Log external hours" button like "Create event"; warning it won't reach the transcript | Partial·V | `LoggedHours.jsx`; `VolunteerDashboard.jsx:499-543` | Button only on `/hours`; the dashboard has "My logged hours". **Gate** — Ruling 3: dashboard "Log external hours" button |
-| P2-22 | `/users/@username`; ⋯ menu Mute / Restrict / Report / Block; Friend + notification when a friend applies | Done·R | `PublicProfile.jsx:171-219,262`; `relationships.js:373-384`; `applicationRoutes.js:679` | |
-| P2-23 | Organizations: organizers create, anyone joins, org link on events notifies members | Done·R | `server/authz.js:177,239,250`; `eventRoutes.js:1153` | |
-| P2-24 | "Legal Center"; About Us with mission and motto | Done·R | `AboutUs.jsx:199,448` | |
-| P2-25 | Owner legal editor: versions only go up, green Save / red Discard, from Settings | Done·R | `legal/LegalEditor.jsx:42,785,794`; `legalAdminRoutes.js:210` | |
-| P2-26 | Better dashboard graphs | Reported | `ServiceInsights.jsx`; `BarChart.jsx` | Judged in Phase 2/5 |
-| P2-27 | Near-me filter; location as a maps link; calendar location; weather | Done·R | `BrowseEvents.jsx:33-91`; `LocationLink.jsx:27-60`; `ics.js:17-21`; `WeatherSummary.jsx` | |
-| P2-28 | QR: @username + time, 5-min expiry, only after start; organizer scan only after start; manual kept | Partial·V | `checkinTokens.js:32-38`; `CheckInCodeModal.jsx:125-160`; `attendanceRoutes.js:56,869` | Organizer check-in opens 2 h before the first shift. **Gate** (A6) — A6 withdrawn: QR code exists only after the volunteer's shift starts — **P3: reopened by R1 — every code shows the name, not @username** |
+| P2-01 | Download data and delete account | Done·V | `privacyRoutes.js:51,103,146`; `accountRoutes.js:57` | Both re-verify identity — **Final:** browser, Phase 6 owner walk: Settings → Privacy "Your Data" export; Settings → Security "Danger Zone" deletion |
+| P2-02 | Improved notifications | Done·V | `NOTIFICATION_KINDS`; 09-21 Pass 5 | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) and rehearsal (real routes), Phases 3 and 6 (2,718 notifications) |
+| P2-03 | DMs | Done·V | `messageRoutes.js` | — **Final:** rehearsal (real routes), Phases 3 and 6: 80 messages in 40 conversations |
+| P2-04 | Calendar integration | Done·V | `server/ics.js:112-154` | .ics with location + alarm; no Google Calendar link; dead `downloadIcs` (A14) — **Final:** `08b5a8a` |
+| P2-05 | "Add to Home Screen" | Done·V | `public/site.webmanifest` | No service worker or install prompt — deliberately deferred. **Gate** — Ruling 9: install prompt, no service worker — **Final:** `4c4bb09` (ruling 9) |
+| P2-06 | Better mobile experience and OAuth | Done·V | `server/config.js:515-517,666-669` | Google + Microsoft done; Apple needs a paid developer account (Owner-action) — **Final:** Google and Microsoft; Apple needs a paid developer account (Owner-action) |
+| P2-07 | Better 400/500 handling | Done·V | `ErrorExperience/*`; `app.errorMapping.test.js` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`app.errorMapping.test.js`) |
+| P2-08 | Privacy Policy and ToS | Done·V | `docs/legal/policies/` (13 documents) | — **Final:** browser, Phase 5 walk: 13 documents render; italics fixed `6fefbe2` |
+| P2-09 | Master dashboard: active users, events, hours, top tags, "we helped N people" | Done·V | `AdminImpact.jsx:285,459-586`; `OwnerCenter.jsx:1044-1054` | No headline "we helped" figure — **Final:** `cd8638b`; browser, Phase 6 owner walk |
+| P2-10 | Personal account switches between all roles; can create and apply | Done·V | → FX-08 | — **Final:** as FX-08 |
+| P2-11 | Email box: promote existing account or store for later; admin log; revoke; no new super admins | Done·V | `invitationRoutes.js:35,116`; `adminInvitations.js`; `bin/grant-ownership.mjs` | Invitee must accept (consent + Policy 10). **No allowlist**: the CLI can make any email super_admin (A11). **Gate** — Ruling 6: keep accept-to-join; lock ownership to two addresses — **Final:** `5e231cd` (ruling 6) |
+| P2-12 | Revoke: unapprove organizer, ban student, demote admin; records kept | Done·V | `adminRoutes.js:109,1518,1609,2359` | An approved organizer cannot be unapproved — **Final:** `125d645`, `d8baa65` |
+| P2-13 | Profile pictures | Done·V | → FX-49 | — **Final:** as FX-49 |
+| P2-14 | Real badges | Done·V | → FX-33/34 | — **Final:** as FX-33, FX-34 |
+| P2-15 | 2FA | Done·V | → CK-01…06 | — **Final:** as CK-01 to CK-05 |
+| P2-16 | One date picker everywhere, themed | Done·V | `DatePicker.adoption.test.jsx`; `EventEditForm.jsx:157,252,256`; `OrganizerDashboard.jsx:752`; `ShareOrganizationDialog.jsx:712,777` | Native inputs remain; calendar has no jump-to-date; N-16 declined these. **Gate** — Ruling 8: picker everywhere, typing kept — **Final:** `ac5ee35`, `7c6face` (ruling 8) |
+| P2-17 | Signed-up vs attended counts, not %; on profile too | Done·V | → FX-24; `PublicProfile.jsx:379-381` | — **Final:** rehearsal (real routes), Phases 3 and 6; counts always shown (`c237410`) |
+| P2-18 | Public `/users/:handle`; private mode hides grade/school/PII; placeholder text; public stats; show-up rate in Auto Select below hours | Done·V | `profileSerializer.js:178,192,345-364`; `ProfileEditModal.jsx:309`; `server/weighting.js` | — **Final:** browser, Phase 5 walk and browser, Phase 6 owner walk; private by default since `aed176c` (owner, 2026-10-04) |
+| P2-19 | Organizers adjust time stayed; "left early" subtract checkbox | Done·V | `EventAttendance.jsx:356-378` | Editable actual hours instead of a checkbox. **Gate** (section C) — Ruling 12: actual-hours box kept — **Final:** rehearsal (real routes), Phases 3 and 6: left-early adjustments credited |
+| P2-20 | Events without hours | Done·V | `CreateEvent.jsx:101,309,573-575` | — **Final:** rehearsal (real routes), Phases 3 and 6; participation certificates (`3373f79`) |
+| P2-21 | "Log external hours" button like "Create event"; warning it won't reach the transcript | Done·V | `LoggedHours.jsx`; `VolunteerDashboard.jsx:499-543` | Button only on `/hours`; the dashboard has "My logged hours". **Gate** — Ruling 3: dashboard "Log external hours" button — **Final:** `8f656b2` (ruling 3) |
+| P2-22 | `/users/@username`; ⋯ menu Mute / Restrict / Report / Block; Friend + notification when a friend applies | Done·V | `PublicProfile.jsx:171-219,262`; `relationships.js:373-384`; `applicationRoutes.js:679` | — **Final:** rehearsal (real routes), Phases 3 and 6: 200 friend requests, reports, blocks |
+| P2-23 | Organizations: organizers create, anyone joins, org link on events notifies members | Done·V | `server/authz.js:177,239,250`; `eventRoutes.js:1153` | — **Final:** rehearsal (real routes), Phases 3 and 6: three clubs, events linked |
+| P2-24 | "Legal Center"; About Us with mission and motto | Done·V | `AboutUs.jsx:199,448` | — **Final:** browser, Phase 6 owner walk: About (mission, vision, motto, who runs it) and the Legal Center's five groups |
+| P2-25 | Owner legal editor: versions only go up, green Save / red Discard, from Settings | Done·V | `legal/LegalEditor.jsx:42,785,794`; `legalAdminRoutes.js:210` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`LegalEditor.test.jsx`, `legalStore.test.js`) |
+| P2-26 | Better dashboard graphs | Done·V | `ServiceInsights.jsx`; `BarChart.jsx` | Judged in Phase 2/5 — **Final:** browser, Phase 6 owner walk: Platform Impact month chart and its table view |
+| P2-27 | Near-me filter; location as a maps link; calendar location; weather | Done·V | `BrowseEvents.jsx:33-91`; `LocationLink.jsx:27-60`; `ics.js:17-21`; `WeatherSummary.jsx` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (location, maps link, .ics, weather tests) |
+| P2-28 | QR: @username + time, 5-min expiry, only after start; organizer scan only after start; manual kept | Done·V | `checkinTokens.js:32-38`; `CheckInCodeModal.jsx:125-160`; `attendanceRoutes.js:56,869` | Organizer check-in opens 2 h before the first shift. **Gate** (A6) — A6 withdrawn: QR code exists only after the volunteer's shift starts — **P3: reopened by R1 — every code shows the name, not @username** — **Final:** `0e74e2a`; rehearsal (real routes), Phases 3 and 6 (86 codes show @username) |
 | P2-29 | Hours per organization; org tags vs regular tags; an org prefix? | Done·V | `organizationHours.js`; `directoryRoutes.js:278-320` | Per-org hours done; `#` shares one namespace. **Gate** — Org hours use organization_id, never tags |
-| P2-30 | On-device LLM; recommendations ("Suggested for you", keep icon); distance; near-me sort; AI tag suggestions | Done·R | `ai/models.js:98-190`; `BrowseEvents.jsx:704,982`; `TagSuggestions.jsx:62` | Qwen2.5 0.5B / 1.5B; SmolLM2-135M not used for chat |
-| P2-31 | Scan a paper certificate → prefill external hours | Partial·R | `ai/certificate/extract.js:124-137` | PDF text layer only; no OCR for photos |
-| P2-32 | "Enable AI mode" offer on "Suggested for you"; blurred explainer; AI policy link; 3 tiers, Recommended + green ring | Partial·V | `AIEnableModal.jsx:34-142`; policy 12 | Modal only from Settings; 2 tiers. **Gate** — Ruling 7: offer banner; 2 sizes kept |
-| P2-33 | A small chatbot with user and event context; verifies certificates | Done·R | `src/ai/`; `WellyView.jsx` | Verify moved to a dashboard button |
-| P2-34 | Name, logo, personality, system prompt; not a generic corner bubble; visible under `npm run dev` | Done·R | `ai/prompts/welly.js:39-141`; `App.jsx:394` | |
-| P2-35 | Talks freely, proper punctuation, excellent answers | Reported | `WllamaRuntime.js:333` (`8c1342b`) | Quality is a runtime judgement (Phase 2) |
-| P2-36 | Own nav entry with the Spark icon; history; responsive | Done·R | `App.jsx:394`; `68352dd` | |
-| P2-37 | Mobile bar not cramped | Reported | `mobileNavFit.test.js:135-207` | Phase 2 |
-| P2-38 | Clearer mode names | Done·R | `WellyModeControl.jsx` | "Welly Chat" / "Welly AI" |
+| P2-30 | On-device LLM; recommendations ("Suggested for you", keep icon); distance; near-me sort; AI tag suggestions | Done·V | `ai/models.js:98-190`; `BrowseEvents.jsx:704,982`; `TagSuggestions.jsx:62` | Qwen2.5 0.5B / 1.5B; SmolLM2-135M not used for chat — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| P2-31 | Scan a paper certificate → prefill external hours | Done·V | `ai/certificate/extract.js:124-137` | PDF text layer only; no OCR for photos — **Final:** `d989b2b`, `77223f2` (ruling 20: never the hours) |
+| P2-32 | "Enable AI mode" offer on "Suggested for you"; blurred explainer; AI policy link; 3 tiers, Recommended + green ring | Done·V | `AIEnableModal.jsx:34-142`; policy 12 | Modal only from Settings; 2 tiers. **Gate** — Ruling 7: offer banner; 2 sizes kept — **Final:** `0c35281` (ruling 7) |
+| P2-33 | A small chatbot with user and event context; verifies certificates | Done·V | `src/ai/`; `WellyView.jsx` | Verify moved to a dashboard button — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) and browser, Phase 2 (Welly Chat answered hours) |
+| P2-34 | Name, logo, personality, system prompt; not a generic corner bubble; visible under `npm run dev` | Done·V | `ai/prompts/welly.js:39-141`; `App.jsx:394` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| P2-35 | Talks freely, proper punctuation, excellent answers | Done·R (owner to judge) | `WllamaRuntime.js:333` (`8c1342b`) | Quality is a runtime judgement (Phase 2) — **Final:** answer quality is a judgement on the running model, which this audit could not run in Node; the split-word defect behind it is fixed (P2-40) |
+| P2-36 | Own nav entry with the Spark icon; history; responsive | Done·V | `App.jsx:394`; `68352dd` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| P2-37 | Mobile bar not cramped | Done·V | `mobileNavFit.test.js:135-207` | Phase 2 — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`mobileNavFit.test.js`) and browser, Phase 2 at 375 |
+| P2-38 | Clearer mode names | Done·V | `WellyModeControl.jsx` | "Welly Chat" / "Welly AI" — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
 | P2-39 | Button beside "Welly" → model setup | Done·V | `WellyView.jsx` | First choice of Welly AI goes to Settings. **Gate** — Mode control beside the name opens setup |
-| P2-40 | On-device replies no longer split words/punctuation | Done·R | `8c1342b` | wllama final-chunk defect; non-streaming call |
-| P2-41 | Same quality in chat mode | Reported | — | Phase 2 |
-| P2-42 | Near-me no longer defaults to chat mode; verify as a real button; disclaimer instead of a verify link | Partial·V | `WellyView.jsx:661-711,1423,1445-1457` | Disclaimer omits "nothing leaves your device" because it would be false (search reaches the server/Pinecone). **Gate** (section C) — Ruling 14: add the precise on-device sentence |
+| P2-40 | On-device replies no longer split words/punctuation | Done·V | `8c1342b` | wllama final-chunk defect; non-streaming call — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (the non-streaming call; see memory "wllama final-chunk") |
+| P2-41 | Same quality in chat mode | Done·V | — | Phase 2 — **Final:** browser, Phase 2 |
+| P2-42 | Near-me no longer defaults to chat mode; verify as a real button; disclaimer instead of a verify link | Done·V | `WellyView.jsx:661-711,1423,1445-1457` | Disclaimer omits "nothing leaves your device" because it would be false (search reaches the server/Pinecone). **Gate** (section C) — Ruling 14: add the precise on-device sentence — **Final:** `3c9de47` (ruling 14, amended by the owner 2026-10-04) |
 | P2-43 | Seamless dropdown switching; first time → download screen | Done·V | `WellyModeControl.jsx:1-56` | Button panel, not a dropdown. **Gate** — Dropdown switches immediately; first pick → download |
 | P2-44 | Commits not linked to the GitHub profile | Done·V | `git log` (Phase 0) | Resolved |
-| P2-45 | Never ask the user to type location or personal info | Done·R | `WellyView.location.test.jsx`; `ai/personalInfo.test.js` | |
-| P2-46 | `/verify` reachable, small, not in the nav | Done·R | `VerifyCertificateAction.jsx:51` | Dashboards only; not from signed-out pages |
+| P2-45 | Never ask the user to type location or personal info | Done·V | `WellyView.location.test.jsx`; `ai/personalInfo.test.js` | — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`WellyView.location.test.jsx`, `ai/personalInfo.test.js`) |
+| P2-46 | `/verify` reachable, small, not in the nav | Done·V | `VerifyCertificateAction.jsx:51` | Dashboards only; not from signed-out pages — **Final:** browser, Phase 5 walk: a small button on every dashboard, not in the rail |
 | P2-47 | Logo: green tile, white checkmark-W, name beside it; in emails | Done·V (owner-accepted) | `BrandMark.jsx`; `server/email.js:675` | → FX-20 — Ruling 12, via FX-20 |
-| P2-48 | Starting a preview lands on the dashboard | Done·R | `ModerationCenter.jsx:316`; `b166dad` | |
-| P2-49 | Admin text all underlined | Done·R | `3380996` | Other admin pages checked Phase 2 |
-| P2-50 | Attachments (images, PDFs, audio) in DMs and announcements | **Deferred** | — | Owner decision 3 (2026-09-30) |
-| P2-51 | More Welly work | Reported | — | Folded into Phase 2/5 findings |
+| P2-48 | Starting a preview lands on the dashboard | Done·V | `ModerationCenter.jsx:316`; `b166dad` | — **Final:** browser, Phase 2 and browser, Phase 6 owner walk |
+| P2-49 | Admin text all underlined | Done·V | `3380996` | Other admin pages checked Phase 2 — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) |
+| P2-50 | Attachments (images, PDFs, audio) in DMs and announcements | Deferred | — | Owner decision 3 (2026-09-30) |
+| P2-51 | More Welly work | Dup | — | Folded into Phase 2/5 findings — **Final:** folded into P2-32 to P2-45 |
 
 ### LG — Legal and event-form items (13)
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
-| LG-01 | ADA compliance: plan + implementation | Partial·R | `a11y/` suites; `docs/audits/2026-08-22-accessibility-audit.md` | Manual screen-reader pass open; certificate PDFs untagged |
-| LG-02 | DMCA policy? EULA? | Partial·V | `docs/legal/13-ACCEPTABLE-USE-AND-ABUSE-REVIEW.md:25-135`; Terms :383 | DMCA procedure in Terms; agent registration is Owner-action; EULA rejected as the wrong instrument — Ruling 13: separate AUP to draft; EULA asked separately |
+| LG-01 | ADA compliance: plan + implementation | Partial·V | `a11y/` suites; `docs/audits/2026-08-22-accessibility-audit.md` | Manual screen-reader pass open; certificate PDFs untagged — **Final:** automated sweeps pass; a manual VoiceOver/NVDA pass and tagged certificate PDFs remain (Owner-action: needs a person with a screen reader) |
+| LG-02 | DMCA policy? EULA? | Done·V | `docs/legal/13-ACCEPTABLE-USE-AND-ABUSE-REVIEW.md:25-135`; Terms :383 | DMCA procedure in Terms; agent registration is Owner-action; EULA rejected as the wrong instrument — Ruling 13: separate AUP to draft; EULA asked separately — **Final:** drafts `45ff705`, `dfeb4d2` (AUP, EULA); DMCA agent registration and publishing are Owner-actions |
 | LG-03 | Factor pending applications into Auto Select; cap at 10 events | Declined-by-owner | `server/config.js:435-455`; `applicationRoutes.js:623-635`; `services/autoSelect.js:160-231` | Cap done; pending not weighed. **Gate** — Ruling 10: cap kept, no Auto Select penalty |
-| LG-04 | Does the legal text cover DDoS, automation, disruption? Is automation fair? AUP needed? | Partial·V | Terms §4 (`02-terms-of-service.md:159-224`) | AUP folded into Terms (section C) — Ruling 13: separate AUP |
+| LG-04 | Does the legal text cover DDoS, automation, disruption? Is automation fair? AUP needed? | Done·V | Terms §4 (`02-terms-of-service.md:159-224`) | AUP folded into Terms (section C) — Ruling 13: separate AUP — **Final:** draft `45ff705` (ruling 13); publishing is the owner's |
 | LG-05 | No XSS from user content; Welly prompt injection | Done·V | no `dangerouslySetInnerHTML`; `policyMarkdown.js`; `WellyMessage.jsx:90-127`; `ai/indirectInjection.test.js` | P1: zero `dangerouslySetInnerHTML`, zero `innerHTML =` in `src/` |
-| LG-06 | Profile picture "under 5kb" and safe | Done·R (owner-accepted) | `profilePictureRoutes.js:118-222` | 5 MB upload; stored as ≤5 KB 192 px WebP — quality check Phase 2 — Ruling 12: 5 KB stored kept |
-| LG-07 | Regroup the Legal Center | Done·R | `legal/LegalCenter.jsx:63-108` | 13 documents in 4 groups |
+| LG-06 | Profile picture "under 5kb" and safe | Done·V (owner-accepted) | `profilePictureRoutes.js:118-222` | 5 MB upload; stored as ≤5 KB 192 px WebP — quality check Phase 2 — Ruling 12: 5 KB stored kept — **Final:** behavioural tests in the final suite (`d8baa65`, 11,530 passed) (`profilePicture.storedSize.test.js`) |
+| LG-07 | Regroup the Legal Center | Done·V | `legal/LegalCenter.jsx:63-108` | 13 documents in 4 groups — **Final:** browser, Phase 5 walk |
 | LG-08 | Hours final after close-out; correctable before | Done·V | `attendance.js:477-553` | Matches 09-21 1A — P1: `finalizeAttendance` is the only writer; lock is its floor |
-| LG-09 | Applications closing after the event (Sep 5 vs Aug 18) | Partial·V | `server/validation.js:33-39`; `CreateEvent.jsx:269-272` | Refused both sides, but client `>=` vs server `>` (A5) — P1: A5 confirmed |
-| LG-10 | Category list too narrow, badly grouped | Done·R | `server/eventCategories.js:68-126` | 16 in 6 groups |
-| LG-11 | Application-close field uses the custom picker; click opens it | Partial·V | `CreateEvent.jsx:444-462`; `DatePicker.jsx:82-90` | Still accepts typing; time is native. **Gate** — Ruling 8 |
-| LG-12 | "Select / Selected" until Apply; Apply easy to find | Done·R | `EventShiftsTab.jsx:319-365` | Placement judged Phase 2 |
-| LG-13 | Gap between tags and the green box | Reported | `EventHero.css:7-12` | Visual |
+| LG-09 | Applications closing after the event (Sep 5 vs Aug 18) | Done·V | `server/validation.js:33-39`; `CreateEvent.jsx:269-272` | Refused both sides, but client `>=` vs server `>` (A5) — P1: A5 confirmed — **Final:** `f20f4ab` |
+| LG-10 | Category list too narrow, badly grouped | Done·V | `server/eventCategories.js:68-126` | 16 in 6 groups — **Final:** browser, Phase 5 walk: 16 categories in groups on the event form |
+| LG-11 | Application-close field uses the custom picker; click opens it | Done·V | `CreateEvent.jsx:444-462`; `DatePicker.jsx:82-90` | Still accepts typing; time is native. **Gate** — Ruling 8 — **Final:** `ac5ee35`, `7c6face` (ruling 8) |
+| LG-12 | "Select / Selected" until Apply; Apply easy to find | Done·V | `EventShiftsTab.jsx:319-365` | Placement judged Phase 2 — **Final:** browser, Phase 5 walk: Select → Selected → "Send application for 1 shift · 2 hrs total" |
+| LG-13 | Gap between tags and the green box | Done·V | `EventHero.css:7-12` | Visual — **Final:** browser, Phase 6 owner walk: 12 px between the tags and the details box, the modal's own spacing |
 
 ### SC — Scaling, Owner Center, final passes (12)
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
 | SC-01 | Upstash for caching, sessions, rate limiting, leaderboard, chat | Done·V (owner-accepted) | `server/redis/*`; `docs/operations/upstash.md:23-60,230-245` | Rate limits + caches only; the rest measured and kept in SQL on free-tier grounds. **Gate** (section C) — Ruling 11: narrow by measurement |
-| SC-02 | Caching, async jobs, fast queries, load tests, horizontal scaling | Done·R | `load-testing.md`; `horizontal-scaling.md`; `bin/multi-instance-check.mjs` | |
-| SC-03 | Owner Center: Better Stack + Amplitude (controls over links), free only | Done·R | `ownerRoutes.js:96-191`; `OwnerCenter.jsx:881-1200` | |
-| SC-04 | Custom certificate viewer; distinct Download and Share; share to socials and by DM | Partial·R | `CertificateView.jsx`; `CertificateShareDialog.jsx:26-147` | No "send by direct message" |
+| SC-02 | Caching, async jobs, fast queries, load tests, horizontal scaling | Done·V | `load-testing.md`; `horizontal-scaling.md`; `bin/multi-instance-check.mjs` | — **Final:** documents and `bin/multi-instance-check.mjs` present; no new scaling work requested |
+| SC-03 | Owner Center: Better Stack + Amplitude (controls over links), free only | Done·V | `ownerRoutes.js:96-191`; `OwnerCenter.jsx:881-1200` | — **Final:** browser, Phase 6 owner walk: Owner Center systems, errors, uptime, usage, infrastructure |
+| SC-04 | Custom certificate viewer; distinct Download and Share; share to socials and by DM | Done·V | `CertificateView.jsx`; `CertificateShareDialog.jsx:26-147` | No "send by direct message" — **Final:** `b75a16b` |
 | SC-05 | Stripe donations | Deferred | — | Owner: "after launch" |
-| SC-06 | Org share links like certificate share; signed-out Join prompts sign-in | Done·R | `ShareOrganizationDialog.jsx`; `SignInToJoinDialog.jsx` | |
-| SC-07 | Org security: link-only join, who may invite, request-to-join; org page redesign | Done·R (owner-accepted) | `organizationPolicy.js:28-81`; `MembershipPolicyFields.jsx`; `JoinRequestInbox.jsx` | Visual redesign → revamp hand-over — Ruling 12: request-to-join mode kept |
-| SC-08 | Notice system: minor legal change = banner like location's; major = blocking modal; never both; no gap | Done·R | `LegalUpdateNotice.jsx`; `AppNotices.test.jsx:88-110`; `noticeSlot.test.js:42` | Modal copy differs from the owner's wording |
-| SC-09 | Upstash + Pinecone in Owner Center; re-verify every external API | Partial·R | `ownerRoutes.js:96-260` | No Google/Microsoft sign-in or Cloudflare checks |
-| SC-10 | Coherence review against professional apps | Open | — | Phase 5 |
-| SC-11 | Unfinished work, TODOs | Done·R | one "coming soon" (Apple) | Tech-debt register rechecked in Phase 6 |
-| SC-12 | Final audit of everything; 100-user week rehearsal | Open | — | Phases 3 and 6 |
+| SC-06 | Org share links like certificate share; signed-out Join prompts sign-in | Done·V | `ShareOrganizationDialog.jsx`; `SignInToJoinDialog.jsx` | — **Final:** rehearsal (real routes), Phases 3 and 6: invite-only club by share link |
+| SC-07 | Org security: link-only join, who may invite, request-to-join; org page redesign | Done·V | `organizationPolicy.js:28-81`; `MembershipPolicyFields.jsx`; `JoinRequestInbox.jsx` | Visual redesign → revamp hand-over — Ruling 12: request-to-join mode kept — **Final:** rehearsal (real routes), Phases 3 and 6: open, request-to-join and invite-only |
+| SC-08 | Notice system: minor legal change = banner like location's; major = blocking modal; never both; no gap | Done·V | `LegalUpdateNotice.jsx`; `AppNotices.test.jsx:88-110`; `noticeSlot.test.js:42` | Modal copy differs from the owner's wording — **Final:** browser, Phase 5 walk: one notice at a time (the consent card held the slot over the location offer) |
+| SC-09 | Upstash + Pinecone in Owner Center; re-verify every external API | Done·V | `ownerRoutes.js:96-260` | No Google/Microsoft sign-in or Cloudflare checks — **Final:** `4684d90`; browser, Phase 6 owner walk |
+| SC-10 | Coherence review against professional apps | Done·V | — | Phase 5 — **Final:** Phase 5, below: seven fixes and rulings 23 to 25 |
+| SC-11 | Unfinished work, TODOs | Done·V | one "coming soon" (Apple) | Tech-debt register rechecked in Phase 6 — **Final:** Phase 6 sweep: no TODO/FIXME; the one "coming soon" is the filtered Apple state |
+| SC-12 | Final audit of everything; 100-user week rehearsal | Done·V | — | Phases 3 and 6 — **Final:** this document: Phases 0 to 6, the week rehearsed twice on SQLite and PostgreSQL with zero anomalies |
 
 ### FE — Frontend, SEO, domains (5)
 
 | ID | Request (condensed) | Status | Evidence | Notes |
 |---|---|---|---|---|
 | FE-01 | Massive frontend revamp | Deferred | tokens; `docs/features/interface-motion.md`; `98b3f63` | Owner decision 4 — separate engagement |
-| FE-02 | Meta description per public page; sitemap; Search Console | Missing·R | `index.html:29` | One generic description; no `robots.txt` / `sitemap.xml` |
-| FE-03 | Marketing site at `wevolunteers.org`, app at `app.wevolunteers.org` | Partial·R | `deploy/nginx/wevolunteers.conf:72,82` | App subdomain live; no marketing site — revamp hand-over |
-| FE-04 | Cloudflare DNS, secure | Done·R | `docs/operations/oracle-zero-cost-deployment.md` | Proxied, Full (strict), DNSSEC, origin locked to Cloudflare |
+| FE-02 | Meta description per public page; sitemap; Search Console | Done·V | `index.html:29` | One generic description; no `robots.txt` / `sitemap.xml` — **Final:** `48cc211`; Search Console verification is an Owner-action |
+| FE-03 | Marketing site at `wevolunteers.org`, app at `app.wevolunteers.org` | Done·V | `deploy/nginx/wevolunteers.conf:72,82` | App subdomain live; no marketing site — revamp hand-over — **Final:** www.wevolunteers.org is live as the info site (`site/`, Cloudflare Workers, 2026-10-04; `docs/operations/info-site.md`), with the app at app.wevolunteers.org. Restyling either is the revamp's |
+| FE-04 | Cloudflare DNS, secure | Done·V | `docs/operations/oracle-zero-cost-deployment.md` | Proxied, Full (strict), DNSSEC, origin locked to Cloudflare — **Final:** live: Cloudflare proxy and origin lock recorded in the deployment runbook and the 2026-09-29 rollout |
 | FE-05 | The service list | Superseded | — | See "the roadmap is not the blueprint" |
 
 ---
@@ -444,8 +444,29 @@ Listed, not performed.
 - DMCA agent registration (LG-02). Apple Sign-In needs a paid developer account (P2-06).
 - Sender avatar: BIMI/VMC or Gravatar (EM-01).
 - Search Console property and sitemap submission (FE-02).
-- Run the demonstration-record seed against production, if still wanted (FX-55).
-- Deploys. This audit commits locally and never pushes.
+- ~~Run the demonstration-record seed against production~~ — superseded by
+  ruling 19: the showcase is drawn on the profile and needs no seed (FX-55).
+- Deploys. This audit commits locally and never pushes. **Everything from this
+  engagement is local on `main`**, ahead of `origin/main`; nothing above is live
+  until it is pushed and rolled out with the scripted deploy.
+
+Added by Phases 4 to 6:
+
+- Publish, if wanted, the drafts in `docs/legal/drafts/`: the Acceptable Use
+  Policy, the Terms §13 "review changes" clause, the EULA (ruling 22), and AI
+  and On-Device Processing 2.0 (approved; paste it into the Legal Center).
+- Set `PLATFORM_OWNER_USERNAME=mahit` on the host if the founder, not the
+  platform account, should answer `/api/platform/owner`.
+- Check that the production build's `VITE_SCHOOL_NAME` does not read as a
+  district operating the platform (W3, Posture B).
+- A manual screen-reader pass (VoiceOver, NVDA) and tagged certificate PDFs
+  (LG-01): the automated sweeps pass, but they are not a person with a screen
+  reader.
+- Try Welly AI's Balanced model on a real iPhone (ruling 7, experimental).
+- Do not delete the legacy B2 backup key before 2026-10-22 (memory "Backup key
+  rotations").
+- Dependency advisories that predate this engagement (`npm audit --omit=dev`:
+  nodemailer and engine.io high, multer moderate), worth a separate update.
 
 
 ---
@@ -896,3 +917,56 @@ mandatory notices excepted.
 
 **For the security review of this phase:** `b8a3e92` (the session probe
 writes the cached user) and `93d2967` (who is emailed).
+
+---
+
+## Phase 6 — Unfinished work, the final audit, and the ledger closed (2026-10-04)
+
+| Check | Result |
+|---|---|
+| TODO / FIXME / "coming soon" sweep | Clean. The one "coming soon" is the filtered state of an unbuilt sign-in provider (Apple), never shown |
+| Code review of the whole engagement diff (`origin/main...main`, structured by module: server routes and services first, then client logic) | 5 findings, all fixed: three tests left on the old word "opportunities" (`36b8f7e`); a cleared time sent half a date that the edit form could not save (`7c6face`); an abandoned photo read left its worker running (`77223f2`); an appeal-spam report could fail the report limit (`04b7c30`); a revoked organizer was promised a review that never comes (`d8baa65`) |
+| *security-review*, third pass (`e97ad10..HEAD`) | No findings. The two before it: none |
+| Full suite, SQLite (`d8baa65`) | 11,530 passed, 0 failed, 178 skipped |
+| Full suite, PostgreSQL 17 (`a06d021`) | 7,427 passed, 0 failed, 41 skipped. The first run had 21 failures in `migrations.postgres.test.js`: its hand-built version-56 database lacked a table every real one has, which migration 072 references, and one assertion had listed the migrations by hand since 067 and been failing, unrun, since 068. Both fixed in `a06d021` |
+| Week rehearsal, re-run | SQLite and PostgreSQL 17: **zero anomalies** on both. 126 users, 449 applications, 119 attended, 191 / 189 hours (row order differs between engines, as in Phase 3) |
+| Accessibility sweep (`npm run a11y`) | 62 passed, 3 failed: the calendar toolbar scrolled sideways at 320 px once it carried "Go to date" (fixed `66aab75`), and the new members page has no seeded club to measure (recorded in `SWEEP_CANNOT_MEASURE`, like its parent page). Re-run: 6 of 6 |
+| Build, bundle secret scan, AI-bundle gating | Clean; clean; PASS with the OCR files matched |
+| Owner walk in the browser | Role preview, Owner Center (with the new sign-in and Cloudflare checks), Platform Impact's headline, About, the Legal Center, data export and deletion, the event modal's spacing. Turned up the last British spellings (`9d724fc`) |
+
+**How the code was covered.** A literal line-by-line reading of all ~1,170
+files was not done, and is not claimed. The engagement's own diff was read
+in full by module (inputs, authorization, persistence, error paths); the
+untouched remainder rests on the 09-21 audit, the suites, the rehearsal and
+the walks.
+
+### The ledger, closed
+
+Every row has a final status and the evidence that settled it (the
+"**Final:**" note on each). 171 rows:
+
+| Status | Rows |
+|---|---|
+| Done·V | 152 |
+| Done·V (owner-accepted) | 6 |
+| Owner-action | 2 (EM-01 sender avatar; FX-44 publishing the clause) |
+| Deferred by the owner | 3 (P2-50 attachments, SC-05, FE-01 the revamp) |
+| Partial·V | 1 (LG-01: the manual screen-reader pass) |
+| Done·R, the owner to judge | 1 (P2-35: Welly's answer quality on the running model) |
+| Declined by the owner | 1 (LG-03) |
+| Superseded | 1 (FE-05) |
+| Duplicates | 4 |
+
+Nothing stays *Reported*.
+
+---
+
+## Phase 7 — Revamp hand-over
+
+Written: `docs/audits/2026-10-revamp-handover.md` — the design as it stands
+(tokens, the two motion systems, the brand lockup, the two sites), the visual
+requests that still want a visual answer, the eleven rules a revamp has to
+keep, and what it needs from the owner.
+
+**The audit is complete.** Everything is committed locally on `main` and
+nothing is pushed or deployed; the owner actions above are what remains.
