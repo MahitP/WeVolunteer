@@ -135,6 +135,26 @@ describe('opportunity slots', () => {
     expect(route('hey i need to find animal shelter volunteering').slots.query)
       .toBe('animal shelter');
   });
+
+  /**
+   * Found trying Welly AI on 2026-10-05: "Are there any river cleanup events I
+   * can join?" searched for "river cleanup join" and answered "I couldn't find
+   * any opportunities matching that", with "River cleanup #3" open. The list
+   * had the verbs people ask WITH and not the ones they say what they want to
+   * do with: join, sign up, apply, attend.
+   */
+  it('drops the words for taking part, which are how a student asks, not what about', () => {
+    for (const [text, topic] of [
+      ['Are there any river cleanup events I can join?', 'river cleanup'],
+      ['any beach cleanup shifts i could sign up for', 'beach cleanup'],
+      ['find food pantry events i can apply to', 'food pantry'],
+      ['find tutoring shifts i can attend or take part in', 'tutoring'],
+      ['which animal shelter events are available or upcoming', 'animal shelter'],
+    ]) {
+      expect(route(text).slots.query, text).toBe(topic);
+    }
+    expect(route('anything i can join this weekend').slots.query).toBeUndefined();
+  });
 });
 
 describe('refusals', () => {
@@ -150,6 +170,34 @@ describe('refusals', () => {
       'can I see another student\'s record',
     ]) {
       expect(route(text).intent, text).toBe('refuse_other_user_data');
+    }
+  });
+
+  /**
+   * Found trying Welly AI on 2026-10-05: "How many hours does Leo Chen have?"
+   * answered "You do not have any verified hours yet. 0" — the asker's own
+   * record, under a question about somebody else. Nothing leaked (Welly can
+   * only read the signed-in account), but a student reads that 0 as Leo's.
+   * A name is not a word the list above can know, so the shape of the
+   * question is matched instead: somebody other than "I" having hours.
+   */
+  it('refuses a question about a named person, rather than answering with the asker\'s own record', () => {
+    for (const text of [
+      'How many hours does Leo Chen have?',
+      'how many hours does leo have',
+      'how many hours has Priya logged',
+      'what certificates did my friend earn',
+    ]) {
+      expect(route(text).intent, text).toBe('refuse_other_user_data');
+    }
+    for (const text of [
+      'How many hours do I have?',
+      'how many hours did i log last month',
+      'how many hours does this event have',
+      'how many hours does the river cleanup have',
+      'how many hours has it been since my last shift',
+    ]) {
+      expect(route(text).intent, text).not.toBe('refuse_other_user_data');
     }
   });
 

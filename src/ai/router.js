@@ -298,6 +298,12 @@ const ASKING_WORDS = new Set([
   'there', 'here', 'please', 'hey', 'hi', 'hello', 'just', 'also', 'well',
   'what', 'whats', 'which', 'where', 'when', 'who', 'how',
   'near', 'nearby', 'close', 'around', 'local', 'area',
+  /* Taking part. "Events I can join" is how a student asks, not what about:
+     left in, "join" became a search term and found nothing (2026-10-05). */
+  'join', 'joining', 'sign', 'signup', 'apply', 'applying', 'attend', 'attending',
+  'participate', 'take', 'part', 'go', 'going',
+  /* Timing a phrase above did not catch. Every search is for open events. */
+  'available', 'upcoming', 'open', 'soon', 'today', 'tonight', 'tomorrow', 'weekend', 'weekends',
   /* The domain nouns. Every search is for these; naming one says nothing. */
   'opportunity', 'opportunities', 'event', 'events', 'shift', 'shifts',
   'volunteer', 'volunteering', 'volunteers', 'opening', 'openings', 'slot', 'slots',
@@ -326,13 +332,27 @@ function searchTopic(text) {
 const AFFIRMATION = /^(thanks?|thank you|ty|thx|cool|awesome|great|perfect|ok|okay|k|alright|got it|understood|sounds good|will do|nice)[\s!.,?]*$/i;
 
 /**
+ * Somebody other than the asker having a record: "does Leo Chen have",
+ * "has Priya logged", "did my friend earn".
+ *
+ * A name cannot be on a word list, so the question's shape is matched instead.
+ * The subject may not be the asker ("I", "you" addressed to Welly) or a thing
+ * ("it", "this", "the river cleanup"), which is what keeps "how many hours does
+ * this event have" an ordinary question. Without it, "How many hours does Leo
+ * Chen have?" was answered with the asker's own record (2026-10-05).
+ */
+const NAMED_SUBJECT =
+  /\b(?:does|did|has)\s+(?!(?:i|you|it|this|that|these|those|the|a|an|we|one|there)\b)[\p{L}'’-]+(?:\s+[\p{L}'’-]+){0,2}?\s+(?:have|got|earn|earned|log|logged)\b/iu;
+
+/**
  * Requests that must be refused immediately for safety and privacy.
  */
 const REFUSALS = [
   {
     intent: 'refuse_other_user_data',
     test: text =>
-      /\b(someone else|somebody else|another (student|user|person|volunteer)|other (students|users|people|volunteers)|(every|each|all|any) (student|user|person|volunteer|students|users|people|volunteers)|everyone|everybody|their|his|her|them)\b/i.test(text)
+      (/\b(someone else|somebody else|another (student|user|person|volunteer)|other (students|users|people|volunteers)|(every|each|all|any) (student|user|person|volunteer|students|users|people|volunteers)|everyone|everybody|their|his|her|them)\b/i.test(text)
+        || NAMED_SUBJECT.test(text))
       && /\b(hours?|certificates?|records?|profiles?|emails?|address|phone|grade|school)\b/i.test(text),
   },
   {
