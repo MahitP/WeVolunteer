@@ -443,18 +443,23 @@ Listed, not performed.
 - Publish legal wording this audit drafts (FX-44 clause, modal copy) and the pending Privacy Policy corrections.
 - DMCA agent registration (LG-02). Apple Sign-In needs a paid developer account (P2-06).
 - Sender avatar: BIMI/VMC or Gravatar (EM-01).
-- Search Console property and sitemap submission (FE-02).
+- Search Console property and sitemap submission (FE-02). The app sitemap is live since Phase 8; Claude in Chrome was not connected to do it.
 - ~~Run the demonstration-record seed against production~~ — superseded by
   ruling 19: the showcase is drawn on the profile and needs no seed (FX-55).
-- Deploys. This audit commits locally and never pushes. **Everything from this
-  engagement is local on `main`**, ahead of `origin/main`; nothing above is live
-  until it is pushed and rolled out with the scripted deploy.
+- Pushing. This audit commits locally and never pushes. Phase 8 **deployed**
+  `e3add65` at the owner's request, by shipping the tree with
+  `deploy/make-release.sh`; `main` is still ahead of `origin/main`, so GitHub
+  does not have what production runs until the owner pushes.
 
 Added by Phases 4 to 6:
 
-- Publish, if wanted, the drafts in `docs/legal/drafts/`: the Acceptable Use
-  Policy, the Terms §13 "review changes" clause, the EULA (ruling 22), and AI
-  and On-Device Processing 2.0 (approved; paste it into the Legal Center).
+- ~~Publish the drafts in `docs/legal/drafts/`~~ — the Acceptable Use Policy
+  and the End-User License are live (Phase 8). **Still the owner's, in the
+  Legal Center editor, by 2026-10-07:** Terms 2.0.0
+  (`terms-of-service-2.0.body.md`, effective 2026-11-06) and AI and On-Device
+  Processing 2.0.0 (`ai-and-on-device-processing-2.0.body.md`, effective the
+  day it is published). After 2026-10-07 the Terms' 30-day floor passes
+  2026-11-06 and the two would take effect after the AUP that replaces §4.
 - Set `PLATFORM_OWNER_USERNAME=mahit` on the host if the founder, not the
   platform account, should answer `/api/platform/owner`.
 - Check that the production build's `VITE_SCHOOL_NAME` does not read as a
@@ -462,11 +467,11 @@ Added by Phases 4 to 6:
 - A manual screen-reader pass (VoiceOver, NVDA) and tagged certificate PDFs
   (LG-01): the automated sweeps pass, but they are not a person with a screen
   reader.
-- Try Welly AI's Balanced model on a real iPhone (ruling 7, experimental).
+- Try Welly AI's Balanced model on a real iPhone (ruling 7, experimental). Phase 8 tried it on desktop; this Mac has no Xcode for the Simulator.
 - Do not delete the legacy B2 backup key before 2026-10-22 (memory "Backup key
   rotations").
-- Dependency advisories that predate this engagement (`npm audit --omit=dev`:
-  nodemailer and engine.io high, multer moderate), worth a separate update.
+- ~~Dependency advisories that predate this engagement~~ — taken in `4573788`
+  and `9ade72f`, and live since Phase 8.
 
 
 ---
@@ -970,3 +975,80 @@ keep, and what it needs from the owner.
 
 **The audit is complete.** Everything is committed locally on `main` and
 nothing is pushed or deployed; the owner actions above are what remains.
+
+---
+
+## Phase 8 — Publish, try Welly AI, deploy (2026-10-05)
+
+The owner asked: publish the legal drafts, try the AI, set up Search Console,
+then deploy if everything is perfect.
+
+### Published
+
+- **Acceptable Use Policy** (policy 14) and **End-User License** (policy 15),
+  `notice` documents taking effect 2026-11-06 (`d1b5458`). Two departures from
+  the approved drafts, both in the policy files' specification blocks: six
+  rules and promises from Terms §4 that the AUP draft had dropped were
+  restored, so moving the rules to the AUP changes none of them; and the EULA
+  was corrected against the code (the two models offered, their sizes, the
+  remove button, the footer sentence) and spelled "License".
+- **Terms 2.0.0** staged for the owner (`docs/legal/drafts/terms-of-service-2.0.body.md`):
+  §4 points to the AUP, §8 links the End-User License, §13 adds the reader's
+  responsibility, corrected to say the legal email always goes (it is a
+  mandatory notice) and to list what is actually withheld until acceptance.
+  A dry run of the editor's own validation accepts it for 2026-11-06.
+- Every version line said "in effect since", including for a document not yet
+  in effect; it now says "takes effect" until the date arrives (`01523ef`).
+
+### Welly AI, tried
+
+Desktop Chromium on the local app, Balanced (Qwen2.5 0.5B, 469 MB from Hugging
+Face; the download ran at Hugging Face's ~0.25 MB/s, measured separately).
+Setup, the footer, the policy wording, "Turn off and remove", hours, Auto
+Select, a confirm-first action and its cancel all behaved. Three wrong answers,
+all ours and not the model's, fixed with tests (`9f038b2`, `e3add65`):
+
+| Asked | Got | Cause |
+|---|---|---|
+| "Are there any river cleanup events I can join?" | "I couldn't find any" with River cleanup #3 open | "join" stayed in the search terms |
+| "How many hours does Leo Chen have?" | The asker's own record, "0" | The refusal knew "their" and "someone else", not a name |
+| "Change my bio to: I love helping…" | A card saying only "Update profile (bio)", over a bio of "to: I love helping…" | The pattern needed a space after "to", stopped at any apostrophe, and the card hid the value |
+
+The setup dialog also said "data centre"; a source-reading guard now holds the
+whole client and the email copy to American spelling (`d173043`, fifteen
+strings). The model's free-form advice is generic but harmless (P2-35 stays the
+owner's call).
+
+**Not done: the iPhone Simulator.** This Mac has no Xcode, only the
+command-line tools, so no simulator can run. Playwright's WebKit would exercise
+Safari's engine (not an iPhone's memory limit) and is a ~70–100 MB download the
+owner has not approved.
+
+### Search Console — not done
+
+Claude in Chrome was not connected at any point (no browser registered to the
+account). The app's sitemap is now live as XML (21 URLs), which it was not
+before this deploy: production had been answering `/sitemap.xml` with the app's
+HTML. The info site's sitemap is live (7 URLs).
+
+### Deployed: `e3add65`, 2026-10-05 20:05 UTC
+
+Production was on `b49ec35` (2026-09-29), not the `98b3f63` the notes said;
+91 commits went out. Gates on the release commit: `npm test` 722 files /
+11,561 passed; `npm run test:postgres` 434 / 7,443 passed (no server change
+after that run); `npm run a11y` 65 passed; lint, build, `scan:bundle`,
+`verify-ai-bundle`, the secret scan and the checklist's greps clean.
+
+Snapshots before the swap, encrypted, uploaded to B2 and verified byte-identical:
+`wevolunteer-20261005T152355Z` and, after a pause, `wevolunteer-20261005T200440Z`
+(migration 71, 4 users). An unswapped `66aab75` release found in the staging
+directory was moved aside to `/srv/wevolunteer-unswapped-66aab75-20261005`,
+not deleted. Build, swap and `verify` passed; migrations 072–075 applied on
+PostgreSQL; 075 re-synced the Youth Safety Guidelines; "15 published documents
+verified against their pinned hashes". The previous release is kept at
+`/srv/wevolunteer-prev-b49ec35-20261005T200457Z`.
+
+**If this ever has to roll back:** `provision.sh rollback` alone would not
+boot, because the database now holds the new Youth Safety hash. Delete that
+one unaccepted row (`legal_documents`, `youth-safety-guidelines` 1.0, as 075
+does) before starting the old release, or restore the 20:04 snapshot.
