@@ -14092,6 +14092,24 @@ a.btn {
 }
 
 /* ==========================================================================
+   Text fields on a touch screen
+   ==========================================================================
+   Safari on iOS zooms the page when a focused field's text is under 16px. The
+   coarse-pointer block near the auth styles brings `.input`, `.select` and
+   `.textarea` to 1rem, but these fields have classes of their own and were
+   never in it: tapping the Welly composer zoomed the page in the iPhone
+   Simulator (2026-10-05). Placed after every rule it overrides, which is what
+   makes a same-weight selector win. `src/textFieldZoom.test.js` finds any new
+   field that is missing. */
+@media (hover: none) and (pointer: coarse) {
+  .welly-textarea,
+  .welly-history-rename-input,
+  .composer-input,
+  .search-bar input,
+  .legal-editor-textarea { font-size: 1rem; }
+}
+
+/* ==========================================================================
    Interface motion
    ==========================================================================
    The application's own motion, as distinct from the brand's (`wvMotion.css`,
