@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import net from 'node:net';
+import nodemailer from 'nodemailer';
 import {
   sendEmail,
   enqueueMessage,
@@ -14,6 +16,8 @@ import {
 import {
   FAILURE,
   EmailSendError,
+  SmtpEmailProvider,
+  TERMINAL,
   classifyResendResponse,
   classifySmtpError,
   redactAddresses,
@@ -433,6 +437,159 @@ describe('failure classification', () => {
     /* Retrying something permanent costs a few attempts. Discarding something
        transient costs a student their verification email. */
     expect(classifySmtpError({})).toBe(FAILURE.TRANSIENT);
+  });
+});
+
+/* ──────────────── a temporary SMTP refusal is never terminal ──────────────── */
+
+/**
+ * nodemailer's error code names the STEP that failed, not whether the failure is
+ * permanent: EENVELOPE is any refusal at MAIL FROM, RCPT TO or DATA, and EAUTH is
+ * any refusal at AUTH. Branching on the code alone read a greylisting 451 as a
+ * bad address — terminal, so a verification email that only had to wait was
+ * dropped without a queue row. The reply code is the server's own word on
+ * permanence.
+ */
+describe('a temporary SMTP refusal is retried, whichever step refused it', () => {
+  /* The shape nodemailer's `_formatError` builds: code, response, responseCode
+     (parsed from the reply's leading digits), command. */
+  const smtpError = (code, response, command) => Object.assign(new Error(response), {
+    code, response, responseCode: Number(response.slice(0, 3)), command,
+  });
+
+  it('lets a 4xx reply outrank the EENVELOPE and EAUTH codes', () => {
+    expect(classifySmtpError(smtpError('EENVELOPE', '451 4.3.0 Temporary failure', 'MAIL FROM')))
+      .toBe(FAILURE.TRANSIENT);
+    expect(classifySmtpError(smtpError('EENVELOPE', '451 4.7.1 Greylisted, try again later', 'RCPT TO')))
+      .toBe(FAILURE.TRANSIENT);
+    expect(classifySmtpError(smtpError('EENVELOPE', '452 4.2.2 Mailbox full', 'RCPT TO')))
+      .toBe(FAILURE.TRANSIENT);
+    expect(classifySmtpError(smtpError('EENVELOPE', '421 4.3.2 Shutting down', 'DATA')))
+      .toBe(FAILURE.TRANSIENT);
+    expect(classifySmtpError(smtpError('EAUTH', '454 4.7.0 Temporary authentication failure', 'AUTH PLAIN')))
+      .toBe(FAILURE.TRANSIENT);
+  });
+
+  it('still reads a permanent envelope refusal by its reply code', () => {
+    expect(classifySmtpError(smtpError('EENVELOPE', '550 5.1.1 No such user', 'RCPT TO')))
+      .toBe(FAILURE.INVALID_RECIPIENT);
+    expect(classifySmtpError(smtpError('EENVELOPE', '553 5.1.3 Bad recipient address syntax', 'RCPT TO')))
+      .toBe(FAILURE.INVALID_RECIPIENT);
+    /* A refusal of the message, not of the address. Terminal either way; the
+       label is what an operator reads in `last_error_category`. */
+    expect(classifySmtpError(smtpError('EENVELOPE', '554 5.7.1 Message rejected', 'DATA')))
+      .toBe(FAILURE.PERMANENT_REJECT);
+    expect(classifySmtpError(smtpError('EENVELOPE', '552 5.2.2 Mailbox full', 'RCPT TO')))
+      .toBe(FAILURE.PERMANENT_REJECT);
+    /* nodemailer refusing the address before any server saw it carries no
+       reply code, and stays a bad address. */
+    expect(classifySmtpError(Object.assign(new Error('Invalid recipient'), { code: 'EENVELOPE', command: 'API' })))
+      .toBe(FAILURE.INVALID_RECIPIENT);
+  });
+
+  it('still reads a permanent AUTH refusal as configuration', () => {
+    expect(classifySmtpError(smtpError('EAUTH', '535 5.7.8 Username and Password not accepted', 'AUTH PLAIN')))
+      .toBe(FAILURE.AUTH_CONFIG);
+    /* "Missing credentials" comes from nodemailer itself, with no reply. */
+    expect(classifySmtpError(Object.assign(new Error('Missing credentials'), { code: 'EAUTH', command: 'API' })))
+      .toBe(FAILURE.AUTH_CONFIG);
+  });
+});
+
+/**
+ * The same cases driven through real nodemailer, against a scripted server.
+ *
+ * The defect was a wrong belief about the shape of nodemailer's errors, so the
+ * cases above — which are built from that belief — cannot be the only guard. If a
+ * nodemailer release changes the code or drops the reply code for one of these,
+ * this table fails instead of a student's verification email.
+ */
+describe('nodemailer refusals reach the right category', () => {
+  const servers = [];
+
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map(({ server, sockets }) => {
+      for (const s of sockets) s.destroy();
+      return new Promise((r) => server.close(r));
+    }));
+  });
+
+  /** Answers each verb with a scripted reply; enough SMTP for one sendMail. */
+  async function scriptedSmtp(overrides) {
+    const replies = {
+      EHLO: '250-fake.test\r\n250 AUTH PLAIN LOGIN',
+      AUTH: '235 2.7.0 Accepted',
+      MAIL: '250 2.1.0 OK',
+      RCPT: '250 2.1.5 OK',
+      DATA: '354 Go ahead',
+      '.': '250 2.0.0 Queued',
+      RSET: '250 2.0.0 OK',
+      ...overrides,
+    };
+    const sockets = new Set();
+    const server = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on('close', () => sockets.delete(socket));
+      socket.on('error', () => {});
+      socket.setEncoding('utf8');
+      let buffered = '';
+      let inData = false;
+      socket.on('data', (chunk) => {
+        buffered += chunk;
+        let end;
+        while ((end = buffered.indexOf('\r\n')) !== -1) {
+          const line = buffered.slice(0, end);
+          buffered = buffered.slice(end + 2);
+          if (inData && line !== '.') continue;
+          inData = false;
+          const verb = line === '.' ? '.' : line.split(/[\s:]/)[0].toUpperCase();
+          if (verb === 'QUIT') { socket.end('221 2.0.0 Bye\r\n'); return; }
+          const reply = replies[verb] ?? '502 5.5.2 Command not implemented';
+          if (verb === 'DATA' && reply.startsWith('354')) inData = true;
+          socket.write(`${reply}\r\n`);
+        }
+      });
+      socket.write('220 fake.test ESMTP\r\n');
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    servers.push({ server, sockets });
+    return server.address().port;
+  }
+
+  it.each([
+    ['AUTH', '454 4.7.0 Temporary authentication failure', 'EAUTH', FAILURE.TRANSIENT],
+    ['MAIL', '451 4.3.0 Temporary local problem', 'EENVELOPE', FAILURE.TRANSIENT],
+    ['RCPT', '451 4.7.1 Greylisted, try again later', 'EENVELOPE', FAILURE.TRANSIENT],
+    ['RCPT', '452 4.2.2 Mailbox full', 'EENVELOPE', FAILURE.TRANSIENT],
+    ['AUTH', '535 5.7.8 Username and Password not accepted', 'EAUTH', FAILURE.AUTH_CONFIG],
+    ['RCPT', '550 5.1.1 No such user', 'EENVELOPE', FAILURE.INVALID_RECIPIENT],
+    ['DATA', '554 5.7.1 Message rejected', 'EENVELOPE', FAILURE.PERMANENT_REJECT],
+  ])('%s answered "%s" is %s, classified %s', async (verb, reply, code, category) => {
+    const port = await scriptedSmtp({ [verb]: reply });
+    /* email.js's options, plus short timeouts so a protocol slip in the fake
+       fails this case quickly rather than hanging it. */
+    const transport = nodemailer.createTransport({
+      host: '127.0.0.1',
+      port: String(port),
+      secure: false,
+      auth: { user: 'relay@wevolunteers.test', pass: 'fixture-only' },
+      connectionTimeout: 2000,
+      greetingTimeout: 2000,
+      socketTimeout: 2000,
+    });
+    const provider = new SmtpEmailProvider(() => transport, () => true);
+
+    const err = await provider
+      .send({ ...MESSAGE, from: 'WeVolunteer <contact@wevolunteers.test>' })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(EmailSendError);
+    expect(err.message, 'nodemailer raised a different code for this refusal').toMatch(`(${code})`);
+    expect(err.status).toBe(Number(reply.slice(0, 3)));
+    expect(err.category).toBe(category);
+    if (reply.startsWith('4')) {
+      expect(TERMINAL.has(err.category), `a ${reply.slice(0, 3)} would abandon the message`).toBe(false);
+    }
   });
 });
 

@@ -75,7 +75,7 @@ Failures are classified before anything decides what to do about them.
 
 | Category | Meaning | Fallback? | Queued? |
 |---|---|---|---|
-| `transient` | network, timeout, 5xx | yes | yes |
+| `transient` | network, timeout, Resend 5xx, **any** SMTP 4xx | yes | yes |
 | `rate_limit` | 429 | yes | yes, with a longer backoff |
 | `auth_config` | bad key, unverified sending domain, SMTP 535 | yes, **once** | yes |
 | `invalid_recipient` | the address is not deliverable | no | **no** |
@@ -98,6 +98,16 @@ Three of these matter more than the rest:
 most likely failure on the day the domain is switched over. It is classified as
 configuration, not as a bad recipient, so those messages **queue** rather than
 being silently dropped as permanent.
+
+On SMTP, the reply code outranks nodemailer's error code. `EENVELOPE` and
+`EAUTH` name the step that failed — any refusal at MAIL FROM, RCPT TO or DATA,
+or at AUTH — not whether it was permanent. Until 2026-10 the code was read
+first, so a greylisting `451`, a `452` full mailbox or a `454` temporary AUTH
+failure was classified `invalid_recipient` or `auth_config`, and the first of
+those is terminal: the message was dropped with no queue row. A 4xx is now
+always `transient`; `EENVELOPE` with a 5xx is classified by its reply code like
+any other 5xx; `EENVELOPE` with no reply code (nodemailer refusing the address
+before sending) is still `invalid_recipient`.
 
 ## The outbox
 

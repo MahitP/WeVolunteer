@@ -285,19 +285,32 @@ export function redactAddresses(text) {
   );
 }
 
-/** A nodemailer error → a category. */
+/**
+ * A nodemailer error → a category.
+ *
+ * nodemailer's `code` names the STEP that failed, not whether the failure is
+ * permanent. EENVELOPE is any refusal at MAIL FROM, RCPT TO or DATA; EAUTH is any
+ * refusal at AUTH. The reply code is the server's own answer to "will this work
+ * later?", so it is read first. Branching on the step alone classified a
+ * greylisting 451 as a bad address, which is terminal: a verification email
+ * refused for "try again in five minutes" was dropped without a queue row.
+ */
 export function classifySmtpError(err) {
   const code = String(err?.code || '');
   const status = Number(err?.responseCode || 0);
 
+  /* 4xx in SMTP is "try again later" by definition; 5xx is a refusal. */
+  if (status >= 400 && status < 500) return FAILURE.TRANSIENT;
+
   if (code === 'EAUTH') return FAILURE.AUTH_CONFIG;
-  if (code === 'EENVELOPE') return FAILURE.INVALID_RECIPIENT;
+  /* No reply code: nodemailer refused the address itself before any server saw
+     it. With one, the 5xx mapping below decides — a 554 at DATA refused the
+     message, not the recipient. */
+  if (code === 'EENVELOPE' && !status) return FAILURE.INVALID_RECIPIENT;
   if (/ECONNECTION|ESOCKET|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EDNS|ENOTFOUND|EAI_AGAIN/.test(code)) {
     return FAILURE.TRANSIENT;
   }
 
-  /* 4xx in SMTP is "try again later" by definition; 5xx is a refusal. */
-  if (status >= 400 && status < 500) return FAILURE.TRANSIENT;
   if (status === 535 || status === 534 || status === 530) return FAILURE.AUTH_CONFIG;
   if (status === 550 || status === 551 || status === 553) return FAILURE.INVALID_RECIPIENT;
   if (status >= 500) return FAILURE.PERMANENT_REJECT;
