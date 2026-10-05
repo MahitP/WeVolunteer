@@ -649,10 +649,19 @@ const MATCHERS = [
     tool: 'update_profile',
     test: text =>
       /\b(update|change|edit)\s+my\s+(bio|headline|about me)\b/i.test(text),
+    /**
+     * Everything after "bio to" (or "bio:", "bio as"), with one pair of
+     * surrounding quotes removed. The old pattern stopped at any quote mark,
+     * so "I'm a junior" was not recognised at all, and it needed a space after
+     * "to", so "bio to: I love…" saved "to: I love…" (2026-10-05).
+     */
     slots: text => {
       const slots = { fields: {} };
-      const bioMatch = text.match(/bio\s+(?:to\s+)?["']?([^"']+)["']?$/i);
-      if (bioMatch) slots.fields.bio = bioMatch[1].trim();
+      const bioMatch = text.match(/\b(?:bio|headline|about me)\b\s*(?:(?:to|as)\b)?\s*:?\s*(\S[\s\S]*)$/i);
+      if (bioMatch) {
+        const bio = bioMatch[1].trim().replace(/^["'“‘]([\s\S]*)["'”’]$/, '$1').trim();
+        if (bio) slots.fields.bio = bio;
+      }
       return slots;
     },
   },

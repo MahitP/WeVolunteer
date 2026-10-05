@@ -1247,10 +1247,16 @@ export async function ask(
         };
       }
 
+      /* The exact text, so what is confirmed is what is saved. The card said
+         only "Update profile (bio)", and a student confirmed text they could
+         not see (2026-10-05). */
+      const described = Object.entries(fields)
+        .map(([field, value]) => `${field === 'bio' ? 'your bio' : field} to “${plainValue(value)}”`)
+        .join(' and ');
       const draft = createDraft({
         tool: 'update_profile',
         args: { fields },
-        preview: `Update profile (${Object.keys(fields).join(', ')})`,
+        preview: `Change ${described}`,
         summary: `Update profile (${Object.keys(fields).join(', ')})`,
         user,
       });

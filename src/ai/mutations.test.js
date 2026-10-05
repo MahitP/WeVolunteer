@@ -137,6 +137,31 @@ describe('student actions and draft-and-confirm lifecycle', () => {
     expect(api.updateProfile).toHaveBeenCalledWith({ bio: 'Passionate volunteer' });
     expect(confirmRes.answer).toMatch(/profile has been updated/i);
   });
+
+  /**
+   * Found trying Welly AI on 2026-10-05. The confirmation card said "Update
+   * profile (bio)" and nothing else, so a student confirmed text they could
+   * not see — and the text was wrong: "Change my bio to: I love helping at
+   * animal shelters." would have saved "to: I love helping at animal
+   * shelters.", and a bio with an apostrophe in it was not recognised at all.
+   */
+  it('shows the exact text it will save, and saves what the student wrote', async () => {
+    const cases = [
+      ['Change my bio to: I love helping at animal shelters.', 'I love helping at animal shelters.'],
+      ["update my bio to I'm a junior who loves tutoring", "I'm a junior who loves tutoring"],
+      ['edit my bio to "Weekend tutor at the library"', 'Weekend tutor at the library'],
+    ];
+    for (const [text, bio] of cases) {
+      clearDraft();
+      vi.clearAllMocks();
+      const draftRes = await ask(text, { user: student });
+      expect(draftRes.intent, text).toBe('update_profile');
+      expect(draftRes.card.data.preview, text).toContain(`“${bio}”`);
+
+      await ask('confirm', { user: student });
+      expect(api.updateProfile, text).toHaveBeenCalledWith({ bio });
+    }
+  });
 });
 
 describe('organizer actions and vacancy chaining', () => {
