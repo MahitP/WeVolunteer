@@ -467,7 +467,7 @@ Added by Phases 4 to 6:
 - A manual screen-reader pass (VoiceOver, NVDA) and tagged certificate PDFs
   (LG-01): the automated sweeps pass, but they are not a person with a screen
   reader.
-- Try Welly AI's Balanced model on a real iPhone (ruling 7, experimental). Phase 8 tried it on desktop; this Mac has no Xcode for the Simulator.
+- Ruling 7 (Welly AI on iPhone) cannot be delivered with the current engine build: Safari cannot run it (Phase 8). Decide whether to self-host wllama's compatibility build.
 - Do not delete the legacy B2 backup key before 2026-10-22 (memory "Backup key
   rotations").
 - ~~Dependency advisories that predate this engagement~~ — taken in `4573788`
@@ -1019,10 +1019,20 @@ whole client and the email copy to American spelling (`d173043`, fifteen
 strings). The model's free-form advice is generic but harmless (P2-35 stays the
 owner's call).
 
-**Not done: the iPhone Simulator.** This Mac has no Xcode, only the
-command-line tools, so no simulator can run. Playwright's WebKit would exercise
-Safari's engine (not an iPhone's memory limit) and is a ~70–100 MB download the
-owner has not approved.
+**The iPhone Simulator, later the same day** (Xcode and the iOS 27.0 runtime
+installed by the owner; iPhone 18 Pro, Safari 27). Setup offered Balanced with
+the "experimental on this device" warning and its checkbox, as ruling 7 asks,
+and the 469 MB download completed. Then every question sat on "Thinking" with
+the page idle. Two defects, both fixed with tests:
+
+| Found | Cause | Fix |
+|---|---|---|
+| Welly AI never answers in Safari | wllama's engine build is 64-bit WebAssembly (Memory64). Safari passes wllama's own feature check but cannot compile the module, so the worker aborted, wllama's abort handler threw before rejecting, and the load never settled. Every browser on iPhone and iPad is WebKit, and so is Safari on a Mac, so ruling 7's experiment could not have worked | `7da9673`: Welly AI is not offered where a Memory64 module will not compile, with the reason shown; the runtime refuses early and bounds the load. The unpublished AI policy 2.0 body is corrected to match |
+| Tapping the Welly composer zooms the page | Its text was 15px; iOS zooms on focus below 16px. Measured: four more fields | `131966c`: all five at 1rem on touch screens, and a stylesheet guard |
+
+Running Welly AI in Safari needs wllama's separate compatibility build,
+self-hosted (the CSP blocks jsDelivr, and the policy is no CDN): an owner
+decision. Neither fix is deployed.
 
 ### Search Console — not done
 
