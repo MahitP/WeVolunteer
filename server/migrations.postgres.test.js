@@ -234,6 +234,19 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     `);
   };
 
+  /* Migration 051 is below the baseline, so every database provisioned at 56
+     has this table from the baseline schema. Migration 072 references it (the
+     screenshots table cascades from a report), and without it here the
+     upgrade failed in a way no real deployment can: the fixture, not the
+     database, was missing it. Only the key 072 needs. */
+  const provisionIssueReports = async () => {
+    await db.exec(`
+      DROP TABLE IF EXISTS issue_report_screenshots CASCADE;
+      DROP TABLE IF EXISTS issue_reports CASCADE;
+      CREATE TABLE issue_reports (id TEXT PRIMARY KEY);
+    `);
+  };
+
   const categoryConstraints = async () => await db.prepare(`
     SELECT conname, pg_get_constraintdef(oid) AS def FROM pg_constraint
      WHERE conrelid = 'events'::regclass AND contype = 'c'
@@ -273,6 +286,7 @@ describe.skipIf(!live)('an already-provisioned PostgreSQL database', () => {
     await provisionEvents();
     await provisionUsers();
     await provisionOrganizations();
+    await provisionIssueReports();
   });
 
   it('starts out refusing a category the widened vocabulary admits', async () => {
@@ -967,7 +981,14 @@ describe.skipIf(!live)('upgrading a database provisioned at an older version', (
     const rows = await db.prepare(
       'SELECT version, checksum FROM schema_migrations WHERE version > 64 ORDER BY version'
     ).all();
-    expect(rows.map((r) => Number(r.version))).toEqual([65, 66, 67]);
+    /* Every migration above 64, derived rather than listed. This was the
+       literal [65, 66, 67], written when 67 was the newest; every migration
+       added since made the upgrade correct and this assertion wrong, and it
+       failed from 068 on without anybody running the PostgreSQL suite (found
+       in the final audit's Phase 6). */
+    const expected = MIGRATIONS.map((m) => m.version).filter((v) => v > 64).sort((a, b) => a - b);
+    expect(expected.slice(0, 3)).toEqual([65, 66, 67]);
+    expect(rows.map((r) => Number(r.version))).toEqual(expected);
     for (const row of rows) {
       expect(row.checksum, 'a migration that RAN must not be recorded as baseline')
         .not.toBe(POSTGRES_BASELINE_CHECKSUM);
