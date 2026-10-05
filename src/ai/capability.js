@@ -87,6 +87,29 @@ function fitsDevice(model, { maxBytes, deviceMemoryGB }) {
 }
 
 /**
+ * Whether this browser can compile 64-bit WebAssembly (Memory64).
+ *
+ * The engine build wllama ships needs it, and there is no way round that short
+ * of shipping wllama's separate compatibility build. Safari is the case that
+ * matters: in the iPhone Simulator on 2026-10-05 it accepted the 469 MB
+ * download and then hung on "Thinking" for good, because the engine failed with
+ * "Memory64 is not enabled" and wllama's own error path never reported it.
+ *
+ * Compiled, not asked about. wllama's check constructs a 64-bit
+ * `WebAssembly.Memory` from JavaScript, which that Safari accepts while
+ * refusing to compile any module that uses one. `validate` compiles a
+ * thirteen-byte module and runs nothing: the header, then a memory section
+ * holding one memory with the 64-bit flag (0x04) and a minimum of one page.
+ */
+export function supportsMemory64() {
+  try {
+    return WebAssembly.validate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1]));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Inspect the device.
  *
  * `nav` is injectable so the tiers can be tested across device profiles without
@@ -100,7 +123,10 @@ function fitsDevice(model, { maxBytes, deviceMemoryGB }) {
  *   webgpu           whether inference will be accelerated
  *   isIOS            whether the ceiling above is the iOS one
  */
-export function detectCapability(nav = typeof navigator !== 'undefined' ? navigator : null) {
+export function detectCapability(
+  nav = typeof navigator !== 'undefined' ? navigator : null,
+  { memory64 = typeof WebAssembly === 'object' && supportsMemory64() } = {},
+) {
   if (!nav || typeof WebAssembly !== 'object') {
     return {
       supported: false,
@@ -118,6 +144,25 @@ export function detectCapability(nav = typeof navigator !== 'undefined' ? naviga
   const webgpu = Boolean(nav.gpu);
   const cores = Number(nav.hardwareConcurrency || 0);
   const deviceMemoryGB = typeof nav.deviceMemory === 'number' ? nav.deviceMemory : null;
+
+  /* Before any size is weighed: a browser that cannot compile the engine is
+     offered nothing, however much memory it has (see `supportsMemory64`). */
+  if (!memory64) {
+    return {
+      supported: false,
+      reason: isIOS
+        ? 'Welly AI cannot run in any browser on iPhone and iPad yet: they cannot run the '
+          + 'kind of WebAssembly the on-device model needs.'
+        : 'This browser cannot run the kind of WebAssembly the on-device model needs. '
+          + 'Chrome, Edge or Firefox on a computer can.',
+      recommendedTier: null,
+      maxBytes: 0,
+      webgpu,
+      isIOS,
+      experimental: false,
+      deviceMemoryGB,
+    };
+  }
 
   let maxBytes = isIOS ? IOS_MAX_MODEL_BYTES : Number.POSITIVE_INFINITY;
   let fits = MODELS.filter(m => fitsDevice(m, { maxBytes, deviceMemoryGB }));

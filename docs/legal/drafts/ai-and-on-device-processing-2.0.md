@@ -16,7 +16,7 @@ Checked against `main` at `d4cd8fb`, 2026-10-04.
 |---|---|
 | "When you type something to the assistant, that text is processed on your device. It is not sent to … any other AI company." / "Your question is not sent" | A search sends the words searched for to `GET /api/events` as `q` (`src/ai/tools.js:372`). The server may pass them to Pinecone, which embeds them with its own hosted model (`server/routes/eventRoutes.js:266`, `server/search/discoverSearch.js:73`). The rest of the sentence goes too: "find volunteer events near Oak Street, I am Sam Lee in 10th grade" sends `Oak Street am Sam Lee 10th grade`. |
 | Network use is "two things": the model download and lookups | Also searches, a rounded location for "near me" (`src/ai/assistant.js:1389-1412`), and anything confirmed: a new event's title, description, location and shifts, or a new bio (`src/ai/tools.js:886-1100`). |
-| "Welly is not currently available on iPhone or iPad" | Balanced is offered there as an opt-in experiment (`src/ai/capability.js:126-140`, `0c35281`, ruling 7). |
+| "Welly is not currently available on iPhone or iPad" | Still true, for a different reason. Ruling 7 offered Balanced there as an experiment, but trying it in the iPhone Simulator on 2026-10-05 showed the engine cannot run in Safari at all: its build is 64-bit WebAssembly, which Safari cannot compile. `capability.js` now withholds Welly AI from any browser that cannot (`supportsMemory64`), and 2.0 gives that reason. |
 | "It does not decide anything", plus a "cannot" list that includes changing "anyone's account" | Welly can withdraw your own application, change your bio and, for accounts that can, create an event, each only after you confirm (`src/ai/assistant.js:1182-1271`). None of this is described. |
 | "off unless you turn it on. If you have never … set it up, nothing described here has happened" | True of Welly AI. **Welly Chat**, which uses no model, is "Always available" (`src/components/ai/WellyModeControl.jsx`) and sends lookups and searches the same way. |
 | The model is "between roughly 100 MB and 1 GB" | The 135M model is never offered (`conversational: false`, `src/ai/capability.js:81`). The models offered are 491 MB and 986 MB. |
@@ -269,16 +269,14 @@ Not every device can run a model, and WeVolunteer will not offer one that is
 likely to fail or to answer badly. Where a device cannot, Settings says so and
 says why rather than presenting a choice that will not work.
 
-**On iPhone and iPad, Welly AI is an experiment.** Safari limits how much
-memory a web page may use, and ends the page if it uses more. WeVolunteer has
-not yet been able to test which models stay inside that limit. So on these
-devices only the smaller model, Balanced (about 500 MB), is offered, and only
-after you tick a box saying you understand it is experimental on your device.
-If it is too big for your device, the page reloads during setup or while Welly
-is answering. Nothing else is affected, and you can turn Welly AI off again in
-Settings. The larger model is not offered on iPhone or iPad.
+**Welly AI does not run on iPhone or iPad, or in Safari on a Mac.** The model
+needs a kind of WebAssembly (64-bit memory) that Safari cannot run yet, and
+every browser on an iPhone or iPad is built on Safari's engine. So on those
+devices Settings says Welly AI is not available here, rather than offering a
+download that could not start.
 
-The same care applies to computers with little memory available. Welly Chat,
+On other browsers, the same care applies to computers with little memory
+available. Welly Chat,
 and everything else in WeVolunteer, works normally on every device either way.
 
 ## Analytics
@@ -310,11 +308,11 @@ downloaded under any circumstances.
 ## Changes
 
 This is version 2.0. Version 1.0 said that your question is not sent when
-Welly looks something up, and that Welly is not available on iPhone or iPad.
-Neither is true today: a search sends the words you searched for, and Welly AI
-is offered on iPhone and iPad as an experiment. This version also describes
-Welly Chat and the actions Welly can take after you confirm, and corrects the
-model sizes and which models are checked against a checksum. Earlier versions
+Welly looks something up. That is not true today: a search sends the words you
+searched for. This version also describes Welly Chat and the actions Welly can
+take after you confirm, gives the current reason Welly AI is not available on
+iPhone or iPad, and corrects the model sizes and which models are checked
+against a checksum. Earlier versions
 are available on request.
 
 As further parts of the assistant are built, this page is updated to describe

@@ -33,9 +33,16 @@ const h = vi.hoisted(() => ({
   downloads: 0,
   deletes: 0,
   loadModelImpl: null,
+  exitImpl: null,
   loadedWith: [],
   exits: 0,
   progressSeen: [],
+  memory64: true,
+}));
+
+vi.mock('../capability.js', async importOriginal => ({
+  ...(await importOriginal()),
+  supportsMemory64: () => h.memory64,
 }));
 
 vi.mock('@wllama/wllama/esm/index.js', () => {
@@ -94,7 +101,10 @@ vi.mock('@wllama/wllama/esm/index.js', () => {
     async createChatCompletion() {
       return { choices: [{ finish_reason: 'stop', message: { content: 'ok.' } }] };
     }
-    async exit() { h.exits += 1; }
+    async exit() {
+      h.exits += 1;
+      if (h.exitImpl) await h.exitImpl();
+    }
   }
 
   return {
@@ -110,7 +120,7 @@ vi.mock('./opfsBackend.js', () => ({
   OpfsStorageBackend: class {},
 }));
 
-const { WllamaRuntime } = await import('./WllamaRuntime.js');
+const { WllamaRuntime, LOAD_TIMEOUT_MS } = await import('./WllamaRuntime.js');
 
 /** Declared length per URL — the registry's own figure. */
 h.declaredFor = url => (url === modelUrl(ADVANCED) ? ADVANCED.bytes : BALANCED.bytes);
@@ -128,6 +138,9 @@ beforeEach(() => {
   h.loadedWith = [];
   h.progressSeen = [];
   h.loadModelImpl = null;
+  h.exitImpl = null;
+  h.memory64 = true;
+  vi.useRealTimers();
 });
 
 describe('loading a model that is on the device and complete', () => {
@@ -318,5 +331,47 @@ describe('switching between the two models', () => {
     expect(text).toBe('ok.');
     expect(runtime.status).toBe(AIStatus.READY);
     expect(runtime.lastFinishReason).toBe('stop');
+  });
+});
+
+/**
+ * Safari, found in the iPhone Simulator on 2026-10-05.
+ *
+ * The engine build is 64-bit WebAssembly, which that Safari cannot compile.
+ * The worker aborted, wllama's handler for the abort threw before it rejected
+ * anything, and `loadModel` never settled: the student watched "Thinking" for
+ * good. The capability check now keeps such a browser from being offered the
+ * download; these are the two layers behind it.
+ */
+describe('an engine that cannot start', () => {
+  it('is refused with a clear message in a browser that cannot compile it, before any engine is made', async () => {
+    h.memory64 = false;
+    cache(BALANCED, BALANCED.bytes);
+    const runtime = new WllamaRuntime();
+
+    const err = await runtime.load(BALANCED).catch(e => e);
+
+    expect(err).toBeInstanceOf(AIRuntimeError);
+    expect(err.userMessage).toMatch(/browser/i);
+    expect(runtime.status).toBe(AIStatus.ERROR);
+    expect(h.loadedWith).toHaveLength(0);
+  });
+
+  it('fails at a time limit instead of loading for ever, and lets the engine go', async () => {
+    vi.useFakeTimers();
+    cache(BALANCED, BALANCED.bytes);
+    h.loadModelImpl = () => new Promise(() => {});
+    /* A wedged worker may not answer its exit message either. */
+    h.exitImpl = () => new Promise(() => {});
+    const runtime = new WllamaRuntime();
+
+    const outcome = runtime.load(BALANCED).catch(e => e);
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS + 10000);
+    const err = await outcome;
+
+    expect(err).toBeInstanceOf(AIRuntimeError);
+    expect(err.userMessage).toMatch(/could not start/i);
+    expect(runtime.status).toBe(AIStatus.ERROR);
+    expect(h.exits).toBe(1);
   });
 });

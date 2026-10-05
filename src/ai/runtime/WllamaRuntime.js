@@ -43,6 +43,7 @@ import { IntegrityError, verifyModel } from '../integrity.js';
 import { isDigestVerified } from '../models.js';
 import { createCacheManager } from './opfsBackend.js';
 import { acquireModel } from './modelCache.js';
+import { supportsMemory64 } from '../capability.js';
 
 /** Replies are bounded so a looping model cannot generate without end. */
 const DEFAULT_MAX_TOKENS = 512;
@@ -57,6 +58,30 @@ const DEFAULT_MAX_TOKENS = 512;
  * uses.
  */
 const CONTEXT_TOKENS = 4096;
+
+/**
+ * How long the engine may take to take the model from storage into memory.
+ *
+ * A model loads in seconds (the Balanced model took 3 on a laptop), so two
+ * minutes is generous for a slow phone and still ends. It exists because a
+ * load that never settles is the failure a reader cannot get out of: in Safari
+ * the engine aborted, wllama's handler for the abort threw before rejecting
+ * anything, and Welly showed "Thinking" for good (iPhone Simulator,
+ * 2026-10-05).
+ */
+export const LOAD_TIMEOUT_MS = 120_000;
+
+/** How long a worker that is being let go may take to answer its exit. */
+const EXIT_TIMEOUT_MS = 2_000;
+
+/** `promise`, or a rejection with `error` after `ms`. The timer never outlives it. */
+function within(promise, ms, error) {
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(error), ms);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
 
 export class WllamaRuntime {
   constructor() {
@@ -143,6 +168,17 @@ export class WllamaRuntime {
 
       this.status = AIStatus.LOADING;
 
+      /* The engine build is 64-bit WebAssembly. A browser that cannot compile
+         it would abort inside the worker and, through wllama's error path,
+         never say so (see LOAD_TIMEOUT_MS). The capability check keeps such a
+         browser from being offered a model at all; this is for one that got
+         here anyway, such as a model downloaded before that check existed. */
+      if (!supportsMemory64()) {
+        throw new AIRuntimeError('This browser cannot compile 64-bit WebAssembly (Memory64).', {
+          userMessage: 'Welly AI cannot run in this browser. Welly Chat still works.',
+        });
+      }
+
       /* Same cache manager as the download used, so the engine reads the file
          that was actually written rather than looking in cross-origin storage
          and finding nothing. */
@@ -170,13 +206,16 @@ export class WllamaRuntime {
        * `checkSize(model, cached.size)`, which read the length the server
        * declared rather than the length of the file — see modelCache.js.
        */
+      const notStarting = new AIRuntimeError(
+        `The engine did not finish loading ${model.id} within ${LOAD_TIMEOUT_MS / 1000}s.`,
+      );
       if (isDigestVerified(model)) {
         const blobs = await cached.open();
         await verifyModel(model, blobs);
         throwIfAborted(signal);
-        await this._wllama.loadModel(blobs, { n_ctx: CONTEXT_TOKENS });
+        await within(this._wllama.loadModel(blobs, { n_ctx: CONTEXT_TOKENS }), LOAD_TIMEOUT_MS, notStarting);
       } else {
-        await this._wllama.loadModel(cached, { n_ctx: CONTEXT_TOKENS });
+        await within(this._wllama.loadModel(cached, { n_ctx: CONTEXT_TOKENS }), LOAD_TIMEOUT_MS, notStarting);
       }
 
       this.model = model;
@@ -401,7 +440,9 @@ export class WllamaRuntime {
     this._wllama = null;
     if (!instance) return;
     try {
-      await instance.exit();
+      /* Bounded: a worker wedged enough to stop a load may not answer this
+         either, and letting it go must not become the next thing that hangs. */
+      await within(instance.exit(), EXIT_TIMEOUT_MS, new Error('exit timed out'));
     } catch {
       /* Already gone, or the worker died with it. Nothing left to release. */
     }
