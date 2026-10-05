@@ -994,10 +994,34 @@ once the commit exists.
 
 ### 6.7 Known accepted advisories
 
-> **Status, 2026-09-13: `npm audit --omit=dev` reports zero entries.** The full
-> tree reports three moderate entries, which are the one development-only
-> advisory in item 4. The `vitest`/`@vitest/mocker` entry that sat beside it was
-> closed on this date by the 4.1.11 patch release.
+> **Status, 2026-10-04: `npm audit --omit=dev` reports zero entries again.** Five
+> production advisories had arrived since the previous count, through new
+> advisories rather than any change here, and all five were fixed rather than
+> accepted. `engine.io` 6.6.11, `multer` 2.4.0, `ip-address` 10.7.3 and
+> `brace-expansion` 5.0.12 were inside declared ranges. **Item 2's path is no
+> longer the only one:** `archiver → readdir-glob → minimatch` now installs
+> `brace-expansion` in production too, which is why it was reported under
+> `--omit=dev`.
+>
+> `nodemailer` needed **10.0.14**, a major: no 9.x carries the fixes. 10.0.0's
+> only declared break is "Node.js 20 or newer", which our `>=24 <25` pin already
+> satisfies, so it was judged as a rewrite to verify, not a break to schedule.
+> The check was 9.1.1 and 10.0.14 driven against one scripted SMTP server, with
+> `email.js`'s exact transport options (a string `port`, the loose `secure`
+> comparison) and the message shape `SmtpEmailProvider` sends. Twelve
+> outcomes — success; 535 and 454 at AUTH; 451 at MAIL; 452 and 550 at RCPT; 554
+> at DATA; 552 after it; 421 greeting; greeting timeout; STARTTLS presenting an
+> untrusted certificate; connection refused — gave identical error codes,
+> `classifySmtpError` categories, SMTP command sequences and MIME bodies. **If
+> that transport's options change, redo the comparison before the next nodemailer
+> major.**
+>
+> The full tree's remaining entries are development-only: item 4, `braces` under
+> `nodemon → chokidar` (npm's only offer is `nodemon` 1.14.10, a two-major
+> downgrade), and `undici` under `jsdom`.
+>
+> *2026-09-13:* zero production entries; the full tree's three moderate entries
+> were item 4, after `vitest` 4.1.11 closed the `@vitest/mocker` entry.
 >
 > *2026-09-03:* zero entries at every severity. The react-router entries in item
 > 1 no longer appear against the pinned `react-router-dom@7.18.2`, and item 3 was
