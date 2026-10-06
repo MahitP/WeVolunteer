@@ -708,8 +708,13 @@ const MATCHERS = [
     intent: 'update_profile',
     tool: 'update_profile',
     test: text =>
-      /\b(update|change|edit)\s+my\s+(bio|headline|about me)\b/i.test(text),
+      /\b(update|change|edit)\s+my\s+(bio|about (me|you))\b/i.test(text),
     /**
+     * "About you" is the bio's label in the profile editor. The headline is a
+     * different field, on distinguished accounts only, and is not something
+     * Welly can write, so it is not matched here: "update my headline to …"
+     * drafted a bio change until 2026-10-05.
+     *
      * Everything after "bio to" (or "bio:", "bio as"), with one pair of
      * surrounding quotes removed. The old pattern stopped at any quote mark,
      * so "I'm a junior" was not recognised at all, and it needed a space after
@@ -717,7 +722,7 @@ const MATCHERS = [
      */
     slots: text => {
       const slots = { fields: {} };
-      const bioMatch = text.match(/\b(?:bio|headline|about me)\b\s*(?:(?:to|as)\b)?\s*:?\s*(\S[\s\S]*)$/i);
+      const bioMatch = text.match(/\b(?:bio|about (?:me|you))\b\s*(?:(?:to|as)\b)?\s*:?\s*(\S[\s\S]*)$/i);
       if (bioMatch) {
         const bio = bioMatch[1].trim().replace(/^["'“‘]([\s\S]*)["'”’]$/, '$1').trim();
         if (bio) slots.fields.bio = bio;

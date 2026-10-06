@@ -162,6 +162,26 @@ describe('student actions and draft-and-confirm lifecycle', () => {
       expect(api.updateProfile, text).toHaveBeenCalledWith({ bio });
     }
   });
+
+  /**
+   * The bio is labelled "About you" in the profile editor; the headline is a
+   * separate field that only a distinguished account has, and Welly cannot
+   * write it. "Update my headline to …" drafted a bio change (found by the
+   * security review's read of the router, 2026-10-05).
+   */
+  it('takes "about you" as the bio, and never turns a headline into one', async () => {
+    clearDraft();
+    vi.clearAllMocks();
+    const about = await ask('change my about you to I tutor maths on weekends', { user: student });
+    expect(about.card.data.preview).toContain('“I tutor maths on weekends”');
+
+    clearDraft();
+    vi.clearAllMocks();
+    const headline = await ask('update my headline to Founder of WeVolunteer', { user: student });
+    expect(headline.draft ?? false).toBe(false);
+    await ask('confirm', { user: student });
+    expect(api.updateProfile).not.toHaveBeenCalled();
+  });
 });
 
 describe('organizer actions and vacancy chaining', () => {
