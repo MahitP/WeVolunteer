@@ -37,8 +37,8 @@ way that visiting any website does.
 This happens once per model. After it is downloaded, the model does not
 contact Hugging Face again.
 
-The models WeVolunteer offers are published under the Apache 2.0 licence. The
-exact model, its size and its licence are shown before the download starts.
+The models WeVolunteer offers are published under the Apache 2.0 license. The
+exact model, its size and its license are shown before the download starts.
 
 ### Looking up your WeVolunteer information
 
@@ -152,7 +152,7 @@ and it goes through the same permission checks.
 - change anything on anybody else's account
 - see anything you could not already see yourself
 
-That last point is not a promise about the model's behaviour; it is a property
+That last point is not a promise about the model's behavior; it is a property
 of how the application is built. Welly asks WeVolunteer for information, and
 asks it to make changes, through the same permission checks that the rest of
 the app uses, and those checks are applied on the server. A request for

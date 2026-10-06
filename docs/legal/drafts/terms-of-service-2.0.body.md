@@ -114,7 +114,7 @@ these terms, and they bind you from the moment your organizer account is approve
   anything sexual.
 - **Record attendance and hours accurately.** The hours you credit become part of a student's
   record and may count toward graduation, a scholarship, or a college application. Record what
-  actually happened. Do not round up as a favour and do not withhold hours a student earned as
+  actually happened. Do not round up as a favor and do not withhold hours a student earned as
   a punishment. If you make a mistake, tell us — do not quietly adjust it later.
 - **Follow the safety rules.** At least two adults present at all times; never alone with a
   single student, at any point, for any reason; and the permissions, insurance, and supervision
@@ -171,7 +171,7 @@ admin@wevolunteers.org and tell an adult you trust. See the
 
 The WeVolunteer software, its design, its name and logo, and the text of these policies belong
 to the operator named at the top of this document. Using WeVolunteer does not give you any
-ownership of it or any licence to it beyond ordinary use of the service. Do not copy, resell,
+ownership of it or any license to it beyond ordinary use of the service. Do not copy, resell,
 rebrand, or reverse-engineer it, and do not use its name or logo to suggest we endorse you.
 
 What you may do with the software WeVolunteer puts on your device — the app's code, the
@@ -187,7 +187,7 @@ You keep ownership of what you write and upload — your bio, avatar, comments, 
 
 By posting, you give us permission to store and display it as needed to run the service (for
 example, showing your comment on an event page to other people at that event). It is a
-permission to operate the platform and nothing more: we do not licence your content to anyone
+permission to operate the platform and nothing more: we do not license your content to anyone
 else, we do not use it in advertising, and we do not sell it. That permission ends when you
 delete the content or your account, except where we have said in the
 [Data Deletion Policy](/legal/data-deletion-policy) that something is kept, and why.
@@ -221,7 +221,7 @@ down, we will put it back and tell the person who complained that we have. You d
 lawyer to do this and we will not ask you for one.
 
 **If somebody repeatedly posts other people's work**, they lose their account. We are not going
-to set a number, because on a platform this size the honest answer is that it is a judgement
+to set a number, because on a platform this size the honest answer is that it is a judgment
 somebody makes by looking, not a counter.
 
 **What this is not.** WeVolunteer has not registered a copyright agent with the United States
@@ -373,7 +373,7 @@ We would much rather fix a problem than argue about one, so:
 
 **There is no arbitration clause in these terms and no class-action waiver.** That is a
 deliberate choice: forcing minors and their families into private arbitration over a free
-service is not something we are willing to do, and courts increasingly disfavour it.
+service is not something we are willing to do, and courts increasingly disfavor it.
 **Step 1 is not a precondition for anything that matters.** Nothing in this section stops you,
 or requires you to wait, before calling 911, reporting suspected child abuse to DCP&P at
 1-877-NJ-ABUSE, telling your school, or contacting the New Jersey Division of Consumer Affairs,
@@ -410,4 +410,3 @@ that exists today is a home address. Publishing the home address of the person w
 accounts, to the people whose accounts get suspended, is not a risk we are willing to take —
 and it is not necessary, because service can be arranged on request. If the operator later
 becomes an LLC, a business address will appear here instead.
-legal@wevolunteers.org
