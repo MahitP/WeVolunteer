@@ -467,7 +467,7 @@ Added by Phases 4 to 6:
 - A manual screen-reader pass (VoiceOver, NVDA) and tagged certificate PDFs
   (LG-01): the automated sweeps pass, but they are not a person with a screen
   reader.
-- Ruling 7 (Welly AI on iPhone) cannot be delivered with the current engine build: Safari cannot run it (Phase 8). Decide whether to self-host wllama's compatibility build.
+- Try Welly AI on a real iPhone: Phase 8 made it run in Safari on wllama's compatibility engine, and the Simulator cannot show a phone's memory limit (ruling 7).
 - Do not delete the legacy B2 backup key before 2026-10-22 (memory "Backup key
   rotations").
 - ~~Dependency advisories that predate this engagement~~ — taken in `4573788`
@@ -1030,9 +1030,28 @@ the page idle. Two defects, both fixed with tests:
 | Welly AI never answers in Safari | wllama's engine build is 64-bit WebAssembly (Memory64). Safari passes wllama's own feature check but cannot compile the module, so the worker aborted, wllama's abort handler threw before rejecting, and the load never settled. Every browser on iPhone and iPad is WebKit, and so is Safari on a Mac, so ruling 7's experiment could not have worked | `7da9673`: Welly AI is not offered where a Memory64 module will not compile, with the reason shown; the runtime refuses early and bounds the load. The unpublished AI policy 2.0 body is corrected to match |
 | Tapping the Welly composer zooms the page | Its text was 15px; iOS zooms on focus below 16px. Measured: four more fields | `131966c`: all five at 1rem on touch screens, and a stylesheet guard |
 
-Running Welly AI in Safari needs wllama's separate compatibility build,
-self-hosted (the CSP blocks jsDelivr, and the policy is no CDN): an owner
-decision. Neither fix is deployed.
+**Then the owner said: fix all, using the recommendations.** The
+recommendation was to make Safari work rather than withhold it, and it did
+(`b2d50d6`): wllama's own compatibility engine (`@wllama/wllama-compat`
+3.5.1, no Memory64, slower), self-hosted, chosen wherever a Memory64 module
+will not compile. In the Simulator the model loaded in 2.0 s, a one-line
+reply took 3.3 s (Chrome: 0.4 s) and a real six-point Welly answer about
+35 s. iPhone and iPad stay ruling 7's experiment, its warning now also saying
+replies are slower; the AI policy 2.0 body went back to the approved text,
+which is true again. A real iPhone's memory limit is still the open question.
+
+Also fixed in the same pass, each with tests:
+
+| Found | Fix |
+|---|---|
+| "Find food bank events this weekend" searched every date | `1e1f8e2`: "today", "tomorrow", "this/next weekend, week, month" become the events API's `from`/`to` |
+| "What food pantry events can I apply to" answered "I can't help with that one" | `1e1f8e2`: a search, held to the thing asked for, so "Can I apply to more than five events at once?" is not |
+| "Update my headline to …" drafted a bio change | `f858016`: the headline is its own field; "about you" (the bio's label) now counts |
+| `.form-input` styled no element | `1d8e2f0`: removed |
+
+The security review (the skill, over all 100 commits ahead of `origin/main`)
+found nothing at or above its confidence threshold; the headline row above is
+the one functional bug it noticed.
 
 ### Search Console — not done
 
