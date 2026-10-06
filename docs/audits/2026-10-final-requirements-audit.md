@@ -1053,6 +1053,19 @@ The security review (the skill, over all 100 commits ahead of `origin/main`)
 found nothing at or above its confidence threshold; the headline row above is
 the one functional bug it noticed.
 
+### Deployed again: `1a60b45`, 2026-10-06 01:38 UTC
+
+Gates on the release commit: `npm test` 723 files / 11,590 passed; `npm run
+a11y` 65 passed; lint (after renaming a helper the hooks rule read as a Hook,
+`1a60b45`), build, `scan:bundle`, `verify-ai-bundle` and the secret scan clean;
+no server change since `e3add65`, so its PostgreSQL run stands. Snapshot
+`wevolunteer-20261006T013725Z` (migration 75) verified on B2 first. Build, swap
+and verify passed; no migrations; the 15 legal pins verified at boot. The
+production assets include the 14 MB compatibility engine, served as
+`application/wasm`. Previous release kept at
+`/srv/wevolunteer-prev-e3add65-20261006T013817Z`; with no migrations in this
+release, a plain `provision.sh rollback` is enough.
+
 ### Search Console — not done
 
 Claude in Chrome was not connected at any point (no browser registered to the
