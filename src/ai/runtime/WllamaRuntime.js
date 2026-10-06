@@ -91,7 +91,7 @@ export const LOAD_TIMEOUT_MS = 120_000;
  * which is the check Safari passes. It is public, and it is the one place
  * wllama decides which engine a worker starts.
  */
-async function useCompatibilityEngine(wllama) {
+async function selectCompatibilityEngine(wllama) {
   const { default: code } = await import('@wllama/wllama-compat/wasm/wllama.js?raw');
   const wasmPath = typeof location === 'undefined' ? compatWasmUrl : new URL(compatWasmUrl, location.href).href;
   wllama.setCompat?.({ wasm: compatWasmUrl, worker: { code } });
@@ -203,7 +203,7 @@ export class WllamaRuntime {
         { default: wasmUrl },
         { allowOffline: true, suppressNativeLog: true, cacheManager },
       );
-      if (!supportsMemory64()) await useCompatibilityEngine(this._wllama);
+      if (!supportsMemory64()) await selectCompatibilityEngine(this._wllama);
 
       /**
        * Two paths, chosen by whether we can afford to hash the file.
