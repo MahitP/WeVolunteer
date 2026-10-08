@@ -443,13 +443,11 @@ Listed, not performed.
 - Publish legal wording this audit drafts (FX-44 clause, modal copy) and the pending Privacy Policy corrections.
 - DMCA agent registration (LG-02). Apple Sign-In needs a paid developer account (P2-06).
 - Sender avatar: BIMI/VMC or Gravatar (EM-01).
-- Search Console property and sitemap submission (FE-02). The app sitemap is live since Phase 8; Claude in Chrome was not connected to do it.
+- ~~Search Console property and sitemap submission (FE-02)~~ — done (Phase 8): the Domain property `sc-domain:wevolunteers.org` already existed and was verified; the info site's sitemap was submitted on 2026-10-04 and the app's on 2026-10-07, after `283b9d7` stopped robots.txt disallowing it.
 - ~~Run the demonstration-record seed against production~~ — superseded by
   ruling 19: the showcase is drawn on the profile and needs no seed (FX-55).
-- Pushing. This audit commits locally and never pushes. Phase 8 **deployed**
-  `e3add65` at the owner's request, by shipping the tree with
-  `deploy/make-release.sh`; `main` is still ahead of `origin/main`, so GitHub
-  does not have what production runs until the owner pushes.
+- ~~Pushing~~ — the owner asked for `main` to be pushed at the end of Phase 8
+  (2026-10-08), after the last deploy.
 
 Added by Phases 4 to 6:
 
@@ -1064,6 +1062,26 @@ production assets include the 14 MB compatibility engine, served as
 `application/wasm`. Previous release kept at
 `/srv/wevolunteer-prev-e3add65-20261006T013817Z`; with no migrations in this
 release, a plain `provision.sh rollback` is enough.
+
+### Finishing (2026-10-07/08)
+
+- **Legal:** the owner signed in to the built-in browser; Terms 2.0.0
+  (effective 2026-11-06) and AI policy 2.0.0 (effective 2026-10-07) were
+  published through the editor, each verified byte-identical to its committed
+  draft. Both drafts first lost their British spellings and Terms 1.0's stray
+  last line (`cb1ef28`).
+- **The editor's hint** said italics would "appear literally" though they have
+  rendered since Phase 4 (`c3da244`).
+- **Search Console:** the property already existed; the app sitemap was
+  submitted and reported "Couldn't fetch", because robots.txt ended in
+  `Disallow: /` with no Allow for the sitemap it names (`283b9d7`). Cloudflare
+  caches robots.txt for four hours, so Google sees the fix by the next read.
+- **The Mac's disk filled** (ENOSPC) from 8.4 GB of swap built up by a booted
+  iPhone Simulator; at the owner's request Xcode, the iOS runtime and all
+  simulators were removed.
+- **Deployed `283b9d7`** (2026-10-08 02:55 UTC): `npm test` 723 files /
+  11,592 passed, lint, build and bundle checks clean, snapshot first, verify
+  passed, no migrations.
 
 ### Search Console — not done
 
