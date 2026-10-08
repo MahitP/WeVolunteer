@@ -674,9 +674,9 @@ export default function LegalEditor({ addToast }) {
                   <label className="label" htmlFor="legal-body">Document text</label>
                   <p className="dim small" id="legal-body-hint">
                     Markdown. Headings (<code>##</code>), lists, <code>**bold**</code>,
-                    links (<code>[text](https://…)</code>), <code>`code`</code>, quotes
-                    and tables are supported. Italics, images and code blocks are not —
-                    they will appear literally.
+                    <code>*italics*</code>, links (<code>[text](https://…)</code>),
+                    <code>`code`</code>, quotes and tables are supported. Images and
+                    code blocks are not — they will appear literally.
                     {maxBodyLength && draft.length > maxBodyLength * 0.9 && (
                       <>
                         {' '}

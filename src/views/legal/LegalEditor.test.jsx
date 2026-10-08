@@ -91,6 +91,21 @@ describe('LegalEditor', () => {
     await waitFor(() => expect(textarea()).toHaveValue(BODY));
   });
 
+  /* The hint said italics "will appear literally" after policyMarkdown learned
+     them, so an owner reading it would avoid the one emphasis Terms 2.0 uses
+     ("*any person*", §5.2). Seen publishing Terms 2.0 on 2026-10-07. */
+  it('describes the formatting the renderer actually supports', async () => {
+    renderEditor();
+    const hint = await waitFor(() => {
+      const el = document.getElementById('legal-body-hint');
+      expect(el).not.toBeNull();
+      return el;
+    });
+    expect(hint.textContent).toMatch(/\*italics\*/);
+    expect(hint.textContent).not.toMatch(/Italics[^.]*are not/i);
+    expect(hint.textContent).toMatch(/Images and code blocks are not/);
+  });
+
   /**
    * Pre-filled with the next patch version, because most edits are corrections.
    * A default, not a fixed value — deciding whether a change is a correction or
