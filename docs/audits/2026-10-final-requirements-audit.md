@@ -453,13 +453,12 @@ Listed, not performed.
 
 Added by Phases 4 to 6:
 
-- ~~Publish the drafts in `docs/legal/drafts/`~~ — the Acceptable Use Policy
-  and the End-User License are live (Phase 8). **Still the owner's, in the
-  Legal Center editor, by 2026-10-07:** Terms 2.0.0
-  (`terms-of-service-2.0.body.md`, effective 2026-11-06) and AI and On-Device
-  Processing 2.0.0 (`ai-and-on-device-processing-2.0.body.md`, effective the
-  day it is published). After 2026-10-07 the Terms' 30-day floor passes
-  2026-11-06 and the two would take effect after the AUP that replaces §4.
+- ~~Publish the drafts in `docs/legal/drafts/`~~ — all four are live (Phase 8):
+  the Acceptable Use Policy and End-User License by deploy; Terms 2.0.0
+  (effective 2026-11-06) and AI and On-Device Processing 2.0.0 (effective
+  2026-10-07) through the Legal Center editor, the owner signing in and
+  passing the identity check, each verified byte-identical to its committed
+  draft from the public API (`a8595349…`, `9c664582…`).
 - Set `PLATFORM_OWNER_USERNAME=mahit` on the host if the founder, not the
   platform account, should answer `/api/platform/owner`.
 - Check that the production build's `VITE_SCHOOL_NAME` does not read as a
