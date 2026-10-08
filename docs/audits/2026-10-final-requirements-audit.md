@@ -464,7 +464,7 @@ Added by Phases 4 to 6:
 - A manual screen-reader pass (VoiceOver, NVDA) and tagged certificate PDFs
   (LG-01): the automated sweeps pass, but they are not a person with a screen
   reader.
-- Try Welly AI on a real iPhone: Phase 8 made it run in Safari on wllama's compatibility engine, and the Simulator cannot show a phone's memory limit (ruling 7).
+- ~~Try Welly AI on a real iPhone~~ — the owner tried it on his own iPhone on 2026-10-08 and it worked, on the compatibility engine (ruling 7's experiment, now confirmed on a device).
 - Do not delete the legacy B2 backup key before 2026-10-22 (memory "Backup key
   rotations").
 - ~~Dependency advisories that predate this engagement~~ — taken in `4573788`
