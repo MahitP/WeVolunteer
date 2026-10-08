@@ -61,6 +61,14 @@ describe('robots.txt', () => {
     expect(robots).toMatch(new RegExp(`^Sitemap: ${ORIGIN}/sitemap\\.xml$`, 'm'));
     expect(READ('deploy/nginx/wevolunteers.conf')).toMatch(/server_name app\.wevolunteers\.org;/);
   });
+
+  /* The file named the sitemap and then disallowed it: `Disallow: /` with no
+     Allow for /sitemap.xml. Google honours robots.txt when it fetches a
+     sitemap, and Search Console reported "Couldn't fetch" on the day it was
+     submitted (2026-10-07). */
+  it('lets crawlers read the sitemap it points them to', () => {
+    expect(allowed(robots, '/sitemap.xml')).toBe(true);
+  });
 });
 
 describe('sitemap.xml', () => {

@@ -27,6 +27,10 @@ Allow: /app-icon
 Allow: /apple-touch-icon.png
 Allow: /api/legal/documents
 
+# The sitemap named at the bottom. Without this line `Disallow: /` covered it,
+# and Google honours robots.txt when it fetches a sitemap.
+Allow: /sitemap.xml$
+
 Disallow: /
 
 Sitemap: https://app.wevolunteers.org/sitemap.xml
