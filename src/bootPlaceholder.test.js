@@ -12,7 +12,7 @@ import path from 'node:path';
  * nothing once the app is up.
  *
  * Styled from a same-origin stylesheet, never inline: the production
- * Content-Security-Policy is `style-src 'self' https://fonts.googleapis.com`,
+ * Content-Security-Policy is `style-src 'self'`,
  * which blocks both `<style>` elements and `style=""` attributes.
  */
 const HTML = readFileSync(path.join(process.cwd(), 'index.html'), 'utf8');

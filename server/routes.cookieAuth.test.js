@@ -136,15 +136,18 @@ describe('Content-Security-Policy', () => {
     expect(directive(csp, 'script-src').split(/\s+/).some(t => t.includes('hf.co'))).toBe(false);
   });
 
-  it('allows the Google Fonts origins on the directives that actually need them', async () => {
+  it('serves stylesheets and fonts from this origin only', async () => {
+    /* The two typefaces came from Google Fonts, so every page view told Google
+       the visitor's IP address, while the Cookie Notice said nothing about how
+       a person uses WeVolunteer reaches anyone but Cloudflare unless they switch
+       it on. They are self-hosted now (src/selfHostedFonts.test.js), and the
+       policy says so: nothing else may load a stylesheet or a font. */
     const res = await fetch(`${srv.base}/health`);
     const csp = res.headers.get('content-security-policy');
 
-    // Scoped per directive: googleapis serves the stylesheet, gstatic serves
-    // the font files. Asserting they appear somewhere in the header would pass
-    // even if one had been attached to script-src by mistake.
-    expect(directive(csp, 'style-src')).toContain('https://fonts.googleapis.com');
-    expect(directive(csp, 'font-src')).toContain('https://fonts.gstatic.com');
+    expect(directive(csp, 'style-src')).toBe("style-src 'self'");
+    expect(directive(csp, 'font-src')).toBe("font-src 'self'");
+    expect(csp).not.toMatch(/fonts\.(googleapis|gstatic)\.com/);
   });
 
   it('forbids framing and plugin content', async () => {

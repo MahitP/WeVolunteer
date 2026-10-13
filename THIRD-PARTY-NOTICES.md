@@ -119,8 +119,10 @@ lines are copied from each package's own `LICENSE` file, not from its
 | `tesseract.js` | 7.0.0 | Apache-2.0 | See the project's `LICENSE.md`. Its worker bundles zlib.js (MIT, imaya), regenerator-runtime (MIT, Facebook, Inc.), buffer (MIT, Feross Aboukhadijeh) and ieee754 (BSD-3-Clause, Feross Aboukhadijeh), per its own `worker.min.js.LICENSE.txt` |
 | `tesseract.js-core` | 7.0.0 | Apache-2.0 | See the project's `LICENSE`. **The Tesseract OCR engine and Leptonica** are compiled into its `.wasm.js`, like llama.cpp into wllama's |
 | `@tesseract.js-data/eng` | 1.0.0 (`4.0.0_best_int`) | MIT (packaging); the trained data is Google's `tessdata_best`, Apache-2.0 | A devDependency, but the file is copied into the build at `/ocr/` and downloaded by the browser |
+| **Bricolage Grotesque** (`@fontsource-variable/bricolage-grotesque`) | 5.3.0 | OFL-1.1 | Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage). The display typeface; its `.woff2` files are copied into the build and served from this origin |
+| **Public Sans** (`@fontsource-variable/public-sans`) | 5.3.0 | OFL-1.1 | Copyright 2015 The Public Sans Project Authors (https://github.com/uswds/public-sans). The body typeface, upright and italic; served from this origin like Bricolage |
 
-Two notes on that table:
+Three notes on that table:
 
 - `@wllama/wllama` declares MIT in `package.json` and ships no `LICENSE` file, so
   the copyright line cannot be quoted from the package. Take it from the
@@ -130,6 +132,12 @@ Two notes on that table:
   the default build includes it. The same is true of the three Tesseract rows
   (the photo reader, ruling 20), which a browser downloads only when somebody
   chooses a photo of a certificate.
+- The two typefaces were loaded from Google Fonts until 2026-10-12, which is
+  why they were never listed: nothing was redistributed. Self-hosting them
+  (so that Google stops receiving every visitor's IP address) makes this a
+  redistribution, and the SIL Open Font License asks for the copyright notice
+  and licence to travel with the fonts. It permits bundling with software of
+  any licence and forbids only selling the fonts by themselves.
 
 ---
 

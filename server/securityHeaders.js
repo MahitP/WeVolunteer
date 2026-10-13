@@ -100,10 +100,12 @@ export const HELMET_OPTIONS = {
        * The client previously used 576 inline `style={{}}` blocks, but they have been
        * refactored. The few remaining dynamic styles use element.style which is CSP safe.
        */
-      styleSrc: ["'self'", 'https://fonts.googleapis.com'],
+      styleSrc: ["'self'"],
 
-      // index.css:1 imports Bricolage Grotesque and Public Sans.
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      /* Bricolage Grotesque and Public Sans are bundled from the Fontsource
+         packages. They came from Google Fonts until 2026-10-12, which sent
+         Google every visitor's IP address; see src/selfHostedFonts.test.js. */
+      fontSrc: ["'self'"],
 
       /**
        * data: covers the inline SVG favicon and any base64 image.
