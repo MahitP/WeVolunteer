@@ -134,6 +134,44 @@ describe('the sweep deletes what the policy says it deletes', () => {
     expect(await db.prepare('SELECT 1 FROM admin_audit_logs WHERE id = ?').get(fresh)).toBeTruthy();
   });
 
+  /**
+   * Two-factor security records carry the IP address and browser of every
+   * sign-in attempt, and nothing deleted them. They cascade with the user row,
+   * but a deleted account's shell is kept while it has hours or a certificate —
+   * which for a real volunteer is for ever — so a deleted student's IP history
+   * outlived their account indefinitely. Found on 2026-10-12 while checking
+   * Privacy Policy 2.0 against the schema. Same period as the administrator
+   * audit log, the other record of who did what to an account.
+   *
+   * Seeded by raw INSERT because the table is append-only (no UPDATE), so a row
+   * cannot be written by `recordSecurityEvent` and aged afterwards.
+   */
+  async function seedSecurityEvent(ageDays) {
+    const id = `sec-ret-${Math.random().toString(36).slice(2, 11)}`;
+    await db.prepare(`
+      INSERT INTO security_audit_logs (id, user_id, event_type, ip_address, user_agent, metadata, created_at)
+      VALUES (?, 'user-student-1', '2FA_FAILED', '203.0.113.7', 'retention fixture', NULL, ?)
+    `).run(id, daysAgo(ageDays));
+    return id;
+  }
+
+  it('removes two-factor security records past the audit window', async () => {
+    const old = await seedSecurityEvent(RETENTION.auditDays + 30);
+    const fresh = await seedSecurityEvent(5);
+
+    const result = await sweep(db, { now: new Date() });
+
+    expect(result.securityEvents).toBeGreaterThanOrEqual(1);
+    expect(await db.prepare('SELECT 1 FROM security_audit_logs WHERE id = ?').get(old)).toBeFalsy();
+    expect(await db.prepare('SELECT 1 FROM security_audit_logs WHERE id = ?').get(fresh)).toBeTruthy();
+  });
+
+  it('keeps a two-factor security record one day inside the window', async () => {
+    const justInside = await seedSecurityEvent(RETENTION.auditDays - 1);
+    await sweep(db, { now: new Date() });
+    expect(await db.prepare('SELECT 1 FROM security_audit_logs WHERE id = ?').get(justInside)).toBeTruthy();
+  });
+
   it('reports counts without deleting when asked for a dry run', async () => {
     await seedMessage(RETENTION.messageDays + 30);
     const result = await sweep(db, { now: new Date(), dryRun: true });

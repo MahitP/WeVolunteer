@@ -48,7 +48,8 @@ export const RETENTION = {
    *  students more than it exposes them. */
   messageDays: 3 * 365,
   /** Audit logs: 1 year. The stated band is 90 days to 1 year; 90 days is
-   *  shorter than the time it typically takes to discover admin misuse. */
+   *  shorter than the time it typically takes to discover admin misuse. The
+   *  two-factor security records (`security_audit_logs`) share this period. */
   auditDays: 365,
   /** Anonymised account shells: 3 years after deletion, then the row goes. */
   deletedAccountDays: 3 * 365,
@@ -185,6 +186,9 @@ export async function sweep(db, { now = new Date(), dryRun = false } = {}) {
     auditLogs: (await db.prepare(
       'SELECT COUNT(*) AS c FROM admin_audit_logs WHERE created_at < ?'
     ).get(auditCutoff)).c,
+    securityEvents: (await db.prepare(
+      'SELECT COUNT(*) AS c FROM security_audit_logs WHERE created_at < ?'
+    ).get(auditCutoff)).c,
     deletedAccounts: (await db.prepare(`
       SELECT COUNT(*) AS c FROM users
       WHERE account_status = 'deleted' AND deleted_at IS NOT NULL AND deleted_at < ?
@@ -232,6 +236,19 @@ export async function sweep(db, { now = new Date(), dryRun = false } = {}) {
     `).run(messageCutoff);
 
     await tx.prepare('DELETE FROM admin_audit_logs WHERE created_at < ?').run(auditCutoff);
+
+    /**
+     * Two-factor security records, on the audit log's period.
+     *
+     * Each row is a sign-in success, failure or factor change with the IP
+     * address and browser it came from. Nothing deleted them: they cascade with
+     * the user row, and a deleted account's shell is kept while it carries hours
+     * or a certificate, which for a real volunteer is for ever. So a deleted
+     * student's IP history outlived the account indefinitely, under a policy
+     * that says everything but hours, certificates and safety reports has an end
+     * date. The table is append-only against UPDATE, not DELETE, by design.
+     */
+    await tx.prepare('DELETE FROM security_audit_logs WHERE created_at < ?').run(auditCutoff);
 
     /**
      * Applications, aged out with their event.
