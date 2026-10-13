@@ -40,9 +40,9 @@ const BODY = code(CONF);
 /** Every `server { … }` block, by brace depth (locations nest one level). */
 function serverBlocks() {
   const out = [];
-  const re = /(^|\n)\s*server\s*\{/g;
-  let m;
-  while ((m = re.exec(BODY))) {
+  /* matchAll, not a `re.exec` loop: asyncShapes.test.js counts `exec(` in test
+     files as an unawaited database call. */
+  for (const m of BODY.matchAll(/(^|\n)\s*server\s*\{/g)) {
     let depth = 0;
     for (let i = BODY.indexOf('{', m.index); i < BODY.length; i += 1) {
       if (BODY[i] === '{') depth += 1;
