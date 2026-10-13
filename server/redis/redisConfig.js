@@ -129,9 +129,46 @@ export function keyPrefix() {
  * 32 hex characters — 128 bits — is far beyond collision range for a keyspace
  * of at most a few thousand live counters, and keeps keys short enough to read
  * in a console.
+ *
+ * ── Why it is keyed ──
+ *
+ * It was a plain SHA-256, and a hash nobody else can compute is the whole of
+ * the privacy argument above. An IPv4 address is a 32-bit space: anybody
+ * holding the keys could hash all four billion and read the address behind a
+ * counter, and hash a known email once to see whether it had been trying to
+ * sign in. The Privacy Policy says the code "cannot be turned back into your
+ * email or your address". Keyed with a secret only this server holds, that is
+ * true of Upstash and of anybody reading its console.
+ *
+ * The key is derived from `JWT_SECRET` rather than being a variable of its
+ * own, so no deployment can run without one (config.js refuses to boot in
+ * production without it), and derived rather than used directly so the
+ * signing secret never keys anything but signatures. Rotating `JWT_SECRET`
+ * therefore changes every key here too: counters and cached lookups start
+ * again from empty once, which is the outcome a restart already had before
+ * these were shared.
+ *
+ * Read from the environment when first needed, not imported from config.js:
+ * that module fixes the secret at import, and importing it from here made a
+ * test that loads this file before starting its server sign with one secret
+ * and verify with another. Without the variable (development only) a fixed
+ * string stands in, as config.js's own fallback does.
  */
+export function segmentHasher(secret) {
+  const key = crypto.createHmac('sha256', String(secret)).update('wevolunteer:upstash-key-segment:v1').digest();
+  return (value) => crypto.createHmac('sha256', key).update(String(value)).digest('hex').slice(0, 32);
+}
+
+let segmentSecret = null;
+let segmentHash = null;
+
 export function hashSegment(value) {
-  return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
+  const secret = process.env.JWT_SECRET || 'wevolunteer-development-only-segment-key';
+  if (secret !== segmentSecret) {
+    segmentSecret = secret;
+    segmentHash = segmentHasher(secret);
+  }
+  return segmentHash(value);
 }
 
 let cached = null;

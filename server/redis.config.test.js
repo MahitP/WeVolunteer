@@ -117,6 +117,34 @@ describe('hashSegment', () => {
   it('distinguishes inputs that differ only in case, because callers normalise first', () => {
     expect(hashSegment('A')).not.toBe(hashSegment('a'));
   });
+
+  /**
+   * Keyed, so Upstash cannot reverse it by hashing guesses.
+   *
+   * It was a plain SHA-256. Every IPv4 address is a 32-bit space, so anybody
+   * holding the keys — Upstash, or whoever reads its console — could recover
+   * the address behind a rate-limit counter by hashing all four billion, and a
+   * known email by hashing it once. The Privacy Policy says the code "cannot be
+   * turned back into your email or your address"; with a key only this server
+   * holds, that is true of everybody who does not also hold the server's
+   * secrets. Found on 2026-10-12 while checking Privacy Policy 2.0.
+   */
+  it('is not the plain SHA-256 of its input', async () => {
+    const { createHash } = await import('node:crypto');
+    for (const input of ['203.0.113.7', 'priya.patel@example.org']) {
+      const unkeyed = createHash('sha256').update(input).digest('hex').slice(0, 32);
+      expect(hashSegment(input)).not.toBe(unkeyed);
+    }
+  });
+
+  it('depends on the server secret it is keyed with', async () => {
+    const { segmentHasher } = await import('./redis/redisConfig.js');
+    const a = segmentHasher('secret-one-0123456789abcdef0123456789abcdef');
+    const b = segmentHasher('secret-two-0123456789abcdef0123456789abcdef');
+    expect(a('203.0.113.7')).not.toBe(b('203.0.113.7'));
+    expect(a('203.0.113.7')).toBe(a('203.0.113.7'));
+    expect(a('203.0.113.7')).toMatch(/^[0-9a-f]{32}$/);
+  });
 });
 
 describe('the recorded free-tier numbers', () => {

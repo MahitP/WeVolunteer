@@ -154,19 +154,26 @@ wev:{env}:{domain}:{...}
 
 | Key | Type | TTL | Written by | Contents |
 |---|---|---|---|---|
-| `wev:{env}:cache:weather:{sha256(lat,lon,hour)}` | string (JSON) | 1 h | `routes/weatherRoutes.js` | a forecast |
-| `wev:{env}:cache:geocode:{sha256(query)}` | string (JSON) | 24 h | `routes/geocodeRoutes.js` | a list of public places |
-| `wev:{env}:rl:{limiter}:{sha256(client)}:{window}` | counter | window + 5 s | `redis/limitStore.js` | an integer |
-| `wev:{env}:cnt:login-failure:{sha256(account)}` | counter | 15 min from the first failure | `routes/authRoutes.js` | an integer |
+| `wev:{env}:cache:weather:{hmac(lat,lon,hour)}` | string (JSON) | 1 h | `routes/weatherRoutes.js` | a forecast |
+| `wev:{env}:cache:geocode:{hmac(query)}` | string (JSON) | 24 h | `routes/geocodeRoutes.js` | a list of public places |
+| `wev:{env}:rl:{limiter}:{hmac(client)}:{window}` | counter | window + 5 s | `redis/limitStore.js` | an integer |
+| `wev:{env}:cnt:login-failure:{hmac(account)}` | counter | 15 min from the first failure | `routes/authRoutes.js` | an integer |
 | `wev:{env}:throttle:nominatim` | string (ms) | 3 s | `redis/upstreamThrottle.js` | one timestamp |
 | `wev:{env}:validation:*` | mixed | 10 s | `bin/upstash-redis.mjs validate` | test values, deleted on exit |
 
-**Every caller-supplied key segment is hashed** (`hashSegment`, sha256 truncated
-to 128 bits). Two reasons, and the second is the one that matters: hashing
-removes every character that could change the command being sent, and a
+**Every caller-supplied key segment is hashed** (`hashSegment`, HMAC-SHA256
+truncated to 128 bits). Two reasons, and the second is the one that matters:
+hashing removes every character that could change the command being sent, and a
 rate-limiter key built from an email address would otherwise make the keyspace a
 list of who tried to sign in, stored on somebody else's infrastructure.
 `redis.privacy.test.js` scans every key-construction site for this.
+
+**Keyed since 2026-10-12.** It was a plain SHA-256, which anyone holding the
+keys could reverse for an IPv4 address by hashing all four billion, and confirm
+for a known email by hashing it once. The HMAC key is derived from `JWT_SECRET`,
+so rotating that secret also resets every counter and cached lookup here once,
+and no key in this table can be computed by an operator tool that does not have
+the application's environment.
 
 **Nothing is written without a TTL.** On a 256 MB shared plan a key that never
 expires is not a leak, it is the whole budget. That is why the counter
