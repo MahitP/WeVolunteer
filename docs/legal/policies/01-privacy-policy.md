@@ -56,6 +56,22 @@ name, the postal address, the vendor names) arrive as configuration and the page
 incomplete until they do. This draft supplies the text those config values should hold. There are
 no district-specific facts — that branch is gone.
 
+**Version 2.0 — corrections 1, 2 and 3 below are applied there, not here.** The body under
+`## Draft` is version 1.0 exactly as published (its hash is pinned), so it still carries every
+problem described below. Version 2.0 is a Legal Center revision, and an editor revision
+overrides this file. Its text is `docs/legal/drafts/privacy-policy-2.0.body.md`. Besides the
+three staged corrections, it fixes what a check of every recipient against production found on
+2026-10-12: Supabase, Oracle Cloud, Backblaze and Better Stack were unnamed; the hosting row
+said "not yet chosen"; CARTO no longer receives anything (tiles are proxied); Upstash is in
+Virginia, not India, and holds every abuse counter, not only failed sign-ins; an organizer's
+address search sends a position rounded to about 11 km; and the retention table lacked request
+records, two-factor records and backups. Four facts the old text asserted were made true in
+code rather than reworded: nginx no longer logs query strings (`d17e0e5`), the fonts no longer
+come from Google (`462bed7`), two-factor records expire after a year (`718628f`), and Upstash
+key hashes are keyed (`c52cd84`). The sections below are kept as the record of why.
+
+---
+
 **PENDING CORRECTION 3 — Pinecone is not named anywhere in this document, and it
 should be.** Staged here, deliberately not applied, for the reason given under correction 1.
 Owner decision 2026-10-04: apply it at the launch pass, with corrections 1 and 2.
