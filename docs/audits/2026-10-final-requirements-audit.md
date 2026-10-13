@@ -1111,3 +1111,58 @@ verified against their pinned hashes". The previous release is kept at
 boot, because the database now holds the new Youth Safety hash. Delete that
 one unaccepted row (`legal_documents`, `youth-safety-guidelines` 1.0, as 075
 does) before starting the old release, or restore the 20:04 snapshot.
+
+## Phase 9 — Privacy Policy 2.0, and what checking it found (2026-10-12)
+
+The owner asked for the two remaining owner actions: Privacy Policy 2.0 through
+the Legal Center editor, and accepting the Admin Responsibilities Policy on the
+owner account. Drafting 2.0 meant checking every recipient the policy names, or
+should name, against the live host — environment variable names only, never
+values — and four of 1.0's statements turned out to be false in ways that were
+better fixed than reworded.
+
+### Fixed in code (deployed as `82f74ef`)
+
+| Commit | What 1.0 said | What was true | Fix |
+|---|---|---|---|
+| `d17e0e5` | "Your coordinates are never stored — not … in a log" | nginx logged in Ubuntu's `combined` format, query strings included. Eleven reset links with their tokens were in the 14-day logs (all expired: requests from 2026-09-27, tokens live an hour); no coordinates had been logged yet | `log_format wevolunteer_noquery`: the path without its query, the Referer cut at `?`, in both server blocks. Checked live: a marker in a query string and in a Referer was not logged |
+| `462bed7` | The Cookie Notice: nothing about how you use WeVolunteer reaches anyone but Cloudflare unless you switch it on | `index.css` imported Bricolage Grotesque and Public Sans from Google Fonts on every page | Self-hosted from the Fontsource packages (OFL-1.1, pinned); CSP `style-src` and `font-src` are `'self'` only. Checked live: both faces load from `/assets/`, no Google request |
+| `718628f` | Everything except hours, certificates and safety reports has an end date | `security_audit_logs` (two-factor events, with IP address and browser) was never swept, and survives account deletion while the shell carries hours | Swept daily on the admin audit log's one-year period |
+| `c52cd84` | The Upstash code "cannot be turned back into your email or your address" | `hashSegment` was a plain SHA-256: an IPv4 address is recoverable by hashing all 2³² | HMAC-SHA256 under a key derived from `JWT_SECRET`; rotating that secret resets Upstash's counters and caches once |
+
+`security-review` over the four: no findings.
+
+### Found and disclosed rather than changed
+
+Supabase (AWS us-east-2, Ohio), Oracle Cloud (us-ashburn-1), Backblaze
+(us-east-005, encrypted, 28 days) and Better Stack (eu-central-1, Germany, 3 days)
+were unnamed; Upstash is in AWS us-east-1, not India (3 ms from the host);
+CARTO receives nothing since the tile proxy; OpenRouteService is not configured
+in production; an organizer's address search sends Nominatim a viewbox around a
+position rounded to about 11 km. The draft is
+`docs/legal/drafts/privacy-policy-2.0.body.md` (`65d7add`): 2.0.0, effective
+2026-11-13 (the floor on 2026-10-13 UTC is 2026-11-12), MAJOR, so every account
+re-accepts on that date. It passes `validateBody` and `validatePublication`.
+
+### Gates on `82f74ef`
+
+`npm test` 724 files / 11,612 passed, after one fix: the async-shape ratchet read
+a regex `re.exec` in the new nginx test as an unawaited database `exec`
+(`82f74ef`, rewritten with `matchAll`, ceiling unchanged).
+`npm run test:postgres` 435 / 7,459 passed. `npm run a11y` 65 passed. Lint,
+build, `scan:bundle`, `verify-ai-bundle` and the secret scan clean.
+
+### Deployed: `82f74ef`, 2026-10-13 01:54 UTC
+
+Snapshot first: `wevolunteer-20261013T015324Z`, uploaded to B2 and verified
+byte-identical. Build, swap (`nginx -t` passed, reloaded) and `verify` passed;
+no migrations; "15 published documents verified against their pinned hashes".
+Previous release kept as a `/srv/wevolunteer-prev-283b9d7-*` directory.
+
+### Waiting on the owner
+
+- **Admin Responsibilities Policy.** The seven undertakings are personal — one is
+  the New Jersey mandated-reporter duty — so the owner ticks them; it was not
+  done for him. Until then fourteen capabilities stay withheld.
+- **Publishing Privacy Policy 2.0** needs the owner signed in for the editor's
+  identity step. The production session had expired on 2026-10-12.
