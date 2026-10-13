@@ -1159,10 +1159,15 @@ byte-identical. Build, swap (`nginx -t` passed, reloaded) and `verify` passed;
 no migrations; "15 published documents verified against their pinned hashes".
 Previous release kept as a `/srv/wevolunteer-prev-283b9d7-*` directory.
 
-### Waiting on the owner
+### Done by the owner (2026-10-13)
 
-- **Admin Responsibilities Policy.** The seven undertakings are personal — one is
-  the New Jersey mandated-reporter duty — so the owner ticks them; it was not
-  done for him. Until then fourteen capabilities stay withheld.
-- **Publishing Privacy Policy 2.0** needs the owner signed in for the editor's
-  identity step. The production session had expired on 2026-10-12.
+- **Admin Responsibilities Policy accepted** on the owner account. The seven
+  undertakings are personal — one is the New Jersey mandated-reporter duty — so
+  the owner ticked them himself; the Admin hub now shows every tile instead of
+  the gate.
+- **Privacy Policy 2.0.0 published** through the editor at 16:39 UTC, effective
+  2026-11-13. The owner signed in and completed the identity step; the editor
+  was filled from the committed draft and its text checked by SHA-256 before
+  saving. Production serves `contentHash` `aa5bea93…`, the trimmed draft's hash
+  exactly. A first attempt was lost unsaved when the session expired and the
+  sign-in reloaded the page; nothing partial was published.
